@@ -11,6 +11,7 @@ import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.reader.ReaderScreen
 import com.radium.inkwell.ui.search.SearchScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
+import com.radium.inkwell.ui.settings.ThemeSettingsScreen
 import com.radium.inkwell.ui.sourceedit.SourceEditScreen
 import com.radium.inkwell.ui.sourcemanage.SourceManageScreen
 import com.radium.inkwell.ui.webdav.WebDavSettingsScreen
@@ -67,7 +68,11 @@ fun InkwellNavHost() {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenWebDav = { navController.navigate(WebDavSettingsRoute) },
+                onOpenTheme = { navController.navigate(ThemeSettingsRoute) },
             )
+        }
+        composable<ThemeSettingsRoute> {
+            ThemeSettingsScreen(onBack = { navController.popBackStack() })
         }
         composable<WebDavSettingsRoute> {
             WebDavSettingsScreen(onBack = { navController.popBackStack() })

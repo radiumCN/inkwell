@@ -5,20 +5,26 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.nav.InkwellNavHost
 import com.radium.inkwell.ui.theme.InkwellTheme
+import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.util.KeyEventBus
 import org.koin.android.ext.android.inject
 
 class MainActivity : ComponentActivity() {
 
     private val keyEventBus: KeyEventBus by inject()
+    private val appPrefs: AppPrefs by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            InkwellTheme {
+            val themeConfig by appPrefs.themeConfig.collectAsState(initial = ThemeConfig())
+            InkwellTheme(config = themeConfig) {
                 InkwellNavHost()
             }
         }

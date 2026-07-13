@@ -48,6 +48,7 @@ import org.koin.compose.koinInject
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenWebDav: () -> Unit,
+    onOpenTheme: () -> Unit,
 ) {
     val context = LocalContext.current
     val updateChecker = koinInject<UpdateChecker>()
@@ -94,6 +95,12 @@ fun SettingsScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            SettingsItem(
+                title = "主题外观",
+                subtitle = "日间/夜间模式与自定义配色",
+                onClick = onOpenTheme,
+            )
+            HorizontalDivider()
             SettingsItem(
                 title = "WebDAV 备份同步",
                 subtitle = "书架、进度与书源的多设备同步",

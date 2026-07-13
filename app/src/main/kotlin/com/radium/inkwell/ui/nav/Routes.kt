@@ -27,4 +27,7 @@ data class SourceEditRoute(val sourceId: String? = null)
 object SettingsRoute
 
 @Serializable
+object ThemeSettingsRoute
+
+@Serializable
 object WebDavSettingsRoute
