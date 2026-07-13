@@ -48,9 +48,15 @@ class SearchViewModel(
         if (keyword.isEmpty()) return
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            val rules = sourceRepo.getEnabledRules().filter { it.search != null }
+            val enabled = sourceRepo.getEnabledRules()
+            val rules = enabled.filter { it.search != null }
             if (rules.isEmpty()) {
-                messages.emit("没有启用的书源，请先导入书源")
+                // 区分"没有书源"和"启用的都是仅发现页的源"，后者曾误导用户以为启用没生效
+                messages.emit(
+                    if (enabled.isEmpty()) "没有启用的书源，请先导入并启用书源"
+                    else "已启用的 ${enabled.size} 个书源都不支持搜索（仅发现页可用），" +
+                        "请到发现页浏览，或导入带搜索规则的书源"
+                )
                 return@launch
             }
             _state.value = _state.value.copy(

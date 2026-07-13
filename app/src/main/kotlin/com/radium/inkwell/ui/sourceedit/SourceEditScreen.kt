@@ -34,6 +34,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radium.inkwell.ui.components.CompactTextField
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -96,12 +97,12 @@ fun SourceEditScreen(
                 ) { Text("保存") }
             }
             Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                OutlinedTextField(
+                CompactTextField(
                     value = state.testKeyword,
                     onValueChange = viewModel::setTestKeyword,
-                    label = { Text("测试关键词") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).padding(end = 6.dp),
+                    placeholder = "测试关键词",
+                    modifier = Modifier.weight(1f).padding(end = 6.dp)
+                        .align(androidx.compose.ui.Alignment.CenterVertically),
                 )
                 OutlinedButton(
                     onClick = viewModel::testSearchChain,

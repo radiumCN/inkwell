@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.sourcemanage
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +25,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
@@ -56,6 +57,7 @@ fun SourceManageScreen(
     viewModel: SourceManageViewModel = koinViewModel(),
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
+    val exploreOnlyIds by viewModel.exploreOnlyIds.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
@@ -140,7 +142,28 @@ fun SourceManageScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(source.name, style = MaterialTheme.typography.bodyLarge)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    source.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (source.id in exploreOnlyIds) {
+                                    Text(
+                                        "仅发现",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier
+                                            .padding(start = 6.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.secondaryContainer,
+                                                MaterialTheme.shapes.extraSmall,
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
                             Text(
                                 source.id,
                                 style = MaterialTheme.typography.bodySmall,
@@ -174,12 +197,11 @@ fun SourceManageScreen(
                         "支持 Inkwell 与 Legado（阅读）格式的书源 JSON 链接",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    OutlinedTextField(
+                    CompactTextField(
                         value = importUrl,
                         onValueChange = { importUrl = it },
-                        placeholder = { Text("https://…/sources.json") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        placeholder = "https://…/sources.json",
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             },

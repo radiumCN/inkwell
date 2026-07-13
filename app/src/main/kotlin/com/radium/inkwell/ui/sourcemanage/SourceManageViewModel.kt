@@ -11,6 +11,8 @@ import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -24,6 +26,17 @@ class SourceManageViewModel(
 
     val sources: StateFlow<List<BookSourceEntity>> = sourceRepo.sources
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 无搜索规则（仅发现页可用）的书源 id，列表上打标签避免用户误以为能搜索 */
+    val exploreOnlyIds: StateFlow<Set<String>> = sourceRepo.sources
+        .map { list ->
+            list.mapNotNull { entity ->
+                val rule = sourceRepo.parseRule(entity.json).getOrNull() ?: return@mapNotNull null
+                entity.id.takeIf { rule.search == null }
+            }.toSet()
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** 一次性提示：用事件流而非 StateFlow，避免相同内容的连续提示被去重吞掉 */
     val messages = MessageBus()

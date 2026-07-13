@@ -16,7 +16,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -29,13 +28,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.BookListRow
+import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.CollectMessages
@@ -52,14 +49,12 @@ fun SearchScreen(onBack: () -> Unit, viewModel: SearchViewModel = koinViewModel(
         topBar = {
             TopAppBar(
                 title = {
-                    OutlinedTextField(
+                    SearchField(
                         value = state.query,
                         onValueChange = viewModel::setQuery,
-                        placeholder = { Text("书名 / 作者") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { viewModel.search() }),
-                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = "书名 / 作者",
+                        onSearch = { viewModel.search() },
+                        modifier = Modifier.padding(end = 8.dp),
                     )
                 },
                 navigationIcon = {
