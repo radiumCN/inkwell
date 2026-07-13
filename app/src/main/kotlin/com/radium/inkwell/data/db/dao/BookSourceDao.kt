@@ -21,6 +21,13 @@ interface BookSourceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(source: BookSourceEntity)
 
+    /** 批量写在单个事务内完成，避免逐条写在真机上又慢又易被中断 */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(sources: List<BookSourceEntity>)
+
+    @Query("SELECT id FROM book_source")
+    suspend fun getAllIds(): List<String>
+
     @Query("UPDATE book_source SET enabled = :enabled WHERE id = :id")
     suspend fun setEnabled(id: String, enabled: Boolean)
 
