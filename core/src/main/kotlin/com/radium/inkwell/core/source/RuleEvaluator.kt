@@ -165,12 +165,15 @@ class RuleEvaluator {
 
 // ---- 模板与编码工具（引擎/HTTP 层共用） ----
 
-private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|\\s]+)\\s*(?:\\|\\s*([^}]+?)\\s*)?}}")
+// 变量名段允许内部空格（算术表达式如 {{page - 1}}）
+private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|]+?)\\s*(?:\\|\\s*([^}]+?)\\s*)?}}")
 
 /** 展开 {{var}} 与 {{var|encode[:charset]}}；未知变量替换为空串 */
 internal fun expandTemplate(template: String, vars: Map<String, String>): String =
     TEMPLATE_VAR.replace(template) { m ->
-        val value = vars[m.groupValues[1]] ?: ""
+        val name = m.groupValues[1]
+        // 变量直取；否则尝试算术表达式（如 {{(page-1)*50}}）
+        val value = vars[name] ?: evalArithmetic(name, vars) ?: ""
         val pipe = m.groupValues[2]
         when {
             pipe.isEmpty() -> value
@@ -180,6 +183,89 @@ internal fun expandTemplate(template: String, vars: Map<String, String>): String
             else -> value
         }
     }
+
+/**
+ * 整数算术表达式求值（+ - * / 与括号），变量先按 vars 替换。
+ * 任一变量未知或语法非法返回 null（模板处按空串处理）。
+ */
+internal fun evalArithmetic(expr: String, vars: Map<String, String>): String? {
+    var unknownVar = false
+    val substituted = Regex("[a-zA-Z_][a-zA-Z0-9_]*").replace(expr) { m ->
+        vars[m.value] ?: run { unknownVar = true; "" }
+    }
+    if (unknownVar || !substituted.matches(Regex("[0-9+\\-*/()\\s]+"))) return null
+    return try {
+        ArithmeticParser(substituted).parse()?.toString()
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** 递归下降：expr = term (±term)* ; term = factor (乘除 factor)* ; factor = num | (expr) | -factor */
+private class ArithmeticParser(private val text: String) {
+    private var pos = 0
+
+    fun parse(): Long? {
+        val v = expr() ?: return null
+        skipSpace()
+        return if (pos == text.length) v else null
+    }
+
+    private fun expr(): Long? {
+        var v = term() ?: return null
+        while (true) {
+            skipSpace()
+            when (peek()) {
+                '+' -> { pos++; v += term() ?: return null }
+                '-' -> { pos++; v -= term() ?: return null }
+                else -> return v
+            }
+        }
+    }
+
+    private fun term(): Long? {
+        var v = factor() ?: return null
+        while (true) {
+            skipSpace()
+            when (peek()) {
+                '*' -> { pos++; v *= factor() ?: return null }
+                '/' -> {
+                    pos++
+                    val d = factor() ?: return null
+                    if (d == 0L) return null
+                    v /= d
+                }
+                else -> return v
+            }
+        }
+    }
+
+    private fun factor(): Long? {
+        skipSpace()
+        return when {
+            peek() == '(' -> {
+                pos++
+                val v = expr()
+                skipSpace()
+                if (peek() != ')') return null
+                pos++
+                v
+            }
+            peek() == '-' -> { pos++; factor()?.let { -it } }
+            else -> {
+                val start = pos
+                while (pos < text.length && text[pos].isDigit()) pos++
+                if (pos == start) null else text.substring(start, pos).toLongOrNull()
+            }
+        }
+    }
+
+    private fun peek(): Char? = text.getOrNull(pos)
+
+    private fun skipSpace() {
+        while (pos < text.length && text[pos] == ' ') pos++
+    }
+}
 
 /** 字符集解析；GBK/GB2312 一律按 GB18030 处理 */
 internal fun charsetOf(name: String): Charset = when (name.trim().lowercase()) {

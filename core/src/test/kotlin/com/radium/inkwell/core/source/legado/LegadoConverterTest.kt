@@ -185,6 +185,39 @@ class LegadoConverterTest {
     }
 
     @Test
+    fun `index exclusion bracket index and single-quote options convert`() {
+        // 来自真实书源合集的语法形态：tr!0 / children[0] / p.!-1 / .-1 中段索引 / 单引号选项 / page 算术
+        val src = """
+        {
+          "bookSourceUrl": "https://x.example.com",
+          "bookSourceName": "语法站",
+          "searchUrl": "/search.php,{'method':'POST','body':'key={{key}}&start={{(page-1)*20}}'}",
+          "ruleSearch": {
+            "bookList": "id.author@tag.tbody@tag.tr!0",
+            "name": "tag.td.0@text",
+            "bookUrl": "tag.a.0@href"
+          },
+          "ruleToc": {
+            "chapterList": "class.full@children[0]@tag.a",
+            "chapterName": "text",
+            "chapterUrl": "href"
+          },
+          "ruleContent": { "content": "class.box.-1@tag.p.!-1@html" }
+        }
+        """.trimIndent()
+        val result = LegadoConverter.convert(src)
+        assertEquals(0, result.skipped.size)
+        val rule = result.converted.single().rule
+
+        val search = rule.search!!
+        assertEquals("POST", search.request.method)
+        assertEquals("key={{keyword}}&start={{(page-1)*20}}", search.request.body)
+        assertEquals("css:#author tbody tr:gt(0)", search.list)
+        assertEquals("css:.full > *:first-child a", rule.toc!!.list)
+        assertEquals("css:.box:last-of-type p:not(:last-of-type)@html", rule.content!!.content)
+    }
+
+    @Test
     fun `unconvertible optional field is dropped with warning but source survives`() {
         val src = """
         {

@@ -300,8 +300,7 @@ object LegadoConverter {
                     }
                     cssParts += css
                 } else {
-                    // 近似：中间层索引按兄弟序号处理
-                    cssParts += "$css:eq($index)"
+                    cssParts += css + midIndexSelector(css, index)
                 }
             } else {
                 cssParts += css
@@ -312,19 +311,59 @@ object LegadoConverter {
         return "css:$selector$ext$tailPipe"
     }
 
-    /** 单段：class.foo.0 / id.x / tag.a.-1 / text.xxx / children / 原生CSS */
-    private fun convertSegment(seg: String): Pair<String, Int?> {
-        if (seg == "children") return "> *" to null
+    /** 中间层索引的 CSS 近似：children 按子元素序号精确，其余按兄弟/同型序号 */
+    private fun midIndexSelector(css: String, n: Int): String = when {
+        css.endsWith("*") -> when (n) {
+            0 -> ":first-child"
+            -1 -> ":last-child"
+            else -> ":nth-child(${n + 1})"
+        }
+        n == -1 -> ":last-of-type"
+        else -> ":eq($n)"
+    }
+
+    /**
+     * 单段：class.foo.0 / id.x / tag.a.-1 / text.xxx / children[0] / tr!0 / 原生CSS。
+     * 返回 (css, 索引)；`!0` 转 :gt(0)，`[n]` 与 `.n` 同义。
+     */
+    private fun convertSegment(raw: String): Pair<String, Int?> {
+        var seg = raw
+        var excludeSuffix = ""
+        Regex("\\.?!(-?\\d+)$").find(seg)?.let { m ->
+            excludeSuffix = when (m.groupValues[1].toInt()) {
+                0 -> ":gt(0)" // 排除第一个
+                -1 -> ":not(:last-of-type)" // 排除最后一个
+                else -> throw LegadoUnsupported("索引排除语法不支持: $raw")
+            }
+            seg = seg.removeRange(m.range)
+        }
+        if (seg.contains('!')) throw LegadoUnsupported("索引排除语法不支持: $raw")
+        var bracketIdx: Int? = null
+        Regex("\\[(-?\\d+)]$").find(seg)?.let { m ->
+            bracketIdx = m.groupValues[1].toInt()
+            seg = seg.removeRange(m.range)
+        }
+        if (seg.contains('[') && !seg.contains('=')) {
+            // 属性选择器 [attr=x] 放行给原生 CSS；纯数字范围 [1:5] 不支持
+            if (Regex("\\[[\\d:!,]+]").containsMatchIn(seg)) {
+                throw LegadoUnsupported("索引范围语法不支持: $raw")
+            }
+        }
+
         val parts = seg.split(".")
         fun idxOf(s: String): Int? = s.toIntOrNull()
-        return when {
+        var (css, dotIdx) = when {
+            seg == "children" -> "> *" to null
             parts.size >= 2 && parts[0] == "class" -> {
                 val idx = if (parts.size >= 3) idxOf(parts.last()) else null
                 val nameParts = if (idx != null) parts.subList(1, parts.size - 1) else parts.drop(1)
                 "." + nameParts.joinToString(".") to idx
             }
-            parts.size >= 2 && parts[0] == "id" ->
-                "#" + parts.drop(1).joinToString(".") to null
+            parts.size >= 2 && parts[0] == "id" -> {
+                val idx = if (parts.size >= 3) idxOf(parts.last()) else null
+                val nameParts = if (idx != null) parts.subList(1, parts.size - 1) else parts.drop(1)
+                "#" + nameParts.joinToString(".") to idx
+            }
             parts.size >= 2 && parts[0] == "tag" -> {
                 val idx = if (parts.size >= 3) idxOf(parts.last()) else null
                 val name = if (idx != null) parts[1] else parts.drop(1).joinToString(".")
@@ -332,14 +371,14 @@ object LegadoConverter {
             }
             parts.size >= 2 && parts[0] == "text" ->
                 "*:containsOwn(${parts.drop(1).joinToString(".")})" to null
-            else -> {
-                if (seg.contains("!") || seg.contains("[")) {
-                    // !排除 与 [范围] 不支持精确转换
-                    throw LegadoUnsupported("索引排除/范围语法不支持: $seg")
-                }
-                seg to null // 当作原生 CSS，最终由 RuleParser 校验
-            }
+            else -> seg to null // 当作原生 CSS，最终由 RuleParser 校验
         }
+        if (excludeSuffix.isNotEmpty()) {
+            css += if (css.endsWith("*") && excludeSuffix == ":not(:last-of-type)") {
+                ":not(:last-child)"
+            } else excludeSuffix
+        }
+        return css to (bracketIdx ?: dotIdx)
     }
 
     private fun defaultExtractor(kind: Kind): String = when (kind) {
@@ -429,7 +468,11 @@ object LegadoConverter {
         if (optIdx > 0) {
             val optText = urlPart.substring(optIdx + 1)
             urlPart = urlPart.substring(0, optIdx)
+            // Legado 选项常用单引号 JSON，标准解析失败时替换重试
             options = runCatching { json.parseToJsonElement(optText).jsonObject }.getOrNull()
+                ?: runCatching {
+                    json.parseToJsonElement(optText.replace('\'', '"')).jsonObject
+                }.getOrNull()
         }
         val charset = options?.str("charset")?.lowercase()
         val keyword = if (charset != null && charset != "utf-8") "{{keyword|encode:$charset}}" else "{{keyword}}"
@@ -438,8 +481,15 @@ object LegadoConverter {
             val out = s.replace("{{key}}", keyword)
                 .replace("searchKey", keyword) // 老式变量
                 .replace("searchPage", "{{page}}")
-            val leftover = Regex("\\{\\{(?!keyword|page)[^}]*}}").find(out)
-            if (leftover != null) throw LegadoUnsupported("searchUrl 含表达式: ${leftover.value}")
+            // 允许 page 算术表达式（如 {{(page-1)*50}}，引擎模板支持求值）
+            Regex("\\{\\{([^}]*)}}").findAll(out).forEach { m ->
+                val body = m.groupValues[1].trim()
+                val isKnown = body == "keyword" || body == "page" || body.startsWith("keyword|")
+                val isPageMath = body.matches(Regex("[0-9page()+\\-*/\\s]+")) && body.contains("page")
+                if (!isKnown && !isPageMath) {
+                    throw LegadoUnsupported("searchUrl 含表达式: ${m.value}")
+                }
+            }
             return out
         }
 
