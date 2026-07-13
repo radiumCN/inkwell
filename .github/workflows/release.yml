@@ -10,6 +10,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,12 +35,28 @@ jobs:
       - name: Run unit tests
         run: ./gradlew test
 
-      # 暂用 debug 签名出包；配置正式签名后改为 assembleRelease + 签名步骤
-      - name: Build APK
-        run: ./gradlew assembleDebug
+      - name: Decode signing keystore
+        if: env.HAS_SIGNING == 'true'
+        run: echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build release APK (signed)
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SIGNING_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      # 未配置签名 Secrets 时兜底：debug 签名的 release 包（仅供测试分发）
+      - name: Build release APK (fallback debug signing)
+        if: env.HAS_SIGNING != 'true'
+        run: |
+          echo "::warning::未配置签名 Secrets，本次 Release 使用 debug 签名"
+          ./gradlew assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk inkwell-${{ github.ref_name }}.apk
+        run: cp app/build/outputs/apk/release/app-release.apk inkwell-${{ github.ref_name }}.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
