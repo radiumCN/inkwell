@@ -15,9 +15,10 @@ android {
         minSdk = 35
         targetSdk = 36
         // 版本号单点配置在 gradle/libs.versions.toml 的 [versions] inkwell
+        // versionCode 忽略预发布后缀（0.1.0-beta.1 与 0.1.0 同码，允许同码覆盖安装）
         val appVersion = libs.versions.inkwell.get()
         versionName = appVersion
-        versionCode = appVersion.split(".").let { (major, minor, patch) ->
+        versionCode = appVersion.substringBefore("-").split(".").let { (major, minor, patch) ->
             major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
         }
     }
