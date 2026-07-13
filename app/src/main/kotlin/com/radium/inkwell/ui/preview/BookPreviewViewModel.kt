@@ -63,9 +63,7 @@ class BookPreviewViewModel(
                 return@launch
             }
             runCatching {
-                val d = engine.getDetail(rule, bookUrl)
-                val toc = engine.getToc(rule, d.tocUrl.ifBlank { bookUrl })
-                d to toc
+                netBookRepo.fetchDetailAndToc(rule, bookUrl)
             }.onSuccess { (d, toc) ->
                 detail = d
                 _state.value = BookPreviewUiState(

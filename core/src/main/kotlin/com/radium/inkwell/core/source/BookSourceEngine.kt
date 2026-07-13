@@ -88,15 +88,28 @@ class BookSourceEngine(
         val rule = source.search ?: throw SourceException("书源「${source.name}」未配置搜索规则")
         val vars = varsOf(source, "keyword" to keyword, "page" to page.toString())
         val fetched = fetchByRequest(source, rule.request, vars, "search")
-        return parseListPage(source, "search", fetched, vars, rule.list, rule.fields, rule.nextPage)
+        return parseListPage(
+            source, "search", fetched, vars, rule.list, rule.fields, rule.nextPage,
+            pageable = pageable(rule.request.url, rule.request.body),
+        )
     }
+
+    /**
+     * 地址模板里有 page 变量才谈得上翻页 —— 没有它，请求「第 2 页」拿回来的还是第 1 页。
+     * Legado 的搜索/发现没有独立的 nextPage 规则，全靠 searchUrl/exploreUrl 里的 {{page}} 重发请求。
+     */
+    private fun pageable(vararg templates: String?): Boolean =
+        templates.any { it != null && PAGE_VAR.containsMatchIn(it) }
 
     suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage {
         val rule = source.explore.getOrNull(exploreIndex)
             ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
         val vars = varsOf(source, "page" to page.toString())
         val fetched = fetchByRequest(source, RequestRule(url = rule.url), vars, "explore")
-        return parseListPage(source, "explore", fetched, vars, rule.list, rule.fields, rule.nextPage)
+        return parseListPage(
+            source, "explore", fetched, vars, rule.list, rule.fields, rule.nextPage,
+            pageable = pageable(rule.url),
+        )
     }
 
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail {
@@ -340,6 +353,7 @@ class BookSourceEngine(
         listRule: String,
         fields: Map<String, String>,
         nextPageRule: String?,
+        pageable: Boolean = false,
     ): SearchPage {
         val ctx = pageContext(fetched, vars)
         val items = evalList(stage, listRule, ctx).mapNotNull { itemCtx ->
@@ -359,8 +373,11 @@ class BookSourceEngine(
                 sourceId = source.id,
             )
         }
-        val hasMore = nextPageRule != null && !evalUrlField(stage, "nextPage", nextPageRule, ctx).isNullOrBlank()
-        return SearchPage(items, hasMore)
+        // nextPage 规则命中即可继续；书源没有该规则时，只要地址模板带 page 且这一页有结果，
+        // 就还能往下翻（Legado 的搜索/发现正是这样分页的）
+        val hasNextRule = nextPageRule != null &&
+            !evalUrlField(stage, "nextPage", nextPageRule, ctx).isNullOrBlank()
+        return SearchPage(items, hasNextRule || (pageable && items.isNotEmpty()))
     }
 
     private fun evalList(stage: String, rule: String, ctx: EvalContext): List<EvalContext> =
@@ -441,6 +458,7 @@ class BookSourceEngine(
     }
 
     private companion object {
+        val PAGE_VAR = Regex("\\{\\{[^}]*page[^}]*\\}\\}")
         const val MAX_TOC_PAGES = 200
         const val MAX_CONTENT_PAGES = 50
     }

@@ -117,7 +117,9 @@ class BookSourceEngineTest {
         assertEquals(2, page.items.size)
         assertEquals("发现书一", page.items[0].title)
         assertEquals("$base/book/9", page.items[0].bookUrl)
-        assertFalse(page.hasMore)
+        // exploreUrl 是 /list/{{page}}.html 且这一页有结果 → 还能往下翻。
+        // 从前这里恒为 false，发现页的「加载更多」因此永远不触发。
+        assertTrue(page.hasMore)
     }
 
     @Test
@@ -165,6 +167,25 @@ class BookSourceEngineTest {
             listOf("重复导航页。", "第二页内容。"),
             content.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text },
         )
+    }
+
+    /**
+     * Legado 的搜索/发现没有独立的 nextPage 规则，全靠地址里的 {{page}} 重发请求翻页。
+     * 从前 hasMore 只认 nextPage 规则，于是这类书源永远 hasMore=false ——
+     * 发现页的「加载更多」成了死代码，搜索干脆连翻页都没有。
+     */
+    @Test
+    fun `没有 nextPage 规则时靠地址里的 page 变量判定还能翻页`() = runBlocking {
+        val json = sourceJson(base).replace("\"nextPage\": \"css:a.next@href\"", "\"nextPage\": null")
+
+        val pageable = BookSourceRule.fromJson(json)
+        val page = engine().search(pageable, "修真")
+        assertTrue(page.items.isNotEmpty())
+        assertTrue(page.hasMore, "searchUrl 里有 {{page}} 且这一页有结果 → 还能往下翻")
+
+        // 地址里没有 page 变量：请求「第 2 页」拿回来的还是第 1 页，不该声称还有更多
+        val fixed = BookSourceRule.fromJson(json.replace("&page={{page}}", ""))
+        assertFalse(engine().search(fixed, "修真").hasMore)
     }
 
     @Test

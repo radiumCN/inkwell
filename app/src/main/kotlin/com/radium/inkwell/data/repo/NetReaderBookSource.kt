@@ -32,13 +32,14 @@ class NetReaderBookSource(
     override fun chapterTitle(index: Int): String? = chapters.getOrNull(index)?.title
 
     override suspend fun loadChapter(index: Int): ChapterContent {
-        cache.read(bookId, index)?.let { return it }
         val chapter = chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
+        // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节
+        cache.read(bookId, url)?.let { return it }
         val remote = engine.getContent(rule, url, chapterUrls)
         val content = ChapterContent(remote.elements)
         withContext(Dispatchers.IO) {
-            cache.write(bookId, index, content)
+            cache.write(bookId, url, content)
             chapterDao.markCached(bookId, index, true)
         }
         return content

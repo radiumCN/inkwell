@@ -20,10 +20,19 @@ class NetBookRepository(
     private val cache: ChapterContentCache,
 ) {
 
+    /** 详情 + 目录。加书架/换源/预览页/书源测试全都走这里，避免各写一份兜底逻辑写出分歧 */
+    suspend fun fetchDetailAndToc(
+        rule: BookSourceRule,
+        bookUrl: String,
+    ): Pair<RemoteBookDetail, List<RemoteChapter>> {
+        val detail = engine.getDetail(rule, bookUrl)
+        val toc = engine.getToc(rule, detail.tocUrl.ifBlank { bookUrl })
+        return detail to toc
+    }
+
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
     suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = runCatching {
-        val detail = engine.getDetail(rule, result.bookUrl)
-        val toc = engine.getToc(rule, detail.tocUrl.ifBlank { result.bookUrl })
+        val (detail, toc) = fetchDetailAndToc(rule, result.bookUrl)
         persist(rule.id, result.bookUrl, detail, toc, fallback = result)
     }
 
@@ -56,8 +65,8 @@ class NetBookRepository(
         check(toc.isNotEmpty()) { "目录解析为空" }
         val bookId = netBookId(sourceId, bookUrl)
         val now = System.currentTimeMillis()
-        // 已在书架时保留原有阅读进度，只刷新书籍元信息与目录
         val existing = bookDao.getById(bookId)
+        val (readIndex, readOffset) = alignProgress(bookId, existing, toc)
         bookDao.upsert(
             BookEntity(
                 id = bookId,
@@ -71,18 +80,14 @@ class NetBookRepository(
                 tocUrl = detail.tocUrl.ifBlank { bookUrl },
                 latestChapterTitle = toc.lastOrNull()?.title,
                 totalChapters = toc.size,
-                readChapterIndex = existing?.readChapterIndex ?: 0,
-                readCharOffset = existing?.readCharOffset ?: 0,
+                readChapterIndex = readIndex,
+                readCharOffset = readOffset,
                 readAt = existing?.readAt ?: 0,
                 addedAt = existing?.addedAt ?: now,
                 updatedAt = now,
             )
         )
-        val cached = chapterDao.getByBook(bookId).filter { it.isCached }.map { it.index }.toSet()
-        chapterDao.deleteByBook(bookId)
-        chapterDao.upsertAll(
-            toc.map { ChapterEntity(bookId, it.index, it.title, url = it.url, isCached = it.index in cached) }
-        )
+        writeToc(bookId, toc)
         return bookId
     }
 
@@ -90,19 +95,50 @@ class NetBookRepository(
     suspend fun refreshToc(book: BookEntity, rule: BookSourceRule): Result<Int> = runCatching {
         val toc = engine.getToc(rule, book.tocUrl ?: book.bookUrl ?: error("缺少目录地址"))
         check(toc.isNotEmpty()) { "目录解析为空" }
-        val cached = chapterDao.getByBook(book.id).filter { it.isCached }.map { it.index }.toSet()
-        chapterDao.deleteByBook(book.id)
-        chapterDao.upsertAll(
-            toc.map { ChapterEntity(book.id, it.index, it.title, url = it.url, isCached = it.index in cached) }
-        )
+        // 追更同样要对齐进度：站点在前面插入公告章/防盗章后目录整体后移，
+        // 沿用旧序号会直接跳章（从前只有换源做了对齐，追更没做）
+        val (readIndex, readOffset) = alignProgress(book.id, book, toc)
+        writeToc(book.id, toc)
         bookDao.update(
             book.copy(
                 totalChapters = toc.size,
                 latestChapterTitle = toc.lastOrNull()?.title,
+                readChapterIndex = readIndex,
+                readCharOffset = readOffset,
                 updatedAt = System.currentTimeMillis(),
             )
         )
         toc.size
+    }
+
+    /** isCached 按章节 URL 判定：目录变动后序号会错位，缓存得跟着章节走 */
+    private suspend fun writeToc(bookId: String, toc: List<RemoteChapter>) {
+        cache.purgeLegacy(bookId)
+        chapterDao.deleteByBook(bookId)
+        chapterDao.upsertAll(
+            toc.map {
+                ChapterEntity(bookId, it.index, it.title, url = it.url, isCached = cache.has(bookId, it.url))
+            }
+        )
+    }
+
+    /**
+     * 目录换过之后重新定位阅读进度：按当前章节标题在新目录里找回它的新序号。
+     * 标题能对上说明还是同一章，字符偏移仍然有效；对不上就只能按序号夹取，偏移已无意义。
+     */
+    private suspend fun alignProgress(
+        bookId: String,
+        book: BookEntity?,
+        toc: List<RemoteChapter>,
+    ): Pair<Int, Int> {
+        if (book == null) return 0 to 0
+        val oldTitle = chapterDao.get(bookId, book.readChapterIndex)?.title
+            ?: return book.readChapterIndex.coerceIn(0, toc.lastIndex) to 0
+        val normalized = normalizeTitle(oldTitle)
+        val matched = toc.filter { normalizeTitle(it.title) == normalized }
+            .minByOrNull { kotlin.math.abs(it.index - book.readChapterIndex) }
+        return if (matched != null) matched.index to book.readCharOffset
+        else book.readChapterIndex.coerceIn(0, toc.lastIndex) to 0
     }
 
     /**
@@ -114,23 +150,18 @@ class NetBookRepository(
         newResult: SearchResult,
         newRule: BookSourceRule,
     ): Result<Unit> = runCatching {
-        val detail = engine.getDetail(newRule, newResult.bookUrl)
-        val tocUrl = detail.tocUrl.ifBlank { newResult.bookUrl }
-        val toc = engine.getToc(newRule, tocUrl)
+        val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl)
         check(toc.isNotEmpty()) { "新书源目录为空" }
+        // 换源只能沿用章节序号：换了站，同一章的正文分段与字数都不同，字符偏移没有意义
+        val (newIndex, _) = alignProgress(book.id, book, toc)
 
-        val oldChapters = chapterDao.getByBook(book.id)
-        val currentTitle = oldChapters.getOrNull(book.readChapterIndex)?.title
-        val newIndex = alignChapter(currentTitle, book.readChapterIndex, toc.map { it.title })
-
-        cache.clear(book.id)
-        chapterDao.deleteByBook(book.id)
-        chapterDao.upsertAll(toc.map { ChapterEntity(book.id, it.index, it.title, url = it.url) })
+        cache.clear(book.id) // 旧源的正文缓存整本作废
+        writeToc(book.id, toc)
         bookDao.update(
             book.copy(
                 sourceId = newRule.id,
                 bookUrl = newResult.bookUrl,
-                tocUrl = tocUrl,
+                tocUrl = detail.tocUrl.ifBlank { newResult.bookUrl },
                 totalChapters = toc.size,
                 latestChapterTitle = toc.lastOrNull()?.title,
                 readChapterIndex = newIndex,
@@ -138,17 +169,6 @@ class NetBookRepository(
                 updatedAt = System.currentTimeMillis(),
             )
         )
-    }
-
-    /** 章节对齐：先精确标题匹配（旧索引附近优先），再退化为按索引夹取 */
-    private fun alignChapter(currentTitle: String?, oldIndex: Int, newTitles: List<String>): Int {
-        if (currentTitle == null || newTitles.isEmpty()) return oldIndex.coerceIn(0, (newTitles.size - 1).coerceAtLeast(0))
-        val normalized = normalizeTitle(currentTitle)
-        val exact = newTitles.withIndex()
-            .filter { normalizeTitle(it.value) == normalized }
-            .minByOrNull { kotlin.math.abs(it.index - oldIndex) }
-        if (exact != null) return exact.index
-        return oldIndex.coerceIn(0, newTitles.size - 1)
     }
 
     private fun normalizeTitle(t: String): String =

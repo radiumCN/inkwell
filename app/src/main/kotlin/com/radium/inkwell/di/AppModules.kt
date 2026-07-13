@@ -41,7 +41,7 @@ val appModule = module {
     single { WebDavPrefs(androidContext()) }
     single { com.radium.inkwell.data.prefs.AppPrefs(androidContext()) }
     single { KeyEventBus() }
-    single { ChapterContentCache(androidContext()) }
+    single { ChapterContentCache(java.io.File(androidContext().filesDir, "cache")) }
 
     single { SourceHttpClient() }
     // Rhino 解释执行 JS 规则（与 Legado 同引擎）
@@ -70,6 +70,6 @@ val appModule = module {
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get()) }
-    viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get()) }
+    viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
 }

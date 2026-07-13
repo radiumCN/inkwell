@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.data.repo.BookSourceRepository
+import com.radium.inkwell.data.repo.NetBookRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,6 +55,7 @@ data class SourceEditUiState(
 class SourceEditViewModel(
     private val sourceId: String?,
     private val sourceRepo: BookSourceRepository,
+    private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
 ) : ViewModel() {
 
@@ -116,10 +118,8 @@ class SourceEditViewModel(
                 val first = page.items.firstOrNull() ?: error("搜索无结果")
                 report.appendLine("  首条: ${first.title} / ${first.author ?: "?"}")
 
-                val detail = engine.getDetail(rule, first.bookUrl)
+                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, first.bookUrl)
                 report.appendLine("✔ 详情: ${detail.title} tocUrl=${detail.tocUrl.take(60)}")
-
-                val toc = engine.getToc(rule, detail.tocUrl.ifBlank { first.bookUrl })
                 report.appendLine("✔ 目录: ${toc.size} 章")
                 val firstChapter = toc.firstOrNull() ?: error("目录为空")
                 report.appendLine("  首章: ${firstChapter.title}")
