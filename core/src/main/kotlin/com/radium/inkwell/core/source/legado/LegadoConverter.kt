@@ -133,9 +133,14 @@ object LegadoConverter {
         val contentRule = convertRule(forceHtmlExtractor(contentRuleRaw), Kind.HTML, "content", ctx)
             ?: throw LegadoUnsupported("正文规则无法转换: ${ctx.lastError ?: contentBase}")
         val contentNext = convertRule(ruleContent.str("nextContentUrl"), Kind.URL, "content.nextPage", ctx)
+        // 净化正则在导入侧（即目标设备的正则引擎上）预编译校验，非法的丢弃而非整源报废
         val purify = buildList {
             contentPurify?.let { add(it) }
             addAll(parseReplaceRegex(ruleContent.str("replaceRegex"), warnings))
+        }.filter { rule ->
+            !rule.isRegex || runCatching { java.util.regex.Pattern.compile(rule.pattern) }.isSuccess.also { ok ->
+                if (!ok) warnings += "净化正则不合法已丢弃：${rule.pattern.take(40)}"
+            }
         }
 
         // 发现页
@@ -357,7 +362,8 @@ object LegadoConverter {
             parts.size >= 2 && parts[0] == "class" -> {
                 val idx = if (parts.size >= 3) idxOf(parts.last()) else null
                 val nameParts = if (idx != null) parts.subList(1, parts.size - 1) else parts.drop(1)
-                "." + nameParts.joinToString(".") to idx
+                // Legado 里 class 名含空格 = 多 class 并列（.a.b）
+                "." + nameParts.joinToString(".").replace(" ", ".") to idx
             }
             parts.size >= 2 && parts[0] == "id" -> {
                 val idx = if (parts.size >= 3) idxOf(parts.last()) else null
@@ -435,9 +441,12 @@ object LegadoConverter {
         return base to PurifyRule(pattern = pattern, replacement = replacement, isRegex = true)
     }
 
-    /** DSL 内嵌正则的转义：空格与 | 会被管道切分，空格转义可保语义，| 无法保语义（上游已拦截） */
+    /**
+     * DSL 内嵌正则的转义：空格会被管道切分，改写为 unicode 转义（反斜杠+u0020）；
+     * 反斜杠+空格在 Android ICU 正则引擎上是非法转义，不能用。
+     */
     private fun escapeForDsl(pattern: String): String =
-        pattern.replace(" ", "\\ ")
+        pattern.replace(" ", "\\u0020")
 
     /** Legado replaceRegex: `##pattern##replacement`，可能多行 */
     private fun parseReplaceRegex(raw: String?, warnings: MutableList<String>): List<PurifyRule> {

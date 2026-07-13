@@ -195,7 +195,9 @@ class LegadoConverterTest {
           "ruleSearch": {
             "bookList": "id.author@tag.tbody@tag.tr!0",
             "name": "tag.td.0@text",
-            "bookUrl": "tag.a.0@href"
+            "bookUrl": "tag.a.0@href",
+            "author": "class.info a@text##作者 大人",
+            "intro": "class.intro summary@text"
           },
           "ruleToc": {
             "chapterList": "class.full@children[0]@tag.a",
@@ -213,6 +215,9 @@ class LegadoConverterTest {
         assertEquals("POST", search.request.method)
         assertEquals("key={{keyword}}&start={{(page-1)*20}}", search.request.body)
         assertEquals("css:#author tbody tr:gt(0)", search.list)
+        // 空格用 unicode 转义（反斜杠+空格在 Android ICU 上非法）；class 名带空格 = 多 class
+        assertTrue(search.fields["author"]!!.contains("regex:作者\\u0020大人"))
+        assertEquals("css:.intro.summary@text", search.fields["intro"])
         assertEquals("css:.full > *:first-child a", rule.toc!!.list)
         assertEquals("css:.box:last-of-type p:not(:last-of-type)@html", rule.content!!.content)
     }
