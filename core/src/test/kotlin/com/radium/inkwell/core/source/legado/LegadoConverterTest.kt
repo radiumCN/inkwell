@@ -102,21 +102,44 @@ class LegadoConverterTest {
     }
 
     @Test
-    fun `js source is skipped with reason`() {
+    fun `js rules convert to js pipes`() {
         val js = """
         {
           "bookSourceUrl": "https://js.example.com",
           "bookSourceName": "JS站",
           "searchUrl": "/s?q={{key}}",
-          "ruleSearch": { "bookList": "<js>result.list</js>", "name": "name", "bookUrl": "url" },
+          "ruleSearch": {
+            "bookList": "<js>JSON.parse(result).list</js>",
+            "name": "name",
+            "bookUrl": "tag.a.0@href@js:result.replace('m.','www.')"
+          },
           "ruleToc": { "chapterList": "tag.a", "chapterName": "text", "chapterUrl": "href" },
           "ruleContent": { "content": "id.content@html" }
         }
         """.trimIndent()
         val result = LegadoConverter.convert(js)
-        assertEquals(0, result.converted.size)
+        assertEquals(0, result.skipped.size)
+        val rule = result.converted.single().rule
+        // 纯脚本 → js 原子规则；规则@js: → js 管道（均 base64 编码）
+        assertTrue(rule.search!!.list.startsWith("js:b64:"))
+        assertTrue(rule.search!!.fields["bookUrl"]!!.contains("| js:b64:"))
+    }
+
+    @Test
+    fun `js referencing unsupported objects is skipped`() {
+        val js = """
+        {
+          "bookSourceUrl": "https://java.example.com",
+          "bookSourceName": "Java桥站",
+          "searchUrl": "/s?q={{key}}",
+          "ruleSearch": { "bookList": "<js>java.ajax(url)</js>", "name": "name", "bookUrl": "url" },
+          "ruleToc": { "chapterList": "tag.a", "chapterName": "text", "chapterUrl": "href" },
+          "ruleContent": { "content": "id.content@html" }
+        }
+        """.trimIndent()
+        val result = LegadoConverter.convert(js)
         assertEquals(1, result.skipped.size)
-        assertTrue(result.skipped[0].reason.contains("搜索列表规则无法转换"))
+        assertTrue(result.skipped[0].reason.contains("不支持的对象"))
     }
 
     @Test

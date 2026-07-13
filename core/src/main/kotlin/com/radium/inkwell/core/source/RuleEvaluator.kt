@@ -23,8 +23,10 @@ data class EvalContext(
     val vars: Map<String, String> = emptyMap(),
 )
 
-/** 规则求值器；正则按 pattern 缓存预编译 */
-class RuleEvaluator {
+/** 规则求值器；正则按 pattern 缓存预编译；scriptRuntime 为空时 js 规则报不支持 */
+class RuleEvaluator(
+    private val scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
+) {
 
     private val regexCache = ConcurrentHashMap<String, Regex>()
     private fun regexOf(pattern: String): Regex = regexCache.getOrPut(pattern) { Regex(pattern) }
@@ -48,6 +50,18 @@ class RuleEvaluator {
                 .takeIf { it.isNotBlank() }
                 ?.let { listOf(ctx.copy(element = null, json = it)) }
                 ?: emptyList()
+        is RuleNode.Js -> evalJs(node.script, ctx)?.let { out ->
+            // list 规则的 JS 结果：JSON 形态进 json 上下文，HTML 形态解析后取子元素
+            val t = out.trim()
+            when {
+                t.isEmpty() -> emptyList()
+                t.startsWith("[") || t.startsWith("{") ->
+                    listOf(ctx.copy(element = null, json = t))
+                t.startsWith("<") -> Jsoup.parse(t).body().children()
+                    .map { ctx.copy(element = it, json = null) }
+                else -> listOf(ctx.copy(element = null, json = t))
+            }
+        } ?: emptyList()
         is RuleNode.Fallback ->
             node.options.firstNotNullOfOrNull { o ->
                 evalToNodes(o, ctx).takeIf { it.isNotEmpty() }
@@ -73,6 +87,8 @@ class RuleEvaluator {
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
         is RuleNode.Literal ->
             expandTemplate(node.template, ctx.vars).let { if (it.isEmpty()) emptyList() else listOf(it) }
+        is RuleNode.Js ->
+            evalJs(node.script, ctx)?.takeIf { it.isNotEmpty() }?.let { listOf(it) } ?: emptyList()
         is RuleNode.Fallback ->
             node.options.firstNotNullOfOrNull { o ->
                 evalToStrings(o, ctx).takeIf { list -> list.any { it.isNotBlank() } }
@@ -160,6 +176,36 @@ class RuleEvaluator {
         is PipeOp.Join -> if (list.isEmpty()) emptyList() else listOf(list.joinToString(op.sep))
         is PipeOp.Prepend -> list.map { expandTemplate(op.s, ctx.vars) + it }
         is PipeOp.Append -> list.map { it + expandTemplate(op.s, ctx.vars) }
+        is PipeOp.Js -> list.mapNotNull { s -> runJs(op.script, ctx, input = s) }
+    }
+
+    // ---- js ----
+
+    /** 原子 js：result = 上下文文本（页面/元素/JSON） */
+    private fun evalJs(script: String, ctx: EvalContext): String? =
+        runJs(script, ctx, input = contextText(ctx))
+
+    /**
+     * 绑定 Legado 常用变量子集：result/src/baseUrl/key/page。
+     * 脚本异常按"不匹配"降级为空结果；未注入引擎则明确报不支持。
+     */
+    private fun runJs(script: String, ctx: EvalContext, input: String): String? {
+        val runtime = scriptRuntime
+            ?: throw UnsupportedRuleException("该书源需要 JS 引擎，当前版本不支持")
+        return try {
+            runtime.eval(
+                script,
+                mapOf(
+                    "result" to input,
+                    "src" to input,
+                    "baseUrl" to ctx.baseUrl,
+                    "key" to (ctx.vars["keyword"] ?: ""),
+                    "page" to (ctx.vars["page"]?.toIntOrNull() ?: 1),
+                ),
+            )
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

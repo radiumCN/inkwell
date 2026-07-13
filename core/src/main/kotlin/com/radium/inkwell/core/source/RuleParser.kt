@@ -29,6 +29,9 @@ sealed interface RuleNode {
     /** 字面量/模板，支持 {{var}} */
     data class Literal(val template: String) : RuleNode
 
+    /** JS 脚本规则；script 为解码后的源码，需注入 ScriptRuntime 才能求值 */
+    data class Js(val script: String) : RuleNode
+
     /** 后处理管道 */
     data class Pipe(val source: RuleNode, val ops: List<PipeOp>) : RuleNode
 
@@ -63,6 +66,9 @@ sealed interface PipeOp {
     data class Join(val sep: String) : PipeOp
     data class Prepend(val s: String) : PipeOp
     data class Append(val s: String) : PipeOp
+
+    /** 对每个结果执行 JS（绑定 result），返回值替换该结果 */
+    data class Js(val script: String) : PipeOp
 }
 
 /** 手写规则解析器；解析结果按规则原文缓存 */
@@ -155,8 +161,8 @@ object RuleParser {
                 RuleNode.RegexRule(pattern)
             }
             t.startsWith("text:") -> RuleNode.Literal(t.substring(5))
-            t.startsWith("js:") || t.startsWith("@js:") ->
-                throw UnsupportedRuleException("该书源需要 JS 引擎，当前版本不支持")
+            t.startsWith("js:") -> RuleNode.Js(decodeScript(t.substring(3), seg.offset + 3))
+            t.startsWith("@js:") -> RuleNode.Js(decodeScript(t.substring(4), seg.offset + 4))
             else -> parseCss(t, seg.offset)
         }
     }
@@ -239,8 +245,25 @@ object RuleParser {
             t.startsWith("join:") -> PipeOp.Join(t.substring(5))
             t.startsWith("prepend:") -> PipeOp.Prepend(t.substring(8))
             t.startsWith("append:") -> PipeOp.Append(t.substring(7))
+            t.startsWith("js:") -> PipeOp.Js(decodeScript(t.substring(3), seg.offset + 3))
             else -> throw RuleSyntaxException(seg.offset, "未知管道操作: $t")
         }
+    }
+
+    /**
+     * js 脚本解码：`b64:` 前缀为 base64（转换器产物，绕开 |/&& 切分），
+     * 否则原样使用（手写规则，注意脚本内不能出现裸 | 或 &&）。
+     */
+    private fun decodeScript(body: String, offset: Int): String {
+        val t = body.trim()
+        if (t.isEmpty()) throw RuleSyntaxException(offset, "JS 脚本为空")
+        return if (t.startsWith("b64:")) {
+            try {
+                String(java.util.Base64.getDecoder().decode(t.substring(4)), Charsets.UTF_8)
+            } catch (e: IllegalArgumentException) {
+                throw RuleSyntaxException(offset, "JS base64 解码失败")
+            }
+        } else t
     }
 
     private fun firstUnescapedSpace(s: String): Int {

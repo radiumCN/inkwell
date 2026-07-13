@@ -74,9 +74,10 @@ class BookSourceEngine(
     private val http: SourceHttpClient,
     private val globalPurify: List<PurifyRule> = emptyList(),
     private val trace: RuleTraceCollector? = null,
+    scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
 ) {
 
-    private val evaluator = RuleEvaluator()
+    private val evaluator = RuleEvaluator(scriptRuntime)
 
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage {
         val rule = source.search ?: throw SourceException("书源「${source.name}」未配置搜索规则")

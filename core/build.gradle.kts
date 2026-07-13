@@ -13,6 +13,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.jsoup)
+    implementation(libs.rhino)
     implementation(libs.juniversalchardet)
     implementation(libs.json.path)
     implementation(libs.okhttp)

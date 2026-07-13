@@ -73,26 +73,23 @@ object LegadoConverter {
         val type = src.int("bookSourceType") ?: 0
         if (type != 0) throw LegadoUnsupported("非文字书源（type=$type）不支持")
 
-        val ruleSearch = src.obj("ruleSearch") ?: throw LegadoUnsupported("缺少 ruleSearch")
+        val ruleSearch = src.obj("ruleSearch")
         val searchUrlRaw = src.str("searchUrl")?.takeIf { it.isNotBlank() }
-            ?: throw LegadoUnsupported("缺少 searchUrl")
 
         val headers = parseHeader(src.str("header"), warnings)
-        val sourceCharset = detectCharsetHint(searchUrlRaw)
+        val sourceCharset = searchUrlRaw?.let { detectCharsetHint(it) }
         val ctx = Ctx(warnings)
 
-        // 搜索
-        val request = convertSearchUrl(searchUrlRaw)
-        val searchList = convertRule(ruleSearch.str("bookList"), Kind.LIST, "search.list", ctx)
-            ?: throw LegadoUnsupported("搜索列表规则无法转换: ${ctx.lastError ?: ruleSearch.str("bookList")}")
-        val searchFields = buildMap {
-            putRule("title", ruleSearch.str("name"), Kind.TEXT, "search.title", ctx, required = true)
-            putRule("bookUrl", ruleSearch.str("bookUrl"), Kind.URL, "search.bookUrl", ctx, required = true)
-            putRule("author", ruleSearch.str("author"), Kind.TEXT, "search.author", ctx)
-            putRule("coverUrl", ruleSearch.str("coverUrl"), Kind.URL, "search.coverUrl", ctx)
-            putRule("intro", ruleSearch.str("intro"), Kind.TEXT, "search.intro", ctx)
-            putRule("latestChapter", ruleSearch.str("lastChapter"), Kind.TEXT, "search.lastChapter", ctx)
-        }
+        // 搜索（可缺省/转换失败：还有发现页时降级保留书源）
+        var searchError: String? = null
+        val search: SearchRule? = if (ruleSearch != null && searchUrlRaw != null) {
+            try {
+                buildSearchRule(ruleSearch, searchUrlRaw, ctx)
+            } catch (e: LegadoUnsupported) {
+                searchError = e.message
+                null
+            }
+        } else null
 
         // 详情
         val ruleBookInfo = src.obj("ruleBookInfo")
@@ -146,8 +143,15 @@ object LegadoConverter {
         // 发现页
         val explore = convertExplore(src, ctx)
 
-        if (searchFields["title"] == null) throw LegadoUnsupported("搜索书名规则无法转换")
-        if (searchFields["bookUrl"] == null) throw LegadoUnsupported("搜索书籍链接规则无法转换")
+        if (search == null && explore.isEmpty()) {
+            throw LegadoUnsupported(
+                searchError?.let { "搜索规则无法转换（$it）且无发现规则" }
+                    ?: "缺少搜索与发现规则"
+            )
+        }
+        if (search == null && searchError != null) {
+            warnings += "搜索规则无法转换（$searchError），仅保留发现页"
+        }
         if (tocFields["title"] == null || tocFields["url"] == null) {
             throw LegadoUnsupported("目录章节规则无法转换")
         }
@@ -166,18 +170,31 @@ object LegadoConverter {
             charset = sourceCharset,
             headers = headers,
             rateLimit = parseConcurrentRate(src.str("concurrentRate")),
-            search = SearchRule(
-                request = request,
-                list = searchList,
-                fields = searchFields,
-                nextPage = null,
-            ),
+            search = search,
             detail = DetailRule(fields = detailFields),
             toc = TocRule(list = tocList, fields = tocFields, nextPage = tocNext, reverse = reverse),
             content = ContentRule(content = contentRule, nextPage = contentNext, purify = purify),
             explore = explore,
         )
         return Converted(rule, warnings.toList())
+    }
+
+    /** 搜索规则整体构建；必填字段无法转换时抛 LegadoUnsupported */
+    private fun buildSearchRule(ruleSearch: JsonObject, searchUrlRaw: String, ctx: Ctx): SearchRule {
+        val request = convertSearchUrl(searchUrlRaw)
+        val list = convertRule(ruleSearch.str("bookList"), Kind.LIST, "search.list", ctx)
+            ?: throw LegadoUnsupported("搜索列表规则无法转换: ${ctx.lastError ?: ruleSearch.str("bookList")}")
+        val fields = buildMap {
+            putRule("title", ruleSearch.str("name"), Kind.TEXT, "search.title", ctx, required = true)
+            putRule("bookUrl", ruleSearch.str("bookUrl"), Kind.URL, "search.bookUrl", ctx, required = true)
+            putRule("author", ruleSearch.str("author"), Kind.TEXT, "search.author", ctx)
+            putRule("coverUrl", ruleSearch.str("coverUrl"), Kind.URL, "search.coverUrl", ctx)
+            putRule("intro", ruleSearch.str("intro"), Kind.TEXT, "search.intro", ctx)
+            putRule("latestChapter", ruleSearch.str("lastChapter"), Kind.TEXT, "search.lastChapter", ctx)
+        }
+        if (fields["title"] == null) throw LegadoUnsupported("搜索书名规则无法转换")
+        if (fields["bookUrl"] == null) throw LegadoUnsupported("搜索书籍链接规则无法转换")
+        return SearchRule(request = request, list = list, fields = fields, nextPage = null)
     }
 
     // ---------- 规则字符串转换 ----------
@@ -236,12 +253,34 @@ object LegadoConverter {
         return convertAtomic(rule, kind, where)
     }
 
+    /** JS 里引用了这些对象的脚本依赖 Legado 的 java 桥/上下文，我们不提供 → 保持跳过 */
+    private val UNSUPPORTED_JS_REFS = Regex("\\b(java|cookie|source|book|chapter|cache)\\s*\\.")
+
     private fun convertAtomic(rule: String, kind: Kind, where: String): String {
-        if (rule.contains("<js>") || rule.startsWith("@js:") || rule.contains("{{")) {
-            throw LegadoUnsupported("JS 规则不支持")
+        if (rule.contains("{{")) {
+            throw LegadoUnsupported("规则内嵌 {{js}} 不支持")
         }
         if (rule.startsWith("@XPath:", ignoreCase = true) || rule.startsWith("//")) {
             throw LegadoUnsupported("XPath 规则不支持")
+        }
+        // <js>...</js> 块：前段为基础规则（可为空），脚本转为 js 管道
+        if (rule.contains("<js>")) {
+            val jsStart = rule.indexOf("<js>")
+            val jsEnd = rule.indexOf("</js>", jsStart)
+            if (jsEnd < 0) throw LegadoUnsupported("JS 块未闭合")
+            val script = rule.substring(jsStart + 4, jsEnd).trim()
+            val base = rule.substring(0, jsStart).trim().trimEnd('@')
+            val tail = rule.substring(jsEnd + 5).trim()
+            if (tail.isNotEmpty()) throw LegadoUnsupported("JS 块后还有规则，暂不支持")
+            return attachJs(base, script, kind, where)
+        }
+        // rule@js:script 后缀（八一中文式）；整条 @js: 开头 = 纯脚本
+        val jsSuffix = rule.indexOf("@js:")
+        if (jsSuffix > 0) {
+            return attachJs(rule.substring(0, jsSuffix), rule.substring(jsSuffix + 4), kind, where)
+        }
+        if (rule.startsWith("@js:")) {
+            return attachJs("", rule.substring(4), kind, where)
         }
         return when {
             rule.startsWith("@css:", ignoreCase = true) ->
@@ -253,6 +292,19 @@ object LegadoConverter {
             rule.startsWith(":") ->
                 "regex:" + escapeForDsl(rule.substring(1))
             else -> convertJsoupHierarchy(rule, kind)
+        }
+    }
+
+    /** 基础规则 + JS：base 为空时脚本作为原子规则，否则作为管道；base64 绕开 DSL 切分 */
+    private fun attachJs(base: String, script: String, kind: Kind, where: String): String {
+        if (UNSUPPORTED_JS_REFS.containsMatchIn(script)) {
+            throw LegadoUnsupported("JS 使用了不支持的对象（java/book/cookie 等）")
+        }
+        val encoded = java.util.Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_8))
+        return if (base.isEmpty()) {
+            "js:b64:$encoded"
+        } else {
+            convertAtomic(base, kind, where) + " | js:b64:$encoded"
         }
     }
 

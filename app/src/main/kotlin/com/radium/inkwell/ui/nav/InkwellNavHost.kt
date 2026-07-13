@@ -7,6 +7,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.radium.inkwell.ui.bookshelf.BookshelfScreen
 import com.radium.inkwell.ui.detail.BookDetailScreen
+import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.reader.ReaderScreen
 import com.radium.inkwell.ui.search.SearchScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
@@ -23,6 +24,7 @@ fun InkwellNavHost() {
                 onOpenBook = { navController.navigate(ReaderRoute(it)) },
                 onOpenDetail = { navController.navigate(BookDetailRoute(it)) },
                 onOpenSearch = { navController.navigate(SearchRoute()) },
+                onOpenExplore = { navController.navigate(ExploreRoute) },
                 onOpenSourceManage = { navController.navigate(SourceManageRoute) },
                 onOpenSettings = { navController.navigate(SettingsRoute) },
             )
@@ -41,6 +43,12 @@ fun InkwellNavHost() {
         }
         composable<SearchRoute> {
             SearchScreen(onBack = { navController.popBackStack() })
+        }
+        composable<ExploreRoute> {
+            ExploreScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSourceManage = { navController.navigate(SourceManageRoute) },
+            )
         }
         composable<SourceManageRoute> {
             SourceManageScreen(

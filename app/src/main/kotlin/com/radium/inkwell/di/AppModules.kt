@@ -44,7 +44,11 @@ val appModule = module {
     single { ChapterContentCache(androidContext()) }
 
     single { SourceHttpClient() }
-    single { BookSourceEngine(get()) }
+    // Rhino 解释执行 JS 规则（与 Legado 同引擎）
+    single<com.radium.inkwell.core.source.js.ScriptRuntime> {
+        com.radium.inkwell.core.source.js.RhinoScriptRuntime()
+    }
+    single { BookSourceEngine(http = get(), scriptRuntime = get()) }
     single { com.radium.inkwell.update.UpdateChecker() }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
@@ -57,6 +61,7 @@ val appModule = module {
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
+    viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get()) }
     viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }

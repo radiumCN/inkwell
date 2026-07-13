@@ -15,6 +15,9 @@ data class ReaderRoute(val bookId: String)
 data class SearchRoute(val initialQuery: String? = null)
 
 @Serializable
+object ExploreRoute
+
+@Serializable
 object SourceManageRoute
 
 @Serializable

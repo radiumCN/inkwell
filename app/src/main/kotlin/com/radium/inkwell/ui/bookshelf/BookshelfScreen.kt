@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Source
@@ -58,6 +59,7 @@ fun BookshelfScreen(
     onOpenBook: (String) -> Unit,
     onOpenDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenExplore: () -> Unit,
     onOpenSourceManage: () -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: BookshelfViewModel = koinViewModel(),
@@ -86,6 +88,9 @@ fun BookshelfScreen(
                 actions = {
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
+                    }
+                    IconButton(onClick = onOpenExplore) {
+                        Icon(Icons.Default.Explore, contentDescription = "发现")
                     }
                     IconButton(onClick = onOpenSourceManage) {
                         Icon(Icons.Default.Source, contentDescription = "书源")

@@ -10,3 +10,8 @@
 # json-path
 -dontwarn com.jayway.jsonpath.**
 -dontwarn org.slf4j.**
+
+# Rhino（JS 规则引擎）：内部反射构造 native 包装类
+-keep class org.mozilla.javascript.** { *; }
+-dontwarn org.mozilla.javascript.**
+-dontwarn org.mozilla.classfile.**

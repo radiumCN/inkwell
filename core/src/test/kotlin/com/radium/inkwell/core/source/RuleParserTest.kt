@@ -100,10 +100,16 @@ class RuleParserTest {
     }
 
     @Test
-    fun `js rule throws unsupported`() {
-        val e = assertFailsWith<UnsupportedRuleException> { RuleParser.parse("js:result.title") }
-        assertEquals("该书源需要 JS 引擎，当前版本不支持", e.message)
-        assertFailsWith<UnsupportedRuleException> { RuleParser.parse("@js:foo()") }
+    fun `js rules parse as Js nodes`() {
+        assertEquals(RuleNode.Js("result.title"), RuleParser.parse("js:result.title"))
+        assertEquals(RuleNode.Js("foo()"), RuleParser.parse("@js:foo()"))
+        // base64 形式（转换器产物，绕开 DSL 的 | 与 && 切分）
+        val b64 = java.util.Base64.getEncoder()
+            .encodeToString("a || b".toByteArray(Charsets.UTF_8))
+        assertEquals(RuleNode.Js("a || b"), RuleParser.parse("js:b64:$b64"))
+        // 作为管道
+        val piped = RuleParser.parse("css:a@href | js:b64:$b64") as RuleNode.Pipe
+        assertEquals(listOf(PipeOp.Js("a || b")), piped.ops)
     }
 
     @Test
