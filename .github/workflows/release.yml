@@ -13,6 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify tag matches configured version
+        run: |
+          V=$(grep -oP '^inkwell = "\K[^"]+' gradle/libs.versions.toml)
+          if [ "v$V" != "${{ github.ref_name }}" ]; then
+            echo "::error::tag ${{ github.ref_name }} 与 libs.versions.toml 中的版本 v$V 不一致，请先更新版本号"
+            exit 1
+          fi
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:

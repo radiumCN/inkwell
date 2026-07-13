@@ -14,8 +14,12 @@ android {
         applicationId = "com.radium.inkwell"
         minSdk = 35
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // 版本号单点配置在 gradle/libs.versions.toml 的 [versions] inkwell
+        val appVersion = libs.versions.inkwell.get()
+        versionName = appVersion
+        versionCode = appVersion.split(".").let { (major, minor, patch) ->
+            major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
+        }
     }
 
     buildTypes {

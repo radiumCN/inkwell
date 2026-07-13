@@ -44,6 +44,7 @@ val appModule = module {
 
     single { SourceHttpClient() }
     single { BookSourceEngine(get()) }
+    single { com.radium.inkwell.update.UpdateChecker() }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
     single { BookSourceRepository(get()) }
