@@ -40,7 +40,11 @@ import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(onBack: () -> Unit, viewModel: SearchViewModel = koinViewModel()) {
+fun SearchScreen(
+    onBack: () -> Unit,
+    onOpenPreview: (sourceId: String, bookUrl: String) -> Unit,
+    viewModel: SearchViewModel = koinViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
@@ -99,6 +103,7 @@ fun SearchScreen(onBack: () -> Unit, viewModel: SearchViewModel = koinViewModel(
                             trailingLabel = "加入",
                             trailingLoading = state.addingUrl == result.bookUrl,
                             onTrailing = { viewModel.addToShelf(result) },
+                            onClick = { onOpenPreview(result.sourceId, result.bookUrl) },
                         )
                     }
                 }

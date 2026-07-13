@@ -8,6 +8,7 @@ import androidx.navigation.toRoute
 import com.radium.inkwell.ui.bookshelf.BookshelfScreen
 import com.radium.inkwell.ui.detail.BookDetailScreen
 import com.radium.inkwell.ui.explore.ExploreScreen
+import com.radium.inkwell.ui.preview.BookPreviewScreen
 import com.radium.inkwell.ui.reader.ReaderScreen
 import com.radium.inkwell.ui.search.SearchScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
@@ -43,12 +44,29 @@ fun InkwellNavHost() {
             ReaderScreen(bookId = route.bookId, onExit = { navController.popBackStack() })
         }
         composable<SearchRoute> {
-            SearchScreen(onBack = { navController.popBackStack() })
+            SearchScreen(
+                onBack = { navController.popBackStack() },
+                onOpenPreview = { sourceId, bookUrl ->
+                    navController.navigate(BookPreviewRoute.of(sourceId, bookUrl))
+                },
+            )
         }
         composable<ExploreRoute> {
             ExploreScreen(
                 onBack = { navController.popBackStack() },
                 onOpenSourceManage = { navController.navigate(SourceManageRoute) },
+                onOpenPreview = { sourceId, bookUrl ->
+                    navController.navigate(BookPreviewRoute.of(sourceId, bookUrl))
+                },
+            )
+        }
+        composable<BookPreviewRoute> { entry ->
+            val route = entry.toRoute<BookPreviewRoute>()
+            BookPreviewScreen(
+                sourceId = route.sourceId,
+                bookUrl = route.bookUrl,
+                onRead = { navController.navigate(ReaderRoute(it)) },
+                onBack = { navController.popBackStack() },
             )
         }
         composable<SourceManageRoute> {

@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -100,7 +101,7 @@ fun BookCover(
     }
 }
 
-/** 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用 */
+/** 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点 */
 @Composable
 fun BookListRow(
     title: String,
@@ -111,9 +112,13 @@ fun BookListRow(
     trailingLoading: Boolean,
     onTrailing: () -> Unit,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier
+            .fillMaxWidth()
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BookCover(

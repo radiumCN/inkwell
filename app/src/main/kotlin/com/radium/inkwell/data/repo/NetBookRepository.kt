@@ -2,6 +2,8 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.RemoteBookDetail
+import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.ChapterDao
@@ -21,32 +23,67 @@ class NetBookRepository(
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
     suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = runCatching {
         val detail = engine.getDetail(rule, result.bookUrl)
-        val tocUrl = detail.tocUrl.ifBlank { result.bookUrl }
-        val toc = engine.getToc(rule, tocUrl)
-        check(toc.isNotEmpty()) { "目录解析为空" }
+        val toc = engine.getToc(rule, detail.tocUrl.ifBlank { result.bookUrl })
+        persist(rule.id, result.bookUrl, detail, toc, fallback = result)
+    }
 
-        val bookId = netBookId(rule.id, result.bookUrl)
+    /** 详情与目录已在预览页抓到时直接入库，避免重复请求 */
+    suspend fun addToShelf(
+        sourceId: String,
+        bookUrl: String,
+        detail: RemoteBookDetail,
+        toc: List<RemoteChapter>,
+    ): Result<String> = runCatching {
+        persist(sourceId, bookUrl, detail, toc, fallback = null)
+    }
+
+    /** 该书是否已在书架；在则返回 bookId */
+    suspend fun shelfBookId(sourceId: String, bookUrl: String): String? =
+        netBookId(sourceId, bookUrl).takeIf { bookDao.getById(it) != null }
+
+    /** 从指定章节开始读：预览页点目录用 */
+    suspend fun setReadPosition(bookId: String, chapterIndex: Int) {
+        bookDao.updateProgress(bookId, chapterIndex, 0, System.currentTimeMillis())
+    }
+
+    private suspend fun persist(
+        sourceId: String,
+        bookUrl: String,
+        detail: RemoteBookDetail,
+        toc: List<RemoteChapter>,
+        fallback: SearchResult?,
+    ): String {
+        check(toc.isNotEmpty()) { "目录解析为空" }
+        val bookId = netBookId(sourceId, bookUrl)
         val now = System.currentTimeMillis()
+        // 已在书架时保留原有阅读进度，只刷新书籍元信息与目录
+        val existing = bookDao.getById(bookId)
         bookDao.upsert(
             BookEntity(
                 id = bookId,
                 type = BookType.NET,
-                title = detail.title.ifBlank { result.title },
-                author = detail.author ?: result.author ?: "",
-                coverPath = detail.coverUrl ?: result.coverUrl,
-                intro = detail.intro ?: result.intro,
-                sourceId = rule.id,
-                bookUrl = result.bookUrl,
-                tocUrl = tocUrl,
+                title = detail.title.ifBlank { fallback?.title.orEmpty() },
+                author = detail.author ?: fallback?.author ?: "",
+                coverPath = detail.coverUrl ?: fallback?.coverUrl,
+                intro = detail.intro ?: fallback?.intro,
+                sourceId = sourceId,
+                bookUrl = bookUrl,
+                tocUrl = detail.tocUrl.ifBlank { bookUrl },
                 latestChapterTitle = toc.lastOrNull()?.title,
                 totalChapters = toc.size,
-                addedAt = now,
+                readChapterIndex = existing?.readChapterIndex ?: 0,
+                readCharOffset = existing?.readCharOffset ?: 0,
+                readAt = existing?.readAt ?: 0,
+                addedAt = existing?.addedAt ?: now,
                 updatedAt = now,
             )
         )
+        val cached = chapterDao.getByBook(bookId).filter { it.isCached }.map { it.index }.toSet()
         chapterDao.deleteByBook(bookId)
-        chapterDao.upsertAll(toc.map { ChapterEntity(bookId, it.index, it.title, url = it.url) })
-        bookId
+        chapterDao.upsertAll(
+            toc.map { ChapterEntity(bookId, it.index, it.title, url = it.url, isCached = it.index in cached) }
+        )
+        return bookId
     }
 
     /** 刷新目录（追更） */
