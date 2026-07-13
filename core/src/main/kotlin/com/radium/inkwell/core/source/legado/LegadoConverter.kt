@@ -225,23 +225,27 @@ object LegadoConverter {
     private fun convertRule(raw: String?, kind: Kind, where: String, ctx: Ctx): String? {
         val rule = raw?.trim().orEmpty()
         if (rule.isEmpty()) return null
-        try {
-            // ## 净化后缀（正文的已在上游剥离并下沉 purify）
+        // 结构转换：JS 桥/XPath/无法识别的语法在此抛出，是真正不可转换 → 跳过该源
+        val dsl = try {
             val (base, hashPipe) = splitHashToPipe(rule, where, ctx)
-
             val orParts = splitTop(base, "||").map { part ->
                 convertAlternative(part.trim(), kind, where)
             }
-            var dsl = orParts.joinToString(" || ")
-            if (hashPipe != null) dsl += hashPipe
-            // 用引擎解析器验证转换产物，非法则报不可转换
-            RuleParser.parse(dsl)
-            return dsl
+            var d = orParts.joinToString(" || ")
+            if (hashPipe != null) d += hashPipe
+            d
         } catch (e: Exception) {
             ctx.lastError = e.message
             ctx.warnings += "$where: 规则无法转换（${e.message?.take(60)}），已忽略「${rule.take(60)}」"
             return null
         }
+        // 产物校验只记警告，不丢弃：Jsoup 扩展选择器(:eq/:containsOwn)与正则在
+        // Android(ICU) 上比桌面 JVM 严格，校验误判不应拒绝整个源；运行时引擎对
+        // 无效选择器本就容错（返回空结果）。
+        runCatching { RuleParser.parse(dsl) }.onFailure {
+            ctx.warnings += "$where: 规则校验警告（${it.message?.take(40)}），已保留"
+        }
+        return dsl
     }
 
     private fun convertAlternative(rule: String, kind: Kind, where: String): String {

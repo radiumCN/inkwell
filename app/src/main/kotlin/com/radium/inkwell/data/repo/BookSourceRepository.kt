@@ -38,9 +38,15 @@ class BookSourceRepository(private val dao: BookSourceDao) {
                 }
                 if (failed.isNotEmpty()) append("；${failed.size} 个入库失败")
                 if (skipped.isNotEmpty()) {
-                    append("；跳过 ${skipped.size} 个（")
-                    append(skipped.first().take(40))
-                    if (skipped.size > 1) append(" 等")
+                    append("；跳过 ${skipped.size} 个")
+                    // 按原因归类展示 Top3，便于定位（原因取冒号后的说明部分）
+                    val byReason = skipped
+                        .groupingBy { it.substringAfter(": ", it).take(24) }
+                        .eachCount()
+                        .entries.sortedByDescending { it.value }
+                    append("（")
+                    append(byReason.take(3).joinToString("，") { "${it.key}×${it.value}" })
+                    if (byReason.size > 3) append("…")
                     append("）")
                 }
             }
