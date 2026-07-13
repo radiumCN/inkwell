@@ -39,6 +39,7 @@ val appModule = module {
 
     single { ReaderPrefs(androidContext()) }
     single { WebDavPrefs(androidContext()) }
+    single { com.radium.inkwell.data.prefs.AppPrefs(androidContext()) }
     single { KeyEventBus() }
     single { ChapterContentCache(androidContext()) }
 

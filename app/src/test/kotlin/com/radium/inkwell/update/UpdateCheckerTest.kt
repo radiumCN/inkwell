@@ -23,8 +23,18 @@ class UpdateCheckerTest {
     }
 
     @Test
-    fun `non numeric suffixes are tolerated`() {
-        assertFalse(UpdateChecker.isNewer("0.1.0-beta", "0.1.0"))
-        assertTrue(UpdateChecker.isNewer("0.2.0-rc1", "0.1.0"))
+    fun `prerelease is older than same release`() {
+        // semver：预发布 < 正式版
+        assertFalse(UpdateChecker.isNewer("0.2.0-beta.1", "0.2.0"))
+        assertTrue(UpdateChecker.isNewer("0.2.0", "0.2.0-beta.1"))
+        assertTrue(UpdateChecker.isNewer("0.2.0-beta.1", "0.1.0"))
+    }
+
+    @Test
+    fun `prerelease identifiers compare segment-wise`() {
+        assertTrue(UpdateChecker.isNewer("0.2.0-beta.2", "0.2.0-beta.1"))
+        assertTrue(UpdateChecker.isNewer("0.2.0-rc.1", "0.2.0-beta.2"))
+        assertTrue(UpdateChecker.isNewer("0.2.0-beta.1", "0.2.0-beta"))
+        assertFalse(UpdateChecker.isNewer("0.2.0-beta.1", "0.2.0-beta.1"))
     }
 }

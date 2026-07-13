@@ -1,8 +1,10 @@
 package com.radium.inkwell.ui.settings
 
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +19,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -24,15 +27,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import android.net.Uri
+import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateChecker
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -45,6 +51,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val updateChecker = koinInject<UpdateChecker>()
+    val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
@@ -53,17 +60,19 @@ fun SettingsScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"
     }
+    val channel by appPrefs.updateChannel.collectAsState(initial = UpdateChannel.STABLE)
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
+    var showChannelDialog by remember { mutableStateOf(false) }
 
     fun checkUpdate() {
         if (checking) return
         checking = true
         scope.launch {
-            when (val result = updateChecker.check(currentVersion)) {
+            when (val result = updateChecker.check(currentVersion, channel)) {
                 is UpdateChecker.CheckResult.Available -> update = result.info
                 UpdateChecker.CheckResult.UpToDate ->
-                    snackbar.showSnackbar("已是最新版本 v$currentVersion")
+                    snackbar.showSnackbar("已是最新版本 v$currentVersion（${channel.label}渠道）")
                 is UpdateChecker.CheckResult.Failed ->
                     snackbar.showSnackbar("检查失败: ${result.message}")
             }
@@ -96,6 +105,11 @@ fun SettingsScreen(
                 subtitle = if (checking) "正在检查…" else "当前版本 v$currentVersion",
                 onClick = ::checkUpdate,
             )
+            SettingsItem(
+                title = "更新渠道",
+                subtitle = "${channel.label}${if (channel == UpdateChannel.BETA) "（包含预发布版本，可能不稳定）" else ""}",
+                onClick = { showChannelDialog = true },
+            )
             HorizontalDivider()
             SettingsItem(
                 title = "开源地址",
@@ -107,10 +121,57 @@ fun SettingsScreen(
         }
     }
 
+    if (showChannelDialog) {
+        AlertDialog(
+            onDismissRequest = { showChannelDialog = false },
+            title = { Text("更新渠道") },
+            text = {
+                Column {
+                    UpdateChannel.entries.forEach { option ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch { appPrefs.setUpdateChannel(option) }
+                                    showChannelDialog = false
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = channel == option,
+                                onClick = {
+                                    scope.launch { appPrefs.setUpdateChannel(option) }
+                                    showChannelDialog = false
+                                },
+                            )
+                            Column {
+                                Text(option.label)
+                                Text(
+                                    when (option) {
+                                        UpdateChannel.STABLE -> "只接收正式版本"
+                                        UpdateChannel.BETA -> "抢先体验新功能，可能不稳定"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showChannelDialog = false }) { Text("关闭") }
+            },
+        )
+    }
+
     update?.let { info ->
         AlertDialog(
             onDismissRequest = { update = null },
-            title = { Text("发现新版本 v${info.latestVersion}") },
+            title = {
+                Text("发现新版本 v${info.latestVersion}" + if (info.isPrerelease) "（测试版）" else "")
+            },
             text = {
                 Column(
                     Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),

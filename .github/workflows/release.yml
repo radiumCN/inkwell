@@ -45,3 +45,5 @@ jobs:
         with:
           files: inkwell-${{ github.ref_name }}.apk
           generate_release_notes: true
+          # 带 - 后缀的 tag（如 v0.2.0-beta.1）标记为预发布 → 只推给测试版渠道
+          prerelease: ${{ contains(github.ref_name, '-') }}
