@@ -38,6 +38,10 @@ class RuleEvaluator(
     fun evalToNodes(node: RuleNode, ctx: EvalContext): List<EvalContext> = when (node) {
         is RuleNode.Css ->
             selectElements(node.query, ctx).map { ctx.copy(element = it, json = null) }
+        is RuleNode.Legado -> ctx.element
+            ?.let { LegadoSelector.elements(it, node.rule) }
+            ?.map { ctx.copy(element = it, json = null) }
+            .orEmpty()
         is RuleNode.JsonPath -> when (val r = readJsonPath(node.path, ctx)) {
             null -> emptyList()
             is List<*> -> r.filterNotNull().map { ctx.copy(element = null, json = it) }
@@ -86,6 +90,7 @@ class RuleEvaluator(
             selectElements(node.query, ctx)
                 .map { extract(it, node.extractor) }
                 .filter { it.isNotEmpty() }
+        is RuleNode.Legado -> ctx.element?.let { LegadoSelector.strings(it, node.rule) }.orEmpty()
         is RuleNode.JsonPath -> jsonToStrings(readJsonPath(node.path, ctx))
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
         is RuleNode.Literal ->

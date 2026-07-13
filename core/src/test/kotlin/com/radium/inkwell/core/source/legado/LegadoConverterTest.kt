@@ -72,24 +72,24 @@ class LegadoConverterTest {
         val search = assertNotNull(rule.search)
         assertEquals("POST", search.request.method)
         assertTrue(search.request.body!!.contains("searchkey={{keyword|encode:gbk}}"))
-        assertEquals("css:.result-list li", search.list)
-        assertEquals("css:.book-name a@text", search.fields["title"])
-        assertEquals("css:.book-name a@href", search.fields["bookUrl"])
-        // ## 后缀 → regex 管道
-        assertEquals("css:.author@text | regex:作者[:：] ", search.fields["author"])
+        // 默认语法原样透传给 LegadoSelector（索引作用于匹配集，CSS 表达不了）
+        assertEquals("legado:class.result-list@tag.li", search.list)
+        assertEquals("legado:class.book-name@tag.a@text", search.fields["title"])
+        assertEquals("legado:class.book-name@tag.a@href", search.fields["bookUrl"])
+        // ## 后缀仍然抽成 regex 管道
+        assertEquals("legado:class.author@text | regex:作者[:：] ", search.fields["author"])
 
         val detail = assertNotNull(rule.detail)
-        assertEquals("css:#intro@html", detail.fields["intro"])
-        // 末段索引 0 → first 管道
-        assertEquals("css:.read-btn a@href | first", detail.fields["tocUrl"])
+        assertEquals("legado:id.intro@html", detail.fields["intro"])
+        assertEquals("legado:class.read-btn@tag.a.0@href", detail.fields["tocUrl"])
 
         val toc = assertNotNull(rule.toc)
-        assertEquals("css:#list dd a", toc.list)
-        assertEquals("css:@text", toc.fields["title"])
-        assertEquals("css:@href", toc.fields["url"])
+        assertEquals("legado:id.list@tag.dd@tag.a", toc.list)
+        assertEquals("legado:text", toc.fields["title"])
+        assertEquals("legado:href", toc.fields["url"])
 
         val content = assertNotNull(rule.content)
-        assertEquals("css:#content@html", content.content)
+        assertEquals("legado:id.content@html", content.content)
         // 正文 ## 与 replaceRegex 全部进 purify
         assertEquals(3, content.purify.size)
         assertEquals("天才一秒记住.*?org", content.purify[0].pattern)
@@ -98,7 +98,7 @@ class LegadoConverterTest {
         assertEquals(2, rule.explore.size)
         assertEquals("玄幻", rule.explore[0].name)
         assertEquals("/list/1_{{page}}.html", rule.explore[0].url)
-        assertEquals("css:.book-list li", rule.explore[0].list)
+        assertEquals("legado:class.book-list@tag.li", rule.explore[0].list)
     }
 
     @Test
@@ -180,8 +180,8 @@ class LegadoConverterTest {
         val rule = result.converted.single().rule
         assertEquals("json:$.data.list", rule.search!!.list)
         assertEquals("json:$.bookName", rule.search!!.fields["title"])
-        assertEquals("css:.author@text", rule.search!!.fields["author"])
-        assertEquals("css:ul.chapters > li > a", rule.toc!!.list)
+        assertEquals("legado:@css:.author@text", rule.search!!.fields["author"])
+        assertEquals("legado:@css:ul.chapters > li > a", rule.toc!!.list)
     }
 
     @Test
@@ -204,7 +204,12 @@ class LegadoConverterTest {
         val result = LegadoConverter.convert(src)
         val rule = result.converted.single().rule
         assertTrue(rule.toc!!.reverse)
-        assertEquals("css:img@attr(data-src) || css:img@src", rule.search!!.fields["coverUrl"])
+        // 含 || 的规则整条 base64 后交给 LegadoSelector（它自己处理回退），避免被 DSL 切分器切坏
+        assertEquals(
+            "legado:b64:" + java.util.Base64.getEncoder()
+                .encodeToString("tag.img@data-src||tag.img@src".toByteArray()),
+            rule.search!!.fields["coverUrl"],
+        )
     }
 
     @Test
@@ -237,15 +242,13 @@ class LegadoConverterTest {
         val search = rule.search!!
         assertEquals("POST", search.request.method)
         assertEquals("key={{keyword}}&start={{(page-1)*20}}", search.request.body)
-        assertEquals("css:#author tbody tr:gt(0)", search.list)
+        // 排除索引 !0：以前 CSS 只能近似成 :gt(0)（兄弟序号，语义不同），现在原样透传
+        assertEquals("legado:id.author@tag.tbody@tag.tr!0", search.list)
         // 空格用 unicode 转义（反斜杠+空格在 Android ICU 上非法）；class 名带空格 = 多 class
         assertTrue(search.fields["author"]!!.contains("regex:作者\\u0020大人"))
-        assertEquals("css:.intro.summary@text", search.fields["intro"])
-        // children[0] 的匹配集就是同一父节点的子元素，兄弟序号与之等价，仍可用纯 CSS
-        assertEquals("css:.full > *:first-child a", rule.toc!!.list)
-        // 中段索引 .-1 走「选中 → 取最后一个 → 下钻」管道：Legado 的索引取自匹配集，
-        // 而 CSS 的 :last-of-type 取自兄弟序号，两者不等价（从前按后者硬套，选中的常是别的元素）
-        assertEquals("css:.box@html | last | select:p:not(:last-of-type)", rule.content!!.content)
+        assertEquals("legado:class.intro summary@text", search.fields["intro"])
+        assertEquals("legado:class.full@children[0]@tag.a", rule.toc!!.list)
+        assertEquals("legado:class.box.-1@tag.p.!-1@html", rule.content!!.content)
     }
 
     @Test

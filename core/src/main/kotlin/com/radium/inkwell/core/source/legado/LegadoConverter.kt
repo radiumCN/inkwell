@@ -111,11 +111,11 @@ object LegadoConverter {
             warnings += "ruleBookInfo.init 不支持，已忽略"
         }
         val detailFields = buildMap {
-            putRule("title", ruleBookInfo?.str("name"), Kind.TEXT, "detail.title", ctx)
-            putRule("author", ruleBookInfo?.str("author"), Kind.TEXT, "detail.author", ctx)
-            putRule("coverUrl", ruleBookInfo?.str("coverUrl"), Kind.URL, "detail.coverUrl", ctx)
-            putRule("intro", ruleBookInfo?.str("intro"), Kind.TEXT, "detail.intro", ctx)
-            putRule("tocUrl", ruleBookInfo?.str("tocUrl"), Kind.URL, "detail.tocUrl", ctx)
+            putRule("title", ruleBookInfo?.str("name"), "detail.title", ctx)
+            putRule("author", ruleBookInfo?.str("author"), "detail.author", ctx)
+            putRule("coverUrl", ruleBookInfo?.str("coverUrl"), "detail.coverUrl", ctx)
+            putRule("intro", ruleBookInfo?.str("intro"), "detail.intro", ctx)
+            putRule("tocUrl", ruleBookInfo?.str("tocUrl"), "detail.tocUrl", ctx)
         }
         // 书源明确写了 tocUrl 却转换失败时不能放行：引擎会退化成「详情页即目录页」，
         // 而这个假设只在书源省略 tocUrl 时才成立。放行的后果是导入看似成功、
@@ -134,13 +134,13 @@ object LegadoConverter {
             reverse = true
             chapterListRaw = chapterListRaw.substring(1)
         }
-        val tocList = convertRule(chapterListRaw, Kind.LIST, "toc.list", ctx)
+        val tocList = convertRule(chapterListRaw, "toc.list", ctx)
             ?: throw LegadoUnsupported("目录列表规则无法转换: ${ctx.lastError ?: chapterListRaw}")
         val tocFields = buildMap {
-            putRule("title", ruleToc.str("chapterName"), Kind.TEXT, "toc.title", ctx, required = true)
-            putRule("url", ruleToc.str("chapterUrl"), Kind.URL, "toc.url", ctx, required = true)
+            putRule("title", ruleToc.str("chapterName"), "toc.title", ctx, required = true)
+            putRule("url", ruleToc.str("chapterUrl"), "toc.url", ctx, required = true)
         }
-        val tocNext = convertRule(ruleToc.str("nextTocUrl"), Kind.URL, "toc.nextPage", ctx)
+        val tocNext = convertRule(ruleToc.str("nextTocUrl"), "toc.nextPage", ctx)
 
         // 正文
         val ruleContent = src.obj("ruleContent") ?: throw LegadoUnsupported("缺少 ruleContent")
@@ -148,9 +148,9 @@ object LegadoConverter {
             ?: throw LegadoUnsupported("缺少正文规则")
         // 正文规则的 ## 替换下沉到 purify（绕开 DSL 内嵌正则的转义限制）
         val (contentRuleRaw, contentPurify) = splitHashReplace(contentBase)
-        val contentRule = convertRule(forceHtmlExtractor(contentRuleRaw), Kind.HTML, "content", ctx)
+        val contentRule = convertRule(contentRuleRaw, "content", ctx)
             ?: throw LegadoUnsupported("正文规则无法转换: ${ctx.lastError ?: contentBase}")
-        val contentNext = convertRule(ruleContent.str("nextContentUrl"), Kind.URL, "content.nextPage", ctx)
+        val contentNext = convertRule(ruleContent.str("nextContentUrl"), "content.nextPage", ctx)
         // 净化正则在导入侧（即目标设备的正则引擎上）预编译校验，非法的丢弃而非整源报废
         val purify = buildList {
             contentPurify?.let { add(it) }
@@ -204,15 +204,15 @@ object LegadoConverter {
     /** 搜索规则整体构建；必填字段无法转换时抛 LegadoUnsupported */
     private fun buildSearchRule(ruleSearch: JsonObject, searchUrlRaw: String, ctx: Ctx): SearchRule {
         val request = convertSearchUrl(searchUrlRaw)
-        val list = convertRule(ruleSearch.str("bookList"), Kind.LIST, "search.list", ctx)
+        val list = convertRule(ruleSearch.str("bookList"), "search.list", ctx)
             ?: throw LegadoUnsupported("搜索列表规则无法转换: ${ctx.lastError ?: ruleSearch.str("bookList")}")
         val fields = buildMap {
-            putRule("title", ruleSearch.str("name"), Kind.TEXT, "search.title", ctx, required = true)
-            putRule("bookUrl", ruleSearch.str("bookUrl"), Kind.URL, "search.bookUrl", ctx, required = true)
-            putRule("author", ruleSearch.str("author"), Kind.TEXT, "search.author", ctx)
-            putRule("coverUrl", ruleSearch.str("coverUrl"), Kind.URL, "search.coverUrl", ctx)
-            putRule("intro", ruleSearch.str("intro"), Kind.TEXT, "search.intro", ctx)
-            putRule("latestChapter", ruleSearch.str("lastChapter"), Kind.TEXT, "search.lastChapter", ctx)
+            putRule("title", ruleSearch.str("name"), "search.title", ctx, required = true)
+            putRule("bookUrl", ruleSearch.str("bookUrl"), "search.bookUrl", ctx, required = true)
+            putRule("author", ruleSearch.str("author"), "search.author", ctx)
+            putRule("coverUrl", ruleSearch.str("coverUrl"), "search.coverUrl", ctx)
+            putRule("intro", ruleSearch.str("intro"), "search.intro", ctx)
+            putRule("latestChapter", ruleSearch.str("lastChapter"), "search.lastChapter", ctx)
         }
         if (fields["title"] == null) throw LegadoUnsupported("搜索书名规则无法转换")
         if (fields["bookUrl"] == null) throw LegadoUnsupported("搜索书籍链接规则无法转换")
@@ -221,8 +221,6 @@ object LegadoConverter {
 
     // ---------- 规则字符串转换 ----------
 
-    private enum class Kind { LIST, TEXT, URL, HTML }
-
     private class Ctx(val warnings: MutableList<String>) {
         var lastError: String? = null
     }
@@ -230,12 +228,11 @@ object LegadoConverter {
     private fun MutableMap<String, String>.putRule(
         key: String,
         raw: String?,
-        kind: Kind,
         where: String,
         ctx: Ctx,
         required: Boolean = false,
     ) {
-        val converted = convertRule(raw, kind, where, ctx)
+        val converted = convertRule(raw, where, ctx)
         if (converted != null) {
             put(key, converted)
         } else if (required && !raw.isNullOrBlank()) {
@@ -244,16 +241,13 @@ object LegadoConverter {
     }
 
     /** 单条 Legado 规则 → 我们的 DSL；不可转换返回 null 并记录原因 */
-    private fun convertRule(raw: String?, kind: Kind, where: String, ctx: Ctx): String? {
+    private fun convertRule(raw: String?, where: String, ctx: Ctx): String? {
         val rule = raw?.trim().orEmpty()
         if (rule.isEmpty()) return null
         // 结构转换：JS 桥/XPath/无法识别的语法在此抛出，是真正不可转换 → 跳过该源
         val dsl = try {
             val (base, hashPipe) = splitHashToPipe(rule, where, ctx)
-            val orParts = splitTop(base, "||").map { part ->
-                convertAlternative(part.trim(), kind, where)
-            }
-            var d = orParts.joinToString(" || ")
+            var d = convertBody(base.trim(), where)
             if (hashPipe != null) d += hashPipe
             d
         } catch (e: Exception) {
@@ -270,30 +264,59 @@ object LegadoConverter {
         return dsl
     }
 
-    private fun convertAlternative(rule: String, kind: Kind, where: String): String {
-        // && / %% 拼接（%% 轮询近似为拼接）
+    /**
+     * 规则主体。默认语法（含 @css:）原样透传给 LegadoSelector —— 它的索引作用于「匹配集」，
+     * 译成 CSS 选择器根本表达不了（排除 !、区间 [0:19]、多索引、逆序 [-1:0] 全都译不出来），
+     * 这正是从前「导入成功、读起来是垃圾章节」的根源。
+     */
+    private fun convertBody(rule: String, where: String): String {
+        if (isPlainLegado(rule)) return legadoAtom(rule)
+        // 混用了 JS / JSONPath / 正则 / XPath / 模板：按 || 分段，用我们自己的 DSL 组合
+        return splitTop(rule, "||").joinToString(" || ") { convertAlternative(it.trim(), where) }
+    }
+
+    /** 整条都是默认语法（无 JS / JSONPath / 正则 / XPath / 模板插值） */
+    private fun isPlainLegado(rule: String): Boolean =
+        !rule.contains("{{") &&
+            !rule.contains("<js>") &&
+            !rule.contains("@js:") &&
+            !rule.contains("$.") &&
+            !rule.startsWith("$[") &&
+            !rule.startsWith("@json:", ignoreCase = true) &&
+            !rule.startsWith("@XPath:", ignoreCase = true) &&
+            !rule.startsWith("//") &&
+            !rule.startsWith(":")
+
+    /** 含 | 或 & 的规则会被 DSL 切分器切坏，故 base64 编码（沿用 js:b64: 的做法） */
+    private fun legadoAtom(rule: String): String =
+        if (rule.none { it == '|' || it == '&' }) {
+            "legado:$rule"
+        } else {
+            "legado:b64:" + java.util.Base64.getEncoder()
+                .encodeToString(rule.toByteArray(Charsets.UTF_8))
+        }
+
+    private fun convertAlternative(rule: String, where: String): String {
         val andParts = splitTop(rule.replace("%%", "&&"), "&&")
         if (andParts.size > 1) {
-            return andParts.joinToString(" && ") { convertAtomic(it.trim(), kind, where) }
+            return andParts.joinToString(" && ") { convertAtomic(it.trim(), where) }
         }
-        return convertAtomic(rule, kind, where)
+        return convertAtomic(rule, where)
     }
 
     /** JS 里引用了这些对象的脚本依赖 Legado 的 java 桥/上下文，我们不提供 → 保持跳过 */
     private val UNSUPPORTED_JS_REFS = Regex("\\b(java|cookie|source|book|chapter|cache)\\s*\\.")
 
-    private fun convertAtomic(rule: String, kind: Kind, where: String): String {
+    private fun convertAtomic(rule: String, where: String): String {
         // 整条 {{expr}}：Legado 视作 JS 表达式求值（绑定 baseUrl/result/key/page，与我们的 js: 规则一致）。
         // 最常见的用法是把详情页地址改写成目录页地址，如 {{baseUrl.replace(/detail/,"chapter")}}。
         if (rule.startsWith("{{") && rule.endsWith("}}") && rule.length > 4) {
             val expr = rule.substring(2, rule.length - 2)
             if (!expr.contains("{{")) {
-                return attachJs("", expr.trim().ifEmpty { throw LegadoUnsupported("空 {{}} 规则") }, kind, where)
+                return attachJs("", expr.trim().ifEmpty { throw LegadoUnsupported("空 {{}} 规则") }, where)
             }
         }
         // 模板型地址：{{baseUrl}}/catalog/ 或 https://host/api?id={{$.book_id}}&page=1
-        // 每个 {{}} 都是 baseUrl 或 JSONPath 时可整体转成字面量模板，求值期再按当前页填空
-        // （详情页是 JSON API 的书源常这样拼目录地址）。
         if (rule.contains("{{") && templateVarsAllKnown(rule)) {
             return "text:$rule"
         }
@@ -312,26 +335,21 @@ object LegadoConverter {
             val base = rule.substring(0, jsStart).trim().trimEnd('@')
             val tail = rule.substring(jsEnd + 5).trim()
             if (tail.isNotEmpty()) throw LegadoUnsupported("JS 块后还有规则，暂不支持")
-            return attachJs(base, script, kind, where)
+            return attachJs(base, script, where)
         }
         // rule@js:script 后缀（八一中文式）；整条 @js: 开头 = 纯脚本
         val jsSuffix = rule.indexOf("@js:")
         if (jsSuffix > 0) {
-            return attachJs(rule.substring(0, jsSuffix), rule.substring(jsSuffix + 4), kind, where)
+            return attachJs(rule.substring(0, jsSuffix), rule.substring(jsSuffix + 4), where)
         }
         if (rule.startsWith("@js:")) {
-            return attachJs("", rule.substring(4), kind, where)
+            return attachJs("", rule.substring(4), where)
         }
         return when {
-            rule.startsWith("@css:", ignoreCase = true) ->
-                convertCssRule(rule.substring(5), kind)
-            rule.startsWith("@json:", ignoreCase = true) ->
-                "json:" + rule.substring(6).trim()
-            rule.startsWith("$.") || rule.startsWith("$[") ->
-                "json:$rule"
-            rule.startsWith(":") ->
-                "regex:" + escapeForDsl(rule.substring(1))
-            else -> convertJsoupHierarchy(rule, kind)
+            rule.startsWith("@json:", ignoreCase = true) -> "json:" + rule.substring(6).trim()
+            rule.startsWith("$.") || rule.startsWith("$[") -> "json:$rule"
+            rule.startsWith(":") -> "regex:" + escapeForDsl(rule.substring(1))
+            else -> legadoAtom(rule)
         }
     }
 
@@ -353,7 +371,7 @@ object LegadoConverter {
     private val TEMPLATE_VAR = Regex("\\{\\{([^}]*)\\}\\}")
 
     /** 基础规则 + JS：base 为空时脚本作为原子规则，否则作为管道；base64 绕开 DSL 切分 */
-    private fun attachJs(base: String, script: String, kind: Kind, where: String): String {
+    private fun attachJs(base: String, script: String, where: String): String {
         if (UNSUPPORTED_JS_REFS.containsMatchIn(script)) {
             throw LegadoUnsupported("JS 使用了不支持的对象（java/book/cookie 等）")
         }
@@ -361,175 +379,8 @@ object LegadoConverter {
         return if (base.isEmpty()) {
             "js:b64:$encoded"
         } else {
-            convertAtomic(base, kind, where) + " | js:b64:$encoded"
+            convertAtomic(base, where) + " | js:b64:$encoded"
         }
-    }
-
-    /** @css:selector@extractor → css:selector@extractor */
-    private fun convertCssRule(body: String, kind: Kind): String {
-        val at = body.lastIndexOf('@')
-        return if (at > 0) {
-            val selector = body.substring(0, at).trim()
-            val extractor = mapExtractor(body.substring(at + 1).trim())
-            "css:$selector$extractor"
-        } else {
-            "css:${body.trim()}${defaultExtractor(kind)}"
-        }
-    }
-
-    /**
-     * 默认 Jsoup 层级：`class.foo.0@tag.a@href`。
-     * 段间 @ 分隔为后代关系，末段可能是提取器；索引 0/-1/n → first/last/index 管道；
-     * 中间段索引近似为 :eq(n) 并记为警告（常见的兄弟场景等价）。
-     */
-    private fun convertJsoupHierarchy(rule: String, kind: Kind): String {
-        val segments = rule.split("@").filter { it.isNotBlank() }
-        if (segments.isEmpty()) throw LegadoUnsupported("空规则")
-
-        // 裸提取器（如 "text"/"href"）= 取当前节点自身
-        if (segments.size == 1) {
-            mapExtractorOrNull(segments[0].trim())?.let { return "css:$it" }
-        }
-
-        var extractor: String? = null
-        var selectorSegs = segments
-        if (segments.size > 1) {
-            mapExtractorOrNull(segments.last().trim())?.let {
-                extractor = it
-                selectorSegs = segments.dropLast(1)
-            }
-        }
-
-        val cssParts = mutableListOf<String>()
-        val ext = extractor ?: defaultExtractor(kind)
-        for ((i, segRaw) in selectorSegs.withIndex()) {
-            val seg = segRaw.trim()
-            val (css, index) = convertSegment(seg)
-            val isLast = i == selectorSegs.lastIndex
-            when {
-                index == null -> cssParts += css
-
-                isLast -> {
-                    cssParts += css
-                    return "css:${cssParts.joinToString(" ")}$ext${indexPipe(index)}"
-                }
-
-                // children（`> *`）的匹配集就是同一父节点的全部子元素，兄弟序号与之天然等价
-                css.endsWith("*") -> cssParts += css + childIndexSelector(index)
-
-                // 其余中间层索引：Legado 的索引取自「匹配集」（扁平结果列表），而 CSS 的
-                // :eq/:last-of-type 取自「兄弟序号」（各自父节点内），两者只在所有匹配同父时
-                // 才等价，且无法在转换期判定。从前按兄弟序号硬套，选中的常常是别的元素
-                // （如 .row[-1]@a 选到页脚），导入看似成功、读出来却是垃圾章节。
-                // 改用「选中 → 取第 n 个 → 下钻」的管道精确表达，提取器作用在下钻后的节点上。
-                else -> {
-                    cssParts += css
-                    val rest = selectorSegs.drop(i + 1).map { r ->
-                        val (c, idx) = convertSegment(r.trim())
-                        if (idx != null) throw LegadoUnsupported("多重中间层索引不支持: $rule")
-                        c
-                    }
-                    if (rest.isEmpty()) throw LegadoUnsupported("中间层索引语法无法等价转换: $seg")
-                    return "css:${cssParts.joinToString(" ")}$ext${indexPipe(index)} | " +
-                        "select:${rest.joinToString(" ")}"
-                }
-            }
-        }
-        return "css:${cssParts.joinToString(" ")}$ext"
-    }
-
-    private fun indexPipe(n: Int): String = when (n) {
-        0 -> " | first"
-        -1 -> " | last"
-        else -> " | index:$n"
-    }
-
-    private fun childIndexSelector(n: Int): String = when (n) {
-        0 -> ":first-child"
-        -1 -> ":last-child"
-        else -> ":nth-child(${n + 1})"
-    }
-
-    /**
-     * 单段：class.foo.0 / id.x / tag.a.-1 / text.xxx / children[0] / tr!0 / 原生CSS。
-     * 返回 (css, 索引)；`!0` 转 :gt(0)，`[n]` 与 `.n` 同义。
-     */
-    private fun convertSegment(raw: String): Pair<String, Int?> {
-        var seg = raw
-        var excludeSuffix = ""
-        Regex("\\.?!(-?\\d+)$").find(seg)?.let { m ->
-            excludeSuffix = when (m.groupValues[1].toInt()) {
-                0 -> ":gt(0)" // 排除第一个
-                -1 -> ":not(:last-of-type)" // 排除最后一个
-                else -> throw LegadoUnsupported("索引排除语法不支持: $raw")
-            }
-            seg = seg.removeRange(m.range)
-        }
-        if (seg.contains('!')) throw LegadoUnsupported("索引排除语法不支持: $raw")
-        var bracketIdx: Int? = null
-        Regex("\\[(-?\\d+)]$").find(seg)?.let { m ->
-            bracketIdx = m.groupValues[1].toInt()
-            seg = seg.removeRange(m.range)
-        }
-        if (seg.contains('[') && !seg.contains('=')) {
-            // 属性选择器 [attr=x] 放行给原生 CSS；纯数字范围 [1:5] 不支持
-            if (Regex("\\[[\\d:!,]+]").containsMatchIn(seg)) {
-                throw LegadoUnsupported("索引范围语法不支持: $raw")
-            }
-        }
-
-        val parts = seg.split(".")
-        fun idxOf(s: String): Int? = s.toIntOrNull()
-        var (css, dotIdx) = when {
-            seg == "children" -> "> *" to null
-            parts.size >= 2 && parts[0] == "class" -> {
-                val idx = if (parts.size >= 3) idxOf(parts.last()) else null
-                val nameParts = if (idx != null) parts.subList(1, parts.size - 1) else parts.drop(1)
-                // Legado 里 class 名含空格 = 多 class 并列（.a.b）
-                "." + nameParts.joinToString(".").replace(" ", ".") to idx
-            }
-            parts.size >= 2 && parts[0] == "id" -> {
-                val idx = if (parts.size >= 3) idxOf(parts.last()) else null
-                val nameParts = if (idx != null) parts.subList(1, parts.size - 1) else parts.drop(1)
-                "#" + nameParts.joinToString(".") to idx
-            }
-            parts.size >= 2 && parts[0] == "tag" -> {
-                val idx = if (parts.size >= 3) idxOf(parts.last()) else null
-                val name = if (idx != null) parts[1] else parts.drop(1).joinToString(".")
-                name to idx
-            }
-            parts.size >= 2 && parts[0] == "text" ->
-                "*:containsOwn(${parts.drop(1).joinToString(".")})" to null
-            else -> seg to null // 当作原生 CSS，最终由 RuleParser 校验
-        }
-        if (excludeSuffix.isNotEmpty()) {
-            css += if (css.endsWith("*") && excludeSuffix == ":not(:last-of-type)") {
-                ":not(:last-child)"
-            } else excludeSuffix
-        }
-        return css to (bracketIdx ?: dotIdx)
-    }
-
-    private fun defaultExtractor(kind: Kind): String = when (kind) {
-        Kind.LIST -> ""
-        Kind.TEXT -> "@text"
-        Kind.URL -> "@href"
-        Kind.HTML -> "@html"
-    }
-
-    private fun mapExtractor(name: String): String =
-        mapExtractorOrNull(name) ?: "@attr($name)"
-
-    private fun mapExtractorOrNull(name: String): String? = when (name) {
-        "text", "textNodes" -> "@text"
-        "ownText" -> "@ownText"
-        "html" -> "@html"
-        "all" -> "@outerHtml"
-        "href" -> "@href"
-        "src" -> "@src"
-        "content" -> "@attr(content)"
-        "data-src", "data-original", "data-url", "title", "alt", "value" -> "@attr($name)"
-        else -> null
     }
 
     // ---------- ## 净化 ----------
@@ -642,12 +493,12 @@ object LegadoConverter {
         if (exploreUrl.isEmpty() || exploreUrl.contains("<js>") || exploreUrl.startsWith("@js")) return emptyList()
         val ruleExplore = src.obj("ruleExplore") ?: src.obj("ruleSearch") ?: return emptyList()
 
-        val list = convertRule(ruleExplore.str("bookList"), Kind.LIST, "explore.list", ctx) ?: return emptyList()
+        val list = convertRule(ruleExplore.str("bookList"), "explore.list", ctx) ?: return emptyList()
         val fields = buildMap {
-            putRule("title", ruleExplore.str("name"), Kind.TEXT, "explore.title", ctx)
-            putRule("bookUrl", ruleExplore.str("bookUrl"), Kind.URL, "explore.bookUrl", ctx)
-            putRule("author", ruleExplore.str("author"), Kind.TEXT, "explore.author", ctx)
-            putRule("coverUrl", ruleExplore.str("coverUrl"), Kind.URL, "explore.coverUrl", ctx)
+            putRule("title", ruleExplore.str("name"), "explore.title", ctx)
+            putRule("bookUrl", ruleExplore.str("bookUrl"), "explore.bookUrl", ctx)
+            putRule("author", ruleExplore.str("author"), "explore.author", ctx)
+            putRule("coverUrl", ruleExplore.str("coverUrl"), "explore.coverUrl", ctx)
         }
         if (fields["title"] == null || fields["bookUrl"] == null) return emptyList()
 
@@ -699,9 +550,6 @@ object LegadoConverter {
         val m = Regex("\"charset\"\\s*:\\s*\"([^\"]+)\"").find(searchUrl) ?: return null
         return m.groupValues[1].lowercase().takeIf { it != "utf-8" }
     }
-
-    /** 正文规则默认取 html（保留 <br>/<img> 供段落切分），Legado 默认 text 会丢结构 */
-    private fun forceHtmlExtractor(rule: String): String = rule
 
     // ---------- 顶层切分（跳过转义） ----------
 

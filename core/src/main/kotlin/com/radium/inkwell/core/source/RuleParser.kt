@@ -23,6 +23,9 @@ sealed interface RuleNode {
     /** jayway JSONPath */
     data class JsonPath(val path: String) : RuleNode
 
+    /** Legado 默认语法，原样交给 [LegadoSelector] 求值（索引作用于匹配集，CSS 表达不了） */
+    data class Legado(val rule: String) : RuleNode
+
     /** 对上下文（元素取 outerHtml，可匹配属性/脚本；否则取文本）做正则提取，$1 优先 */
     data class RegexRule(val pattern: String) : RuleNode
 
@@ -163,9 +166,10 @@ object RuleParser {
                 checkRegex(pattern, seg.offset + 6)
                 RuleNode.RegexRule(pattern)
             }
+            t.startsWith("legado:") -> RuleNode.Legado(decodeBody(t.substring(7), seg.offset + 7))
             t.startsWith("text:") -> RuleNode.Literal(t.substring(5))
-            t.startsWith("js:") -> RuleNode.Js(decodeScript(t.substring(3), seg.offset + 3))
-            t.startsWith("@js:") -> RuleNode.Js(decodeScript(t.substring(4), seg.offset + 4))
+            t.startsWith("js:") -> RuleNode.Js(decodeBody(t.substring(3), seg.offset + 3))
+            t.startsWith("@js:") -> RuleNode.Js(decodeBody(t.substring(4), seg.offset + 4))
             else -> parseCss(t, seg.offset)
         }
     }
@@ -253,23 +257,24 @@ object RuleParser {
             t.startsWith("join:") -> PipeOp.Join(t.substring(5))
             t.startsWith("prepend:") -> PipeOp.Prepend(t.substring(8))
             t.startsWith("append:") -> PipeOp.Append(t.substring(7))
-            t.startsWith("js:") -> PipeOp.Js(decodeScript(t.substring(3), seg.offset + 3))
+            t.startsWith("js:") -> PipeOp.Js(decodeBody(t.substring(3), seg.offset + 3))
             else -> throw RuleSyntaxException(seg.offset, "未知管道操作: $t")
         }
     }
 
     /**
-     * js 脚本解码：`b64:` 前缀为 base64（转换器产物，绕开 |/&& 切分），
-     * 否则原样使用（手写规则，注意脚本内不能出现裸 | 或 &&）。
+     * 规则体解码：`b64:` 前缀为 base64（转换器产物，绕开 |/&& 切分），
+     * 否则原样使用（手写规则，注意内容里不能出现裸 | 或 &&）。
+     * js 脚本与 legado 规则共用。
      */
-    private fun decodeScript(body: String, offset: Int): String {
+    private fun decodeBody(body: String, offset: Int): String {
         val t = body.trim()
-        if (t.isEmpty()) throw RuleSyntaxException(offset, "JS 脚本为空")
+        if (t.isEmpty()) throw RuleSyntaxException(offset, "规则内容为空")
         return if (t.startsWith("b64:")) {
             try {
                 String(java.util.Base64.getDecoder().decode(t.substring(4)), Charsets.UTF_8)
             } catch (e: IllegalArgumentException) {
-                throw RuleSyntaxException(offset, "JS base64 解码失败")
+                throw RuleSyntaxException(offset, "base64 解码失败")
             }
         } else t
     }
