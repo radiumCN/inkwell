@@ -198,10 +198,24 @@ fun PageFlipContainer(
                     val dir = dragDir ?: return@awaitEachGesture
                     if (settling || direction != null) return@awaitEachGesture
                     val flippable = canFlip(dir)
-                    if (flippable && animation != FlipAnimation.NONE) {
-                        // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）
-                        cornerBottom = down.position.y > size.height / 2f
-                        touchY = down.position.y
+                    // 触点纵坐标被钉住的值；null = 自由跟手（拿捏页角时才该出现对角卷）
+                    var pinnedY: Float? = null
+                    // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
+                    // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
+                    // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
+                    if (flippable && effectiveAnim != FlipAnimation.NONE) {
+                        val h = size.height.toFloat()
+                        // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
+                        // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
+                        cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
+                        // 从页面中间 1/3 带起手（以及所有后翻）时把触点纵坐标钉在边缘，
+                        // 翻出干脆的水平页；否则纸角会跟着手指上下摆动。
+                        pinnedY = if (dir == FlipDirection.BACKWARD || down.position.y in (h / 3f)..(h * 2f / 3f)) {
+                            if (cornerBottom) h - 1f else 1f
+                        } else {
+                            null
+                        }
+                        touchY = pinnedY ?: down.position.y
                         downX = down.position.x
                         touchX = down.position.x
                         direction = dir
@@ -213,7 +227,7 @@ fun PageFlipContainer(
                         change.consume()
                         if (!flippable || effectiveAnim == FlipAnimation.NONE) return@horizontalDrag
                         // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）
-                        touchY = change.position.y
+                        touchY = pinnedY ?: change.position.y
                         touchX = change.position.x
                         val range = if (dir == FlipDirection.FORWARD) -width..0f else 0f..width
                         offset = (offset + change.positionChange().x).coerceIn(range)

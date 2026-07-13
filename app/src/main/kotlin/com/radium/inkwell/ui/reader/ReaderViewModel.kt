@@ -32,7 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 data class TocItem(val index: Int, val title: String)
@@ -214,13 +216,17 @@ class ReaderViewModel(
             _state.value = _state.value.copy(sourceCandidates = emptyList(), searchingSources = true)
             val rules = sourceRepo.getEnabledRules()
                 .filter { it.search != null && it.id != b.sourceId }
+            // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
+            val limiter = Semaphore(8)
             val candidates = rules.map { rule ->
                 async {
-                    runCatching { engine.search(rule, b.title).items }
-                        .getOrDefault(emptyList())
-                        .filter { it.title == b.title || it.title.contains(b.title) }
-                        .filter { b.author.isBlank() || it.author.isNullOrBlank() || it.author == b.author }
-                        .take(3)
+                    limiter.withPermit {
+                        runCatching { engine.search(rule, b.title).items }
+                            .getOrDefault(emptyList())
+                            .filter { it.title == b.title || it.title.contains(b.title) }
+                            .filter { b.author.isBlank() || it.author.isNullOrBlank() || it.author == b.author }
+                            .take(3)
+                    }
                 }
             }.awaitAll().flatten()
             _state.value = _state.value.copy(sourceCandidates = candidates, searchingSources = false)
@@ -345,7 +351,9 @@ class ReaderViewModel(
                 Paginator(facade).paginate(chapterIndex, title, content, spec)
             }
             paginated[chapterIndex] = result
-            trimWindow(position.chapterIndex)
+            // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
+            // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。
+            trimWindow(position.chapterIndex, alsoKeep = chapterIndex)
             result
         } catch (e: Exception) {
             if (chapterIndex == position.chapterIndex) {
@@ -366,8 +374,8 @@ class ReaderViewModel(
     }
 
     /** 只保留 center±1 的分页结果（测量结果持有 TextLayoutResult，较重） */
-    private fun trimWindow(center: Int) {
-        val keep = (center - 1)..(center + 1)
+    private fun trimWindow(center: Int, alsoKeep: Int = center) {
+        val keep = ((center - 1)..(center + 1)).toSet() + alsoKeep
         paginated.keys.retainAll { it in keep }
     }
 
