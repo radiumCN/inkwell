@@ -75,6 +75,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
+    // 前页正面靠折痕的投影：纸张翘起在正面留下的阴影（近折痕深、向外渐隐）
+    private val frontShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 1f, 0f,
+            0x00000000, 0x28000000,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
 
     /**
      * @param touchX/touchY 当前触点（x 可越出屏幕左侧，用于把页完全卷走）
@@ -95,10 +103,11 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         calcPoints()
         buildPaths()
 
-        // 1. 前页未卷起部分：整画布挖掉卷起区域
+        // 1. 前页未卷起部分：整画布挖掉卷起区域 + 折痕投影
         canvas.save()
         canvas.clipOutPath(pathCurl)
         canvas.drawBitmap(front, 0f, 0f, null)
+        drawFrontShadow(canvas)
         canvas.restore()
 
         // 2. 下页露出区域 + 折线阴影
@@ -219,6 +228,28 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /** 背面靠折线处的暗部，增强纸张卷曲的立体感 */
     private fun drawBackShadow(canvas: Canvas) {
         drawShadowStrip(canvas, backShadowPaint, widthDivisor = 6f, maxWidth = 40f, towardLeft = false)
+    }
+
+    /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
+    private fun drawFrontShadow(canvas: Canvas) {
+        val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
+        val w = (fold / 5f).coerceIn(0f, 30f)
+        if (w < 2f) return
+        val degree = Math.toDegrees(
+            atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
+        ).toFloat()
+        // 渐变 x:0→1 映射为 near-far（近折痕深），画在折痕向页面主体（左）一侧
+        shadowMatrix.reset()
+        shadowMatrix.setScale(-w, 1f)
+        shadowMatrix.postTranslate(bezierStart1.x, bezierStart1.y)
+        frontShadowPaint.shader.setLocalMatrix(shadowMatrix)
+        canvas.save()
+        canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
+        canvas.drawRect(
+            bezierStart1.x - w, bezierStart1.y - height * 2,
+            bezierStart1.x, bezierStart1.y + height * 2, frontShadowPaint,
+        )
+        canvas.restore()
     }
 
     /** 卷起弧面中段高光；卷得越多高光越明显 */

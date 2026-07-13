@@ -1,5 +1,6 @@
 package com.radium.inkwell.reader.flip
 
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -121,14 +122,19 @@ fun PageFlipContainer(
                 else -> downX - width * 0.3f                             // 回滚：重新折叠到屏外
             }
             val dur = if (commit) settleDuration(velocity, 200, 320) else settleDuration(velocity, 160, 240)
-            animate(touchX, target, animationSpec = tween(dur)) { v, _ -> touchX = v }
+            // 减速曲线（≈DecelerateInterpolator）：纸张甩出后自然减速停下
+            animate(touchX, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
+                touchX = v
+            }
         } else {
             val target = when {
                 commit -> if (dir == FlipDirection.FORWARD) -width else width
                 else -> 0f
             }
             val dur = if (commit) settleDuration(velocity, 180, 260) else settleDuration(velocity, 140, 200)
-            animate(offset, target, animationSpec = tween(dur)) { v, _ -> offset = v }
+            animate(offset, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
+                offset = v
+            }
         }
         if (commit) {
             // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
