@@ -50,7 +50,22 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             )
         )
     }
-    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // 单位渐变（x: 0→1）+ localMatrix 复用，避免每帧 new Shader 的分配抖动
+    private val shadowMatrix = Matrix()
+    private val foldShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 1f, 0f,
+            0x44000000, 0x00000000,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    private val backShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 1f, 0f,
+            0x33000000, 0x00000000,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
 
     /**
      * @param touchX/touchY 当前触点（x 可越出屏幕左侧，用于把页完全卷走）
@@ -193,57 +208,48 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /** 背面靠折线处的暗部，增强纸张卷曲的立体感 */
     private fun drawBackShadow(canvas: Canvas) {
-        val degree = Math.toDegrees(
-            atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
-        ).toFloat()
-        val shadowWidth = (hypot(
-            (touch.x - cornerX).toDouble(),
-            (touch.y - cornerY).toDouble(),
-        ) / 6f).toFloat().coerceAtMost(40f)
-
-        canvas.save()
-        canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
-        shadowPaint.shader = android.graphics.LinearGradient(
-            bezierStart1.x, bezierStart1.y,
-            bezierStart1.x + shadowWidth, bezierStart1.y,
-            0x33000000, 0x00000000,
-            android.graphics.Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(
-            bezierStart1.x,
-            bezierStart1.y - height * 2,
-            bezierStart1.x + shadowWidth,
-            bezierStart1.y + height * 2,
-            shadowPaint,
-        )
-        canvas.restore()
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 6f, maxWidth = 40f, towardLeft = false)
     }
 
     private fun drawFoldShadow(canvas: Canvas) {
-        // 折线处的线性渐变阴影
+        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 4f, maxWidth = 60f, towardLeft = true)
+    }
+
+    /** 沿折线画渐变阴影条；shader 为单位渐变，用 localMatrix 定位（无每帧分配） */
+    private fun drawShadowStrip(
+        canvas: Canvas,
+        paint: Paint,
+        widthDivisor: Float,
+        maxWidth: Float,
+        towardLeft: Boolean,
+    ) {
         val degree = Math.toDegrees(
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
         ).toFloat()
         val shadowWidth = (hypot(
             (touch.x - cornerX).toDouble(),
             (touch.y - cornerY).toDouble(),
-        ) / 4f).toFloat().coerceAtMost(60f)
+        ) / widthDivisor).toFloat().coerceAtMost(maxWidth)
+        if (shadowWidth < 1f) return
+
+        shadowMatrix.reset()
+        shadowMatrix.setScale(if (towardLeft) -shadowWidth else shadowWidth, 1f)
+        shadowMatrix.postTranslate(bezierStart1.x, bezierStart1.y)
+        paint.shader.setLocalMatrix(shadowMatrix)
 
         canvas.save()
         canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
-        shadowPaint.shader = android.graphics.LinearGradient(
-            bezierStart1.x, bezierStart1.y,
-            bezierStart1.x - shadowWidth, bezierStart1.y,
-            0x44000000, 0x00000000,
-            android.graphics.Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(
-            bezierStart1.x - shadowWidth,
-            bezierStart1.y - height * 2,
-            bezierStart1.x,
-            bezierStart1.y + height * 2,
-            shadowPaint,
-        )
+        if (towardLeft) {
+            canvas.drawRect(
+                bezierStart1.x - shadowWidth, bezierStart1.y - height * 2,
+                bezierStart1.x, bezierStart1.y + height * 2, paint,
+            )
+        } else {
+            canvas.drawRect(
+                bezierStart1.x, bezierStart1.y - height * 2,
+                bezierStart1.x + shadowWidth, bezierStart1.y + height * 2, paint,
+            )
+        }
         canvas.restore()
     }
 }

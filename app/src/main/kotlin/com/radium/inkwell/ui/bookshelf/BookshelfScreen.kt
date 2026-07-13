@@ -15,9 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -32,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,13 +43,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.EmptyState
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,9 +111,21 @@ fun BookshelfScreen(
         },
     ) { padding ->
         if (books.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("书架空空如也\n点击 + 导入 txt / epub / mobi", textAlign = TextAlign.Center)
-            }
+            EmptyState(
+                icon = Icons.Default.AutoStories,
+                title = "书架空空如也",
+                hint = "导入本地 txt / EPUB / MOBI，或从书源搜索添加",
+                actionLabel = "导入本地书",
+                onAction = {
+                    importLauncher.launch(
+                        arrayOf(
+                            "text/plain", "application/epub+zip",
+                            "application/octet-stream", "application/x-mobipocket-ebook",
+                        )
+                    )
+                },
+                modifier = Modifier.padding(padding),
+            )
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 96.dp),
@@ -156,28 +167,12 @@ fun BookshelfScreen(
 @Composable
 private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
-        Surface(
+        BookCover(
+            title = book.title,
+            coverModel = book.coverPath,
             modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-        ) {
-            if (book.coverPath != null) {
-                AsyncImage(
-                    model = book.coverPath,
-                    contentDescription = book.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(8.dp)) {
-                    Text(
-                        book.title.take(6),
-                        style = MaterialTheme.typography.titleMedium,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
-        }
+            placeholderChars = 6,
+        )
         Text(
             book.title,
             style = MaterialTheme.typography.bodySmall,

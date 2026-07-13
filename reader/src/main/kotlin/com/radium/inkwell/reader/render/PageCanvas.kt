@@ -11,6 +11,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -85,7 +87,11 @@ fun PageCanvas(
     Spacer(modifier.fillMaxSize().drawBehind { drawPage(page, layout, theme) })
 }
 
-/** 把一页渲染为位图（仿真卷页需要对整页做几何变形） */
+/**
+ * 把一页渲染为位图（仿真卷页需要对整页做几何变形）。
+ * 返回不可变位图：HWUI 对可变位图每帧重新上传 GPU 纹理（全屏 ~10MB），
+ * 是仿真翻页掉帧的主因；不可变位图纹理只上传一次。
+ */
 fun renderPageBitmap(
     page: RenderablePage?,
     layout: LayoutSpec,
@@ -103,7 +109,9 @@ fun renderPageBitmap(
     ) {
         drawPage(page, layout, theme)
     }
-    return bitmap
+    return bitmap.asAndroidBitmap()
+        .copy(android.graphics.Bitmap.Config.ARGB_8888, /* isMutable = */ false)
+        .asImageBitmap()
 }
 
 private fun DrawScope.drawTextSlice(

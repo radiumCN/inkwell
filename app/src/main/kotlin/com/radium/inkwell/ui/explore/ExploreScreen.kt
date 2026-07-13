@@ -14,10 +14,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,7 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -43,13 +42,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.ui.components.BookListRow
+import com.radium.inkwell.ui.components.EmptyState
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,15 +124,13 @@ fun ExploreScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (state.sources.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "没有可用的发现书源\n导入带发现页规则的书源后可在此浏览书单",
-                            textAlign = TextAlign.Center,
-                        )
-                        TextButton(onClick = onOpenSourceManage) { Text("去导入书源") }
-                    }
-                }
+                EmptyState(
+                    icon = Icons.Default.Explore,
+                    title = "没有可用的发现书源",
+                    hint = "导入带发现页规则的书源后，可在此浏览分类书单",
+                    actionLabel = "去导入书源",
+                    onAction = onOpenSourceManage,
+                )
                 return@Column
             }
 
@@ -158,18 +155,23 @@ fun ExploreScreen(
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                state.books.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("这个分类没有内容")
-                        TextButton(onClick = { viewModel.retry() }) { Text("重试") }
-                    }
-                }
+                state.books.isEmpty() -> EmptyState(
+                    icon = Icons.Default.Explore,
+                    title = "这个分类没有内容",
+                    actionLabel = "重试",
+                    onAction = { viewModel.retry() },
+                )
                 else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(state.books, key = { "${it.sourceId}|${it.bookUrl}" }) { book ->
-                        ExploreBookRow(
-                            book = book,
-                            adding = state.addingUrl == book.bookUrl,
-                            onAdd = { viewModel.addToShelf(book) },
+                        BookListRow(
+                            title = book.title,
+                            subtitle = listOfNotNull(book.author, book.latestChapter)
+                                .joinToString(" · "),
+                            caption = book.intro,
+                            coverModel = book.coverUrl,
+                            trailingLabel = "加入",
+                            trailingLoading = state.addingUrl == book.bookUrl,
+                            onTrailing = { viewModel.addToShelf(book) },
                         )
                     }
                     if (state.loadingMore) {
@@ -182,52 +184,6 @@ fun ExploreScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ExploreBookRow(book: SearchResult, adding: Boolean, onAdd: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(
-            Modifier.size(width = 48.dp, height = 64.dp),
-            shape = RoundedCornerShape(4.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-        ) {
-            if (book.coverUrl != null) {
-                AsyncImage(
-                    model = book.coverUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                )
-            }
-        }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(book.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            Text(
-                listOfNotNull(book.author, book.latestChapter).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!book.intro.isNullOrBlank()) {
-                Text(
-                    book.intro!!,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (adding) {
-            CircularProgressIndicator(Modifier.size(24.dp))
-        } else {
-            TextButton(onClick = onAdd) { Text("加入") }
         }
     }
 }

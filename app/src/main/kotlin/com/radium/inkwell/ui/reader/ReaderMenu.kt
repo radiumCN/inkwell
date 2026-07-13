@@ -23,8 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -207,22 +210,59 @@ fun ReaderMenu(
 @Composable
 private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
     val listState = rememberLazyListState()
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(toc, query) {
+        if (query.isBlank()) toc
+        else toc.filter { it.title.contains(query.trim(), ignoreCase = true) }
+    }
     LaunchedEffect(Unit) {
         if (current > 3) listState.scrollToItem(current - 3)
     }
-    LazyColumn(state = listState, modifier = Modifier.heightIn(max = 480.dp)) {
-        items(toc, key = { it.index }) { item ->
-            Text(
-                item.title,
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelect(item.index) }
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
-                color = if (item.index == current) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
+
+    Column {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("搜索章节") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "清空")
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp),
+        )
+        if (filtered.isEmpty()) {
+            Box(
+                Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "没有匹配的章节",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(state = listState, modifier = Modifier.heightIn(max = 440.dp)) {
+                items(filtered, key = { it.index }) { item ->
+                    Text(
+                        item.title,
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(item.index) }
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
+                        color = if (item.index == current) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
     }
 }

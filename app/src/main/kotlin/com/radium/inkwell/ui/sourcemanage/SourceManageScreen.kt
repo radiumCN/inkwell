@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.ui.components.EmptyState
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,12 +123,18 @@ fun SourceManageScreen(
         },
     ) { padding ->
         if (sources.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(
-                    "还没有书源\n可从剪贴板导入 JSON，或点击 + 手写一个",
-                    textAlign = TextAlign.Center,
-                )
-            }
+            EmptyState(
+                icon = Icons.Default.Source,
+                title = "还没有书源",
+                hint = "支持导入 Inkwell 与 Legado（阅读）格式的书源",
+                actionLabel = "从文件导入",
+                onAction = {
+                    fileImportLauncher.launch(
+                        arrayOf("application/json", "text/plain", "application/octet-stream")
+                    )
+                },
+                modifier = Modifier.padding(padding),
+            )
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 items(sources, key = { it.id }) { source ->
