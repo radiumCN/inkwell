@@ -73,6 +73,15 @@ object LegadoConverter {
         val type = src.int("bookSourceType") ?: 0
         if (type != 0) throw LegadoUnsupported("非文字书源（type=$type）不支持")
 
+        // 书源站点列表里常见的占位条目：只有站名/分组等元信息，一条规则都没有（在 Legado 里同样不可用）。
+        // 先于 ruleToc 检查报出，否则会被归成「缺少 ruleToc」，让人误以为是转换器挑食。
+        val hasAnyRule = !src.str("searchUrl").isNullOrBlank() ||
+            !src.str("exploreUrl").isNullOrBlank() ||
+            src.obj("ruleSearch") != null ||
+            src.obj("ruleToc") != null ||
+            src.obj("ruleContent") != null
+        if (!hasAnyRule) throw LegadoUnsupported("空书源（无任何规则）")
+
         val ruleSearch = src.obj("ruleSearch")
         val searchUrlRaw = src.str("searchUrl")?.takeIf { it.isNotBlank() }
 
@@ -547,7 +556,7 @@ object LegadoConverter {
                 .replace("searchKey", keyword) // 老式变量
                 .replace("searchPage", "{{page}}")
             // 允许 page 算术表达式（如 {{(page-1)*50}}，引擎模板支持求值）
-            Regex("\\{\\{([^}]*)}}").findAll(out).forEach { m ->
+            Regex("\\{\\{([^}]*)\\}\\}").findAll(out).forEach { m ->
                 val body = m.groupValues[1].trim()
                 val isKnown = body == "keyword" || body == "page" || body.startsWith("keyword|")
                 val isPageMath = body.matches(Regex("[0-9page()+\\-*/\\s]+")) && body.contains("page")

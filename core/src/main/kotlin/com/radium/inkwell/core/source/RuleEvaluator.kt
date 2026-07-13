@@ -212,7 +212,8 @@ class RuleEvaluator(
 // ---- 模板与编码工具（引擎/HTTP 层共用） ----
 
 // 变量名段允许内部空格（算术表达式如 {{page - 1}}）
-private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|]+?)\\s*(?:\\|\\s*([^}]+?)\\s*)?}}")
+// 花括号一律转义：Android 的 ICU 正则引擎不接受裸 { }，桌面 JVM 却当字面量放行
+private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|]+?)\\s*(?:\\|\\s*([^}]+?)\\s*)?\\}\\}")
 
 /** 展开 {{var}} 与 {{var|encode[:charset]}}；未知变量替换为空串 */
 internal fun expandTemplate(template: String, vars: Map<String, String>): String =
