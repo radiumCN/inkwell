@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 墨水瓶 + 羽毛笔的简化图形 -->
+    <path
+        android:fillColor="#F5EFDC"
+        android:pathData="M40,44 L68,44 L66,50 L70,54 L70,74 A6,6 0 0 1 64,80 L44,80 A6,6 0 0 1 38,74 L38,54 L42,50 Z" />
+    <path
+        android:fillColor="#E8C97E"
+        android:pathData="M44,34 L64,34 L64,44 L44,44 Z" />
+    <path
+        android:fillColor="#F5EFDC"
+        android:pathData="M62,26 C70,18 78,16 82,16 C80,22 76,30 68,36 L62,32 Z" />
+</vector>
