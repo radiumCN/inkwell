@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,21 +65,14 @@ fun BookshelfScreen(
     viewModel: BookshelfViewModel = koinViewModel(),
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
-    val message by viewModel.message.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.importBooks(uris) }
-
-    LaunchedEffect(message) {
-        message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.clearMessage()
-        }
-    }
 
     Scaffold(
         topBar = {

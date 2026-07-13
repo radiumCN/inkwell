@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,8 +56,8 @@ fun SourceManageScreen(
     viewModel: SourceManageViewModel = koinViewModel(),
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
-    val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
     var showUrlImport by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
@@ -65,13 +66,6 @@ fun SourceManageScreen(
     val fileImportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
-
-    LaunchedEffect(message) {
-        message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.clearMessage()
-        }
-    }
 
     Scaffold(
         topBar = {

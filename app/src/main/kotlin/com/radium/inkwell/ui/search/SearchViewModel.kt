@@ -6,6 +6,7 @@ import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -22,7 +23,6 @@ data class SearchUiState(
     val results: List<SearchResult> = emptyList(),
     val sourceCount: Int = 0,
     val doneCount: Int = 0,
-    val message: String? = null,
     val addingUrl: String? = null,
 )
 
@@ -34,6 +34,8 @@ class SearchViewModel(
 
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
+
+    val messages = MessageBus()
 
     private var searchJob: Job? = null
 
@@ -48,7 +50,7 @@ class SearchViewModel(
         searchJob = viewModelScope.launch {
             val rules = sourceRepo.getEnabledRules().filter { it.search != null }
             if (rules.isEmpty()) {
-                _state.value = _state.value.copy(message = "没有启用的书源，请先导入书源")
+                messages.emit("没有启用的书源，请先导入书源")
                 return@launch
             }
             _state.value = _state.value.copy(
@@ -77,16 +79,20 @@ class SearchViewModel(
             _state.value = _state.value.copy(addingUrl = result.bookUrl)
             val rule = sourceRepo.getRule(result.sourceId)
             if (rule == null) {
-                _state.value = _state.value.copy(addingUrl = null, message = "书源不存在")
+                _state.value = _state.value.copy(addingUrl = null)
+                messages.emit("书源不存在")
                 return@launch
             }
             netBookRepo.addToShelf(result, rule)
-                .onSuccess { _state.value = _state.value.copy(addingUrl = null, message = "已加入书架") }
-                .onFailure { _state.value = _state.value.copy(addingUrl = null, message = "加入失败: ${it.message}") }
+                .onSuccess {
+                    _state.value = _state.value.copy(addingUrl = null)
+                    messages.emit("已加入书架")
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(addingUrl = null)
+                    messages.emit("加入失败: ${it.message?.take(80)}")
+                }
         }
     }
 
-    fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
-    }
 }

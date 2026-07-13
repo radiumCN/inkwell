@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,15 +61,9 @@ fun ExploreScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    CollectMessages(viewModel.messages, snackbar)
     val listState = rememberLazyListState()
     var sourceMenuOpen by remember { mutableStateOf(false) }
-
-    LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.clearMessage()
-        }
-    }
 
     // 滚到底部自动加载下一页
     val nearEnd by remember {

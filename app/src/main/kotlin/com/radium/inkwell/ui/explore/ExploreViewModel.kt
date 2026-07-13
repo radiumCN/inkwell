@@ -7,6 +7,7 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +25,6 @@ data class ExploreUiState(
     val hasMore: Boolean = false,
     val loading: Boolean = false,
     val loadingMore: Boolean = false,
-    val message: String? = null,
     val addingUrl: String? = null,
 ) {
     val currentSource: ExploreSource? get() = sources.getOrNull(sourceIndex)
@@ -40,6 +40,8 @@ class ExploreViewModel(
 
     private val _state = MutableStateFlow(ExploreUiState())
     val state: StateFlow<ExploreUiState> = _state.asStateFlow()
+
+    val messages = MessageBus()
 
     private var loadJob: Job? = null
     private val ruleCache = mutableMapOf<String, BookSourceRule>()
@@ -101,11 +103,8 @@ class ExploreViewModel(
                     )
                 }
                 .onFailure { e ->
-                    _state.value = _state.value.copy(
-                        loading = false,
-                        loadingMore = false,
-                        message = "加载失败: ${e.message?.take(80)}",
-                    )
+                    _state.value = _state.value.copy(loading = false, loadingMore = false)
+                    messages.emit("加载失败: ${e.message?.take(80)}")
                 }
         }
     }
@@ -115,21 +114,20 @@ class ExploreViewModel(
             _state.value = _state.value.copy(addingUrl = result.bookUrl)
             val rule = ruleCache[result.sourceId] ?: sourceRepo.getRule(result.sourceId)
             if (rule == null) {
-                _state.value = _state.value.copy(addingUrl = null, message = "书源不存在")
+                _state.value = _state.value.copy(addingUrl = null)
+                messages.emit("书源不存在")
                 return@launch
             }
             netBookRepo.addToShelf(result, rule)
-                .onSuccess { _state.value = _state.value.copy(addingUrl = null, message = "已加入书架") }
+                .onSuccess {
+                    _state.value = _state.value.copy(addingUrl = null)
+                    messages.emit("已加入书架")
+                }
                 .onFailure {
-                    _state.value = _state.value.copy(
-                        addingUrl = null,
-                        message = "加入失败: ${it.message?.take(80)}",
-                    )
+                    _state.value = _state.value.copy(addingUrl = null)
+                    messages.emit("加入失败: ${it.message?.take(80)}")
                 }
         }
     }
 
-    fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
-    }
 }

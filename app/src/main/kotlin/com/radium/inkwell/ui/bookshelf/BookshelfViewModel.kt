@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.repo.BookRepository
+import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,8 +20,7 @@ class BookshelfViewModel(
     val books: StateFlow<List<BookEntity>> = bookRepo.books
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _message = MutableStateFlow<String?>(null)
-    val message: StateFlow<String?> = _message.asStateFlow()
+    val messages = MessageBus()
 
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
@@ -38,11 +38,13 @@ class BookshelfViewModel(
                     .onFailure { failed++; lastError = it.message }
             }
             _importing.value = false
-            _message.value = when {
-                failed == 0 -> "已导入 $ok 本"
-                ok == 0 -> "导入失败: $lastError"
-                else -> "导入 $ok 本，失败 $failed 本"
-            }
+            messages.emit(
+                when {
+                    failed == 0 -> "已导入 $ok 本"
+                    ok == 0 -> "导入失败: $lastError"
+                    else -> "导入 $ok 本，失败 $failed 本"
+                }
+            )
         }
     }
 
@@ -50,7 +52,4 @@ class BookshelfViewModel(
         viewModelScope.launch { bookRepo.deleteBook(id) }
     }
 
-    fun clearMessage() {
-        _message.value = null
-    }
 }

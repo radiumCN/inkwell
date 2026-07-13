@@ -17,14 +17,27 @@ class BookSourceRepository(private val dao: BookSourceDao) {
 
     val sources: Flow<List<BookSourceEntity>> = dao.observeAll()
 
-    data class ImportReport(val imported: Int, val skipped: List<String>) {
+    data class ImportReport(
+        val added: Int,
+        val updated: Int,
+        val skipped: List<String>,
+    ) {
+        val imported: Int get() = added + updated
+
+        /** 说清楚新增/更新/跳过各多少，避免"看起来没反应" */
         val summary: String
             get() = buildString {
-                append("导入 $imported 个书源")
+                when {
+                    added > 0 && updated > 0 -> append("新增 $added 个、更新 $updated 个书源")
+                    added > 0 -> append("新增 $added 个书源")
+                    updated > 0 -> append("更新 $updated 个已有书源")
+                    else -> append("没有可用书源")
+                }
                 if (skipped.isNotEmpty()) {
-                    append("，跳过 ${skipped.size} 个：")
-                    append(skipped.take(3).joinToString("；"))
-                    if (skipped.size > 3) append(" 等")
+                    append("；跳过 ${skipped.size} 个（")
+                    append(skipped.first().take(40))
+                    if (skipped.size > 1) append(" 等")
+                    append("）")
                 }
             }
     }
@@ -40,20 +53,24 @@ class BookSourceRepository(private val dao: BookSourceDao) {
         } else {
             listOf(json.decodeFromString(trimmed))
         }
-        ImportReport(upsertRules(rules), emptyList())
+        val (added, updated) = upsertRules(rules)
+        ImportReport(added, updated, emptyList())
     }
 
     private suspend fun importLegado(text: String): ImportReport {
         val result = LegadoConverter.convert(text)
-        val imported = upsertRules(result.converted.map { it.rule })
+        val (added, updated) = upsertRules(result.converted.map { it.rule })
         return ImportReport(
-            imported = imported,
-            skipped = result.skipped.map { "${it.name}(${it.reason})" },
+            added = added,
+            updated = updated,
+            skipped = result.skipped.map { "${it.name}: ${it.reason}" },
         )
     }
 
-    private suspend fun upsertRules(rules: List<BookSourceRule>): Int {
-        var imported = 0
+    /** @return (新增数, 覆盖已有数) */
+    private suspend fun upsertRules(rules: List<BookSourceRule>): Pair<Int, Int> {
+        var added = 0
+        var updated = 0
         rules.forEach { rule ->
             val existing = dao.getById(rule.id)
             val existingVersion = existing?.let {
@@ -70,10 +87,10 @@ class BookSourceRepository(private val dao: BookSourceDao) {
                         updatedAt = System.currentTimeMillis(),
                     )
                 )
-                imported++
+                if (existing == null) added++ else updated++
             }
         }
-        return imported
+        return added to updated
     }
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)

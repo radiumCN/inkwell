@@ -38,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,13 +46,7 @@ import org.koin.androidx.compose.koinViewModel
 fun SearchScreen(onBack: () -> Unit, viewModel: SearchViewModel = koinViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-
-    LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.clearMessage()
-        }
-    }
+    CollectMessages(viewModel.messages, snackbar)
 
     Scaffold(
         topBar = {
