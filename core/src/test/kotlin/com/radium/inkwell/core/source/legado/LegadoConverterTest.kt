@@ -241,8 +241,11 @@ class LegadoConverterTest {
         // 空格用 unicode 转义（反斜杠+空格在 Android ICU 上非法）；class 名带空格 = 多 class
         assertTrue(search.fields["author"]!!.contains("regex:作者\\u0020大人"))
         assertEquals("css:.intro.summary@text", search.fields["intro"])
+        // children[0] 的匹配集就是同一父节点的子元素，兄弟序号与之等价，仍可用纯 CSS
         assertEquals("css:.full > *:first-child a", rule.toc!!.list)
-        assertEquals("css:.box:last-of-type p:not(:last-of-type)@html", rule.content!!.content)
+        // 中段索引 .-1 走「选中 → 取最后一个 → 下钻」管道：Legado 的索引取自匹配集，
+        // 而 CSS 的 :last-of-type 取自兄弟序号，两者不等价（从前按后者硬套，选中的常是别的元素）
+        assertEquals("css:.box@html | last | select:p:not(:last-of-type)", rule.content!!.content)
     }
 
     @Test

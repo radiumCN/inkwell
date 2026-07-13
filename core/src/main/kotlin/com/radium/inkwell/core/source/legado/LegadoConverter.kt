@@ -67,8 +67,12 @@ object LegadoConverter {
 
     private fun convertOne(src: JsonObject): Converted {
         val warnings = mutableListOf<String>()
-        val baseUrl = src.str("bookSourceUrl")?.trimEnd('/')
-            ?: throw LegadoUnsupported("缺少 bookSourceUrl")
+        val rawUrl = src.str("bookSourceUrl") ?: throw LegadoUnsupported("缺少 bookSourceUrl")
+        // Legado 用 `#后缀`（常含 emoji）区分同站的重复书源，它不是真实地址的一部分。
+        // 留在 baseUrl 里会污染所有相对链接的解析，还会随 Referer:{{baseUrl}} 发出去 ——
+        // OkHttp 拒收非 ASCII 头值，整个书源当场不可用。id 仍用原值以保持唯一性。
+        val baseUrl = rawUrl.substringBefore('#').trimEnd('/')
+        if (baseUrl.isBlank()) throw LegadoUnsupported("bookSourceUrl 无效: $rawUrl")
         val name = src.str("bookSourceName") ?: baseUrl
         val type = src.int("bookSourceType") ?: 0
         if (type != 0) throw LegadoUnsupported("非文字书源（type=$type）不支持")
@@ -111,6 +115,13 @@ object LegadoConverter {
             putRule("coverUrl", ruleBookInfo?.str("coverUrl"), Kind.URL, "detail.coverUrl", ctx)
             putRule("intro", ruleBookInfo?.str("intro"), Kind.TEXT, "detail.intro", ctx)
             putRule("tocUrl", ruleBookInfo?.str("tocUrl"), Kind.URL, "detail.tocUrl", ctx)
+        }
+        // 书源明确写了 tocUrl 却转换失败时不能放行：引擎会退化成「详情页即目录页」，
+        // 而这个假设只在书源省略 tocUrl 时才成立。放行的后果是导入看似成功、
+        // 一读就报「目录规则未匹配到章节」（如创世中文网的 tocUrl 是 {{js}} 表达式）。
+        val tocUrlRaw = ruleBookInfo?.str("tocUrl")
+        if (!tocUrlRaw.isNullOrBlank() && detailFields["tocUrl"] == null) {
+            throw LegadoUnsupported("目录地址规则无法转换: ${ctx.lastError ?: tocUrlRaw.take(40)}")
         }
 
         // 目录
@@ -167,7 +178,8 @@ object LegadoConverter {
 
         val rule = BookSourceRule(
             schemaVersion = 1,
-            id = baseUrl.removePrefix("https://").removePrefix("http://").trim('/'),
+            // id 用带 # 后缀的原值：同站可以并存多个书源，剥掉后缀会让它们撞 id 被去重丢掉
+            id = rawUrl.removePrefix("https://").removePrefix("http://").trim('/'),
             name = name,
             baseUrl = baseUrl,
             version = 1,
@@ -270,6 +282,14 @@ object LegadoConverter {
     private val UNSUPPORTED_JS_REFS = Regex("\\b(java|cookie|source|book|chapter|cache)\\s*\\.")
 
     private fun convertAtomic(rule: String, kind: Kind, where: String): String {
+        // 整条 {{expr}}：Legado 视作 JS 表达式求值（绑定 baseUrl/result/key/page，与我们的 js: 规则一致）。
+        // 最常见的用法是把详情页地址改写成目录页地址，如 {{baseUrl.replace(/detail/,"chapter")}}。
+        if (rule.startsWith("{{") && rule.endsWith("}}") && rule.length > 4) {
+            val expr = rule.substring(2, rule.length - 2)
+            if (!expr.contains("{{")) {
+                return attachJs("", expr.trim().ifEmpty { throw LegadoUnsupported("空 {{}} 规则") }, kind, where)
+            }
+        }
         if (rule.contains("{{")) {
             throw LegadoUnsupported("规则内嵌 {{js}} 不支持")
         }
@@ -357,39 +377,53 @@ object LegadoConverter {
         }
 
         val cssParts = mutableListOf<String>()
-        var tailPipe = ""
-        selectorSegs.forEachIndexed { i, seg ->
+        val ext = extractor ?: defaultExtractor(kind)
+        for ((i, segRaw) in selectorSegs.withIndex()) {
+            val seg = segRaw.trim()
+            val (css, index) = convertSegment(seg)
             val isLast = i == selectorSegs.lastIndex
-            val (css, index) = convertSegment(seg.trim())
-            if (index != null) {
-                if (isLast) {
-                    tailPipe = when {
-                        index == 0 -> " | first"
-                        index == -1 -> " | last"
-                        else -> " | index:$index"
-                    }
+            when {
+                index == null -> cssParts += css
+
+                isLast -> {
                     cssParts += css
-                } else {
-                    cssParts += css + midIndexSelector(css, index)
+                    return "css:${cssParts.joinToString(" ")}$ext${indexPipe(index)}"
                 }
-            } else {
-                cssParts += css
+
+                // children（`> *`）的匹配集就是同一父节点的全部子元素，兄弟序号与之天然等价
+                css.endsWith("*") -> cssParts += css + childIndexSelector(index)
+
+                // 其余中间层索引：Legado 的索引取自「匹配集」（扁平结果列表），而 CSS 的
+                // :eq/:last-of-type 取自「兄弟序号」（各自父节点内），两者只在所有匹配同父时
+                // 才等价，且无法在转换期判定。从前按兄弟序号硬套，选中的常常是别的元素
+                // （如 .row[-1]@a 选到页脚），导入看似成功、读出来却是垃圾章节。
+                // 改用「选中 → 取第 n 个 → 下钻」的管道精确表达，提取器作用在下钻后的节点上。
+                else -> {
+                    cssParts += css
+                    val rest = selectorSegs.drop(i + 1).map { r ->
+                        val (c, idx) = convertSegment(r.trim())
+                        if (idx != null) throw LegadoUnsupported("多重中间层索引不支持: $rule")
+                        c
+                    }
+                    if (rest.isEmpty()) throw LegadoUnsupported("中间层索引语法无法等价转换: $seg")
+                    return "css:${cssParts.joinToString(" ")}$ext${indexPipe(index)} | " +
+                        "select:${rest.joinToString(" ")}"
+                }
             }
         }
-        val selector = cssParts.joinToString(" ")
-        val ext = extractor ?: defaultExtractor(kind)
-        return "css:$selector$ext$tailPipe"
+        return "css:${cssParts.joinToString(" ")}$ext"
     }
 
-    /** 中间层索引的 CSS 近似：children 按子元素序号精确，其余按兄弟/同型序号 */
-    private fun midIndexSelector(css: String, n: Int): String = when {
-        css.endsWith("*") -> when (n) {
-            0 -> ":first-child"
-            -1 -> ":last-child"
-            else -> ":nth-child(${n + 1})"
-        }
-        n == -1 -> ":last-of-type"
-        else -> ":eq($n)"
+    private fun indexPipe(n: Int): String = when (n) {
+        0 -> " | first"
+        -1 -> " | last"
+        else -> " | index:$n"
+    }
+
+    private fun childIndexSelector(n: Int): String = when (n) {
+        0 -> ":first-child"
+        -1 -> ":last-child"
+        else -> ":nth-child(${n + 1})"
     }
 
     /**

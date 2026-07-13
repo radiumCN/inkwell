@@ -63,6 +63,9 @@ sealed interface PipeOp {
     data object First : PipeOp
     data object Last : PipeOp
     data class Index(val n: Int) : PipeOp
+
+    /** `select:CSS` 在当前节点内继续选择（仅对节点列表有意义，字符串管道里为空操作） */
+    data class Select(val query: String) : PipeOp
     data class Join(val sep: String) : PipeOp
     data class Prepend(val s: String) : PipeOp
     data class Append(val s: String) : PipeOp
@@ -236,6 +239,11 @@ object RuleParser {
                 if (pattern.isEmpty()) throw RuleSyntaxException(seg.offset + 6, "正则为空")
                 checkRegex(pattern, seg.offset + 6)
                 PipeOp.Match(pattern)
+            }
+            t.startsWith("select:") -> {
+                val q = t.substring(7).trim()
+                if (q.isEmpty()) throw RuleSyntaxException(seg.offset + 7, "select 选择器为空")
+                PipeOp.Select(validQuery(q, seg.offset + 7))
             }
             t.startsWith("index:") -> {
                 val n = t.substring(6).trim().toIntOrNull()

@@ -94,11 +94,16 @@ class SourceHttpClient(
         var hasUa = false
         var contentType: String? = null
         headers.forEach { (k, v) ->
+            // OkHttp 只接受 ASCII 头值，非法值会抛 IllegalArgumentException 打死整次抓取。
+            // 书源常把 Referer 写成 {{baseUrl}}，而书源 URL 里可能带 emoji 后缀 —— 丢掉该头即可，
+            // 不该让整个书源不可用。
+            if (!isValidHeaderValue(v)) return@forEach
             if (k.equals("User-Agent", ignoreCase = true)) hasUa = true
             if (k.equals("Content-Type", ignoreCase = true)) contentType = v
             b.header(k, v)
         }
         if (!hasUa) b.header("User-Agent", DEFAULT_UA)
+
         if (method.equals("POST", ignoreCase = true)) {
             val mediaType = (contentType ?: "application/x-www-form-urlencoded").toMediaTypeOrNull()
             val cs = charsetOverride?.let { runCatching { charsetOf(it) }.getOrNull() } ?: Charsets.UTF_8
@@ -108,6 +113,10 @@ class SourceHttpClient(
         }
         return b.build()
     }
+
+    /** OkHttp 允许的头值字符：可见 ASCII 与制表符 */
+    private fun isValidHeaderValue(v: String): Boolean =
+        v.all { it == '\t' || it in ' '..'~' }
 
     /** 三级字符集探测 */
     private fun detectCharset(override: String?, contentTypeHeader: String?, bytes: ByteArray): Charset {
@@ -137,14 +146,19 @@ class SourceHttpClient(
         return Charsets.UTF_8
     }
 
-    private companion object {
-        val RETRY_CODES = setOf(403, 429)
-        const val MAX_RETRIES = 2
+    companion object {
+        /**
+         * 书源规则是照着这个 UA 抓到的页面写的，JS 渲染器必须沿用同一个，否则站点可能
+         * 按 UA 给出另一套 DOM（创世中文网就会在移动 UA 下跳转到 m. 站），规则随即全部落空。
+         */
         const val DEFAULT_UA =
             "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-        val CHARSET_PARAM = Regex("charset\\s*=\\s*\"?([\\w-]+)", RegexOption.IGNORE_CASE)
-        val META_CHARSET = Regex("<meta[^>]+charset\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)
+
+        private val RETRY_CODES = setOf(403, 429)
+        private const val MAX_RETRIES = 2
+        private val CHARSET_PARAM = Regex("charset\\s*=\\s*\"?([\\w-]+)", RegexOption.IGNORE_CASE)
+        private val META_CHARSET = Regex("<meta[^>]+charset\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)
     }
 }
 

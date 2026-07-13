@@ -75,9 +75,14 @@ class BookSourceEngine(
     private val globalPurify: List<PurifyRule> = emptyList(),
     private val trace: RuleTraceCollector? = null,
     scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
+    /** JS 渲染回退；未注入时行为与从前完全一致 */
+    private val renderer: PageRenderer? = null,
 ) {
 
     private val evaluator = RuleEvaluator(scriptRuntime)
+
+    /** 已确认需要 JS 渲染的书源；后续请求直接走渲染器，省掉每次先静态空跑一遍 */
+    private val needsRender = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage {
         val rule = source.search ?: throw SourceException("书源「${source.name}」未配置搜索规则")
@@ -96,19 +101,30 @@ class BookSourceEngine(
 
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail {
         val rule = source.detail ?: throw SourceException("书源「${source.name}」未配置详情规则")
-        val fetched = fetchUrl(source, resolveUrl(source.baseUrl, bookUrl), "detail")
+        val url = resolveUrl(source.baseUrl, bookUrl)
+        return withRenderFallback(source) { render -> parseDetail(source, rule, url, render) }
+            ?: throw SourceException("详情页未匹配到书名: $url")
+    }
+
+    private suspend fun parseDetail(
+        source: BookSourceRule,
+        rule: DetailRule,
+        url: String,
+        render: Boolean,
+    ): RemoteBookDetail? {
+        val fetched = fetchPage(source, url, "detail", render)
         val ctx = pageContext(fetched, varsOf(source))
         val f = rule.fields
         val title = evalField("detail", "title", f["title"], ctx)
-        if (title.isNullOrBlank()) throw SourceException("详情页未匹配到书名: ${fetched.finalUrl}")
-        val tocUrl = evalField("detail", "tocUrl", f["tocUrl"], ctx)
+        if (title.isNullOrBlank()) return null
+        val tocUrl = evalUrlField("detail", "tocUrl", f["tocUrl"], ctx)
             ?.takeIf { it.isNotBlank() }
             ?.let { resolveUrl(fetched.finalUrl, it) }
             ?: fetched.finalUrl // 缺省：详情页即目录页
         return RemoteBookDetail(
             title = title,
             author = evalField("detail", "author", f["author"], ctx),
-            coverUrl = evalField("detail", "coverUrl", f["coverUrl"], ctx)
+            coverUrl = evalUrlField("detail", "coverUrl", f["coverUrl"], ctx)
                 ?.let { resolveUrl(fetched.finalUrl, it) },
             intro = evalField("detail", "intro", f["intro"], ctx),
             tocUrl = tocUrl,
@@ -117,6 +133,16 @@ class BookSourceEngine(
 
     suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> {
         val rule = source.toc ?: throw SourceException("书源「${source.name}」未配置目录规则")
+        return withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
+            ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
+    }
+
+    private suspend fun collectToc(
+        source: BookSourceRule,
+        rule: TocRule,
+        tocUrl: String,
+        render: Boolean,
+    ): List<RemoteChapter>? {
         val collected = mutableListOf<Pair<String, String>>()
         var url: String? = resolveUrl(source.baseUrl, tocUrl)
         val visited = HashSet<String>()
@@ -124,36 +150,59 @@ class BookSourceEngine(
         // nextPage 循环：上限 + visited 防环
         while (url != null && pages < MAX_TOC_PAGES && visited.add(url)) {
             pages++
-            val fetched = fetchUrl(source, url, "toc")
+            val fetched = fetchPage(source, url, "toc", render)
             val ctx = pageContext(fetched, varsOf(source))
             for (item in evalList("toc", rule.list, ctx)) {
                 val title = evalField("toc", "title", rule.fields["title"], item)
-                val chapUrl = evalField("toc", "url", rule.fields["url"], item)
+                val chapUrl = evalUrlField("toc", "url", rule.fields["url"], item)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { resolveUrl(fetched.finalUrl, it) }
                 if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank()) collected += title to chapUrl
             }
             url = rule.nextPage
-                ?.let { evalField("toc", "nextPage", it, ctx) }
+                ?.let { evalUrlField("toc", "nextPage", it, ctx) }
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveUrl(fetched.finalUrl, it) }
         }
-        if (collected.isEmpty()) throw SourceException("目录规则未匹配到章节: $tocUrl")
+        if (collected.isEmpty()) return null
         val ordered = if (rule.reverse) collected.asReversed() else collected
         return ordered.mapIndexed { i, (title, u) -> RemoteChapter(i, title, u) }
     }
 
-    suspend fun getContent(source: BookSourceRule, chapterUrl: String): RemoteChapterContent {
+    /**
+     * @param otherChapterUrls 本书其余章节的地址。正文分页会跟着 nextPage 一直翻，而不少站点把
+     * 分页按钮也标成「下一章」（如仓库看书网 874007_2.html → 874007_3.html → 874008.html），
+     * 一路跟下去会把后面十几章吞进当前章。撞上目录里的其他章节即停。
+     */
+    suspend fun getContent(
+        source: BookSourceRule,
+        chapterUrl: String,
+        otherChapterUrls: Set<String> = emptySet(),
+    ): RemoteChapterContent {
         val rule = source.content ?: throw SourceException("书源「${source.name}」未配置正文规则")
+        return withRenderFallback(source) { render ->
+            collectContent(source, rule, chapterUrl, otherChapterUrls, render)
+        } ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
+    }
+
+    private suspend fun collectContent(
+        source: BookSourceRule,
+        rule: ContentRule,
+        chapterUrl: String,
+        otherChapterUrls: Set<String>,
+        render: Boolean,
+    ): RemoteChapterContent? {
         // 净化：源级在前、全局在后；正则预编译
         val purifiers = compilePurify(rule.purify + globalPurify)
         val elements = mutableListOf<ContentElement>()
-        var url: String? = resolveUrl(source.baseUrl, chapterUrl)
+        val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
+        val stopAt = otherChapterUrls.filterNotTo(HashSet()) { it == firstUrl }
+        var url: String? = firstUrl
         val visited = HashSet<String>()
         var pages = 0
         while (url != null && pages < MAX_CONTENT_PAGES && visited.add(url)) {
             pages++
-            val fetched = fetchUrl(source, url, "content")
+            val fetched = fetchPage(source, url, "content", render)
             val ctx = pageContext(fetched, varsOf(source))
             val html = evalField("content", "content", rule.content, ctx)
             if (html != null) {
@@ -167,13 +216,54 @@ class BookSourceEngine(
                 elements += converter.convert(body)
             }
             url = rule.nextPage
-                ?.let { evalField("content", "nextPage", it, ctx) }
+                ?.let { evalUrlField("content", "nextPage", it, ctx) }
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveUrl(fetched.finalUrl, it) }
+                ?.takeIf { it !in stopAt } // 翻到别的章节了 → 本章结束
         }
-        val purified = applyPurify(elements, purifiers)
-        if (purified.isEmpty()) throw SourceException("正文规则未匹配到内容: $chapterUrl")
-        return RemoteChapterContent(purified)
+        return applyPurify(elements, purifiers).takeIf { it.isNotEmpty() }?.let { RemoteChapterContent(it) }
+    }
+
+    // ---- JS 渲染回退 ----
+
+    /**
+     * 先按已知模式抓一次；解析为空且注入了渲染器时，用 WebView 执行页面 JS 后重试一次。
+     * 一旦确认某书源需要渲染就记住，后续请求直接走渲染器，不再每次先静态空跑。
+     *
+     * 只用于 detail/toc/content —— 这三级都是用户点开某一本书触发的，慢一点可以接受。
+     * 搜索/发现会向上百个书源并发扇出，其中大量是已死站点，逐个渲染会把整次搜索拖垮。
+     */
+    private suspend fun <T : Any> withRenderFallback(
+        source: BookSourceRule,
+        attempt: suspend (render: Boolean) -> T?,
+    ): T? {
+        val known = source.id in needsRender
+        attempt(known)?.let { return it }
+        if (known || renderer == null) return null
+        return attempt(true)?.also { needsRender += source.id }
+    }
+
+    /** render=true 时走 JS 渲染；渲染器缺席或渲染失败时静默退回静态抓取 */
+    private suspend fun fetchPage(
+        source: BookSourceRule,
+        url: String,
+        stage: String,
+        render: Boolean,
+    ): FetchedPage {
+        if (render && renderer != null) {
+            val headers = mergeHeaders(source.headers, emptyMap(), emptyMap())
+            // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
+            val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+                ?: SourceHttpClient.DEFAULT_UA
+            renderer.render(url, headers, ua)?.let { page ->
+                trace?.onFetch(
+                    FetchTrace(url, "RENDER", page.statusCode, page.finalUrl,
+                        page.detectedCharset, page.bodyText.take(500))
+                )
+                return page
+            }
+        }
+        return fetchUrl(source, url, stage)
     }
 
     // ---- 内部 ----
@@ -254,7 +344,7 @@ class BookSourceEngine(
         val ctx = pageContext(fetched, vars)
         val items = evalList(stage, listRule, ctx).mapNotNull { itemCtx ->
             val title = evalField(stage, "title", fields["title"], itemCtx)
-            val bookUrl = evalField(stage, "bookUrl", fields["bookUrl"], itemCtx)
+            val bookUrl = evalUrlField(stage, "bookUrl", fields["bookUrl"], itemCtx)
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveUrl(fetched.finalUrl, it) }
             if (title.isNullOrBlank() || bookUrl.isNullOrBlank()) return@mapNotNull null
@@ -262,14 +352,14 @@ class BookSourceEngine(
                 title = title,
                 bookUrl = bookUrl,
                 author = evalField(stage, "author", fields["author"], itemCtx),
-                coverUrl = evalField(stage, "coverUrl", fields["coverUrl"], itemCtx)
+                coverUrl = evalUrlField(stage, "coverUrl", fields["coverUrl"], itemCtx)
                     ?.let { resolveUrl(fetched.finalUrl, it) },
                 intro = evalField(stage, "intro", fields["intro"], itemCtx),
                 latestChapter = evalField(stage, "latestChapter", fields["latestChapter"], itemCtx),
                 sourceId = source.id,
             )
         }
-        val hasMore = nextPageRule != null && !evalField(stage, "nextPage", nextPageRule, ctx).isNullOrBlank()
+        val hasMore = nextPageRule != null && !evalUrlField(stage, "nextPage", nextPageRule, ctx).isNullOrBlank()
         return SearchPage(items, hasMore)
     }
 
@@ -282,6 +372,24 @@ class BookSourceEngine(
             trace?.onRule(RuleTrace(stage, "list", rule, null, e.message))
             throw e
         }
+
+    /**
+     * URL 字段求值：只取首个非空匹配。
+     * 文本字段多匹配时换行拼接是合理的（如多段简介），但地址字段绝不能拼 ——
+     * 页面上下两处导航常各有一个「下一章」，拼起来会得到一个必然 404 的废地址。
+     */
+    private fun evalUrlField(stage: String, name: String, rule: String?, ctx: EvalContext): String? {
+        if (rule.isNullOrBlank()) return null
+        return try {
+            val value = evaluator.evalToStrings(RuleParser.parse(rule), ctx)
+                .firstOrNull { it.isNotBlank() }
+            trace?.onRule(RuleTrace(stage, name, rule, value?.take(200)))
+            value
+        } catch (e: Exception) {
+            trace?.onRule(RuleTrace(stage, name, rule, null, e.message))
+            throw e
+        }
+    }
 
     /** 单字段求值；规则缺失返回 null，求值异常上报 trace 后原样抛出 */
     private fun evalField(stage: String, name: String, rule: String?, ctx: EvalContext): String? {
@@ -340,8 +448,18 @@ class BookSourceEngine(
 
 /** 相对 → 绝对 URL 解析；base 非法或无法解析时原样返回 */
 internal fun resolveUrl(base: String, ref: String): String {
-    val r = ref.trim()
+    val r = stripUrlOptions(ref.trim())
     if (r.isEmpty()) return r
     if (r.startsWith("http://") || r.startsWith("https://")) return r
     return base.toHttpUrlOrNull()?.resolve(r)?.toString() ?: r
+}
+
+/**
+ * Legado 的「地址,{选项}」写法（选项含 method/body/headers 等），规则产出的地址可能带这条尾巴，
+ * 常见于用 JS 拼目录页地址的书源。抓取前剥掉，否则整条尾巴会被当成 URL 的一部分。
+ * 选项里的 headers 暂不生效——需要时书源可在源级 header 里配。
+ */
+private fun stripUrlOptions(url: String): String {
+    val i = url.indexOf(",{")
+    return if (i > 0) url.substring(0, i).trim() else url
 }

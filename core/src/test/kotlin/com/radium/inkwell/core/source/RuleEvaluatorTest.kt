@@ -33,6 +33,27 @@ class RuleEvaluatorTest {
     private fun strs(rule: String, c: EvalContext = ctx()) = ev.evalToStrings(RuleParser.parse(rule), c)
 
     @Test
+    fun `select pipe takes the nth match then descends into it`() {
+        // 两个 .row 各在自己的 .wrap 下：CSS 的 :last-of-type 按兄弟序号算，会把两个都选中；
+        // 而 Legado 的 [-1] 指「匹配集里的最后一个」，只该选中第二个。
+        val h = """
+            <body>
+              <div class="wrap"><div class="row"><a href="/a1">A1</a></div></div>
+              <div class="wrap"><div class="row"><a href="/b1">B1</a></div></div>
+            </body>
+        """.trimIndent()
+        val c = EvalContext(Jsoup.parse(h, "https://ex.com/"), null, "https://ex.com/", emptyMap())
+
+        assertEquals(2, ev.evalToNodes(RuleParser.parse("css:.row:last-of-type a"), c).size)
+
+        assertEquals(1, ev.evalToNodes(RuleParser.parse("css:.row | last | select:a"), c).size)
+        assertEquals(listOf("B1"), ev.evalToStrings(RuleParser.parse("css:.row | last | select:a"), c))
+        // 提取器作用在下钻后的节点上
+        assertEquals(listOf("/b1"), ev.evalToStrings(RuleParser.parse("css:.row@href | last | select:a"), c))
+        assertEquals(listOf("/a1"), ev.evalToStrings(RuleParser.parse("css:.row@href | first | select:a"), c))
+    }
+
+    @Test
     fun `css text and href extraction`() {
         assertEquals(listOf("斗破星空", "凡人修仙"), strs("css:div.book h3 a"))
         assertEquals(listOf("/book/1", "/book/2"), strs("css:h3 a@href"))

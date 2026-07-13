@@ -24,13 +24,18 @@ class NetReaderBookSource(
 
     override val chapterCount: Int get() = chapters.size
 
+    /** 交给引擎作为正文翻页的止步集：翻到别的章节说明本章已完 */
+    private val chapterUrls: Set<String> by lazy {
+        chapters.mapNotNullTo(HashSet()) { it.url }
+    }
+
     override fun chapterTitle(index: Int): String? = chapters.getOrNull(index)?.title
 
     override suspend fun loadChapter(index: Int): ChapterContent {
         cache.read(bookId, index)?.let { return it }
         val chapter = chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
-        val remote = engine.getContent(rule, url)
+        val remote = engine.getContent(rule, url, chapterUrls)
         val content = ChapterContent(remote.elements)
         withContext(Dispatchers.IO) {
             cache.write(bookId, index, content)

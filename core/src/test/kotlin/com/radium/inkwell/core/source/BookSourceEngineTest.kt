@@ -137,6 +137,36 @@ class BookSourceEngineTest {
         assertEquals(2, server.requestCount)
     }
 
+    /**
+     * 分页链接与「下一章」共用一个规则时（不少站点如此），跟到本章最后一页会滑进下一章。
+     * 传入目录里的其它章节地址即可止步。不传则一路吃下去，正是线上把十几章连成一章的成因。
+     */
+    @Test
+    fun `content nextPage stops at another chapter`() = runBlocking {
+        val eng = engine()
+        val bleed = eng.getContent(source(), "$base/bleed/1")
+        assertEquals(
+            listOf("第一章上半。", "第一章下半。", "第二章内容。"),
+            bleed.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text },
+        )
+
+        val stopped = eng.getContent(source(), "$base/bleed/1", setOf("$base/bleed/2"))
+        assertEquals(
+            listOf("第一章上半。", "第一章下半。"),
+            stopped.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text },
+        )
+    }
+
+    /** 页面上下两处导航各有一个「下一页」：URL 字段必须取首个匹配，拼起来会得到必然 404 的废地址 */
+    @Test
+    fun `url field takes first match instead of joining`() = runBlocking {
+        val content = engine().getContent(source(), "$base/dup/1")
+        assertEquals(
+            listOf("重复导航页。", "第二页内容。"),
+            content.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text },
+        )
+    }
+
     @Test
     fun `detail without matched title throws`() = runBlocking {
         assertFailsWith<SourceException> { engine().getDetail(source(), "$base/book/empty") }
@@ -229,6 +259,11 @@ class BookSourceEngineTest {
                 path == "/chap/1_2" -> html(CHAP_PAGE_2)
                 path == "/loop/a" -> html(LOOP_A)
                 path == "/loop/b" -> html(LOOP_B)
+                path == "/bleed/1" -> html(BLEED_1)
+                path == "/bleed/1_2" -> html(BLEED_1_2)
+                path == "/bleed/2" -> html(BLEED_2)
+                path == "/dup/1" -> html(DUP_NAV)
+                path == "/dup/2" -> html(DUP_LAST)
                 path.startsWith("/list/") -> html(EXPLORE_PAGE)
                 path == "/gbk/chap" -> MockResponse()
                     .setBody(Buffer().write(GBK_CHAP.toByteArray(charset("GBK"))))
@@ -341,6 +376,22 @@ class BookSourceEngineTest {
             <p>　　他背起行囊，踏上了修真之路。</p>
             <img src="/img/scene.jpg">
             </div></body></html>"""
+
+        // 章内分页的末页把「下一页」指向下一章 —— 现实中极常见，会把后续章节吃进本章
+        const val BLEED_1 = """<html><body><div id="content"><p>第一章上半。</p></div>
+            <a id="next" href="/bleed/1_2">下一页</a></body></html>"""
+
+        const val BLEED_1_2 = """<html><body><div id="content"><p>第一章下半。</p></div>
+            <a id="next" href="/bleed/2">下一页</a></body></html>"""
+
+        const val BLEED_2 = """<html><body><div id="content"><p>第二章内容。</p></div></body></html>"""
+
+        // 上下两处导航各有一个「下一页」，且指向同一地址
+        const val DUP_NAV = """<html><body><a id="next" href="/dup/2">下一页</a>
+            <div id="content"><p>重复导航页。</p></div>
+            <a id="next" href="/dup/2">下一页</a></body></html>"""
+
+        const val DUP_LAST = """<html><body><div id="content"><p>第二页内容。</p></div></body></html>"""
 
         const val LOOP_A = """<html><body><div id="content"><p>甲页内容。</p></div>
             <a id="next" href="/loop/b">下一页</a></body></html>"""

@@ -72,6 +72,9 @@ class RuleEvaluator(
                 PipeOp.First -> acc.take(1)
                 PipeOp.Last -> acc.takeLast(1)
                 is PipeOp.Index -> listOfNotNull(acc.getOrNull(op.n))
+                is PipeOp.Select -> acc.flatMap { c ->
+                    c.element?.select(op.query)?.map { c.copy(element = it, json = null) }.orEmpty()
+                }
                 else -> acc // 字符串类管道对节点列表无意义，忽略
             }
         }
@@ -94,9 +97,22 @@ class RuleEvaluator(
                 evalToStrings(o, ctx).takeIf { list -> list.any { it.isNotBlank() } }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToStrings(it, ctx) }
-        is RuleNode.Pipe ->
-            node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
-                .filter { it.isNotEmpty() }
+        is RuleNode.Pipe -> {
+            val src = node.source
+            if (src is RuleNode.Css && node.ops.any { it is PipeOp.Select }) {
+                // 含 select 的管道（「选中 → 取第 n 个 → 下钻」）必须按节点求值：
+                // select 之前的都是节点操作，提取器作用在最终选中的节点上，其余管道再按字符串处理。
+                val split = node.ops.indexOfLast { it is PipeOp.Select } + 1
+                val nodes = evalToNodes(RuleNode.Pipe(src, node.ops.take(split)), ctx)
+                val strings = nodes.mapNotNull { it.element?.let { el -> extract(el, src.extractor) } }
+                    .filter { it.isNotEmpty() }
+                node.ops.drop(split).fold(strings) { acc, op -> applyOp(op, acc, ctx) }
+                    .filter { it.isNotEmpty() }
+            } else {
+                node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
+                    .filter { it.isNotEmpty() }
+            }
+        }
     }
 
     /** 求值为单个字符串；多条结果用换行拼接，空结果返回 null */
@@ -173,6 +189,7 @@ class RuleEvaluator(
         PipeOp.First -> list.take(1)
         PipeOp.Last -> list.takeLast(1)
         is PipeOp.Index -> listOfNotNull(list.getOrNull(op.n))
+        is PipeOp.Select -> list // 节点级操作，字符串管道里无意义
         is PipeOp.Join -> if (list.isEmpty()) emptyList() else listOf(list.joinToString(op.sep))
         is PipeOp.Prepend -> list.map { expandTemplate(op.s, ctx.vars) + it }
         is PipeOp.Append -> list.map { it + expandTemplate(op.s, ctx.vars) }
