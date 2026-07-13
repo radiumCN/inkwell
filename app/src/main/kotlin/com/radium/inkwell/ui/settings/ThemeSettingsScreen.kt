@@ -301,15 +301,18 @@ private fun CustomThemeEditor(
                 }
             }
 
-            LabeledSlider("强调色 · 色相", hue, 0f..360f) { hue = it; onChange(currentSeed(), currentBg()) }
-            LabeledSlider("强调色 · 饱和度", sat, 0f..1f) { sat = it; onChange(currentSeed(), currentBg()) }
-            LabeledSlider("强调色 · 明度", value, 0.2f..1f) { value = it; onChange(currentSeed(), currentBg()) }
-            LabeledSlider("背景 · 暖度", bgWarmth, 0f..0.12f) { bgWarmth = it; onChange(currentSeed(), currentBg()) }
+            // 拖动只更新本地预览，松手（onFinished）才落库：避免每帧写 DataStore 与全局主题抖动
+            val commit = { onChange(currentSeed(), currentBg()) }
+            LabeledSlider("强调色 · 色相", hue, 0f..360f, { hue = it }, commit)
+            LabeledSlider("强调色 · 饱和度", sat, 0f..1f, { sat = it }, commit)
+            LabeledSlider("强调色 · 明度", value, 0.2f..1f, { value = it }, commit)
+            LabeledSlider("背景 · 暖度", bgWarmth, 0f..0.12f, { bgWarmth = it }, commit)
             LabeledSlider(
                 if (dark) "背景 · 明度（纯黑 ↔ 深灰）" else "背景 · 明度",
                 bgValue,
                 if (dark) 0f..0.25f else 0.85f..1f,
-            ) { bgValue = it; onChange(currentSeed(), currentBg()) }
+                { bgValue = it }, commit,
+            )
         }
     }
 }
@@ -320,6 +323,7 @@ private fun LabeledSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     onChange: (Float) -> Unit,
+    onFinished: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -334,6 +338,7 @@ private fun LabeledSlider(
         Slider(
             value = value.coerceIn(range),
             onValueChange = onChange,
+            onValueChangeFinished = onFinished,
             valueRange = range,
             modifier = Modifier.weight(1f),
         )

@@ -66,6 +66,15 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
+    // 卷起弧面高光：中间亮、两侧透明，模拟光照到卷曲纸面
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 1f, 0f,
+            intArrayOf(0x00FFFFFF, 0x33FFFFFF, 0x00FFFFFF),
+            floatArrayOf(0f, 0.5f, 1f),
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
 
     /**
      * @param touchX/touchY 当前触点（x 可越出屏幕左侧，用于把页完全卷走）
@@ -100,12 +109,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         drawFoldShadow(canvas)
         canvas.restore()
 
-        // 3. 前页背面（镜像 + 泛白）+ 折边阴影
+        // 3. 前页背面（镜像 + 泛白）+ 折边阴影 + 弧面高光
         canvas.save()
         canvas.clipPath(pathCurl)
         canvas.clipOutPath(pathUnder)
         drawBack(canvas, front)
         drawBackShadow(canvas)
+        drawBackHighlight(canvas)
         canvas.restore()
     }
 
@@ -209,6 +219,27 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /** 背面靠折线处的暗部，增强纸张卷曲的立体感 */
     private fun drawBackShadow(canvas: Canvas) {
         drawShadowStrip(canvas, backShadowPaint, widthDivisor = 6f, maxWidth = 40f, towardLeft = false)
+    }
+
+    /** 卷起弧面中段高光；卷得越多高光越明显 */
+    private fun drawBackHighlight(canvas: Canvas) {
+        val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
+        val hlWidth = (fold / 3f).coerceIn(0f, 90f)
+        if (hlWidth < 2f) return
+        val degree = Math.toDegrees(
+            atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
+        ).toFloat()
+        shadowMatrix.reset()
+        shadowMatrix.setScale(hlWidth, 1f)
+        shadowMatrix.postTranslate(bezierStart1.x - hlWidth, bezierStart1.y)
+        highlightPaint.shader.setLocalMatrix(shadowMatrix)
+        canvas.save()
+        canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
+        canvas.drawRect(
+            bezierStart1.x - hlWidth, bezierStart1.y - height * 2,
+            bezierStart1.x, bezierStart1.y + height * 2, highlightPaint,
+        )
+        canvas.restore()
     }
 
     private fun drawFoldShadow(canvas: Canvas) {

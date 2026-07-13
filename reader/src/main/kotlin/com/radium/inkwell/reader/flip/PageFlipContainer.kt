@@ -29,9 +29,13 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -75,6 +79,16 @@ fun PageFlipContainer(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    // 系统「移除动画」开启时降级为无动画直切（无障碍）
+    val animationsOff = remember {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+        ) == 0f
+    }
+    val effectiveAnim = if (animationsOff) FlipAnimation.NONE else animation
     // offset：拖拽累计位移，FORWARD ∈ [-w,0]，BACKWARD ∈ [0,w]；驱动 COVER/SLIDE 与松手裁决
     var offset by remember { mutableFloatStateOf(0f) }
     // CURL 的真实触点（跟手）
@@ -86,11 +100,19 @@ fun PageFlipContainer(
     var settling by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize(1, 1)) }
 
-    suspend fun settle(commit: Boolean) {
+    // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
+    fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
+        val speed = abs(velocity)
+        val t = (speed / 4000f).coerceIn(0f, 1f) // 4000px/s 视为最快
+        return (maxMs - (maxMs - minMs) * t).toInt()
+    }
+
+    suspend fun settle(commit: Boolean, velocity: Float = 0f) {
         val dir = direction ?: return
         settling = true
         val width = size.width.toFloat()
-        if (animation == FlipAnimation.CURL) {
+        if (commit) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (effectiveAnim == FlipAnimation.CURL) {
             // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
             val target = when {
                 commit && dir == FlipDirection.FORWARD -> -width * 0.7f  // 卷出左侧
@@ -98,15 +120,15 @@ fun PageFlipContainer(
                 dir == FlipDirection.FORWARD -> width - 1.5f             // 回滚：贴回右缘
                 else -> downX - width * 0.3f                             // 回滚：重新折叠到屏外
             }
-            animate(touchX, target, animationSpec = tween(300)) { v, _ -> touchX = v }
+            val dur = if (commit) settleDuration(velocity, 200, 320) else settleDuration(velocity, 160, 240)
+            animate(touchX, target, animationSpec = tween(dur)) { v, _ -> touchX = v }
         } else {
             val target = when {
                 commit -> if (dir == FlipDirection.FORWARD) -width else width
                 else -> 0f
             }
-            animate(offset, target, animationSpec = tween(if (commit) 240 else 180)) { v, _ ->
-                offset = v
-            }
+            val dur = if (commit) settleDuration(velocity, 180, 260) else settleDuration(velocity, 140, 200)
+            animate(offset, target, animationSpec = tween(dur)) { v, _ -> offset = v }
         }
         if (commit) {
             // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
@@ -123,7 +145,7 @@ fun PageFlipContainer(
             if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
             return
         }
-        if (animation == FlipAnimation.NONE) {
+        if (effectiveAnim == FlipAnimation.NONE) {
             onCommit(dir)
             return
         }
@@ -144,7 +166,7 @@ fun PageFlipContainer(
         modifier
             .fillMaxSize()
             .onSizeChanged { size = it }
-            .pointerInput(gesturesEnabled, animation) {
+            .pointerInput(gesturesEnabled, effectiveAnim) {
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -183,7 +205,7 @@ fun PageFlipContainer(
                     horizontalDrag(drag.id) { change ->
                         tracker.addPosition(change.uptimeMillis, change.position)
                         change.consume()
-                        if (!flippable || animation == FlipAnimation.NONE) return@horizontalDrag
+                        if (!flippable || effectiveAnim == FlipAnimation.NONE) return@horizontalDrag
                         // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）
                         touchY = change.position.y
                         touchX = change.position.x
@@ -196,7 +218,7 @@ fun PageFlipContainer(
                         if (dir == FlipDirection.FORWARD) onCommit(dir)
                         return@awaitEachGesture
                     }
-                    if (animation == FlipAnimation.NONE) {
+                    if (effectiveAnim == FlipAnimation.NONE) {
                         onCommit(dir)
                         return@awaitEachGesture
                     }
@@ -205,11 +227,11 @@ fun PageFlipContainer(
                         FlipDirection.FORWARD -> offset < -width / 4f || velocity < -1200f
                         FlipDirection.BACKWARD -> offset > width / 4f || velocity > 1200f
                     }
-                    scope.launch { settle(commit) }
+                    scope.launch { settle(commit, velocity) }
                 }
             },
     ) {
-        when (animation) {
+        when (effectiveAnim) {
             FlipAnimation.NONE -> PageCanvas(current, layout, theme)
             FlipAnimation.SLIDE -> SlideLayers(
                 current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
