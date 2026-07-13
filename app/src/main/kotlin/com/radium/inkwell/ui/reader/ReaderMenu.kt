@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.reader
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,24 +10,32 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -217,105 +227,162 @@ private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+// ---------- 阅读设置面板 ----------
+
+private val LINE_SPACING_OPTIONS = listOf(
+    "紧凑" to 1.4f,
+    "标准" to 1.6f,
+    "宽松" to 1.9f,
+)
+
 @Composable
 private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
-        StepperRow(
-            label = "字号",
-            value = "${settings.fontSizeSp.toInt()}",
-            onMinus = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
-            onPlus = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 32.dp),
+    ) {
+        // 亮度
+        SectionLabel("亮度")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.DarkMode, contentDescription = null,
+                Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = settings.brightnessOverride ?: 0.5f,
+                onValueChange = { v ->
+                    onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
+                },
+                enabled = settings.brightnessOverride != null,
+                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+            )
+            Icon(
+                Icons.Default.LightMode, contentDescription = null,
+                Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(12)
+            FilterChip(
+                selected = settings.brightnessOverride == null,
+                onClick = {
+                    onUpdate(
+                        settings.copy(
+                            brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
+                        )
+                    )
+                },
+                label = { Text("系统") },
+            )
+        }
+
+        // 字号
+        SectionLabel("字号")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
+                modifier = Modifier.weight(1f),
+            ) { Text("A−", style = MaterialTheme.typography.titleMedium) }
+            Text(
+                "${settings.fontSizeSp.toInt()}",
+                Modifier.width(72.dp),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleLarge,
+            )
+            OutlinedButton(
+                onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
+                modifier = Modifier.weight(1f),
+            ) { Text("A＋", style = MaterialTheme.typography.titleMedium) }
+        }
+
+        // 行距
+        SectionLabel("行距")
+        ChipRow(
+            options = LINE_SPACING_OPTIONS.map { it.first },
+            selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
+                kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
+            },
+            onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
         )
-        StepperRow(
-            label = "行距",
-            value = String.format("%.1f", settings.lineSpacingMult),
-            onMinus = { if (settings.lineSpacingMult > 1.2f) onUpdate(settings.copy(lineSpacingMult = settings.lineSpacingMult - 0.1f)) },
-            onPlus = { if (settings.lineSpacingMult < 2.4f) onUpdate(settings.copy(lineSpacingMult = settings.lineSpacingMult + 0.1f)) },
+
+        // 翻页方式
+        SectionLabel("翻页方式")
+        ChipRow(
+            options = FlipAnimation.entries.map { it.label },
+            selectedIndex = FlipAnimation.entries.indexOf(settings.flipAnimation),
+            onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
         )
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("翻页", Modifier.padding(end = 16.dp))
-            FlipAnimation.entries.forEach { anim ->
-                val selected = settings.flipAnimation == anim
-                TextButton(onClick = { onUpdate(settings.copy(flipAnimation = anim)) }) {
-                    Text(
-                        anim.label,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("字体", Modifier.padding(end = 16.dp))
-            ReaderSettings.FONT_PRESETS.forEach { (id, label) ->
-                val selected = settings.fontId == id
-                TextButton(onClick = { onUpdate(settings.copy(fontId = id)) }) {
-                    Text(
-                        label,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("主题", Modifier.padding(end = 16.dp))
-            ReaderTheme.ALL.forEach { theme ->
-                Box(
-                    Modifier
-                        .padding(end = 12.dp)
-                        .background(Color(theme.background), MaterialTheme.shapes.small)
-                        .clickable { onUpdate(settings.copy(theme = theme)) }
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        if (theme.id == settings.theme.id) "✓" else "文",
-                        color = Color(theme.textColor),
-                    )
-                }
-            }
-        }
+
+        // 字体
+        SectionLabel("字体")
+        ChipRow(
+            options = ReaderSettings.FONT_PRESETS.map { it.second },
+            selectedIndex = ReaderSettings.FONT_PRESETS.indexOfFirst { it.first == settings.fontId },
+            onSelect = { onUpdate(settings.copy(fontId = ReaderSettings.FONT_PRESETS[it].first)) },
+        )
+
+        // 背景
+        SectionLabel("背景")
         Row(
             Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("亮度", Modifier.padding(end = 16.dp))
-            Slider(
-                value = settings.brightnessOverride ?: -0.05f,
-                onValueChange = { v ->
-                    onUpdate(settings.copy(brightnessOverride = if (v < 0f) null else v.coerceIn(0.01f, 1f)))
-                },
-                valueRange = -0.05f..1f,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (settings.brightnessOverride == null) "系统" else "${(settings.brightnessOverride!! * 100).toInt()}%",
-                style = MaterialTheme.typography.bodySmall,
+            ReaderTheme.ALL.forEach { theme ->
+                val selected = theme.id == settings.theme.id
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .background(Color(theme.background), CircleShape)
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape,
+                        )
+                        .clickable { onUpdate(settings.copy(theme = theme)) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = theme.id,
+                            Modifier.size(20.dp),
+                            tint = Color(theme.textColor),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        Modifier.padding(top = 16.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ChipRow(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEachIndexed { i, label ->
+            FilterChip(
+                selected = i == selectedIndex,
+                onClick = { onSelect(i) },
+                label = { Text(label) },
             )
         }
     }
 }
 
 @Composable
-private fun StepperRow(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, Modifier.weight(1f))
-        TextButton(onClick = onMinus) { Text("−") }
-        Text(value, Modifier.padding(horizontal = 12.dp))
-        TextButton(onClick = onPlus) { Text("＋") }
-    }
+private fun Spacer(width: Int) {
+    androidx.compose.foundation.layout.Spacer(Modifier.width(width.dp))
 }

@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.sourcemanage
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -53,7 +57,12 @@ fun SourceManageScreen(
     val snackbar = remember { SnackbarHostState() }
     var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
     var showUrlImport by remember { mutableStateOf(false) }
+    var showImportMenu by remember { mutableStateOf(false) }
     var importUrl by remember { mutableStateOf("") }
+
+    val fileImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
     LaunchedEffect(message) {
         message?.let {
@@ -72,8 +81,35 @@ fun SourceManageScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = { viewModel.importFromClipboard() }) { Text("剪贴板") }
-                    TextButton(onClick = { showUrlImport = true }) { Text("网络导入") }
+                    TextButton(onClick = { showImportMenu = true }) { Text("导入书源") }
+                    DropdownMenu(
+                        expanded = showImportMenu,
+                        onDismissRequest = { showImportMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("从文件导入") },
+                            onClick = {
+                                showImportMenu = false
+                                fileImportLauncher.launch(
+                                    arrayOf("application/json", "text/plain", "application/octet-stream")
+                                )
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("从剪贴板导入") },
+                            onClick = {
+                                showImportMenu = false
+                                viewModel.importFromClipboard()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("从网络链接导入") },
+                            onClick = {
+                                showImportMenu = false
+                                showUrlImport = true
+                            },
+                        )
+                    }
                 },
             )
         },

@@ -52,15 +52,25 @@ class BookRepository(
                         f.absolutePath
                     }
                     val now = System.currentTimeMillis()
+                    // 文件已改名为 bookId，txt 的书名只能来自原始文件名；
+                    // EPUB/MOBI 优先元数据，无标题时同样回落原始文件名
+                    val type = when (ext) {
+                        "epub" -> BookType.LOCAL_EPUB
+                        "mobi", "azw3", "azw" -> BookType.LOCAL_MOBI
+                        else -> BookType.LOCAL_TXT
+                    }
+                    val fallbackTitle = displayName.substringBeforeLast('.').trim()
+                    val title = if (type == BookType.LOCAL_TXT) {
+                        fallbackTitle
+                    } else {
+                        book.metadata.title.takeIf { it.isNotBlank() && it != "未命名" }
+                            ?: fallbackTitle
+                    }
                     bookDao.upsert(
                         BookEntity(
                             id = bookId,
-                            type = when (ext) {
-                                "epub" -> BookType.LOCAL_EPUB
-                                "mobi", "azw3", "azw" -> BookType.LOCAL_MOBI
-                                else -> BookType.LOCAL_TXT
-                            },
-                            title = book.metadata.title,
+                            type = type,
+                            title = title.ifBlank { "未命名" },
                             author = book.metadata.author ?: "",
                             coverPath = coverPath,
                             intro = book.metadata.description,

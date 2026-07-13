@@ -5,7 +5,10 @@ import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +27,8 @@ import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -72,11 +77,15 @@ fun ReaderScreen(
     val activity = LocalActivity.current
     BrightnessEffect(activity, state.settings.brightnessOverride)
     KeepScreenOnEffect(activity, state.settings.keepScreenOn)
+    // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复
+    ImmersiveEffect(activity, immersive = !state.menuVisible)
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Color(state.settings.theme.background))
+            // 避开挖孔/刘海，页眉章节名不会顶进摄像头区域
+            .windowInsetsPadding(WindowInsets.displayCutout)
             .onSizeChanged { viewport = it },
     ) {
         val spec = if (viewport.width > 0) buildLayoutSpec(viewport, state.settings, density) else null
@@ -179,6 +188,30 @@ private fun BrightnessEffect(activity: Activity?, brightness: Float?) {
             val attrs = w.attributes
             attrs.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             w.attributes = attrs
+        }
+    }
+}
+
+@Composable
+private fun ImmersiveEffect(activity: Activity?, immersive: Boolean) {
+    DisposableEffect(activity, immersive) {
+        val window = activity?.window
+        if (window != null) {
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (immersive) {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            // 退出阅读页恢复系统栏
+            activity?.window?.let {
+                WindowInsetsControllerCompat(it, it.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
 }

@@ -42,6 +42,23 @@ class SourceManageViewModel(
         }
     }
 
+    fun importFromFile(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes().toString(Charsets.UTF_8)
+                    } ?: error("无法读取文件")
+                }
+            }
+            text.onSuccess { body ->
+                sourceRepo.importJson(body)
+                    .onSuccess { _message.value = it.summary }
+                    .onFailure { _message.value = "导入失败: ${it.message?.take(120)}" }
+            }.onFailure { _message.value = "读取失败: ${it.message}" }
+        }
+    }
+
     fun importFromUrl(url: String) {
         if (url.isBlank()) return
         viewModelScope.launch {

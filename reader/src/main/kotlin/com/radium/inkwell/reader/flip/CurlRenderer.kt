@@ -53,8 +53,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /**
-     * @param touchX/touchY 当前触点
-     * @param rightSide true=从右侧卷（前翻），false=从左侧卷（后翻）
+     * @param touchX/touchY 当前触点（x 可越出屏幕左侧，用于把页完全卷走）
+     * @param cornerBottom 卷角固定在右下(true)/右上(false)，手势开始时锁定
      */
     fun draw(
         canvas: Canvas,
@@ -62,11 +62,11 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         under: Bitmap,
         touchX: Float,
         touchY: Float,
-        rightSide: Boolean,
+        cornerBottom: Boolean,
     ) {
-        cornerX = if (rightSide) width else 0f
-        cornerY = if (touchY <= height / 2f) 0f else height
-        touch.x = touchX.coerceIn(1f, width - 1f)
+        cornerX = width
+        cornerY = if (cornerBottom) height else 0f
+        touch.x = touchX.coerceIn(-width * 1.5f, width - 1.5f)
         touch.y = touchY.coerceIn(1f, height - 1f)
         calcPoints()
         buildPaths()
@@ -85,11 +85,12 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         drawFoldShadow(canvas)
         canvas.restore()
 
-        // 3. 前页背面（镜像 + 泛白）
+        // 3. 前页背面（镜像 + 泛白）+ 折边阴影
         canvas.save()
         canvas.clipPath(pathCurl)
         canvas.clipOutPath(pathUnder)
         drawBack(canvas, front)
+        drawBackShadow(canvas)
         canvas.restore()
     }
 
@@ -188,6 +189,34 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         backMatrix.preTranslate(-bezierStart1.x, -bezierStart1.y)
         backMatrix.postTranslate(bezierStart1.x, bezierStart1.y)
         canvas.drawBitmap(front, backMatrix, backPaint)
+    }
+
+    /** 背面靠折线处的暗部，增强纸张卷曲的立体感 */
+    private fun drawBackShadow(canvas: Canvas) {
+        val degree = Math.toDegrees(
+            atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
+        ).toFloat()
+        val shadowWidth = (hypot(
+            (touch.x - cornerX).toDouble(),
+            (touch.y - cornerY).toDouble(),
+        ) / 6f).toFloat().coerceAtMost(40f)
+
+        canvas.save()
+        canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
+        shadowPaint.shader = android.graphics.LinearGradient(
+            bezierStart1.x, bezierStart1.y,
+            bezierStart1.x + shadowWidth, bezierStart1.y,
+            0x33000000, 0x00000000,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(
+            bezierStart1.x,
+            bezierStart1.y - height * 2,
+            bezierStart1.x + shadowWidth,
+            bezierStart1.y + height * 2,
+            shadowPaint,
+        )
+        canvas.restore()
     }
 
     private fun drawFoldShadow(canvas: Canvas) {

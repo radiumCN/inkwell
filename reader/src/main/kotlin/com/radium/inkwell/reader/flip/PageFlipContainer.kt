@@ -42,7 +42,6 @@ import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /** 程序化翻页入口（点击区域 / 音量键共用动画路径） */
 class FlipController {
@@ -54,9 +53,8 @@ class FlipController {
 
 /**
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
- * COVER/SLIDE 用图层位移，CURL 用位图仿真卷页，NONE 直接换页。
- * commit 动画结束后回调 onCommit（父层换页），随后 offset 归零——新当前页
- * 即动画终点画面，无闪烁。
+ * COVER/SLIDE 用图层位移驱动（offset），CURL 用真实触点驱动仿真卷页
+ * （卷角在手势开始时锁定，提交动画把触点拉到屏幕外让页完全卷走）。
  */
 @Composable
 fun PageFlipContainer(
@@ -75,30 +73,46 @@ fun PageFlipContainer(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    // offset: FORWARD ∈ [-w,0]，BACKWARD ∈ [0,w]
+    // offset：拖拽累计位移，FORWARD ∈ [-w,0]，BACKWARD ∈ [0,w]；驱动 COVER/SLIDE 与松手裁决
     val offset = remember { Animatable(0f) }
-    var direction by remember { mutableStateOf<FlipDirection?>(null) }
+    // CURL 的真实触点（跟手）；settle 时单独动画
+    val touchX = remember { Animatable(0f) }
     var touchY by remember { mutableFloatStateOf(0f) }
+    var downX by remember { mutableFloatStateOf(0f) }
+    var cornerBottom by remember { mutableStateOf(true) }
+    var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var size by remember { mutableStateOf(IntSize(1, 1)) }
 
     suspend fun settle(commit: Boolean) {
         val dir = direction ?: return
         val width = size.width.toFloat()
-        val target = if (dir == FlipDirection.FORWARD) -width else width
+        if (animation == FlipAnimation.CURL) {
+            // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
+            val target = when {
+                commit && dir == FlipDirection.FORWARD -> -width * 0.7f  // 卷出左侧
+                commit -> downX + width                                  // prev 展开盖满
+                dir == FlipDirection.FORWARD -> width - 1.5f             // 回滚：贴回右缘
+                else -> downX - width * 0.3f                             // 回滚：重新折叠到屏外
+            }
+            touchX.animateTo(target, tween(300))
+        } else {
+            val target = if (dir == FlipDirection.FORWARD) -width else width
+            if (commit) offset.animateTo(target, tween(240))
+            else offset.animateTo(0f, tween(180))
+        }
         if (commit) {
-            offset.animateTo(target, tween(240))
-            // 先换页并复位 direction，再归零 offset：任何中间帧都只会画新当前页
+            // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
             onCommit(dir)
             direction = null
             offset.snapTo(0f)
         } else {
-            offset.animateTo(0f, tween(180))
             direction = null
+            offset.snapTo(0f)
         }
     }
 
     fun startProgrammaticFlip(dir: FlipDirection) {
-        if (direction != null || offset.isRunning) return
+        if (direction != null || offset.isRunning || touchX.isRunning) return
         if (!canFlip(dir)) {
             if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
             return
@@ -107,9 +121,15 @@ fun PageFlipContainer(
             onCommit(dir)
             return
         }
-        direction = dir
-        touchY = size.height * 0.8f
-        scope.launch { settle(commit = true) }
+        scope.launch {
+            cornerBottom = true
+            touchY = size.height * 0.82f
+            downX = if (dir == FlipDirection.FORWARD) size.width * 0.92f else size.width * 0.08f
+            touchX.snapTo(downX)
+            offset.snapTo(0f)
+            direction = dir
+            settle(commit = true)
+        }
     }
 
     LaunchedEffect(controller) {
@@ -124,7 +144,6 @@ fun PageFlipContainer(
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    touchY = down.position.y
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
                     var dragDir: FlipDirection? = null
@@ -134,7 +153,7 @@ fun PageFlipContainer(
                     }
                     if (drag == null) {
                         // 松手未越过 slop = 点击
-                        if (!offset.isRunning && direction == null) {
+                        if (!offset.isRunning && !touchX.isRunning && direction == null) {
                             val x = down.position.x
                             when {
                                 x < size.width / 3f -> startProgrammaticFlip(FlipDirection.BACKWARD)
@@ -145,20 +164,29 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir ?: return@awaitEachGesture
-                    if (offset.isRunning || direction != null) return@awaitEachGesture
+                    if (offset.isRunning || touchX.isRunning || direction != null) return@awaitEachGesture
                     val flippable = canFlip(dir)
-                    if (flippable && animation != FlipAnimation.NONE) direction = dir
+                    if (flippable && animation != FlipAnimation.NONE) {
+                        // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）
+                        cornerBottom = down.position.y > size.height / 2f
+                        touchY = down.position.y
+                        downX = down.position.x
+                        scope.launch { touchX.snapTo(down.position.x) }
+                        direction = dir
+                    }
 
                     val width = size.width.toFloat()
                     horizontalDrag(drag.id) { change ->
                         tracker.addPosition(change.uptimeMillis, change.position)
-                        touchY = change.position.y
-                        val delta = change.positionChange().x
                         change.consume()
                         if (!flippable || animation == FlipAnimation.NONE) return@horizontalDrag
+                        touchY = change.position.y
                         val range = if (dir == FlipDirection.FORWARD) -width..0f else 0f..width
-                        val newValue = (offset.value + delta).coerceIn(range)
-                        scope.launch { offset.snapTo(newValue) }
+                        val delta = change.positionChange().x
+                        scope.launch {
+                            touchX.snapTo(change.position.x)
+                            offset.snapTo((offset.value + delta).coerceIn(range))
+                        }
                     }
 
                     if (!flippable) {
@@ -189,7 +217,9 @@ fun PageFlipContainer(
             )
             FlipAnimation.CURL -> CurlLayer(
                 current, prev, next, layout, theme, direction,
-                offset.value, size, touchY, density,
+                // 前翻卷角完全跟手；后翻以按下点为折叠原点（起始全折叠，随位移展开）
+                touchX = if (direction == FlipDirection.BACKWARD) touchX.value - downX else touchX.value,
+                touchY = touchY, cornerBottom = cornerBottom, size = size, density = density,
             )
         }
     }
@@ -273,9 +303,10 @@ private fun CurlLayer(
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
-    offset: Float,
-    size: IntSize,
+    touchX: Float,
     touchY: Float,
+    cornerBottom: Boolean,
+    size: IntSize,
     density: androidx.compose.ui.unit.Density,
 ) {
     // 位图只在需要的方向上渲染，随页面/主题/排版变化重建
@@ -300,21 +331,15 @@ private fun CurlLayer(
         return
     }
 
-    val width = size.width.toFloat()
     Spacer(
         Modifier.fillMaxSize().drawBehind {
             drawIntoCanvas { canvas ->
-                // 两个方向都从右角起卷：前翻是当前页被卷走（触点右→左），
-                // 后翻是上一页从完全折叠展开盖回（触点左→右）
-                val touchX = when (direction) {
-                    FlipDirection.FORWARD -> width + offset // offset ∈ [-w,0]
-                    FlipDirection.BACKWARD -> offset        // offset ∈ [0,w]
-                }
+                // 前翻：当前页从触点处被卷走；后翻：上一页（起始折叠在屏外）随手指展开盖回
                 renderer.draw(
                     canvas.nativeCanvas,
                     frontBitmap.asAndroidBitmap(),
                     underBitmap.asAndroidBitmap(),
-                    touchX, touchY, rightSide = true,
+                    touchX, touchY, cornerBottom,
                 )
             }
         }
