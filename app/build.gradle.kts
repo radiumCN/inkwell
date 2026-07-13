@@ -13,6 +13,7 @@ android {
     defaultConfig {
         applicationId = "com.radium.inkwell"
         minSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         // 版本号单点配置在 gradle/libs.versions.toml 的 [versions] inkwell
         // versionCode 忽略预发布后缀（0.1.0-beta.1 与 0.1.0 同码，允许同码覆盖安装）
@@ -99,4 +100,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // WebView 渲染只能在真机/模拟器上验证，JVM 单测覆盖不到
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.okhttp.mockwebserver)
 }

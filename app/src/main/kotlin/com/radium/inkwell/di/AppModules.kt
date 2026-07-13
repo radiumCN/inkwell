@@ -48,7 +48,11 @@ val appModule = module {
     single<com.radium.inkwell.core.source.js.ScriptRuntime> {
         com.radium.inkwell.core.source.js.RhinoScriptRuntime()
     }
-    single { BookSourceEngine(http = get(), scriptRuntime = get()) }
+    // JS 渲染回退：静态 HTML 解析不出内容时用 WebView 执行页面 JS 再试（详情/目录/正文三级）
+    single<com.radium.inkwell.core.source.PageRenderer> {
+        com.radium.inkwell.data.source.WebViewPageRenderer(androidContext())
+    }
+    single { BookSourceEngine(http = get(), scriptRuntime = get(), renderer = get()) }
     single { com.radium.inkwell.update.UpdateChecker() }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
@@ -61,6 +65,9 @@ val appModule = module {
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
+    viewModel { (sourceId: String, bookUrl: String) ->
+        com.radium.inkwell.ui.preview.BookPreviewViewModel(sourceId, bookUrl, get(), get(), get())
+    }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get()) }
     viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get()) }

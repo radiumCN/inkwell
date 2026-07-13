@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  允许明文 HTTP。
+
+  书源由用户自行导入，指向的是任意第三方小说站，其中相当一部分只有 http://
+  （实测一份 876 源的常见书源表里有 290 个，占三分之一）。targetSdk 28 起系统默认
+  禁止明文流量，这些书源会在抓取时直接抛 UnknownServiceException —— 无论规则写得多对。
+
+  这是本类应用的固有取舍：不开明文就等于砍掉三分之一书源。抓取内容仅用于本地阅读，
+  不涉及账号与凭据。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
