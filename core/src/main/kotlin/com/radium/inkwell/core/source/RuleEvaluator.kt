@@ -46,7 +46,7 @@ class RuleEvaluator(
         is RuleNode.RegexRule ->
             regexExtract(node.pattern, ctx).map { ctx.copy(element = null, json = it) }
         is RuleNode.Literal ->
-            expandTemplate(node.template, ctx.vars)
+            expandRuleTemplate(node.template, ctx)
                 .takeIf { it.isNotBlank() }
                 ?.let { listOf(ctx.copy(element = null, json = it)) }
                 ?: emptyList()
@@ -89,7 +89,7 @@ class RuleEvaluator(
         is RuleNode.JsonPath -> jsonToStrings(readJsonPath(node.path, ctx))
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
         is RuleNode.Literal ->
-            expandTemplate(node.template, ctx.vars).let { if (it.isEmpty()) emptyList() else listOf(it) }
+            expandRuleTemplate(node.template, ctx).let { if (it.isEmpty()) emptyList() else listOf(it) }
         is RuleNode.Js ->
             evalJs(node.script, ctx)?.takeIf { it.isNotEmpty() }?.let { listOf(it) } ?: emptyList()
         is RuleNode.Fallback ->
@@ -171,6 +171,16 @@ class RuleEvaluator(
             .toList()
     }
 
+    /**
+     * 规则里的字面量模板。与 Legado 对齐两点：
+     * - {{$.x}} 在当前页的 JSON 上求值（JSON API 型书源常这样拼目录地址）
+     * - {{baseUrl}} 是当前页地址，不是站点根 —— 例如 {{baseUrl}}/catalog/ 依赖前者
+     */
+    private fun expandRuleTemplate(template: String, ctx: EvalContext): String =
+        expandTemplate(template, ctx.vars + ("baseUrl" to ctx.baseUrl)) { path ->
+            jsonToStrings(readJsonPath(path, ctx)).firstOrNull().orEmpty()
+        }
+
     /** 元素上下文取 outerHtml（可匹配属性与脚本内容），否则取 JSON/文本值 */
     private fun contextText(ctx: EvalContext): String =
         ctx.element?.outerHtml() ?: (ctx.json as? String ?: ctx.json?.toString() ?: "")
@@ -232,12 +242,27 @@ class RuleEvaluator(
 // 花括号一律转义：Android 的 ICU 正则引擎不接受裸 { }，桌面 JVM 却当字面量放行
 private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|]+?)\\s*(?:\\|\\s*([^}]+?)\\s*)?\\}\\}")
 
-/** 展开 {{var}} 与 {{var|encode[:charset]}}；未知变量替换为空串 */
-internal fun expandTemplate(template: String, vars: Map<String, String>): String =
+/** 模板变量是否为 JSONPath（{{$.book_id}}），需在当前页 JSON 上求值而非查 vars */
+internal fun isJsonPathVar(name: String): Boolean = name.startsWith("$.") || name.startsWith("$[")
+
+/**
+ * 展开 {{var}} 与 {{var|encode[:charset]}}；未知变量替换为空串。
+ *
+ * @param jsonPath {{$.x}} 的求值器。HTTP 层拼请求地址时没有页面上下文，传 null 即可；
+ *   规则求值时由 RuleEvaluator 接到当前页的 JSON 上（详情页是 JSON API 的书源常这么写目录地址）。
+ */
+internal fun expandTemplate(
+    template: String,
+    vars: Map<String, String>,
+    jsonPath: ((String) -> String)? = null,
+): String =
     TEMPLATE_VAR.replace(template) { m ->
         val name = m.groupValues[1]
-        // 变量直取；否则尝试算术表达式（如 {{(page-1)*50}}）
-        val value = vars[name] ?: evalArithmetic(name, vars) ?: ""
+        // JSONPath > 变量直取 > 算术表达式（如 {{(page-1)*50}}）
+        val value = when {
+            jsonPath != null && isJsonPathVar(name) -> jsonPath(name)
+            else -> vars[name] ?: evalArithmetic(name, vars) ?: ""
+        }
         val pipe = m.groupValues[2]
         when {
             pipe.isEmpty() -> value

@@ -8,6 +8,7 @@ import com.radium.inkwell.core.source.PurifyRule
 import com.radium.inkwell.core.source.RateLimitRule
 import com.radium.inkwell.core.source.RequestRule
 import com.radium.inkwell.core.source.RuleParser
+import com.radium.inkwell.core.source.isJsonPathVar
 import com.radium.inkwell.core.source.SearchRule
 import com.radium.inkwell.core.source.TocRule
 import kotlinx.serialization.json.Json
@@ -290,6 +291,12 @@ object LegadoConverter {
                 return attachJs("", expr.trim().ifEmpty { throw LegadoUnsupported("空 {{}} 规则") }, kind, where)
             }
         }
+        // 模板型地址：{{baseUrl}}/catalog/ 或 https://host/api?id={{$.book_id}}&page=1
+        // 每个 {{}} 都是 baseUrl 或 JSONPath 时可整体转成字面量模板，求值期再按当前页填空
+        // （详情页是 JSON API 的书源常这样拼目录地址）。
+        if (rule.contains("{{") && templateVarsAllKnown(rule)) {
+            return "text:$rule"
+        }
         if (rule.contains("{{")) {
             throw LegadoUnsupported("规则内嵌 {{js}} 不支持")
         }
@@ -327,6 +334,23 @@ object LegadoConverter {
             else -> convertJsoupHierarchy(rule, kind)
         }
     }
+
+    /**
+     * 模板里的 {{}} 是否全都是求值期能填的变量（baseUrl / $.jsonpath）。
+     * 含 JS 表达式（如 {{Date.now()}}、{{java.get(...)}}）的一律不算，交给上层报不支持。
+     */
+    private fun templateVarsAllKnown(rule: String): Boolean {
+        // JS 脚本里也会出现 {{$.x}} 插值，那是脚本的一部分，不能整条当字面量模板
+        if (rule.contains("<js>") || rule.contains("@js:")) return false
+        // 「地址,{选项}」若带 POST/body，剥掉选项后发出的 GET 是错的 —— 宁可报不支持，
+        // 也不要再产出一个「导入成功、读不了」的书源
+        val options = rule.substringAfter(",{", "")
+        if (Regex("""["']?(method|body)["']?\s*:""").containsMatchIn(options)) return false
+        val vars = TEMPLATE_VAR.findAll(rule).map { it.groupValues[1].trim() }.toList()
+        return vars.isNotEmpty() && vars.all { it == "baseUrl" || isJsonPathVar(it) }
+    }
+
+    private val TEMPLATE_VAR = Regex("\\{\\{([^}]*)\\}\\}")
 
     /** 基础规则 + JS：base 为空时脚本作为原子规则，否则作为管道；base64 绕开 DSL 切分 */
     private fun attachJs(base: String, script: String, kind: Kind, where: String): String {

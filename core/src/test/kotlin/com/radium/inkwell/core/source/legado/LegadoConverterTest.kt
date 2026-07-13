@@ -270,4 +270,42 @@ class LegadoConverterTest {
         assertEquals(null, conv.rule.search!!.fields["intro"])
         assertTrue(conv.warnings.any { it.contains("XPath") || it.contains("intro") })
     }
+
+    @Test
+    fun `模板型 tocUrl 转为字面量模板，JS 与 POST 选项仍报不支持`() {
+        fun tocUrlOf(tocUrl: String) = LegadoConverter.convert(
+            """
+            {
+              "bookSourceUrl": "https://api.example.com",
+              "bookSourceName": "接口站",
+              "searchUrl": "/s?q={{key}}",
+              "ruleSearch": { "bookList": "class.list@tag.li", "name": "tag.h3@text", "bookUrl": "tag.a@href" },
+              "ruleBookInfo": { "name": "tag.h1@text", "tocUrl": ${'"'}$tocUrl${'"'} },
+              "ruleToc": { "chapterList": "class.dir@tag.a", "chapterName": "text", "chapterUrl": "href" },
+              "ruleContent": { "content": "id.content@html" }
+            }
+            """.trimIndent()
+        )
+
+        // {{$.x}} / {{baseUrl}} 都能在求值期填 → 整条转成字面量模板
+        tocUrlOf("/api/book/{{$.book_id}}/chapters").let {
+            assertEquals(0, it.skipped.size)
+            assertEquals(
+                "text:/api/book/{{$.book_id}}/chapters",
+                it.converted.single().rule.detail!!.fields["tocUrl"],
+            )
+        }
+
+        // JS 脚本里也会出现 {{$.x}} 插值，那是脚本的一部分，不能整条当模板
+        tocUrlOf("@js:java.get('u')+'{{$.bid}}'").let {
+            assertEquals(1, it.skipped.size)
+            assertTrue(it.skipped.single().reason.startsWith("目录地址规则无法转换"))
+        }
+
+        // 带 POST/body 的「地址,{选项}」：剥掉选项后发 GET 是错的，宁可跳过也不要产出坏书源
+        tocUrlOf("/api/toc,{'method':'POST','body':'id={{$.book_id}}'}").let {
+            assertEquals(1, it.skipped.size)
+            assertTrue(it.skipped.single().reason.startsWith("目录地址规则无法转换"))
+        }
+    }
 }

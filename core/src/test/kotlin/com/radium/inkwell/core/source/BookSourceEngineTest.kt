@@ -182,6 +182,24 @@ class BookSourceEngineTest {
         Unit
     }
 
+    /**
+     * JSON API 型书源：详情页返回 JSON，目录地址靠模板拼出来
+     * （{{$.x}} 取自当前页 JSON，{{baseUrl}} 是当前页地址而非站点根 —— 与 Legado 一致）。
+     */
+    @Test
+    fun `模板型 tocUrl 从详情页 JSON 取值`() = runBlocking {
+        val src = BookSourceRule.fromJson(
+            """{"id":"com.test.api","name":"API站","baseUrl":"$base",
+                "detail":{"fields":{"title":"json:${'$'}.name","tocUrl":"text:/api/book/{{${'$'}.id}}/toc"}},
+                "toc":{"list":"json:${'$'}.chapters","fields":{"title":"json:${'$'}.t","url":"json:${'$'}.u"}}}"""
+        )
+        val detail = engine().getDetail(src, "$base/api/detail")
+        assertEquals("$base/api/book/777/toc", detail.tocUrl)
+
+        val toc = engine().getToc(src, detail.tocUrl)
+        assertEquals(listOf("第一章 起", "第二章 承"), toc.map { it.title })
+    }
+
     // ---- 净化 ----
 
     @Test
@@ -262,6 +280,8 @@ class BookSourceEngineTest {
                 path == "/bleed/1" -> html(BLEED_1)
                 path == "/bleed/1_2" -> html(BLEED_1_2)
                 path == "/bleed/2" -> html(BLEED_2)
+                path == "/api/detail" -> json(API_DETAIL)
+                path == "/api/book/777/toc" -> json(API_TOC)
                 path == "/dup/1" -> html(DUP_NAV)
                 path == "/dup/2" -> html(DUP_LAST)
                 path.startsWith("/list/") -> html(EXPLORE_PAGE)
@@ -274,6 +294,9 @@ class BookSourceEngineTest {
 
         private fun html(body: String): MockResponse =
             MockResponse().setBody(body).setHeader("Content-Type", "text/html; charset=utf-8")
+
+        private fun json(body: String): MockResponse =
+            MockResponse().setBody(body).setHeader("Content-Type", "application/json; charset=utf-8")
     }
 
     private companion object {
@@ -392,6 +415,11 @@ class BookSourceEngineTest {
             <a id="next" href="/dup/2">下一页</a></body></html>"""
 
         const val DUP_LAST = """<html><body><div id="content"><p>第二页内容。</p></div></body></html>"""
+
+        const val API_DETAIL = """{"id":777,"name":"接口小说"}"""
+
+        const val API_TOC =
+            """{"chapters":[{"t":"第一章 起","u":"/api/c/1"},{"t":"第二章 承","u":"/api/c/2"}]}"""
 
         const val LOOP_A = """<html><body><div id="content"><p>甲页内容。</p></div>
             <a id="next" href="/loop/b">下一页</a></body></html>"""
