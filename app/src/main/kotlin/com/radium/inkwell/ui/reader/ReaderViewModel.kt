@@ -294,6 +294,9 @@ class ReaderViewModel(
         _state.value = _state.value.copy(menuVisible = !_state.value.menuVisible)
     }
 
+    /** UI 层按 App 主题模式 + 系统日夜算出后调这个，阅读纸张随之切日/夜槽 */
+    fun setDarkActive(dark: Boolean) = readerPrefs.setDarkActive(dark)
+
     fun updateSettings(settings: ReaderSettings) {
         viewModelScope.launch { readerPrefs.update(settings) }
     }

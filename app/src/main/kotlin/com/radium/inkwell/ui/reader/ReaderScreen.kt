@@ -82,6 +82,19 @@ fun ReaderScreen(
     val keyBus = koinInject<KeyEventBus>()
     val flipController = remember { FlipController() }
 
+    // 阅读纸张跟 App 的日夜走：算出此刻生效的是日间还是夜间，喂给 ViewModel 切日/夜槽。
+    val appPrefs = koinInject<com.radium.inkwell.data.prefs.AppPrefs>()
+    val themeConfig by appPrefs.themeConfig.collectAsStateWithLifecycle(
+        initialValue = com.radium.inkwell.ui.theme.ThemeConfig(),
+    )
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val effectiveDark = when (themeConfig.mode) {
+        com.radium.inkwell.ui.theme.ThemeMode.LIGHT -> false
+        com.radium.inkwell.ui.theme.ThemeMode.DARK -> true
+        com.radium.inkwell.ui.theme.ThemeMode.SYSTEM -> systemDark
+    }
+    LaunchedEffect(effectiveDark) { viewModel.setDarkActive(effectiveDark) }
+
     /**
      * 挖孔尺寸。**首帧就得是对的** —— 这是"进书抖一下"的根。
      *
@@ -455,6 +468,7 @@ private fun buildLayoutSpec(
         fontSizePx = fontSizePx,
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,
+        titleFontScale = settings.titleScale,
         titleTopSpacingPx = 24.dp.toPx(),
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,

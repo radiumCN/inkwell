@@ -3,6 +3,8 @@ package com.radium.inkwell.reader.api
 /** 阅读器排版与交互设置；由 app 层从 DataStore 读取后传入 */
 data class ReaderSettings(
     val fontSizeSp: Float = 18f,
+    /** 章节标题相对正文的倍数（legado 的标题字号）。1.0 = 与正文同大 */
+    val titleScale: Float = 1.4f,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
     val paragraphSpacingEm: Float = 0.6f,

@@ -364,6 +364,13 @@ private val LINE_SPACING_OPTIONS = listOf(
     "宽松" to 1.9f,
 )
 
+/** 章节标题相对正文的倍数。1.0 = 与正文同大（有人不喜欢标题占地方） */
+private val TITLE_SCALE_OPTIONS = listOf(
+    "小" to 1.0f,
+    "标准" to 1.4f,
+    "大" to 1.8f,
+)
+
 /**
  * 阅读设置面板。
  *
@@ -417,6 +424,15 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
             modifier = Modifier.weight(1f),
         ) { Text("A＋", style = MaterialTheme.typography.titleMedium) }
     }
+
+    SectionLabel("标题字号")
+    ChipRow(
+        options = TITLE_SCALE_OPTIONS.map { it.first },
+        selectedIndex = TITLE_SCALE_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.titleScale) < 0.05f
+        },
+        onSelect = { onUpdate(settings.copy(titleScale = TITLE_SCALE_OPTIONS[it].second)) },
+    )
 
     SectionLabel("行距")
     ChipRow(
