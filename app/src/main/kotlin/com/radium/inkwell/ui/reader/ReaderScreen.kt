@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.absolutePadding
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -117,14 +114,13 @@ fun ReaderScreen(
     val b = live.getBottom(density)
     val cutout = if (l == 0 && t == 0 && r == 0 && b == 0) seed else IntInsets(l, t, r, b)
 
-    val viewport = IntSize(
-        (windowSize.width - cutout.left - cutout.right).coerceAtLeast(0),
-        (windowSize.height - cutout.top - cutout.bottom).coerceAtLeast(0),
-    )
+    // 视口 = **整个窗口**（边到边）。挖孔不再从视口里扣掉，而是折进正文边距（见下）——
+    // 这样正文页与卷页都铺满全屏，顶部不再留一条状态栏/挖孔高度的空带（卷页时会露出来）。
+    val viewport = IntSize(windowSize.width, windowSize.height)
 
-    val spec = remember(viewport, state.settings, density) {
+    val spec = remember(viewport, state.settings, density, cutout) {
         if (viewport.width <= 0 || viewport.height <= 0) null
-        else buildLayoutSpec(viewport, state.settings, density)
+        else buildLayoutSpec(viewport, state.settings, density, cutout)
     }
 
     LaunchedEffect(spec) {
@@ -162,26 +158,9 @@ fun ReaderScreen(
         Modifier
             .fillMaxSize()
             .background(Color(state.settings.theme.background))
-            // 避开挖孔/刘海，页眉章节名不会顶进摄像头区域。
-            // 用自己算的 cutout 而不是 windowInsetsPadding：后者首帧是 0，会让 Box 先铺满
-            // 再缩回来 —— 正文画在 Box 里，Box 一动正文跟着动。两边同源才不会打架。
-            .absolutePadding(
-                left = with(density) { cutout.left.toDp() },
-                top = with(density) { cutout.top.toDp() },
-                right = with(density) { cutout.right.toDp() },
-                bottom = with(density) { cutout.bottom.toDp() },
-            )
-            // **消费掉刚扣的那部分**。windowInsetsPadding 会自动做这件事，absolutePadding 不会 ——
-            // 不声明的话，子树里的 statusBarsPadding()（阅读菜单顶栏就有）看不到我们已经让开过，
-            // 会把状态栏高度再加一遍：顶栏上方凭空多出一整条纸色，菜单被压得又高又空。
-            .consumeWindowInsets(
-                PaddingValues(
-                    start = with(density) { cutout.left.toDp() },
-                    top = with(density) { cutout.top.toDp() },
-                    end = with(density) { cutout.right.toDp() },
-                    bottom = with(density) { cutout.bottom.toDp() },
-                )
-            ),
+            // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
+            // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
+            // statusBarsPadding 让开状态栏，不受这里影响。
     ) {
         val layout = spec
 
@@ -460,15 +439,17 @@ private fun buildLayoutSpec(
     viewport: IntSize,
     settings: ReaderSettings,
     density: androidx.compose.ui.unit.Density,
+    cutout: IntInsets,
 ): LayoutSpec = with(density) {
     val fontSizePx = settings.fontSizeSp.sp.toPx()
+    // 挖孔折进边距：视口铺满全屏，靠加大这一侧的留白把页眉/正文推开摄像头，而不是把整页缩进去。
     LayoutSpec(
         viewportWidthPx = viewport.width,
         viewportHeightPx = viewport.height,
-        marginLeftPx = settings.marginHorizontalDp.dp.toPx(),
-        marginRightPx = settings.marginHorizontalDp.dp.toPx(),
-        marginTopPx = settings.marginVerticalDp.dp.toPx(),
-        marginBottomPx = settings.marginVerticalDp.dp.toPx(),
+        marginLeftPx = settings.marginHorizontalDp.dp.toPx() + cutout.left,
+        marginRightPx = settings.marginHorizontalDp.dp.toPx() + cutout.right,
+        marginTopPx = settings.marginVerticalDp.dp.toPx() + cutout.top,
+        marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom,
         headerHeightPx = 18.dp.toPx(),
         footerHeightPx = 18.dp.toPx(),
         fontSizePx = fontSizePx,
