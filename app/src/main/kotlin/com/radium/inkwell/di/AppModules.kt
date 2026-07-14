@@ -37,6 +37,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_4_5,
                 InkwellDb.MIGRATION_5_6,
                 InkwellDb.MIGRATION_6_7,
+                InkwellDb.MIGRATION_7_8,
             )
             .build()
     }
@@ -44,7 +45,6 @@ val appModule = module {
     single { get<InkwellDb>().chapterDao() }
     single { get<InkwellDb>().bookSourceDao() }
     single { get<InkwellDb>().replaceRuleDao() }
-    single { get<InkwellDb>().bookmarkDao() }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
     single { BookParserRegistry(listOf(EpubParser(), MobiParser(), TxtParser())) }
@@ -83,7 +83,7 @@ val appModule = module {
 
     viewModel { BookshelfViewModel(get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

@@ -85,6 +85,7 @@ class WebDavRepository(
                 totalChapters = b.totalChapters,
                 readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
                 readAt = b.readAt, addedAt = b.addedAt, updatedAt = b.updatedAt,
+                groupName = b.groupName,
             )
         },
         sources = sourceDao.getAll().map { s ->
@@ -120,6 +121,7 @@ class WebDavRepository(
                         totalChapters = maxOf(existing.totalChapters, b.totalChapters),
                         readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
                         readAt = b.readAt, updatedAt = b.updatedAt,
+                        groupName = b.groupName,
                     )
                 )
             } else {
@@ -134,6 +136,7 @@ class WebDavRepository(
                         readAt = b.readAt,
                         addedAt = if (b.addedAt > 0) b.addedAt else System.currentTimeMillis(),
                         updatedAt = b.updatedAt,
+                        groupName = b.groupName,
                     )
                 )
             }

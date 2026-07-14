@@ -18,6 +18,11 @@ data class ReaderSettings(
     val volumeKeyFlip: Boolean = true,
     /** 自动翻页间隔（秒）；每页停留这么久后自动往下翻 */
     val autoFlipSeconds: Int = 15,
+    /**
+     * 往后预加载多少章正文（0 = 关闭）。
+     * 翻到章末才去抓下一章，网络书必然卡一下；提前抓好放进缓存就没有这个停顿。
+     */
+    val preloadChapters: Int = 3,
     /** 正文的简繁转换 */
     val chineseConvert: ChineseConvert = ChineseConvert.NONE,
 ) {

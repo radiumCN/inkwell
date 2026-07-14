@@ -303,9 +303,6 @@ fun ReaderScreen(
                 onUpdateSettings = { viewModel.updateSettings(it) },
                 onSearchSources = { viewModel.searchOtherSources() },
                 onToggleAutoFlip = { viewModel.toggleAutoFlip() },
-                onToggleBookmark = { viewModel.toggleBookmark() },
-                onGotoBookmark = { viewModel.gotoBookmark(it) },
-                onDeleteBookmark = { viewModel.deleteBookmark(it) },
                 onOpenSearch = { viewModel.openSearchPanel() },
                 onDismiss = { viewModel.toggleMenu() },
             )

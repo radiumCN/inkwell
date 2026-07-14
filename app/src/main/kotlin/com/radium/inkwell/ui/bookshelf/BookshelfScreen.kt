@@ -44,6 +44,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +75,12 @@ fun BookshelfScreen(
     viewModel: BookshelfViewModel = koinViewModel(),
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
+    val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val group by viewModel.group.collectAsStateWithLifecycle()
+    var actionTarget by remember { mutableStateOf<BookEntity?>(null) }
+    var groupTarget by remember { mutableStateOf<BookEntity?>(null) }
+    var groupInput by remember { mutableStateOf("") }
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
@@ -114,7 +128,7 @@ fun BookshelfScreen(
             }
         },
     ) { padding ->
-        if (books.isEmpty()) {
+        if (allBooks.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.AutoStories,
                 title = "书架空空如也",
@@ -131,22 +145,129 @@ fun BookshelfScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 96.dp),
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(books, key = { it.id }) { book ->
-                    BookCard(
-                        book = book,
-                        onClick = { onOpenBook(book.id) },
-                        onLongClick = { deleteTarget = book },
-                    )
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕
+                if (groups.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = group == null,
+                            onClick = { viewModel.setGroup(null) },
+                            label = { Text("全部") },
+                        )
+                        groups.forEach { g ->
+                            FilterChip(
+                                selected = group == g,
+                                onClick = { viewModel.setGroup(g) },
+                                label = { Text(g) },
+                            )
+                        }
+                        FilterChip(
+                            selected = group == BookshelfViewModel.UNGROUPED,
+                            onClick = { viewModel.setGroup(BookshelfViewModel.UNGROUPED) },
+                            label = { Text("未分组") },
+                        )
+                    }
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 96.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(books, key = { it.id }) { book ->
+                        BookCard(
+                            book = book,
+                            onClick = { onOpenBook(book.id) },
+                            // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
+                            onLongClick = { actionTarget = book },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    actionTarget?.let { book ->
+        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text(
+                    book.title,
+                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                SettingRow(
+                    title = "设置分组",
+                    subtitle = book.groupName.ifBlank { "未分组" },
+                    onClick = {
+                        groupInput = book.groupName
+                        groupTarget = book
+                        actionTarget = null
+                    },
+                )
+                SettingRow(
+                    title = "从书架删除",
+                    subtitle = "本地文件与缓存将一并删除",
+                    onClick = {
+                        deleteTarget = book
+                        actionTarget = null
+                    },
+                )
+            }
+        }
+    }
+
+    groupTarget?.let { book ->
+        AlertDialog(
+            onDismissRequest = { groupTarget = null },
+            title = { Text("设置分组") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = groupInput,
+                        onValueChange = { groupInput = it },
+                        label = { Text("分组名") },
+                        placeholder = { Text("留空则移出分组") },
+                        singleLine = true,
+                    )
+                    if (groups.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
+                            groups.forEach { g ->
+                                FilterChip(
+                                    selected = groupInput == g,
+                                    onClick = { groupInput = g },
+                                    label = { Text(g) },
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.assignGroup(book.id, groupInput)
+                    groupTarget = null
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupTarget = null }) { Text("取消") }
+            },
+        )
     }
 
     deleteTarget?.let { book ->

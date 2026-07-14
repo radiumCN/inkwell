@@ -74,6 +74,8 @@ data class BackupBook(
     val readAt: Long = 0,
     val addedAt: Long = 0,
     val updatedAt: Long = 0,
+    /** 书架分组 */
+    val groupName: String = "",
 )
 
 @Serializable

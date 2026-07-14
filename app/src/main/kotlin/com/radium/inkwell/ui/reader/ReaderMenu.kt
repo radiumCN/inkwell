@@ -52,13 +52,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import com.radium.inkwell.reader.api.ChineseConvert
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import com.radium.inkwell.data.db.entity.BookmarkEntity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -80,9 +75,6 @@ fun ReaderMenu(
     onUpdateSettings: (ReaderSettings) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
-    onToggleBookmark: () -> Unit,
-    onGotoBookmark: (BookmarkEntity) -> Unit,
-    onDeleteBookmark: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -119,13 +111,6 @@ fun ReaderMenu(
                         color = barContent.copy(alpha = 0.65f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(onClick = onToggleBookmark) {
-                    Icon(
-                        if (state.bookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        contentDescription = if (state.bookmarked) "删除书签" else "加书签",
-                        tint = if (state.bookmarked) MaterialTheme.colorScheme.primary else barContent,
                     )
                 }
                 IconButton(onClick = onOpenSearch) {
@@ -200,30 +185,13 @@ fun ReaderMenu(
     }
 
     if (showToc) {
-        var tab by remember { mutableStateOf(0) }
         ModalBottomSheet(onDismissRequest = { showToc = false }) {
-            TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("目录") })
-                Tab(
-                    selected = tab == 1,
-                    onClick = { tab = 1 },
-                    text = { Text("书签 ${state.bookmarks.size}") },
-                )
-            }
-            if (tab == 0) {
-                TocList(
-                    toc = state.toc,
-                    current = state.chapterIndex,
-                    // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
-                    onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
-                )
-            } else {
-                BookmarkList(
-                    bookmarks = state.bookmarks,
-                    onSelect = { showToc = false; onGotoBookmark(it) },
-                    onDelete = onDeleteBookmark,
-                )
-            }
+            TocList(
+                toc = state.toc,
+                current = state.chapterIndex,
+                // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
+                onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
+            )
         }
     }
 
@@ -386,6 +354,14 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
             onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
         )
 
+        // 预加载
+        SectionLabel("预加载章节")
+        ChipRow(
+            options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
+            selectedIndex = PRELOAD_OPTIONS.indexOf(settings.preloadChapters),
+            onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
+        )
+
         // 字体
         SectionLabel("字体")
         ChipRow(
@@ -463,55 +439,5 @@ private fun Spacer(width: Int) {
 /** 自动翻页可选间隔（秒）。太快来不及读，太慢不如自己翻 */
 private val AUTO_FLIP_OPTIONS = listOf(5, 10, 15, 20, 30, 45, 60)
 
-@Composable
-private fun BookmarkList(
-    bookmarks: List<BookmarkEntity>,
-    onSelect: (BookmarkEntity) -> Unit,
-    onDelete: (String) -> Unit,
-) {
-    if (bookmarks.isEmpty()) {
-        Text(
-            "还没有书签。在阅读页顶栏点书签图标，把当前这一页记下来。",
-            Modifier.padding(Dimens.rowHorizontal),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
-    LazyColumn(Modifier.heightIn(max = 400.dp)) {
-        items(bookmarks, key = { it.id }) { bm ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onSelect(bm) }
-                    .padding(start = Dimens.rowHorizontal, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        bm.chapterTitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (bm.excerpt.isNotBlank()) {
-                        Text(
-                            bm.excerpt,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                IconButton(onClick = { onDelete(bm.id) }) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "删除书签",
-                        tint = MaterialTheme.colorScheme.outline,
-                    )
-                }
-            }
-        }
-    }
-}
+/** 预取多少章正文。给多了只是白耗流量：读者不会一口气跳着读十章 */
+private val PRELOAD_OPTIONS = listOf(0, 1, 3, 5, 10)

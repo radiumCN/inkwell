@@ -29,8 +29,6 @@ import com.radium.inkwell.reader.render.ScrollChapter
 import com.radium.inkwell.core.text.ChineseConverter
 import com.radium.inkwell.reader.api.ChineseConvert
 import kotlinx.coroutines.delay
-import com.radium.inkwell.data.db.entity.BookmarkEntity
-import com.radium.inkwell.reader.paginate.PageItem
 import kotlinx.coroutines.isActive
 import com.radium.inkwell.core.model.ContentElement
 import kotlinx.coroutines.Job
@@ -95,9 +93,6 @@ data class ReaderUiState(
     val toast: String? = null,
     /** 自动翻页中 */
     val autoFlipping: Boolean = false,
-    val bookmarks: List<BookmarkEntity> = emptyList(),
-    /** 当前页是否已加书签 */
-    val bookmarked: Boolean = false,
     /** 全书搜索：null=面板没开 */
     val searchResults: List<ChapterHit>? = null,
     val searching: Boolean = false,
@@ -128,7 +123,6 @@ class ReaderViewModel(
     private val contentCache: ChapterContentCache,
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
-    private val bookmarkDao: com.radium.inkwell.data.db.dao.BookmarkDao,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -171,7 +165,6 @@ class ReaderViewModel(
             }
         }
         observeBookRules()
-        observeBookmarks()
     }
 
     private suspend fun loadSession() {
@@ -276,70 +269,6 @@ class ReaderViewModel(
 
     fun updateSettings(settings: ReaderSettings) {
         viewModelScope.launch { readerPrefs.update(settings) }
-    }
-
-    // ---------- 书签 ----------
-
-    private fun observeBookmarks() {
-        viewModelScope.launch {
-            bookmarkDao.observeForBook(bookId).collect { list ->
-                _state.value = _state.value.copy(
-                    bookmarks = list,
-                    bookmarked = list.any { it.chapterIndex == position.chapterIndex && inCurrentPage(it.charOffset) },
-                )
-            }
-        }
-    }
-
-    /** 书签落在当前页里才算"本页已加书签" —— 否则整章任意一个书签都会把图标点亮 */
-    private fun inCurrentPage(offset: Int): Boolean {
-        val s = _state.value
-        val page = s.page?.spec ?: return false
-        return offset >= page.startCharOffset && offset < page.endCharOffset
-    }
-
-    fun toggleBookmark() {
-        val s = _state.value
-        val existing = s.bookmarks.firstOrNull {
-            it.chapterIndex == position.chapterIndex && inCurrentPage(it.charOffset)
-        }
-        viewModelScope.launch {
-            if (existing != null) {
-                bookmarkDao.deleteById(existing.id)
-                _state.value = _state.value.copy(toast = "已删除书签")
-            } else {
-                bookmarkDao.upsert(
-                    BookmarkEntity(
-                        id = java.util.UUID.randomUUID().toString(),
-                        bookId = bookId,
-                        chapterIndex = position.chapterIndex,
-                        charOffset = position.charOffset,
-                        chapterTitle = s.chapterTitle,
-                        excerpt = currentPageExcerpt(),
-                        createdAt = System.currentTimeMillis(),
-                    )
-                )
-                _state.value = _state.value.copy(toast = "已加书签")
-            }
-        }
-    }
-
-    /** 当前页头一段文字，书签列表上给用户认位置 */
-    private fun currentPageExcerpt(): String {
-        val page = _state.value.page ?: return ""
-        val first = page.spec.items.filterIsInstance<PageItem.TextSlice>().firstOrNull()
-            ?: return ""
-        val para = page.measured[first.elementIndex] ?: return ""
-        return para.text.take(40).trim()
-    }
-
-    fun deleteBookmark(id: String) {
-        viewModelScope.launch { bookmarkDao.deleteById(id) }
-    }
-
-    fun gotoBookmark(bookmark: BookmarkEntity) {
-        _state.value = _state.value.copy(menuVisible = false)
-        gotoChapter(bookmark.chapterIndex, bookmark.charOffset)
     }
 
     // ---------- 全书搜索 ----------
@@ -859,6 +788,38 @@ class ReaderViewModel(
                 ensurePaginated(center - 1)
             }
             refreshNeighbors()
+        }
+        prefetchAhead(center)
+    }
+
+    private var prefetchJob: Job? = null
+
+    /**
+     * 往后预取正文进缓存。
+     *
+     * 翻到章末才去抓下一章，网络书必然卡一下 —— 提前抓好就没有这个停顿。
+     * 邻章（center±1）由 preloadNeighbors 顺带排好版了，这里管的是**更远**的那几章：
+     * 只把正文拉进缓存，不排版（排版结果持有 TextLayoutResult，很重，攒几章就 OOM）。
+     *
+     * 三条纪律：
+     * - **不碰 engineMutex**。预取一占锁，用户翻页就得排队等它 —— 本来是为了不卡顿，
+     *   结果反而卡得更死。
+     * - 顺序抓，不并发。几章同时打同一个站点只会触发限流，把好书源熬成"加载失败"。
+     * - 换页就取消上一轮：用户跳到别处去了，再抓原来那几章纯属浪费流量。
+     */
+    private fun prefetchAhead(center: Int) {
+        val ahead = _state.value.settings.preloadChapters
+        if (ahead <= 0) return
+        val src = source ?: return
+        val total = _state.value.chapterCount
+        prefetchJob?.cancel()
+        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            for (i in (center + 2)..(center + 1 + ahead)) {
+                if (i >= total) break
+                if (!isActive) return@launch
+                // 已缓存的话 loadChapter 直接命中缓存，几乎不花钱；没缓存才会真去抓
+                runCatching { src.loadChapter(i) }
+            }
         }
     }
 

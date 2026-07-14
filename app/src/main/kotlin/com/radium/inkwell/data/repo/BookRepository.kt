@@ -102,6 +102,10 @@ class BookRepository(
         }
     }
 
+    suspend fun setGroup(id: String, group: String) {
+        bookDao.setGroup(id, group)
+    }
+
     suspend fun saveProgress(id: String, chapterIndex: Int, charOffset: Int) {
         bookDao.updateProgress(id, chapterIndex, charOffset, System.currentTimeMillis())
     }

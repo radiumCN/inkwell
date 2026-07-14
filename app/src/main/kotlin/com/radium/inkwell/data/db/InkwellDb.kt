@@ -7,12 +7,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.ChapterDao
-import com.radium.inkwell.data.db.dao.BookmarkDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
-import com.radium.inkwell.data.db.entity.BookmarkEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 
 @Database(
@@ -21,9 +19,8 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
         ChapterEntity::class,
         BookSourceEntity::class,
         ReplaceRuleEntity::class,
-        BookmarkEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -31,7 +28,6 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun bookSourceDao(): BookSourceDao
     abstract fun replaceRuleDao(): ReplaceRuleDao
-    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         /**
@@ -98,6 +94,17 @@ abstract class InkwellDb : RoomDatabase() {
                     """.trimIndent()
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_bookmark_bookId ON bookmark(bookId)")
+            }
+        }
+
+        /**
+         * 书架分组；同时把 beta.26 短暂存在过的 bookmark 表丢掉 —— 书签功能撤了，
+         * 留个没人读的空表在库里只会让下一个看 schema 的人困惑。
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS bookmark")
+                db.execSQL("ALTER TABLE book ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
             }
         }
 

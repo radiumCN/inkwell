@@ -34,4 +34,7 @@ interface BookDao {
 
     @Query("SELECT * FROM book")
     suspend fun getAll(): List<BookEntity>
+
+    @Query("UPDATE book SET groupName = :group WHERE id = :id")
+    suspend fun setGroup(id: String, group: String)
 }

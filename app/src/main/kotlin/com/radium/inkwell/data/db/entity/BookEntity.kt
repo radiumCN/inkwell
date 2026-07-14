@@ -35,4 +35,6 @@ data class BookEntity(
     val updatedAt: Long,
     /** 书源脚本在详情阶段存下的变量（JSON）；见 ChapterEntity.variable */
     val variable: String = "",
+    /** 书架分组；空 = 未分组 */
+    val groupName: String = "",
 )
