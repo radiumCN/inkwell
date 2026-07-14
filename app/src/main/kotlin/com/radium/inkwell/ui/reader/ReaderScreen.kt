@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.reader.api.FlipAnimation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -69,6 +70,7 @@ fun ReaderScreen(
     viewModel: ReaderViewModel = koinViewModel { parametersOf(bookId) },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scrollChapters by viewModel.scrollChapters.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -84,8 +86,11 @@ fun ReaderScreen(
     }
 
     // 音量键翻页（与点击共用动画路径）
-    LaunchedEffect(state.settings.volumeKeyFlip, state.menuVisible) {
-        keyBus.volumeFlipEnabled = state.settings.volumeKeyFlip && !state.menuVisible
+    LaunchedEffect(state.settings.volumeKeyFlip, state.menuVisible, state.settings.flipAnimation) {
+        // 滚动模式下没有"页"，音量键翻页无从谈起 —— 按下去只会把游标推到别处、把人转晕
+        keyBus.volumeFlipEnabled = state.settings.volumeKeyFlip &&
+            !state.menuVisible &&
+            state.settings.flipAnimation != FlipAnimation.SCROLL
     }
     LaunchedEffect(Unit) {
         keyBus.flipEvents.collect { flipController.requestFlip(it) }
@@ -114,6 +119,14 @@ fun ReaderScreen(
             .onSizeChanged { viewport = it },
     ) {
         val spec = if (viewport.width > 0) buildLayoutSpec(viewport, state.settings, density) else null
+
+        // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
+        // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
+        if (state.settings.flipAnimation == FlipAnimation.SCROLL) {
+            LaunchedEffect(spec, state.chapterCount) {
+                if (spec != null && state.chapterCount > 0) viewModel.prepareScroll()
+            }
+        }
 
         when {
             state.error != null -> Column(
@@ -146,6 +159,19 @@ fun ReaderScreen(
                 Modifier.align(Alignment.Center),
                 color = Color(state.settings.theme.textColor),
             )
+            // 滚动模式：另一条渲染路径，不走翻页容器
+            state.settings.flipAnimation == FlipAnimation.SCROLL -> {
+                ScrollReader(
+                    chapters = scrollChapters,
+                    layout = spec,
+                    theme = state.settings.theme,
+                    onVisible = { chapterIndex, elementIndex ->
+                        viewModel.onScrollTo(chapterIndex, elementIndex)
+                    },
+                    onCenterTap = { viewModel.toggleMenu() },
+                )
+            }
+
             else -> {
                 val page = state.page
                 Box(

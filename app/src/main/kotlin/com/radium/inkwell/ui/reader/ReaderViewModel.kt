@@ -23,6 +23,9 @@ import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.Paginator
 import com.radium.inkwell.reader.render.RenderablePage
 import kotlinx.coroutines.Dispatchers
+import com.radium.inkwell.core.model.ChapterContent
+import com.radium.inkwell.core.model.charLength
+import com.radium.inkwell.reader.render.ScrollChapter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -414,6 +417,115 @@ class ReaderViewModel(
         preloadNeighbors(target.chapterIndex)
     }
 
+    /**
+     * 取正文并应用书内净化。
+     *
+     * 书内净化在这里做、而不是抓取时：用户在阅读页长按选中一句话建规则，指望的是眼前
+     * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
+     */
+    private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int): ChapterContent {
+        val raw = src.loadChapter(chapterIndex)
+        val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
+        return if (purifier.isEmpty) raw else raw.copy(elements = purifier.apply(raw.elements))
+    }
+
+    // ---------- 滚动模式 ----------
+
+    /**
+     * 滚动模式是**另一条渲染路径**，不复用分页结果：页与页堆叠起来，每屏底部都会留一道
+     * 参差的空隙（分页器按整行断页，剩多少空白取决于这一屏排了几行）。
+     * 这里给分页器一个"高得放得下整章"的视口，它就只产出一页 —— 那一页的 items
+     * 正好是带 y 偏移的全部元素，字体/行距/缩进/对齐仍与翻页模式同一套逻辑。
+     */
+    private val scrollCache = LinkedHashMap<Int, ScrollChapter>()
+
+    private suspend fun ensureScroll(chapterIndex: Int): ScrollChapter? {
+        scrollCache[chapterIndex]?.let { return it }
+        if (chapterIndex !in 0 until _state.value.chapterCount) return null
+        val src = source ?: return null
+        val facade = facade ?: return null
+        val baseSpec = spec ?: return null
+        return try {
+            val content = loadPurified(src, chapterIndex)
+            val title = src.chapterTitle(chapterIndex) ?: ""
+            val tall = baseSpec.copy(
+                viewportHeightPx = SCROLL_VIEWPORT_PX,
+                headerHeightPx = 0f,
+                footerHeightPx = 0f,
+            )
+            val result = withContext(Dispatchers.Default) {
+                Paginator(facade).paginate(chapterIndex, title, content, tall)
+            }
+            val page = result.chapter.pages.firstOrNull() ?: return null
+
+            // elementIndex → 章内字符偏移。元素表与 Paginator 里一致：标题在最前，正文依次跟上
+            val offsets = HashMap<Int, Int>()
+            var acc = 0
+            offsets[0] = 0
+            acc += title.length
+            content.elements.forEachIndexed { i, el ->
+                offsets[i + 1] = acc
+                acc += el.charLength
+            }
+
+            ScrollChapter(
+                chapterIndex = chapterIndex,
+                title = title,
+                items = page.items,
+                measured = result.measured,
+                charOffsets = offsets,
+            ).also {
+                scrollCache[chapterIndex] = it
+                trimScrollWindow(center = position.chapterIndex, alsoKeep = chapterIndex)
+            }
+        } catch (e: Exception) {
+            if (chapterIndex == position.chapterIndex) {
+                _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
+            }
+            null
+        }
+    }
+
+    /**
+     * 只留当前章前后各一章：一章的 TextLayoutResult 很占内存，整本书攒下来会 OOM。
+     * alsoKeep 是刚排好的那一章 —— 跳章时 position 还停在旧章，只按旧章裁的话，
+     * 刚排好的目标章会被当场剔掉。
+     */
+    private fun trimScrollWindow(center: Int, alsoKeep: Int) {
+        val keep = setOf(center - 1, center, center + 1, alsoKeep)
+        val drop = scrollCache.keys.filterNot { it in keep }
+        drop.forEach { scrollCache.remove(it) }
+        _scrollChapters.value = scrollCache.values.sortedBy { it.chapterIndex }
+    }
+
+    private val _scrollChapters = MutableStateFlow<List<ScrollChapter>>(emptyList())
+    val scrollChapters: StateFlow<List<ScrollChapter>> = _scrollChapters.asStateFlow()
+
+    /** 进入滚动模式 / 跳章时：把当前章及邻章排好 */
+    fun prepareScroll(center: Int = position.chapterIndex) {
+        viewModelScope.launch {
+            engineMutex.withLock {
+                ensureScroll(center) ?: return@withLock
+                _state.value = _state.value.copy(loading = false, error = null)
+            }
+            engineMutex.withLock { ensureScroll(center - 1) }
+            engineMutex.withLock { ensureScroll(center + 1) }
+        }
+    }
+
+    /** 滚到某章某元素：记进度、必要时续排下一章 */
+    fun onScrollTo(chapterIndex: Int, elementIndex: Int) {
+        val chapter = scrollCache[chapterIndex] ?: return
+        val offset = chapter.charOffsets[elementIndex] ?: 0
+        position = ReadPosition(chapterIndex, offset)
+        _state.value = _state.value.copy(
+            chapterIndex = chapterIndex,
+            chapterTitle = chapter.title,
+        )
+        saveProgress()
+        prepareScroll(chapterIndex)
+    }
+
     private fun renderable(result: Paginator.Result, pageIndex: Int): RenderablePage? {
         val page = result.chapter.pages.getOrNull(pageIndex) ?: return null
         return RenderablePage(
@@ -480,13 +592,7 @@ class ReaderViewModel(
         val facade = facade ?: return null
         val spec = spec ?: return null
         return try {
-            val raw = src.loadChapter(chapterIndex)
-            // 书内净化在这里应用，而不是抓取时：用户在阅读页长按选中一句话建规则，
-            // 指望的是眼前这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化
-            // 再也不会跑到它头上。
-            val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
-            val content = if (purifier.isEmpty) raw
-            else raw.copy(elements = purifier.apply(raw.elements))
+            val content = loadPurified(src, chapterIndex)
             val title = src.chapterTitle(chapterIndex) ?: ""
             val result = withContext(Dispatchers.Default) {
                 Paginator(facade).paginate(chapterIndex, title, content, spec)
@@ -532,6 +638,9 @@ class ReaderViewModel(
     }
 
     private companion object {
+        /** 滚动模式的"无限高视口"：足够放下任何一章，分页器于是只产出一页 */
+        const val SCROLL_VIEWPORT_PX = 2_000_000
+
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
 
