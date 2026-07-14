@@ -100,6 +100,8 @@ fun PageFlipContainer(
     var touchY by remember { mutableFloatStateOf(0f) }
     var downX by remember { mutableFloatStateOf(0f) }
     var cornerBottom by remember { mutableStateOf(true) }
+    // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
+    var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var settling by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize(1, 1)) }
@@ -158,8 +160,10 @@ fun PageFlipContainer(
             onCommit(dir)
             return
         }
+        // 点击翻页 = 翻整页，走竖直圆柱：触点 Y 钉到页底（与中间横划一致），别卷出斜角
         cornerBottom = true
-        touchY = size.height * 0.82f
+        flatSwipe = true
+        touchY = size.height.toFloat()
         downX = if (dir == FlipDirection.FORWARD) size.width * 0.92f else size.width * 0.08f
         touchX = downX
         offset = 0f
@@ -209,10 +213,15 @@ fun PageFlipContainer(
                         // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
                         // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
                         cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
-                        // 触点自由跟手。曾把中间区域的触点钉到页边缘（想翻出干脆的水平页），
-                        // 结果触点与卷角几乎重合，卷页的控制点被算到屏幕外十几万像素、
-                        // 路径自交、裁剪失效 —— 正面与镜像背面糊在一起。得不偿失，撤回。
-                        touchY = down.position.y
+                        // 从屏幕**中间那一带**起手 = 想翻整页，不是揪角。这时把触点 Y 钉到卷角所在的
+                        // 页边（不跟手指的 Y），折痕于是接近竖直、页面绕竖轴卷过去 —— 真书翻页的样子。
+                        // 只有从上/下三分之一起手才让 Y 跟手，卷出斜的揪角效果。
+                        //
+                        // 从前一律跟手，中间横划就卷出一条贯穿全页的大斜折（"天差地别"那张图）。
+                        // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
+                        // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
+                        flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
+                        touchY = if (flatSwipe) (if (cornerBottom) h else 0f) else down.position.y
                         downX = down.position.x
                         touchX = down.position.x
                         direction = dir
@@ -223,8 +232,9 @@ fun PageFlipContainer(
                         tracker.addPosition(change.uptimeMillis, change.position)
                         change.consume()
                         if (!flippable || effectiveAnim == FlipAnimation.NONE) return@horizontalDrag
-                        // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）
-                        touchY = change.position.y
+                        // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
+                        // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
+                        touchY = if (flatSwipe) (if (cornerBottom) size.height.toFloat() else 0f) else change.position.y
                         touchX = change.position.x
                         val range = if (dir == FlipDirection.FORWARD) -width..0f else 0f..width
                         offset = (offset + change.positionChange().x).coerceIn(range)

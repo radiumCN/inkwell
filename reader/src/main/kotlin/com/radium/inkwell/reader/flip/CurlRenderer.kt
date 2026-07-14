@@ -105,11 +105,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         touch.x = touchX.coerceIn(-width * 1.5f, width - 1.5f)
         // 触点太贴近卷角时几何会退化：midY 逼近 cornerY，控制点被算到屏幕外十几万像素，
         // 路径自交、Canvas 裁剪失效 —— 正面与镜像背面糊在一起。留出安全距离。
-        val minGap = height * MIN_CORNER_GAP
+        // 只留 1px 的安全边：从前留 8% 是因为退化处理会把控制点塌回卷角，逼近卷角就自交崩掉，
+        // 只能靠这道大间隙挡住。现在退化改成 ÷0.1（控制点留在屏外形成竖直折痕），touchY 可以
+        // 一直贴到卷角，横划时才卷得出竖直的圆柱。留 1px 只为避开真正的 0/0。
         touch.y = if (cornerBottom) {
-            touchY.coerceIn(1f, height - minGap)
+            touchY.coerceIn(1f, height - 1f)
         } else {
-            touchY.coerceIn(minGap, height - 1f)
+            touchY.coerceIn(1f, height - 1f)
         }
         calcPoints()
         buildPaths()
@@ -149,7 +151,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         bezierControl1.y = cornerY
         bezierControl2.x = cornerX
         val dy = cornerY - midY
-        bezierControl2.y = if (abs(dy) < 0.1f) midY else midY - (cornerX - midX) * (cornerX - midX) / dy
+        // touchY 逼近 cornerY（从屏幕中间横划、触点被钉到页边时）dy→0。
+        // **必须用 ÷0.1 而不是塌回 midY**：塌回 midY 会让 control2 落到卷角上，整个卷曲区退化成
+        // 一条对角直线（就是"天差地别"那张图）。÷0.1 让 control2 留在屏外，折痕于是接近竖直 ——
+        // 页面绕竖轴卷过去，才是真书翻页的样子。
+        bezierControl2.y =
+            if (abs(dy) < 0.1f) midY - (cornerX - midX) * (cornerX - midX) / 0.1f
+            else midY - (cornerX - midX) * (cornerX - midX) / dy
 
         bezierStart1.x = bezierControl1.x - (cornerX - bezierControl1.x) / 2f
         bezierStart1.y = cornerY
@@ -170,7 +178,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
                 bezierControl1.y = cornerY
                 bezierControl2.x = cornerX
                 val dy2 = cornerY - my
-                bezierControl2.y = if (abs(dy2) < 0.1f) my else my - (cornerX - mx) * (cornerX - mx) / dy2
+                bezierControl2.y =
+                    if (abs(dy2) < 0.1f) my - (cornerX - mx) * (cornerX - mx) / 0.1f
+                    else my - (cornerX - mx) * (cornerX - mx) / dy2
                 bezierStart1.x = bezierControl1.x - (cornerX - bezierControl1.x) / 2f
             }
         }
@@ -331,13 +341,6 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     private companion object {
-        /**
-         * 触点与卷角之间必须留出的最小纵向距离（占页高的比例）。
-         * 低于它，`bezierControl2.y = midY - (cornerX-midX)² / (cornerY-midY)` 的分母趋零，
-         * 控制点飞到屏幕外十几万像素，路径自交、裁剪崩掉。
-         */
-        const val MIN_CORNER_GAP = 0.08f
-
         /** 纸背透出的墨的浓度。真纸从背面看，另一面的字只是极淡的一层，不是灰版正文 */
         const val BACK_INK_ALPHA = 36 // ~14%
     }
