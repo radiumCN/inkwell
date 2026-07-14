@@ -42,7 +42,12 @@ class RenderablePage(
  * 自绘一页的内容。跨页段落的行子集用 translate + clipRect 露出属于本页的行，
  * 画的是分页时测量的同一个 TextLayoutResult，像素级一致。
  */
-fun DrawScope.drawPage(page: RenderablePage?, layout: LayoutSpec, theme: ReaderTheme) {
+fun DrawScope.drawPage(
+    page: RenderablePage?,
+    layout: LayoutSpec,
+    theme: ReaderTheme,
+    selection: TextSelection? = null,
+) {
     drawRect(Color(theme.background))
     if (page == null) return
     val contentLeft = layout.marginLeftPx
@@ -52,6 +57,14 @@ fun DrawScope.drawPage(page: RenderablePage?, layout: LayoutSpec, theme: ReaderT
             is PageItem.TextSlice -> {
                 val handle = page.measured[item.elementIndex]?.renderHandle as? TextLayoutResult
                     ?: return@forEach
+                // 高亮先画，文字后画 —— 否则半透明的色块会盖在字上
+                if (selection != null && selection.elementIndex == item.elementIndex) {
+                    drawSelection(
+                        handle, item, selection,
+                        left = contentLeft, top = contentTop,
+                        color = Color(theme.textColor).copy(alpha = 0.25f),
+                    )
+                }
                 drawTextSlice(
                     handle, item,
                     left = contentLeft, top = contentTop,
@@ -83,8 +96,9 @@ fun PageCanvas(
     layout: LayoutSpec,
     theme: ReaderTheme,
     modifier: Modifier = Modifier,
+    selection: TextSelection? = null,
 ) {
-    Spacer(modifier.fillMaxSize().drawBehind { drawPage(page, layout, theme) })
+    Spacer(modifier.fillMaxSize().drawBehind { drawPage(page, layout, theme, selection) })
 }
 
 /**
@@ -112,6 +126,33 @@ fun renderPageBitmap(
     return bitmap.asAndroidBitmap()
         .copy(android.graphics.Bitmap.Config.ARGB_8888, /* isMutable = */ false)
         .asImageBitmap()
+}
+
+/**
+ * 选区高亮。用与 drawTextSlice 完全相同的 translate + clipRect ——
+ * 差一点点，色块就会飘到字的上方或糊到相邻页去。
+ */
+private fun DrawScope.drawSelection(
+    layoutResult: TextLayoutResult,
+    slice: PageItem.TextSlice,
+    selection: TextSelection,
+    left: Float,
+    top: Float,
+    color: Color,
+) {
+    val len = layoutResult.layoutInput.text.length
+    val start = selection.start.coerceIn(0, len)
+    val end = selection.end.coerceIn(start, len)
+    if (end <= start) return
+    val sliceTopInParagraph = layoutResult.getLineTop(slice.lineRange.first)
+    translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {
+        clipRect(
+            top = sliceTopInParagraph,
+            bottom = layoutResult.getLineBottom(slice.lineRange.last),
+        ) {
+            drawPath(layoutResult.getPathForRange(start, end), color)
+        }
+    }
 }
 
 private fun DrawScope.drawTextSlice(

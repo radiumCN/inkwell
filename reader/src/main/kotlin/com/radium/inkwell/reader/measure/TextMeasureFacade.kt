@@ -19,6 +19,12 @@ interface MeasuredParagraph {
     /** 该行首字符在段内的偏移 */
     fun lineStartOffset(line: Int): Int
     fun lineEndOffset(line: Int): Int
+    /** 段落原文。长按选字要拿它切子串 */
+    val text: String
+    /** 段内坐标 → 字符偏移。自绘正文没有系统级文字选择，只能自己做命中测试 */
+    fun offsetForPosition(x: Float, y: Float): Int
+    /** 偏移所在的词边界；中日文没有空格，交给平台的分词器 */
+    fun wordBoundary(offset: Int): IntRange
     /** 渲染句柄：Android 实现持有 TextLayoutResult，Fake 为 null */
     val renderHandle: Any?
 }

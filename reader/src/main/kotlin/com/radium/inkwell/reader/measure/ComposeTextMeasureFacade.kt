@@ -1,5 +1,6 @@
 package com.radium.inkwell.reader.measure
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -76,6 +77,25 @@ class ComposeTextMeasureFacade(
         override fun lineBottom(line: Int): Float = result.getLineBottom(line)
         override fun lineStartOffset(line: Int): Int = result.getLineStart(line)
         override fun lineEndOffset(line: Int): Int = result.getLineEnd(line)
+        override val text: String get() = result.layoutInput.text.text
+
+        override fun offsetForPosition(x: Float, y: Float): Int =
+            result.getOffsetForPosition(Offset(x, y))
+
+        override fun wordBoundary(offset: Int): IntRange {
+            val len = text.length
+            if (len == 0) return IntRange.EMPTY
+            val safe = offset.coerceIn(0, len - 1)
+            val range = result.getWordBoundary(safe)
+            // 中文常常整段没有词边界，退化成"整个偏移点"——此时至少给一个字，
+            // 否则长按下去什么都没选中，用户以为功能坏了
+            return if (range.end > range.start) {
+                range.start until range.end
+            } else {
+                safe until (safe + 1).coerceAtMost(len)
+            }
+        }
+
         override val renderHandle: Any get() = result
     }
 }

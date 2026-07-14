@@ -42,6 +42,7 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.render.PageCanvas
+import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
@@ -77,6 +78,8 @@ fun PageFlipContainer(
     onCenterTap: () -> Unit,
     controller: FlipController,
     modifier: Modifier = Modifier,
+    /** 长按选中的文字；只在静止态（没在翻页）才可能非空 */
+    selection: TextSelection? = null,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -246,15 +249,17 @@ fun PageFlipContainer(
             },
     ) {
         when (effectiveAnim) {
-            FlipAnimation.NONE -> PageCanvas(current, layout, theme)
+            FlipAnimation.NONE -> PageCanvas(current, layout, theme, selection = selection)
             FlipAnimation.SLIDE -> SlideLayers(
-                current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+                selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.COVER -> CoverLayers(
-                current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+                selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.CURL -> CurlLayer(
-                current, prev, next, layout, theme, direction,
+                selection = selection,
+                current = current, prev = prev, next = next,
+                layout = layout, theme = theme, direction = direction,
                 // 前翻卷角完全跟手；后翻以按下点为折叠原点（起始全折叠，随位移展开）
                 touchX = if (direction == FlipDirection.BACKWARD) touchX - downX else touchX,
                 touchY = touchY, cornerBottom = cornerBottom, size = size, density = density,
@@ -265,6 +270,7 @@ fun PageFlipContainer(
 
 @Composable
 private fun SlideLayers(
+    selection: TextSelection? = null,
     current: RenderablePage?,
     prev: RenderablePage?,
     next: RenderablePage?,
@@ -275,7 +281,7 @@ private fun SlideLayers(
     width: Float,
 ) {
     when (direction) {
-        null -> PageCanvas(current, layout, theme)
+        null -> PageCanvas(current, layout, theme, selection = selection)
         FlipDirection.FORWARD -> {
             PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset })
             PageCanvas(next, layout, theme, Modifier.graphicsLayer { translationX = offset + width })
@@ -289,6 +295,7 @@ private fun SlideLayers(
 
 @Composable
 private fun CoverLayers(
+    selection: TextSelection? = null,
     current: RenderablePage?,
     prev: RenderablePage?,
     next: RenderablePage?,
@@ -299,7 +306,7 @@ private fun CoverLayers(
     width: Float,
 ) {
     when (direction) {
-        null -> PageCanvas(current, layout, theme)
+        null -> PageCanvas(current, layout, theme, selection = selection)
         FlipDirection.FORWARD -> {
             // 下页静止在底，当前页被拖走并带右缘阴影
             PageCanvas(next, layout, theme)
@@ -346,6 +353,7 @@ private fun CurlLayer(
     cornerBottom: Boolean,
     size: IntSize,
     density: androidx.compose.ui.unit.Density,
+    selection: TextSelection? = null,
 ) {
     // 位图按页预渲染（页面/排版/主题变化时重建），手势开始时零合成开销
     val curBitmap = remember(current, layout, theme) {
@@ -364,7 +372,7 @@ private fun CurlLayer(
     val renderer = remember(size) { CurlRenderer(size.width.toFloat(), size.height.toFloat()) }
 
     if (direction == null || curBitmap == null) {
-        PageCanvas(current, layout, theme)
+        PageCanvas(current, layout, theme, selection = selection)
         return
     }
 
