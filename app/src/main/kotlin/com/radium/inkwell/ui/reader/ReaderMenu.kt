@@ -54,6 +54,17 @@ import androidx.compose.material.icons.filled.PlayArrow
 import com.radium.inkwell.reader.api.ChineseConvert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.PaddingValues
+import com.radium.inkwell.ui.components.SlimSlider
+import androidx.compose.animation.AnimatedVisibility
+import com.radium.inkwell.ui.components.bottomBarEnter
+import com.radium.inkwell.ui.components.bottomBarExit
+import com.radium.inkwell.ui.components.scrimEnter
+import com.radium.inkwell.ui.components.scrimExit
+import com.radium.inkwell.ui.components.topBarEnter
+import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +79,7 @@ import com.radium.inkwell.reader.api.ReaderTheme
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderMenu(
+    visible: Boolean,
     state: ReaderUiState,
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
@@ -81,103 +93,147 @@ fun ReaderMenu(
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
+    // 菜单现在常驻组合（为了能播退场动画），所以关菜单时得把面板一起收掉 ——
+    // 否则下次呼出菜单，上回没关的目录会自己冒出来
+    LaunchedEffect(visible) {
+        if (!visible) {
+            showToc = false
+            showSettings = false
+        }
+    }
+
     // 菜单栏跟随阅读主题的纸张色。从前用 MaterialTheme.surface（白色），
     // 而正文是米色/夜间色 —— 白条压在纸上非常割裂。
     val theme = state.settings.theme
     val barColor = Color(theme.background)
     val barContent = Color(theme.textColor)
 
-    Column(Modifier.fillMaxSize()) {
-        // 顶栏
-        Surface(color = barColor, contentColor = barContent, shadowElevation = 4.dp) {
-            Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
+    // 中间蒙层淡入 —— 让人看得出这是「盖上来的一层」，而不是页面突然换了个样子。
+    // 退场比入场快（Motion.EXIT_MS）：用户已经决定关掉了，界面还慢悠悠淡出会像没反应。
+    AnimatedVisibility(
+        visible = visible,
+        enter = scrimEnter(),
+        exit = scrimExit(),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            // 顶栏从上滑入，底栏从下滑入 —— 用 animateEnterExit 而不是再套一层
+            // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
+            Surface(
+                color = barColor,
+                contentColor = barContent,
+                shadowElevation = 4.dp,
+                modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
             ) {
-                IconButton(onClick = onExit) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        state.bookTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        state.chapterTitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        // 次要文字也跟主题走：M3 的灰色在夜间纸张上会糊掉
-                        color = barContent.copy(alpha = 0.65f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(onClick = onOpenSearch) {
-                    Icon(Icons.Default.Search, contentDescription = "全书搜索", tint = barContent)
-                }
-            }
-        }
-
-        // 中央区域：轻蒙层，把菜单读成「浮在正文之上的一层」，点击关闭
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.18f))
-                .clickable(onClick = onDismiss)
-        )
-
-        // 底栏
-        Surface(color = barColor, contentColor = barContent, shadowElevation = 8.dp) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 8.dp)) {
-                // 章节进度
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(
-                        onClick = { onGotoChapter(state.chapterIndex - 1) },
-                        enabled = state.chapterIndex > 0,
-                    ) { Text("上一章") }
-                    Slider(
-                        value = if (state.pageCount <= 1) 0f else state.pageInChapter.toFloat() / (state.pageCount - 1),
-                        onValueChange = onSeekPercent,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                    )
-                    TextButton(
-                        onClick = { onGotoChapter(state.chapterIndex + 1) },
-                        enabled = state.chapterIndex + 1 < state.chapterCount,
-                    ) { Text("下一章") }
+                    IconButton(onClick = onExit) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            state.bookTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            state.chapterTitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            // 次要文字也跟主题走：M3 的灰色在夜间纸张上会糊掉
+                            color = barContent.copy(alpha = 0.65f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "全书搜索", tint = barContent)
+                    }
                 }
-                HorizontalDivider()
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    TextButton(onClick = { showToc = true }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
-                        Text(" 目录")
+            }
+
+            // 中央区域：轻蒙层，把菜单读成「浮在正文之上的一层」，点击关闭
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.18f))
+                    .clickable(onClick = onDismiss)
+            )
+
+            // 底栏
+            Surface(
+                color = barColor,
+                contentColor = barContent,
+                shadowElevation = 8.dp,
+                modifier = Modifier.animateEnterExit(bottomBarEnter(), bottomBarExit()),
+            ) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 8.dp)) {
+                    // 章节进度
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(
+                            onClick = { onGotoChapter(state.chapterIndex - 1) },
+                            enabled = state.chapterIndex > 0,
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
+
+                        // 细滑块 + 页码。M3 默认的 Slider thumb 是一根竖条，把这条本该最不起眼的
+                        // 进度撑得比按钮还厚 —— 章节进度是"瞄一眼"的东西，不该抢地方
+                        SlimSlider(
+                            value = if (state.pageCount <= 1) 0f
+                            else state.pageInChapter.toFloat() / (state.pageCount - 1),
+                            onValueChange = onSeekPercent,
+                            enabled = state.pageCount > 1,
+                            activeColor = barContent,
+                            inactiveColor = barContent.copy(alpha = 0.2f),
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        )
+                        Text(
+                            "${state.pageInChapter + 1}/${state.pageCount.coerceAtLeast(1)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = barContent.copy(alpha = 0.65f),
+                        )
+
+                        TextButton(
+                            onClick = { onGotoChapter(state.chapterIndex + 1) },
+                            enabled = state.chapterIndex + 1 < state.chapterCount,
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
                     }
-                    if (state.isNetBook) {
-                        TextButton(onClick = onSearchSources) {
-                            Icon(Icons.Default.SwapHoriz, contentDescription = null)
-                            Text(" 换源")
+                    HorizontalDivider()
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        TextButton(onClick = { showToc = true }) {
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                            Text(" 目录")
                         }
-                    }
-                    // 滚动模式下没有"页"，自动翻页无从谈起
-                    if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
-                        TextButton(onClick = onToggleAutoFlip) {
-                            Icon(
-                                if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = null,
-                            )
-                            Text(if (state.autoFlipping) " 停止" else " 自动")
+                        if (state.isNetBook) {
+                            TextButton(onClick = onSearchSources) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                Text(" 换源")
+                            }
                         }
-                    }
-                    TextButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = null)
-                        Text(" 设置")
+                        // 滚动模式下没有"页"，自动翻页无从谈起
+                        if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
+                            TextButton(onClick = onToggleAutoFlip) {
+                                Icon(
+                                    if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                )
+                                Text(if (state.autoFlipping) " 停止" else " 自动")
+                            }
+                        }
+                        TextButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = null)
+                            Text(" 设置")
+                        }
                     }
                 }
             }
@@ -275,7 +331,7 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
                 Icons.Default.DarkMode, contentDescription = null,
                 Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Slider(
+            SlimSlider(
                 value = settings.brightnessOverride ?: 0.5f,
                 onValueChange = { v ->
                     onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
@@ -417,15 +473,17 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun ChipRow(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    // 必须可横向滚动。从前是个固定宽度的 Row：选项一多（自动翻页有 7 档）就塞不下，
+    // Row 把剩余宽度硬分给最后一个 chip，它的文字被压成竖排单字 —— 「45s」变成三行。
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEachIndexed { i, label ->
             FilterChip(
                 selected = i == selectedIndex,
                 onClick = { onSelect(i) },
-                label = { Text(label) },
+                label = { Text(label, maxLines = 1) },
             )
         }
     }

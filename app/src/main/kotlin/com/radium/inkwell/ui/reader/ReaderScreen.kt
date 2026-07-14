@@ -294,19 +294,19 @@ fun ReaderScreen(
             )
         }
 
-        if (state.menuVisible) {
-            ReaderMenu(
-                state = state,
-                onExit = onExit,
-                onGotoChapter = { viewModel.gotoChapter(it) },
-                onSeekPercent = { viewModel.seekToPercent(it) },
-                onUpdateSettings = { viewModel.updateSettings(it) },
-                onSearchSources = { viewModel.searchOtherSources() },
-                onToggleAutoFlip = { viewModel.toggleAutoFlip() },
-                onOpenSearch = { viewModel.openSearchPanel() },
-                onDismiss = { viewModel.toggleMenu() },
-            )
-        }
+        // 常驻组合，可见性交给 AnimatedVisibility —— 否则退场动画根本没机会播
+        ReaderMenu(
+            visible = state.menuVisible,
+            state = state,
+            onExit = onExit,
+            onGotoChapter = { viewModel.gotoChapter(it) },
+            onSeekPercent = { viewModel.seekToPercent(it) },
+            onUpdateSettings = { viewModel.updateSettings(it) },
+            onSearchSources = { viewModel.searchOtherSources() },
+            onToggleAutoFlip = { viewModel.toggleAutoFlip() },
+            onOpenSearch = { viewModel.openSearchPanel() },
+            onDismiss = { viewModel.toggleMenu() },
+        )
     }
 }
 

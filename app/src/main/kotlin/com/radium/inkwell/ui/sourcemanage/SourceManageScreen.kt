@@ -56,12 +56,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
+import com.radium.inkwell.ui.components.SlimSlider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -454,7 +454,7 @@ fun SourceManageScreen(
                         "单源超时 ${draft.timeoutMs / 1000} 秒",
                         style = MaterialTheme.typography.labelMedium,
                     )
-                    Slider(
+                    SlimSlider(
                         value = (draft.timeoutMs / 1000).toFloat(),
                         onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
                         valueRange = 15f..180f,
