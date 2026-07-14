@@ -36,6 +36,7 @@ class ReaderPrefs(private val context: Context) {
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
+        val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
         val CHINESE_CONVERT = stringPreferencesKey("chinese_convert")
@@ -58,6 +59,7 @@ class ReaderPrefs(private val context: Context) {
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
             keepScreenOn = p[Keys.KEEP_SCREEN_ON] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
+            flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
             chineseConvert = p[Keys.CHINESE_CONVERT]
@@ -84,6 +86,7 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
+            p[Keys.FLIP_HAPTIC] = settings.flipHaptic
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
             p[Keys.CHINESE_CONVERT] = settings.chineseConvert.name
@@ -119,6 +122,7 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "brightness" to (s.brightnessOverride ?: -1f).toString(),
             "keep_screen_on" to s.keepScreenOn.toString(),
             "volume_key_flip" to s.volumeKeyFlip.toString(),
+            "flip_haptic" to s.flipHaptic.toString(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
             "chinese_convert" to s.chineseConvert.name,
@@ -158,6 +162,7 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             brightnessOverride = v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f },
             keepScreenOn = v["keep_screen_on"]?.toBooleanStrictOrNull() ?: base.keepScreenOn,
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
+            flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
             preloadChapters = v["preload_chapters"]?.toIntOrNull() ?: base.preloadChapters,
             chineseConvert = v["chinese_convert"]

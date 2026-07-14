@@ -302,6 +302,7 @@ fun ReaderScreen(
                         layout = layout,
                         theme = state.settings.theme,
                         animation = state.settings.flipAnimation,
+                        hapticOnFlip = state.settings.flipHaptic,
                         // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
                         gesturesEnabled = !state.menuVisible && selection == null,
                         canFlip = { dir ->

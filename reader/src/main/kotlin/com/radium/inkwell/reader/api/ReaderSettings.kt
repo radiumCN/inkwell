@@ -16,6 +16,11 @@ data class ReaderSettings(
     val brightnessOverride: Float? = null,
     val keepScreenOn: Boolean = true,
     val volumeKeyFlip: Boolean = true,
+    /**
+     * 翻页时震一下。**默认关** —— 读小说是连续翻页，每页都震很烦，而且费电。
+     * 想要"落定"手感的人再开。
+     */
+    val flipHaptic: Boolean = false,
     /** 自动翻页间隔（秒）；每页停留这么久后自动往下翻 */
     val autoFlipSeconds: Int = 15,
     /**

@@ -497,6 +497,12 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
             checked = settings.volumeKeyFlip,
             onCheckedChange = { onUpdate(settings.copy(volumeKeyFlip = it)) },
         )
+        SwitchRow(
+            title = "翻页震动",
+            subtitle = "翻过一页时轻震一下。连续翻页会一直震，默认关",
+            checked = settings.flipHaptic,
+            onCheckedChange = { onUpdate(settings.copy(flipHaptic = it)) },
+        )
     }
 }
 

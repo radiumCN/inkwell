@@ -72,6 +72,8 @@ fun PageFlipContainer(
     layout: LayoutSpec,
     theme: ReaderTheme,
     animation: FlipAnimation,
+    /** 翻页落定时震一下。默认关；见 ReaderSettings.flipHaptic */
+    hapticOnFlip: Boolean = false,
     gesturesEnabled: Boolean,
     canFlip: (FlipDirection) -> Boolean,
     onCommit: (FlipDirection) -> Unit,
@@ -117,7 +119,7 @@ fun PageFlipContainer(
         val dir = direction ?: return
         settling = true
         val width = size.width.toFloat()
-        if (commit) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (commit && hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (effectiveAnim == FlipAnimation.CURL) {
             // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
             val target = when {
