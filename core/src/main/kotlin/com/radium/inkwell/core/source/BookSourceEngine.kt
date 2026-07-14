@@ -10,6 +10,8 @@ class SourceException(message: String, cause: Throwable? = null) : Exception(mes
 
 // ---- 结果模型 ----
 
+/** 可序列化：预览页需要整条带过去，详情页解析不出的字段（书名/作者/封面）由它回落 */
+@kotlinx.serialization.Serializable
 data class SearchResult(
     val title: String,
     val bookUrl: String,
@@ -37,6 +39,8 @@ data class RemoteChapter(
     val index: Int,
     val title: String,
     val url: String,
+    /** 目录规则用 @put/java.put 存下的变量（JSON）；正文规则会用 @get 取 */
+    val variable: String = "",
 )
 
 /** 正文；图片元素的 resourceId 为绝对 URL */
@@ -79,7 +83,10 @@ class BookSourceEngine(
     private val renderer: PageRenderer? = null,
 ) {
 
-    private val evaluator = RuleEvaluator(scriptRuntime)
+    private val evaluator = RuleEvaluator(
+        scriptRuntime,
+        jsHttp = com.radium.inkwell.core.source.js.EngineJsHttp(http),
+    )
 
     /** 已确认需要 JS 渲染的书源；后续请求直接走渲染器，省掉每次先静态空跑一遍 */
     private val needsRender = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -126,16 +133,20 @@ class BookSourceEngine(
         render: Boolean,
     ): RemoteBookDetail? {
         val fetched = fetchPage(source, url, "detail", render)
-        val ctx = pageContext(fetched, varsOf(source))
+        val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, bookUrl = url))
         val f = rule.fields
         val title = evalField("detail", "title", f["title"], ctx)
-        if (title.isNullOrBlank()) return null
+        // 书源不配书名规则是常态：JSON API 源的「详情页」往往只是目录接口，压根没有书名，
+        // 书名搜索结果里已经给过了（Legado 同样是把搜索结果的书名带下来）。
+        // 只有「配了书名规则却没匹配到」才说明这一页真没解析出来 —— 那时返回 null，
+        // 交给 JS 渲染兜底重试。从前一律要求详情页解析出书名，把这一整类书源判了死刑。
+        if (!f["title"].isNullOrBlank() && title.isNullOrBlank()) return null
         val tocUrl = evalUrlField("detail", "tocUrl", f["tocUrl"], ctx)
             ?.takeIf { it.isNotBlank() }
             ?.let { resolveUrl(fetched.finalUrl, it) }
             ?: fetched.finalUrl // 缺省：详情页即目录页
         return RemoteBookDetail(
-            title = title,
+            title = title.orEmpty(), // 可能为空 → 调用方回落到搜索结果的书名
             author = evalField("detail", "author", f["author"], ctx),
             coverUrl = evalUrlField("detail", "coverUrl", f["coverUrl"], ctx)
                 ?.let { resolveUrl(fetched.finalUrl, it) },
@@ -156,7 +167,7 @@ class BookSourceEngine(
         tocUrl: String,
         render: Boolean,
     ): List<RemoteChapter>? {
-        val collected = mutableListOf<Pair<String, String>>()
+        val collected = mutableListOf<Triple<String, String, String>>()
         var url: String? = resolveUrl(source.baseUrl, tocUrl)
         val visited = HashSet<String>()
         var pages = 0
@@ -164,13 +175,17 @@ class BookSourceEngine(
         while (url != null && pages < MAX_TOC_PAGES && visited.add(url)) {
             pages++
             val fetched = fetchPage(source, url, "toc", render)
-            val ctx = pageContext(fetched, varsOf(source))
+            val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, tocUrl = url))
             for (item in evalList("toc", rule.list, ctx)) {
-                val title = evalField("toc", "title", rule.fields["title"], item)
-                val chapUrl = evalUrlField("toc", "url", rule.fields["url"], item)
+                // 每个章节项一份变量表：@put 存的参数属于这一章，不能串到别的章节上
+                val itemCtx = item.copy(js = item.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap()))
+                val title = evalField("toc", "title", rule.fields["title"], itemCtx)
+                val chapUrl = evalUrlField("toc", "url", rule.fields["url"], itemCtx)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { resolveUrl(fetched.finalUrl, it) }
-                if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank()) collected += title to chapUrl
+                if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank()) {
+                    collected += Triple(title, chapUrl, encodeVars(itemCtx.js.scriptVars))
+                }
             }
             url = rule.nextPage
                 ?.let { evalUrlField("toc", "nextPage", it, ctx) }
@@ -179,7 +194,7 @@ class BookSourceEngine(
         }
         if (collected.isEmpty()) return null
         val ordered = if (rule.reverse) collected.asReversed() else collected
-        return ordered.mapIndexed { i, (title, u) -> RemoteChapter(i, title, u) }
+        return ordered.mapIndexed { i, (title, u, vars) -> RemoteChapter(i, title, u, vars) }
     }
 
     /**
@@ -187,15 +202,31 @@ class BookSourceEngine(
      * 分页按钮也标成「下一章」（如仓库看书网 874007_2.html → 874007_3.html → 874008.html），
      * 一路跟下去会把后面十几章吞进当前章。撞上目录里的其他章节即停。
      */
+    /**
+     * @param chapterVariable 目录阶段存下的变量（[RemoteChapter.variable]）。正文规则里的
+     * `@get:{k}` / `java.get(k)` 要取得到它 —— 不传这条链路就是断的。
+     */
     suspend fun getContent(
         source: BookSourceRule,
         chapterUrl: String,
         otherChapterUrls: Set<String> = emptySet(),
+        chapterVariable: String = "",
     ): RemoteChapterContent {
         val rule = source.content ?: throw SourceException("书源「${source.name}」未配置正文规则")
         return withRenderFallback(source) { render ->
-            collectContent(source, rule, chapterUrl, otherChapterUrls, render)
+            collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
         } ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
+    }
+
+    /** 变量表 ↔ JSON（随章节一起落库，见 ChapterEntity.variable） */
+    private fun encodeVars(vars: Map<String, String>): String =
+        if (vars.isEmpty()) "" else VARS_JSON.encodeToString(vars.toMap())
+
+    private fun decodeVars(json: String): MutableMap<String, String> {
+        if (json.isBlank()) return java.util.concurrent.ConcurrentHashMap()
+        val map = runCatching { VARS_JSON.decodeFromString<Map<String, String>>(json) }
+            .getOrElse { emptyMap() }
+        return java.util.concurrent.ConcurrentHashMap(map)
     }
 
     private suspend fun collectContent(
@@ -203,6 +234,7 @@ class BookSourceEngine(
         rule: ContentRule,
         chapterUrl: String,
         otherChapterUrls: Set<String>,
+        chapterVariable: String,
         render: Boolean,
     ): RemoteChapterContent? {
         // 净化：源级在前、全局在后；正则预编译
@@ -216,7 +248,10 @@ class BookSourceEngine(
         while (url != null && pages < MAX_CONTENT_PAGES && visited.add(url)) {
             pages++
             val fetched = fetchPage(source, url, "content", render)
-            val ctx = pageContext(fetched, varsOf(source))
+            // 目录阶段存下的变量在这里喂回脚本：正文规则的 @get:{k} / java.get(k) 靠它
+            val js = jsContextOf(source, chapterUrl = url)
+                .copy(scriptVars = decodeVars(chapterVariable))
+            val ctx = pageContext(fetched, varsOf(source), js)
             val html = evalField("content", "content", rule.content, ctx)
             if (html != null) {
                 // 每页单独转换，图片相对路径按该页最终 URL 解析为绝对 URL
@@ -290,12 +325,14 @@ class BookSourceEngine(
         vars: Map<String, String>,
         stage: String,
     ): FetchedPage {
-        val url = resolveUrl(source.baseUrl, expandTemplate(request.url, vars))
+        // 地址里的 {{}} 同样按 Legado 语义展开（JS 表达式 / 嵌套规则），不只是变量替换
+        val urlCtx = urlContext(source, vars)
+        val url = resolveUrl(source.baseUrl, evaluator.expandTemplate(request.url, urlCtx))
         return doFetch(
             stage = stage,
             url = url,
             method = request.method,
-            body = request.body?.let { expandTemplate(it, vars) },
+            body = request.body?.let { evaluator.expandTemplate(it, urlCtx) },
             headers = mergeHeaders(source.headers, request.headers, vars),
             charset = request.charset ?: source.charset,
             rateLimit = source.rateLimit,
@@ -337,13 +374,42 @@ class BookSourceEngine(
         (sourceHeaders + requestHeaders).mapValues { (_, v) -> expandTemplate(v, vars) }
 
     /** 页面上下文：HTML 与原始文本（JSON 规则懒解析）同时可用 */
-    private fun pageContext(fetched: FetchedPage, vars: Map<String, String>): EvalContext =
+    private fun pageContext(
+        fetched: FetchedPage,
+        vars: Map<String, String>,
+        js: JsContext = JsContext(),
+    ): EvalContext =
         EvalContext(
             element = Jsoup.parse(fetched.bodyText, fetched.finalUrl),
             json = fetched.bodyText,
             baseUrl = fetched.finalUrl,
             vars = vars,
+            js = js,
         )
+
+    /** 脚本上下文：书源标识 + 当前书/章节。scriptVars 每条抓取链路一份，供 java.put/get 传值 */
+    /** 展开地址模板用的上下文：没有页面，只有变量与脚本桥 */
+    private fun urlContext(source: BookSourceRule, vars: Map<String, String>) = EvalContext(
+        element = null,
+        json = null,
+        baseUrl = source.baseUrl,
+        vars = vars,
+        js = jsContextOf(source),
+    )
+
+    private fun jsContextOf(
+        source: BookSourceRule,
+        bookUrl: String = "",
+        tocUrl: String = "",
+        chapterUrl: String = "",
+    ) = JsContext(
+        sourceKey = source.id,
+        book = com.radium.inkwell.core.source.js.BookBridge(
+            bookUrl = bookUrl,
+            tocUrl = tocUrl,
+        ),
+        chapter = com.radium.inkwell.core.source.js.ChapterBridge(url = chapterUrl),
+    )
 
     private fun parseListPage(
         source: BookSourceRule,
@@ -355,7 +421,7 @@ class BookSourceEngine(
         nextPageRule: String?,
         pageable: Boolean = false,
     ): SearchPage {
-        val ctx = pageContext(fetched, vars)
+        val ctx = pageContext(fetched, vars, jsContextOf(source))
         val items = evalList(stage, listRule, ctx).mapNotNull { itemCtx ->
             val title = evalField(stage, "title", fields["title"], itemCtx)
             val bookUrl = evalUrlField(stage, "bookUrl", fields["bookUrl"], itemCtx)
@@ -458,6 +524,7 @@ class BookSourceEngine(
     }
 
     private companion object {
+        val VARS_JSON = kotlinx.serialization.json.Json
         val PAGE_VAR = Regex("\\{\\{[^}]*page[^}]*\\}\\}")
         const val MAX_TOC_PAGES = 200
         const val MAX_CONTENT_PAGES = 50

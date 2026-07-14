@@ -188,6 +188,23 @@ class BookSourceEngineTest {
         assertFalse(engine().search(fixed, "修真").hasMore)
     }
 
+    /**
+     * 书源不配书名规则是常态：JSON API 源的「详情页」往往只是目录接口，压根没有书名，
+     * 书名搜索时就给过了。从前一律要求详情页解析出书名，把这一整类书源判了死刑
+     * （追书神器等 22 个源都栽在这）。
+     */
+    @Test
+    fun `没有书名规则的详情页不算失败，书名留空交给调用方回落`() = runBlocking {
+        val noTitleRule = BookSourceRule.fromJson(
+            sourceJson(base).replace(""""title": "css:h1@text",""", "")
+        )
+        val detail = engine().getDetail(noTitleRule, "$base/book/1")
+        assertEquals("", detail.title, "书名留空，由调用方回落到搜索结果")
+        // 其余字段照常解析
+        assertEquals("$base/book/1/toc", detail.tocUrl)
+        assertEquals("一个平凡少年踏上修真之路。", detail.intro)
+    }
+
     @Test
     fun `detail without matched title throws`() = runBlocking {
         assertFailsWith<SourceException> { engine().getDetail(source(), "$base/book/empty") }
@@ -298,6 +315,8 @@ class BookSourceEngineTest {
                 path == "/chap/1_2" -> html(CHAP_PAGE_2)
                 path == "/loop/a" -> html(LOOP_A)
                 path == "/loop/b" -> html(LOOP_B)
+                path == "/vartoc" -> html(VAR_TOC)
+                path.startsWith("/vchap/") -> html("<html><body><p>x</p></body></html>")
                 path == "/bleed/1" -> html(BLEED_1)
                 path == "/bleed/1_2" -> html(BLEED_1_2)
                 path == "/bleed/2" -> html(BLEED_2)
@@ -319,6 +338,44 @@ class BookSourceEngineTest {
         private fun json(body: String): MockResponse =
             MockResponse().setBody(body).setHeader("Content-Type", "application/json; charset=utf-8")
     }
+
+
+    /**
+     * 目录规则用 @put 存的参数，正文规则要用 @get 取得到 —— Legado 靠这条链路传参
+     * （变量挂在 chapter 实体上并落库）。我们从前 @put/@get 完全没实现，
+     * 这类书源「导入成功、读出来是错的」。
+     */
+    @Test
+    fun `目录 put 的变量传到正文 get`() = runBlocking {
+        val putPipe = "put:b64:" + b64("""{"cid":"tag.a@data-cid"}""")
+        val contentRule = "text:b64:" + b64("章节ID=@get:{cid}")
+        val json = """
+            {"schemaVersion":1,"id":"t","name":"传参站","baseUrl":"BASE","version":1,
+             "toc":{"list":"legado:class.chap","fields":{
+               "title":"legado:tag.a@text",
+               "url":"legado:tag.a@href | PUT"}},
+             "content":{"content":"CONTENT"}}
+        """.trimIndent()
+            .replace("BASE", base)
+            .replace("PUT", putPipe)
+            .replace("CONTENT", contentRule)
+        val src = BookSourceRule.fromJson(json)
+
+        val toc = engine().getToc(src, "$base/vartoc")
+        assertEquals(2, toc.size)
+        // 变量随章节被带出来（会落到 ChapterEntity.variable）
+        assertTrue(toc[0].variable.contains("c101"), "实际: ${toc[0].variable}")
+        assertTrue(toc[1].variable.contains("c202"), "实际: ${toc[1].variable}")
+
+        // 正文规则的 @get:{cid} 取到的是本章的变量，不会串到别的章节
+        val c1 = engine().getContent(src, toc[0].url, chapterVariable = toc[0].variable)
+        assertEquals("章节ID=c101", (c1.elements.first() as ContentElement.Paragraph).text)
+        val c2 = engine().getContent(src, toc[1].url, chapterVariable = toc[1].variable)
+        assertEquals("章节ID=c202", (c2.elements.first() as ContentElement.Paragraph).text)
+    }
+
+    private fun b64(s: String) =
+        java.util.Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8))
 
     private companion object {
 
@@ -420,6 +477,11 @@ class BookSourceEngineTest {
             <p>　　他背起行囊，踏上了修真之路。</p>
             <img src="/img/scene.jpg">
             </div></body></html>"""
+
+        const val VAR_TOC = """<html><body>
+            <div class="chap"><a href="/vchap/1" data-cid="c101">第一章</a></div>
+            <div class="chap"><a href="/vchap/2" data-cid="c202">第二章</a></div>
+            </body></html>"""
 
         // 章内分页的末页把「下一页」指向下一章 —— 现实中极常见，会把后续章节吃进本章
         const val BLEED_1 = """<html><body><div id="content"><p>第一章上半。</p></div>

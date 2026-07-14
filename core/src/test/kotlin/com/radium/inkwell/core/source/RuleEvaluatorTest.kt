@@ -24,7 +24,7 @@ class RuleEvaluatorTest {
         </body></html>
     """.trimIndent()
 
-    private val ev = RuleEvaluator()
+    private val ev = RuleEvaluator(com.radium.inkwell.core.source.js.RhinoScriptRuntime())
 
     private fun ctx(vars: Map<String, String> = emptyMap()) =
         EvalContext(Jsoup.parse(html, "https://ex.com/s?q=1"), null, "https://ex.com/", vars)
@@ -162,5 +162,66 @@ class RuleEvaluatorTest {
             "/search?q=%D6%D0%CE%C4&p=1",
             expandTemplate("/search?q={{kw|encode:gbk}}&p={{page}}", mapOf("kw" to "中文", "page" to "1")),
         )
+    }
+
+    /**
+     * `@put:{"k":"规则"}` 把规则求值结果存进变量表，后续规则用 `@get:{k}` 取。
+     * Legado 靠这个把目录页的参数传给正文页 —— 我们那份书源表里 75 个源在用。
+     * 从前完全没实现：`@put:` 会被当成普通规则文本解析出垃圾（导入成功、读出来是错的）。
+     */
+    @Test
+    fun `put 存变量、get 取变量`() {
+        val c = ctx()
+        // 存：把书名存进变量 bid
+        ev.evalToStrings(RuleParser.parse("legado:tag.h3@tag.a@text | put:b64:" + b64("""{"bid":"tag.h3@tag.a@text"}""")), c)
+        assertEquals("斗破星空", c.js.scriptVars["bid"])
+
+        // 取：@get:{bid} 在求值期替换成变量值
+        assertEquals(
+            listOf("/book/斗破星空"),
+            ev.evalToStrings(RuleParser.parse("text:b64:" + b64("/book/@get:{bid}")), c),
+        )
+    }
+
+    @Test
+    fun `java put get 在脚本里互通`() {
+        val c = ctx()
+        c.js.scriptVars["token"] = "abc123"
+        // 脚本读变量表
+        assertEquals(
+            listOf("abc123"),
+            ev.evalToStrings(RuleParser.parse("js:b64:" + b64("java.get('token')")), c),
+        )
+        // 脚本写变量表，规则侧能读到
+        ev.evalToStrings(RuleParser.parse("js:b64:" + b64("java.put('x','42')")), c)
+        assertEquals("42", c.js.scriptVars["x"])
+    }
+
+    private fun b64(s: String) =
+        java.util.Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8))
+
+    /**
+     * Legado 把规则串按 `<js>` 切成若干段顺序流水执行：前一段的输出是后一段的输入。
+     * `class.x@html<js>...</js>@text` = 选中 → 跑脚本 → **在脚本产物上**再抽 text。
+     * 从前见到「JS 块后还有规则」就整源跳过 —— 19 个书源卡在这。
+     */
+    @Test
+    fun `rule 管道把脚本产物当作新内容再求值`() {
+        // 脚本吐出一段新 HTML，后一段规则在这段新 HTML 上求值
+        val script = b64("'<div><span class=\\'t\\'>脚本产物</span></div>'")
+        val tail = b64("legado:class.t@text")
+        assertEquals(
+            listOf("脚本产物"),
+            strs("js:b64:$script | rule:b64:$tail"),
+        )
+    }
+
+    /** Legado 的 @XPath 规则；从前一律跳过整源（13 个书源卡在这） */
+    @Test
+    fun `xpath 规则`() {
+        assertEquals(listOf("斗破星空", "凡人修仙"), strs("xpath:b64:" + b64("//div[@class='book']//h3/a/text()")))
+        assertEquals(listOf("/book/1", "/book/2"), strs("xpath:b64:" + b64("//h3/a/@href")))
+        // 非法 XPath 返回空而不是打死整条链路
+        assertEquals(emptyList(), strs("xpath:b64:" + b64("//[[[bad")))
     }
 }

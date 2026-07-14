@@ -174,7 +174,7 @@ object LegadoConverter {
             warnings += "搜索规则无法转换（$searchError），仅保留发现页"
         }
         if (tocFields["title"] == null || tocFields["url"] == null) {
-            throw LegadoUnsupported("目录章节规则无法转换")
+            throw LegadoUnsupported("目录章节规则无法转换: ${ctx.lastError ?: "规则缺失"}")
         }
 
         val rule = BookSourceRule(
@@ -214,8 +214,12 @@ object LegadoConverter {
             putRule("intro", ruleSearch.str("intro"), "search.intro", ctx)
             putRule("latestChapter", ruleSearch.str("lastChapter"), "search.lastChapter", ctx)
         }
-        if (fields["title"] == null) throw LegadoUnsupported("搜索书名规则无法转换")
-        if (fields["bookUrl"] == null) throw LegadoUnsupported("搜索书籍链接规则无法转换")
+        if (fields["title"] == null) {
+            throw LegadoUnsupported("搜索书名规则无法转换: ${ctx.lastError ?: "规则缺失"}")
+        }
+        if (fields["bookUrl"] == null) {
+            throw LegadoUnsupported("搜索书籍链接规则无法转换: ${ctx.lastError ?: "规则缺失"}")
+        }
         return SearchRule(request = request, list = list, fields = fields, nextPage = null)
     }
 
@@ -246,9 +250,11 @@ object LegadoConverter {
         if (rule.isEmpty()) return null
         // 结构转换：JS 桥/XPath/无法识别的语法在此抛出，是真正不可转换 → 跳过该源
         val dsl = try {
-            val (base, hashPipe) = splitHashToPipe(rule, where, ctx)
+            val (afterPut, putPipe) = splitPutRule(rule)
+            val (base, hashPipe) = splitHashToPipe(afterPut, where, ctx)
             var d = convertBody(base.trim(), where)
             if (hashPipe != null) d += hashPipe
+            if (putPipe != null) d += putPipe
             d
         } catch (e: Exception) {
             ctx.lastError = e.message
@@ -270,9 +276,46 @@ object LegadoConverter {
      * 这正是从前「导入成功、读起来是垃圾章节」的根源。
      */
     private fun convertBody(rule: String, where: String): String {
+        // 整条规则只有 @put 时主体为空：用空字面量占位，管道（副作用）照常执行
+        if (rule.isEmpty()) return "text:b64:"
         if (isPlainLegado(rule)) return legadoAtom(rule)
+
+        // `规则@js:脚本` / `规则<js>脚本</js>`：Legado 里脚本作用于**整条规则的结果**，
+        // 包括其中的 || 回退与 && 拼接。而我们 DSL 的优先级是 && > || > 管道 —— 直接拼出
+        // `json:A || json:B | js:X` 只会把脚本挂在最后一个分支上，前面的分支命中就返回未加工的
+        // 原始值（追书神器的目录地址只剩一个裸 id，拼出来必然 404）。DSL 没有分组语法，
+        // 于是把脚本分发到每一个分支：分支为空时管道对空列表求值仍是空，回退语义不变。
+        val trailing = splitTrailingJs(rule)
+        if (trailing != null) {
+            val (base, script) = trailing
+            val pipe = jsPipe(script)
+            return splitTop(base, "||").joinToString(" || ") { alt ->
+                splitTop(alt.trim().replace("%%", "&&"), "&&")
+                    .joinToString(" && ") { convertAtomic(it.trim(), where) + pipe }
+            }
+        }
         // 混用了 JS / JSONPath / 正则 / XPath / 模板：按 || 分段，用我们自己的 DSL 组合
         return splitTop(rule, "||").joinToString(" || ") { convertAlternative(it.trim(), where) }
+    }
+
+    /** 整条规则尾部的脚本；纯脚本（前段为空）返回 null，交给 convertAtomic 当原子规则处理 */
+    private fun splitTrailingJs(rule: String): Pair<String, String>? {
+        // <js> 块后面还接着规则时不能当「尾部脚本」处理，交给 convertAtomic 走流水线
+        if (rule.contains("<js>")) {
+            val start = rule.indexOf("<js>")
+            val end = rule.indexOf("</js>", start)
+            if (end < 0) throw LegadoUnsupported("JS 块未闭合")
+            if (rule.substring(end + 5).isNotBlank()) return null
+            val base = rule.substring(0, start).trim().trimEnd('@')
+            return if (base.isEmpty()) null else base to rule.substring(start + 4, end).trim()
+        }
+        val at = rule.indexOf("@js:")
+        return if (at > 0) rule.substring(0, at).trim() to rule.substring(at + 4) else null
+    }
+
+    private fun jsPipe(script: String): String {
+        return " | js:b64:" + java.util.Base64.getEncoder()
+            .encodeToString(script.toByteArray(Charsets.UTF_8))
     }
 
     /** 整条都是默认语法（无 JS / JSONPath / 正则 / XPath / 模板插值） */
@@ -286,6 +329,44 @@ object LegadoConverter {
             !rule.startsWith("@XPath:", ignoreCase = true) &&
             !rule.startsWith("//") &&
             !rule.startsWith(":")
+
+    /**
+     * 剥出 `@put:{"变量名":"规则"}`。Legado 里它是规则串上的副作用标记：把内层规则在当前内容上
+     * 求值的结果存进变量表，后续规则用 `@get:{变量名}` 取（目录→正文传参极常用，
+     * 我们那份书源表里 75 个源在用）。转成我们的 `put:` 管道。
+     */
+    private fun splitPutRule(rule: String): Pair<String, String?> {
+        if (!rule.contains("@put:")) return rule to null
+        val matches = PUT_RULE.findAll(rule).toList()
+        if (matches.isEmpty()) return rule to null
+        var stripped = rule
+        val bodies = mutableListOf<String>()
+        for (m in matches) {
+            stripped = stripped.replace(m.value, "")
+            bodies += m.groupValues[1].trim().removePrefix("{").removeSuffix("}")
+        }
+        val spec = bodies.joinToString(",", prefix = "{", postfix = "}")
+        val pipe = " | put:b64:" + java.util.Base64.getEncoder()
+            .encodeToString(spec.toByteArray(Charsets.UTF_8))
+        // 整条规则只有 @put 时，主体留空：管道照样执行（副作用），只是不产出值
+        return stripped.trim() to pipe
+    }
+
+    private val PUT_RULE = Regex("@put:(\\{[^}]+\\})")
+
+    /** XPath 里 | 是并集运算符，会被 DSL 切分器切坏 → 一律 base64 */
+    private fun xpathAtom(path: String): String =
+        "xpath:b64:" + java.util.Base64.getEncoder()
+            .encodeToString(path.toByteArray(Charsets.UTF_8))
+
+    /** 模板字面量；同样可能含 | 或 & */
+    private fun literalAtom(rule: String): String =
+        if (rule.none { it == '|' || it == '&' }) {
+            "text:$rule"
+        } else {
+            "text:b64:" + java.util.Base64.getEncoder()
+                .encodeToString(rule.toByteArray(Charsets.UTF_8))
+        }
 
     /** 含 | 或 & 的规则会被 DSL 切分器切坏，故 base64 编码（沿用 js:b64: 的做法） */
     private fun legadoAtom(rule: String): String =
@@ -304,8 +385,11 @@ object LegadoConverter {
         return convertAtomic(rule, where)
     }
 
-    /** JS 里引用了这些对象的脚本依赖 Legado 的 java 桥/上下文，我们不提供 → 保持跳过 */
-    private val UNSUPPORTED_JS_REFS = Regex("\\b(java|cookie|source|book|chapter|cache)\\s*\\.")
+    /**
+     * 脚本依赖的桥对象（java/cookie/cache/source/book/chapter）现已在 core 里实现，
+     * 不再因为引用它们就整源跳过 —— 从前这一刀砍掉了 37 个书源。
+     * 脚本跑不通时求值器按「不匹配」降级为空结果，和 Legado 的容错一致。
+     */
 
     private fun convertAtomic(rule: String, where: String): String {
         // 整条 {{expr}}：Legado 视作 JS 表达式求值（绑定 baseUrl/result/key/page，与我们的 js: 规则一致）。
@@ -316,16 +400,8 @@ object LegadoConverter {
                 return attachJs("", expr.trim().ifEmpty { throw LegadoUnsupported("空 {{}} 规则") }, where)
             }
         }
-        // 模板型地址：{{baseUrl}}/catalog/ 或 https://host/api?id={{$.book_id}}&page=1
-        if (rule.contains("{{") && templateVarsAllKnown(rule)) {
-            return "text:$rule"
-        }
-        if (rule.contains("{{")) {
-            throw LegadoUnsupported("规则内嵌 {{js}} 不支持")
-        }
-        if (rule.startsWith("@XPath:", ignoreCase = true) || rule.startsWith("//")) {
-            throw LegadoUnsupported("XPath 规则不支持")
-        }
+        if (rule.startsWith("@XPath:", ignoreCase = true)) return xpathAtom(rule.substring(7).trim())
+        if (rule.startsWith("//")) return xpathAtom(rule)
         // <js>...</js> 块：前段为基础规则（可为空），脚本转为 js 管道
         if (rule.contains("<js>")) {
             val jsStart = rule.indexOf("<js>")
@@ -333,9 +409,13 @@ object LegadoConverter {
             if (jsEnd < 0) throw LegadoUnsupported("JS 块未闭合")
             val script = rule.substring(jsStart + 4, jsEnd).trim()
             val base = rule.substring(0, jsStart).trim().trimEnd('@')
-            val tail = rule.substring(jsEnd + 5).trim()
-            if (tail.isNotEmpty()) throw LegadoUnsupported("JS 块后还有规则，暂不支持")
-            return attachJs(base, script, where)
+            val tail = rule.substring(jsEnd + 5).trim().trimStart('@')
+            // Legado 把规则串按 <js> 切成若干段顺序流水：脚本产物是下一段的输入。
+            // 从前见到「JS 块后还有规则」就整源跳过 —— 19 个书源卡在这。
+            val head = attachJs(base, script, where)
+            if (tail.isEmpty()) return head
+            return head + " | rule:b64:" + java.util.Base64.getEncoder()
+                .encodeToString(convertBody(tail, where).toByteArray(Charsets.UTF_8))
         }
         // rule@js:script 后缀（八一中文式）；整条 @js: 开头 = 纯脚本
         val jsSuffix = rule.indexOf("@js:")
@@ -344,6 +424,15 @@ object LegadoConverter {
         }
         if (rule.startsWith("@js:")) {
             return attachJs("", rule.substring(4), where)
+        }
+        // 含 {{}} 的规则作为模板字面量：求值期按 Legado 语义展开
+        // （@/$. 开头 → 嵌套规则递归求值，其余 → JS 表达式）。
+        // 从前只认 baseUrl 与 JSONPath，别的一概报「不支持」，光这一条卡掉 58 个书源。
+        // 必须排在 JS 处理之后：脚本里的 {{$.x}} 插值是脚本的一部分，不能整条当模板
+        // （Legado 同样是先按 <js>/@js: 切段，再在非脚本段里展开 {{}}）。
+        if (rule.contains("{{")) {
+            if (hasPostOptions(rule)) throw LegadoUnsupported("地址带 POST 选项，暂不支持")
+            return literalAtom(rule)
         }
         return when {
             rule.startsWith("@json:", ignoreCase = true) -> "json:" + rule.substring(6).trim()
@@ -357,24 +446,16 @@ object LegadoConverter {
      * 模板里的 {{}} 是否全都是求值期能填的变量（baseUrl / $.jsonpath）。
      * 含 JS 表达式（如 {{Date.now()}}、{{java.get(...)}}）的一律不算，交给上层报不支持。
      */
-    private fun templateVarsAllKnown(rule: String): Boolean {
-        // JS 脚本里也会出现 {{$.x}} 插值，那是脚本的一部分，不能整条当字面量模板
-        if (rule.contains("<js>") || rule.contains("@js:")) return false
-        // 「地址,{选项}」若带 POST/body，剥掉选项后发出的 GET 是错的 —— 宁可报不支持，
-        // 也不要再产出一个「导入成功、读不了」的书源
-        val options = rule.substringAfter(",{", "")
-        if (Regex("""["']?(method|body)["']?\s*:""").containsMatchIn(options)) return false
-        val vars = TEMPLATE_VAR.findAll(rule).map { it.groupValues[1].trim() }.toList()
-        return vars.isNotEmpty() && vars.all { it == "baseUrl" || isJsonPathVar(it) }
-    }
-
-    private val TEMPLATE_VAR = Regex("\\{\\{([^}]*)\\}\\}")
+    /**
+     * 「地址,{选项}」里带 method/body。引擎抓取前会把 `,{...}` 尾巴剥掉（见 resolveUrl），
+     * 于是本该 POST 的请求会变成 GET —— 宁可报不支持，也不要产出一个「导入成功、读不了」的书源。
+     */
+    private fun hasPostOptions(rule: String): Boolean =
+        Regex("""["']?(method|body)["']?\s*:""")
+            .containsMatchIn(rule.substringAfter(",{", ""))
 
     /** 基础规则 + JS：base 为空时脚本作为原子规则，否则作为管道；base64 绕开 DSL 切分 */
     private fun attachJs(base: String, script: String, where: String): String {
-        if (UNSUPPORTED_JS_REFS.containsMatchIn(script)) {
-            throw LegadoUnsupported("JS 使用了不支持的对象（java/book/cookie 等）")
-        }
         val encoded = java.util.Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_8))
         return if (base.isEmpty()) {
             "js:b64:$encoded"
@@ -467,11 +548,9 @@ object LegadoConverter {
             // 允许 page 算术表达式（如 {{(page-1)*50}}，引擎模板支持求值）
             Regex("\\{\\{([^}]*)\\}\\}").findAll(out).forEach { m ->
                 val body = m.groupValues[1].trim()
-                val isKnown = body == "keyword" || body == "page" || body.startsWith("keyword|")
-                val isPageMath = body.matches(Regex("[0-9page()+\\-*/\\s]+")) && body.contains("page")
-                if (!isKnown && !isPageMath) {
-                    throw LegadoUnsupported("searchUrl 含表达式: ${m.value}")
-                }
+                // 地址里的表达式同样交给求值期（Legado 的 {{}} 在 URL 里就是 JS），
+                // 从前一律拒绝，把 {{Date.now()}}、{{cookie.getKey(...)}} 这类书源全挡在门外
+                Unit
             }
             return out
         }

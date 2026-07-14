@@ -15,18 +15,43 @@ import java.util.concurrent.ConcurrentHashMap
  * @param json JSON 上下文（原始字符串或已解析对象）；regex/text 中间结果也放这里
  * @param baseUrl 页面最终 URL（重定向后），相对链接解析基准
  * @param vars 模板变量（keyword/page/baseUrl 等）
+ * @param js 脚本桥（book/chapter/source/变量表）；书源脚本靠它拿上下文与传值
  */
 data class EvalContext(
     val element: Element?,
     val json: Any?,
     val baseUrl: String,
     val vars: Map<String, String> = emptyMap(),
+    val js: JsContext = JsContext(),
+)
+
+/**
+ * 一次抓取链路里的脚本上下文。book/chapter 让脚本读到当前书与章节，
+ * scriptVars 是 java.put/java.get 的变量表（Legado 里目录→正文传参极常用）。
+ */
+data class JsContext(
+    /** 书源标识，脚本里的 source.getKey() */
+    val sourceKey: String = "",
+    val book: com.radium.inkwell.core.source.js.BookBridge =
+        com.radium.inkwell.core.source.js.BookBridge(),
+    val chapter: com.radium.inkwell.core.source.js.ChapterBridge =
+        com.radium.inkwell.core.source.js.ChapterBridge(),
+    /** java.put / java.get 的变量表 */
+    val scriptVars: MutableMap<String, String> = ConcurrentHashMap(),
 )
 
 /** 规则求值器；正则按 pattern 缓存预编译；scriptRuntime 为空时 js 规则报不支持 */
 class RuleEvaluator(
     private val scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
+    /** 书源脚本的 HTTP 出口（java.ajax/get/post、cookie 读写）；不注入则这些方法返回空 */
+    private val jsHttp: com.radium.inkwell.core.source.js.JsHttp? = null,
 ) {
+
+    private val jsCache = com.radium.inkwell.core.source.js.JsCache()
+
+    /** 书源级 KV（source.put/get），按书源留存，跨抓取链路可见 */
+    private val sourceStores =
+        ConcurrentHashMap<String, MutableMap<String, String>>()
 
     private val regexCache = ConcurrentHashMap<String, Regex>()
     private fun regexOf(pattern: String): Regex = regexCache.getOrPut(pattern) { Regex(pattern) }
@@ -39,9 +64,10 @@ class RuleEvaluator(
         is RuleNode.Css ->
             selectElements(node.query, ctx).map { ctx.copy(element = it, json = null) }
         is RuleNode.Legado -> ctx.element
-            ?.let { LegadoSelector.elements(it, node.rule) }
+            ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
             ?.map { ctx.copy(element = it, json = null) }
             .orEmpty()
+        is RuleNode.XPath -> xpathNodes(node.path, ctx).map { ctx.copy(element = it, json = null) }
         is RuleNode.JsonPath -> when (val r = readJsonPath(node.path, ctx)) {
             null -> emptyList()
             is List<*> -> r.filterNotNull().map { ctx.copy(element = null, json = it) }
@@ -50,7 +76,7 @@ class RuleEvaluator(
         is RuleNode.RegexRule ->
             regexExtract(node.pattern, ctx).map { ctx.copy(element = null, json = it) }
         is RuleNode.Literal ->
-            expandRuleTemplate(node.template, ctx)
+            expandTemplate(node.template, ctx)
                 .takeIf { it.isNotBlank() }
                 ?.let { listOf(ctx.copy(element = null, json = it)) }
                 ?: emptyList()
@@ -90,11 +116,13 @@ class RuleEvaluator(
             selectElements(node.query, ctx)
                 .map { extract(it, node.extractor) }
                 .filter { it.isNotEmpty() }
-        is RuleNode.Legado -> ctx.element?.let { LegadoSelector.strings(it, node.rule) }.orEmpty()
+        is RuleNode.Legado ->
+            ctx.element?.let { LegadoSelector.strings(it, withGetVars(node.rule, ctx)) }.orEmpty()
+        is RuleNode.XPath -> xpathStrings(node.path, ctx)
         is RuleNode.JsonPath -> jsonToStrings(readJsonPath(node.path, ctx))
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
         is RuleNode.Literal ->
-            expandRuleTemplate(node.template, ctx).let { if (it.isEmpty()) emptyList() else listOf(it) }
+            expandTemplate(node.template, ctx).let { if (it.isEmpty()) emptyList() else listOf(it) }
         is RuleNode.Js ->
             evalJs(node.script, ctx)?.takeIf { it.isNotEmpty() }?.let { listOf(it) } ?: emptyList()
         is RuleNode.Fallback ->
@@ -141,6 +169,31 @@ class RuleEvaluator(
         is CssExtractor.Attr -> el.attr(extractor.name)
     }
 
+    // ---- xpath ----
+
+    /**
+     * XPath 由 JsoupXpath 求值。Legado 的 @XPath 规则直接用它，语义一致。
+     * 选择器非法或不匹配时返回空 —— 书源里手写的 XPath 质量参差，不该拖垮整条链路。
+     */
+    private fun xpathNodes(path: String, ctx: EvalContext): List<Element> {
+        val el = ctx.element ?: return emptyList()
+        return runCatching {
+            org.seimicrawler.xpath.JXDocument.create(el.outerHtml())
+                .selN(path)
+                .mapNotNull { if (it.isElement) it.asElement() else null }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun xpathStrings(path: String, ctx: EvalContext): List<String> {
+        val el = ctx.element ?: return emptyList()
+        return runCatching {
+            org.seimicrawler.xpath.JXDocument.create(el.outerHtml())
+                .selN(path)
+                .map { if (it.isElement) it.asElement().text() else it.asString() }
+                .filter { it.isNotBlank() }
+        }.getOrDefault(emptyList())
+    }
+
     // ---- json ----
 
     private fun readJsonPath(path: String, ctx: EvalContext): Any? {
@@ -181,10 +234,120 @@ class RuleEvaluator(
      * - {{$.x}} 在当前页的 JSON 上求值（JSON API 型书源常这样拼目录地址）
      * - {{baseUrl}} 是当前页地址，不是站点根 —— 例如 {{baseUrl}}/catalog/ 依赖前者
      */
-    private fun expandRuleTemplate(template: String, ctx: EvalContext): String =
-        expandTemplate(template, ctx.vars + ("baseUrl" to ctx.baseUrl)) { path ->
-            jsonToStrings(readJsonPath(path, ctx)).firstOrNull().orEmpty()
+    /**
+     * 展开规则/地址里的 `{{}}`。
+     *
+     * Legado 的语义（AnalyzeRule.makeUpRule）：内容以 `@` / `$.` / `$[` / `//` 开头 →
+     * 当**嵌套规则**递归求值；否则 → 当 **JS 表达式**跑。我们从前只认 baseUrl 和 JSONPath，
+     * 其余一律报「不支持」，光这一条就卡掉了 58 个书源。
+     *
+     * 用括号配对扫描而非正则：JS 表达式里会出现 `}` 与 `|`，正则切不干净。
+     */
+    fun expandTemplate(templateRaw: String, ctx: EvalContext): String {
+        // @get:{k} 与 {{}} 都可能出现在同一条规则/地址里，先取变量再展开模板
+        val template = withGetVars(templateRaw, ctx)
+        if (!template.contains("{{")) return template
+        val out = StringBuilder()
+        var i = 0
+        while (i < template.length) {
+            val start = template.indexOf("{{", i)
+            if (start < 0) {
+                out.append(template, i, template.length)
+                break
+            }
+            out.append(template, i, start)
+            val close = matchingClose(template, start)
+            if (close < 0) { // 没配对上，原样留着
+                out.append(template, start, template.length)
+                break
+            }
+            out.append(evalTemplateExpr(template.substring(start + 2, close).trim(), ctx))
+            i = close + 2
         }
+        return out.toString()
+    }
+
+    /** 从 `{{` 起找配对的 `}}`（按双花括号计数，JS 里的对象字面量是单花括号，不受影响） */
+    private fun matchingClose(s: String, start: Int): Int {
+        var depth = 0
+        var i = start
+        while (i < s.length - 1) {
+            when {
+                s.startsWith("{{", i) -> { depth++; i += 2 }
+                s.startsWith("}}", i) -> {
+                    depth--
+                    if (depth == 0) return i
+                    i += 2
+                }
+                else -> i++
+            }
+        }
+        return -1
+    }
+
+    private fun evalTemplateExpr(body: String, ctx: EvalContext): String {
+        // 我们自己产出的编码模板：{{keyword|encode:gbk}}（搜索地址要按站点编码转关键词）
+        val pipeAt = body.indexOf('|')
+        if (pipeAt > 0) {
+            val name = body.substring(0, pipeAt).trim()
+            val pipe = body.substring(pipeAt + 1).trim()
+            if (pipe == "encode" || pipe.startsWith("encode:")) {
+                val v = varValue(name, ctx)
+                val cs = if (pipe == "encode") Charsets.UTF_8 else charsetOf(pipe.removePrefix("encode:"))
+                return URLEncoder.encode(v, cs.name())
+            }
+        }
+        // 嵌套规则（Legado：@ / $. / $[ / // 开头）
+        if (body.startsWith("$.") || body.startsWith("$[")) {
+            return evalToStrings(RuleNode.JsonPath(body), ctx).firstOrNull().orEmpty()
+        }
+        if (body.startsWith("//")) return "" // XPath，暂不支持
+        if (body.startsWith("@")) {
+            return evalToStrings(RuleNode.Legado(body), ctx).firstOrNull().orEmpty()
+        }
+        // 已知变量 / 整数算术（{{(page-1)*20}}）
+        ctx.vars[body]?.let { return it }
+        if (body == "baseUrl") return ctx.baseUrl
+        evalArithmetic(body, ctx.vars)?.let { return it }
+        // 其余按 JS 表达式求值 —— 这是 Legado 的默认分支。
+        // 没有注入 JS 引擎时按空串处理：模板里的未知变量不该打死整条规则
+        // （js: 原子规则仍会明确报不支持，那才是真的非它不可）。
+        if (scriptRuntime == null) return ""
+        return runJs(body, ctx, contextText(ctx)).orEmpty()
+    }
+
+    /**
+     * `@get:{变量名}` 在求值期替换成变量值（Legado 在规则串组装期做同样的事）。
+     * 变量由 `@put:{}` / `java.put()` 写入。
+     */
+    private fun withGetVars(rule: String, ctx: EvalContext): String =
+        if (!rule.contains("@get:")) rule
+        else GET_VAR.replace(rule) { m -> ctx.js.scriptVars[m.groupValues[1].trim()].orEmpty() }
+
+    /** `@put:{"k":"规则"}`：每条规则在当前内容上求值，结果存进变量表 */
+    private fun applyPut(spec: String, ctx: EvalContext) {
+        val obj = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(spec)
+                    as kotlinx.serialization.json.JsonObject
+        }.getOrNull() ?: return
+        for ((key, value) in obj) {
+            val ruleText = (value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: continue
+            val v = runCatching {
+                evalToStrings(RuleParser.parse(convertPutValue(ruleText)), ctx).firstOrNull()
+            }.getOrNull().orEmpty()
+            ctx.js.scriptVars[key] = v
+        }
+    }
+
+    /** @put 的 value 是一条 Legado 规则原文，按前缀分派到对应引擎 */
+    private fun convertPutValue(rule: String): String = when {
+        rule.startsWith("$.") || rule.startsWith("$[") -> "json:$rule"
+        rule.startsWith("@js:") -> "js:" + rule.substring(4)
+        else -> "legado:$rule"
+    }
+
+    private fun varValue(name: String, ctx: EvalContext): String =
+        ctx.vars[name] ?: if (name == "baseUrl") ctx.baseUrl else ""
 
     /** 元素上下文取 outerHtml（可匹配属性与脚本内容），否则取 JSON/文本值 */
     private fun contextText(ctx: EvalContext): String =
@@ -205,6 +368,19 @@ class RuleEvaluator(
         PipeOp.Last -> list.takeLast(1)
         is PipeOp.Index -> listOfNotNull(list.getOrNull(op.n))
         is PipeOp.Select -> list // 节点级操作，字符串管道里无意义
+        is PipeOp.Put -> {
+            applyPut(op.spec, ctx)
+            list // 只有副作用
+        }
+        is PipeOp.Rule -> {
+            // 上一步的产物是一段新内容（HTML 或 JSON），在它上面重新求值
+            val node = runCatching { RuleParser.parse(op.rule) }.getOrNull()
+            if (node == null) list
+            else list.flatMap { s ->
+                val sub = ctx.copy(element = Jsoup.parse(s, ctx.baseUrl), json = s)
+                runCatching { evalToStrings(node, sub) }.getOrDefault(emptyList())
+            }
+        }
         is PipeOp.Join -> if (list.isEmpty()) emptyList() else listOf(list.joinToString(op.sep))
         is PipeOp.Prepend -> list.map { expandTemplate(op.s, ctx.vars) + it }
         is PipeOp.Append -> list.map { it + expandTemplate(op.s, ctx.vars) }
@@ -218,12 +394,17 @@ class RuleEvaluator(
         runJs(script, ctx, input = contextText(ctx))
 
     /**
-     * 绑定 Legado 常用变量子集：result/src/baseUrl/key/page。
-     * 脚本异常按"不匹配"降级为空结果；未注入引擎则明确报不支持。
+     * 绑定书源脚本可见的全部上下文：变量（result/src/baseUrl/key/page）+ 桥对象
+     * （java/cookie/cache/source/book/chapter）。Rhino 会把这些 Kotlin 对象反射成 JS 对象。
+     *
+     * 脚本异常按「不匹配」降级为空结果 —— 书源里的脚本质量参差，一处报错不该打死整条链路；
+     * 未注入引擎则明确报不支持。
      */
     private fun runJs(script: String, ctx: EvalContext, input: String): String? {
         val runtime = scriptRuntime
             ?: throw UnsupportedRuleException("该书源需要 JS 引擎，当前版本不支持")
+        val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
+        val java = com.radium.inkwell.core.source.js.JavaBridge(jsHttp, jsCache, ctx.js.scriptVars)
         return try {
             runtime.eval(
                 script,
@@ -233,6 +414,12 @@ class RuleEvaluator(
                     "baseUrl" to ctx.baseUrl,
                     "key" to (ctx.vars["keyword"] ?: ""),
                     "page" to (ctx.vars["page"]?.toIntOrNull() ?: 1),
+                    "java" to java,
+                    "cookie" to com.radium.inkwell.core.source.js.CookieBridge(jsHttp),
+                    "cache" to jsCache,
+                    "source" to com.radium.inkwell.core.source.js.SourceBridge(ctx.js.sourceKey, store),
+                    "book" to ctx.js.book,
+                    "chapter" to ctx.js.chapter,
                 ),
             )
         } catch (e: Exception) {
@@ -248,6 +435,8 @@ class RuleEvaluator(
 private val TEMPLATE_VAR = Regex("\\{\\{\\s*([^}|]+?)\\s*(?:\\|\\s*([^}]+?)\\s*)?\\}\\}")
 
 /** 模板变量是否为 JSONPath（{{$.book_id}}），需在当前页 JSON 上求值而非查 vars */
+private val GET_VAR = Regex("@get:\\{([^}]+)\\}")
+
 internal fun isJsonPathVar(name: String): Boolean = name.startsWith("$.") || name.startsWith("$[")
 
 /**

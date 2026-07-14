@@ -101,6 +101,33 @@ class LegadoConverterTest {
         assertEquals("legado:class.book-list@tag.li", rule.explore[0].list)
     }
 
+    /**
+     * `规则@js:脚本` 里的脚本作用于整条规则的结果，包括其中的 || 回退。
+     * 我们 DSL 的 || 优先级高于管道，直接拼只会把脚本挂在最后一个分支上 ——
+     * 前面的分支一命中就返回未加工的原始值（追书神器的目录地址只剩个裸 id，必然 404）。
+     */
+    @Test
+    fun `js 脚本分发到每个 || 分支`() {
+        val src = """
+        {
+          "bookSourceUrl": "https://api.example.com",
+          "bookSourceName": "API站",
+          "searchUrl": "/s?q={{key}}",
+          "ruleSearch": { "bookList": "${'$'}.list", "name": "${'$'}.n", "bookUrl": "${'$'}.u" },
+          "ruleBookInfo": {
+            "tocUrl": "@JSon:${'$'}.a._id||${'$'}.b._id@js:\"/toc/\" + result + \"?v=1\""
+          },
+          "ruleToc": { "chapterList": "${'$'}.chapters", "chapterName": "text", "chapterUrl": "href" },
+          "ruleContent": { "content": "id.content@html" }
+        }
+        """.trimIndent()
+        val tocUrl = LegadoConverter.convert(src).converted.single().rule.detail!!.fields["tocUrl"]!!
+        val branches = tocUrl.split(" || ")
+        assertEquals(2, branches.size)
+        // 两个分支都挂上了脚本，而不是只有最后一个
+        assertTrue(branches.all { it.contains("| js:b64:") }, "实际: $tocUrl")
+    }
+
     @Test
     fun `js rules convert to js pipes`() {
         val js = """
@@ -126,7 +153,11 @@ class LegadoConverterTest {
     }
 
     @Test
-    fun `js referencing unsupported objects is skipped`() {
+    /**
+     * 桥对象（java/cookie/cache/source/book/chapter）已在 core 里实现，
+     * 引用它们的脚本不再整源跳过 —— 从前这一刀砍掉了 37 个书源。
+     */
+    fun `脚本引用 java 桥不再跳过整源`() {
         val js = """
         {
           "bookSourceUrl": "https://java.example.com",
@@ -138,8 +169,8 @@ class LegadoConverterTest {
         }
         """.trimIndent()
         val result = LegadoConverter.convert(js)
-        assertEquals(1, result.skipped.size)
-        assertTrue(result.skipped[0].reason.contains("不支持的对象"))
+        assertEquals(0, result.skipped.size)
+        assertTrue(result.converted.single().rule.search!!.list.startsWith("js:b64:"))
     }
 
     @Test
@@ -252,11 +283,12 @@ class LegadoConverterTest {
     }
 
     @Test
-    fun `unconvertible optional field is dropped with warning but source survives`() {
+    /** XPath 现由 JsoupXpath 求值（从前一律跳过，13 个书源卡在这）；| 是并集运算符，故 base64 */
+    fun `XPath 规则转为 xpath 原子规则`() {
         val src = """
         {
           "bookSourceUrl": "https://w.example.com",
-          "bookSourceName": "警告站",
+          "bookSourceName": "XPath站",
           "searchUrl": "/s?q={{key}}",
           "ruleSearch": {
             "bookList": "class.list@tag.li",
@@ -269,9 +301,13 @@ class LegadoConverterTest {
         }
         """.trimIndent()
         val result = LegadoConverter.convert(src)
-        val conv = result.converted.single()
-        assertEquals(null, conv.rule.search!!.fields["intro"])
-        assertTrue(conv.warnings.any { it.contains("XPath") || it.contains("intro") })
+        assertEquals(0, result.skipped.size)
+        val intro = result.converted.single().rule.search!!.fields["intro"]!!
+        assertTrue(intro.startsWith("xpath:b64:"), "实际: $intro")
+        assertEquals(
+            "//div[@class='intro']/text()",
+            String(java.util.Base64.getDecoder().decode(intro.removePrefix("xpath:b64:"))),
+        )
     }
 
     @Test
@@ -299,10 +335,10 @@ class LegadoConverterTest {
             )
         }
 
-        // JS 脚本里也会出现 {{$.x}} 插值，那是脚本的一部分，不能整条当模板
+        // 纯脚本规则转成 js 原子规则（java 桥现已支持，不再跳过）
         tocUrlOf("@js:java.get('u')+'{{$.bid}}'").let {
-            assertEquals(1, it.skipped.size)
-            assertTrue(it.skipped.single().reason.startsWith("目录地址规则无法转换"))
+            assertEquals(0, it.skipped.size)
+            assertTrue(it.converted.single().rule.detail!!.fields["tocUrl"]!!.startsWith("js:b64:"))
         }
 
         // 带 POST/body 的「地址,{选项}」：剥掉选项后发 GET 是错的，宁可跳过也不要产出坏书源

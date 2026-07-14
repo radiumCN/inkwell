@@ -26,6 +26,9 @@ sealed interface RuleNode {
     /** Legado 默认语法，原样交给 [LegadoSelector] 求值（索引作用于匹配集，CSS 表达不了） */
     data class Legado(val rule: String) : RuleNode
 
+    /** XPath（JsoupXpath）；Legado 里写作 `@XPath:` 或以 `//` 开头 */
+    data class XPath(val path: String) : RuleNode
+
     /** 对上下文（元素取 outerHtml，可匹配属性/脚本；否则取文本）做正则提取，$1 优先 */
     data class RegexRule(val pattern: String) : RuleNode
 
@@ -75,6 +78,19 @@ sealed interface PipeOp {
 
     /** 对每个结果执行 JS（绑定 result），返回值替换该结果 */
     data class Js(val script: String) : PipeOp
+
+    /**
+     * `put:{"变量名":"规则"}`：把规则在当前内容上求值的结果存进变量表，供后续 `@get:{变量名}` 取用。
+     * 只有副作用，不改变管道里的值。Legado 的目录→正文传参极常用（我们那份书源表里 75 个源在用）。
+     */
+    data class Put(val spec: String) : PipeOp
+
+    /**
+     * `rule:规则`：把上一步的字符串结果当作**新内容**，再用这条规则求值一次。
+     * Legado 把规则串按 `<js>` 切成若干段顺序流水执行，前一段的输出即后一段的输入
+     * （`class.x@html<js>...</js>@text` 就是「选中 → 跑脚本 → 在脚本产物上再抽 text」）。
+     */
+    data class Rule(val rule: String) : PipeOp
 }
 
 /** 手写规则解析器；解析结果按规则原文缓存 */
@@ -167,7 +183,8 @@ object RuleParser {
                 RuleNode.RegexRule(pattern)
             }
             t.startsWith("legado:") -> RuleNode.Legado(decodeBody(t.substring(7), seg.offset + 7))
-            t.startsWith("text:") -> RuleNode.Literal(t.substring(5))
+            t.startsWith("xpath:") -> RuleNode.XPath(decodeBody(t.substring(6), seg.offset + 6))
+            t.startsWith("text:") -> RuleNode.Literal(decodeBody(t.substring(5), seg.offset + 5))
             t.startsWith("js:") -> RuleNode.Js(decodeBody(t.substring(3), seg.offset + 3))
             t.startsWith("@js:") -> RuleNode.Js(decodeBody(t.substring(4), seg.offset + 4))
             else -> parseCss(t, seg.offset)
@@ -249,6 +266,8 @@ object RuleParser {
                 if (q.isEmpty()) throw RuleSyntaxException(seg.offset + 7, "select 选择器为空")
                 PipeOp.Select(validQuery(q, seg.offset + 7))
             }
+            t.startsWith("put:") -> PipeOp.Put(decodeBody(t.substring(4), seg.offset + 4))
+            t.startsWith("rule:") -> PipeOp.Rule(decodeBody(t.substring(5), seg.offset + 5))
             t.startsWith("index:") -> {
                 val n = t.substring(6).trim().toIntOrNull()
                     ?: throw RuleSyntaxException(seg.offset + 6, "index 需要整数")
