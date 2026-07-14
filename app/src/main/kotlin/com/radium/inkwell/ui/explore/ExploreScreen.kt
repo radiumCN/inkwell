@@ -49,6 +49,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
 
@@ -81,32 +83,14 @@ fun ExploreScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier,
-                    ) {
-                        TextButton(onClick = { sourceMenuOpen = true }) {
-                            Text(
-                                state.currentSource?.name ?: "发现",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "切换书源")
-                        }
-                        DropdownMenu(
-                            expanded = sourceMenuOpen,
-                            onDismissRequest = { sourceMenuOpen = false },
-                        ) {
-                            state.sources.forEachIndexed { i, s ->
-                                DropdownMenuItem(
-                                    text = { Text(s.name) },
-                                    onClick = {
-                                        sourceMenuOpen = false
-                                        viewModel.selectSource(i)
-                                    },
-                                )
-                            }
-                        }
+                    // 选书源统一走底部面板：从前是裸 DropdownMenu，弹个小浮层、选中态全靠猜
+                    TextButton(onClick = { sourceMenuOpen = true }) {
+                        Text(
+                            state.currentSource?.name ?: "发现",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "切换书源")
                     }
                 },
                 navigationIcon = {
@@ -182,5 +166,20 @@ fun ExploreScreen(
                 }
             }
         }
+    }
+
+    if (sourceMenuOpen) {
+        OptionPickerSheet(
+            title = "选择书源",
+            options = state.sources.map { PickerOption(id = it.id, label = it.name) },
+            selectedId = state.currentSource?.id,
+            onSelect = { opt ->
+                sourceMenuOpen = false
+                state.sources.indexOfFirst { it.id == opt.id }
+                    .takeIf { it >= 0 }
+                    ?.let { viewModel.selectSource(it) }
+            },
+            onDismiss = { sourceMenuOpen = false },
+        )
     }
 }

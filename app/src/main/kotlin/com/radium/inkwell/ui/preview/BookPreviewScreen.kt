@@ -44,6 +44,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -57,6 +59,7 @@ fun BookPreviewScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var sourcePickerOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.messages.messages.collect { snackbar.showSnackbar(it) }
@@ -105,24 +108,16 @@ fun BookPreviewScreen(
                 Button(onClick = viewModel::load) { Text("重试") }
 
                 // 这本书还有别的书源 —— 一个源挂了不该让人卡死在这
-                val others = state.sources.withIndex().filter { it.index != state.currentSource }
-                if (others.isNotEmpty()) {
+                if (state.sources.size > 1) {
                     Spacer(Modifier.height(24.dp))
-                    Text(
-                        "换个书源试试（共 ${state.sources.size} 个）",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    others.forEach { (i, sourceId) ->
-                        TextButton(onClick = { viewModel.switchSource(i) }) {
-                            Text(sourceId, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                    OutlinedButton(onClick = { sourcePickerOpen = true }) {
+                        Text("换个书源试试（共 ${state.sources.size} 个）")
                     }
                 }
             }
 
             else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                item { Header(state, viewModel) }
+                item { Header(state, viewModel, onOpenSourcePicker = { sourcePickerOpen = true }) }
                 item {
                     Text(
                         "目录 · 共 ${state.chapters.size} 章",
@@ -148,10 +143,29 @@ fun BookPreviewScreen(
             }
         }
     }
+
+    // 换源：详情页从前一处是裸 DropdownMenu（选中态靠手拼 "✓ "），
+    // 另一处是加载失败时一排纵向 TextButton。两处收敛到同一个面板。
+    if (sourcePickerOpen) {
+        OptionPickerSheet(
+            title = "换源",
+            options = state.sources.map { PickerOption(id = it, label = it) },
+            selectedId = state.sources.getOrNull(state.currentSource),
+            onSelect = { opt ->
+                sourcePickerOpen = false
+                state.sources.indexOf(opt.id).takeIf { it >= 0 }?.let { viewModel.switchSource(it) }
+            },
+            onDismiss = { sourcePickerOpen = false },
+        )
+    }
 }
 
 @Composable
-private fun Header(state: BookPreviewUiState, viewModel: BookPreviewViewModel) {
+private fun Header(
+    state: BookPreviewUiState,
+    viewModel: BookPreviewViewModel,
+    onOpenSourcePicker: () -> Unit,
+) {
     var introExpanded by remember { mutableStateOf(false) }
 
     Column(
@@ -180,26 +194,8 @@ private fun Header(state: BookPreviewUiState, viewModel: BookPreviewViewModel) {
                     color = MaterialTheme.colorScheme.outline,
                 )
                 if (state.sources.size > 1) {
-                    var menuOpen by remember { mutableStateOf(false) }
-                    TextButton(onClick = { menuOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                    TextButton(onClick = onOpenSourcePicker, contentPadding = PaddingValues(0.dp)) {
                         Text("换源（${state.sources.size} 个书源）", style = MaterialTheme.typography.labelMedium)
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        state.sources.forEachIndexed { i, sourceId ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (i == state.currentSource) "✓ $sourceId" else sourceId,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                                onClick = {
-                                    menuOpen = false
-                                    viewModel.switchSource(i)
-                                },
-                            )
-                        }
                     }
                 }
             }
