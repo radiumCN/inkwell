@@ -223,6 +223,17 @@ class ReaderViewModel(
         viewModelScope.launch { readerPrefs.update(settings) }
     }
 
+    /** 正文加载失败后重试：清掉分页缓存重来一遍（站点抽风、临时封 IP 都可能只是一次性的） */
+    fun retry() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(error = null, loading = true)
+            engineMutex.withLock {
+                paginated.clear()
+                showPosition(position)
+            }
+        }
+    }
+
     fun clearBookEnd() {
         _state.value = _state.value.copy(atBookEnd = false)
     }
@@ -367,7 +378,11 @@ class ReaderViewModel(
                         sourceCandidates = null,
                         menuVisible = false,
                         loading = true,
+                        // 换源多半就是为了绕开上一个源的报错；不清掉的话新源加载成功了
+                        // 还挂着旧错误，用户以为换源没生效
+                        error = null,
                     )
+                    // 分页缓存由 loadSession 在互斥锁内清掉 —— 在这里清会与在飞的预加载抢
                     loadSession()
                 }
                 .onFailure {

@@ -32,7 +32,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /** 一个书源的校验结果 */
-data class SourceCheck(val ok: Boolean, val message: String)
+/** [respondMs] 响应耗时；书源好坏很大程度上就是"快不快"，光有可用/不可用不够用 */
+data class SourceCheck(val ok: Boolean, val message: String, val respondMs: Long = 0)
 
 /** 校验进度；null = 没在校验 */
 data class CheckProgress(val done: Int, val total: Int)
@@ -121,7 +122,11 @@ class SourceManageViewModel(
      *
      * @param ids 为空则校验全部
      */
-    fun validate(ids: Collection<String> = emptySet(), keyword: String = "剑") {
+    /**
+     * [keyword] 校验用的搜索词。默认「我的」—— 要的是一个几乎每个站都搜得出结果的常见词。
+     * 从前默认「剑」，武侠仙侠站没问题，都市/言情站可能一无所获，好书源被判成"搜索无结果"。
+     */
+    fun validate(ids: Collection<String> = emptySet(), keyword: String = DEFAULT_CHECK_KEYWORD) {
         if (checkJob?.isActive == true) return
         val targets = (ids.ifEmpty { sources.value.map { it.id } }).toList()
         if (targets.isEmpty()) return
@@ -147,30 +152,52 @@ class SourceManageViewModel(
         }
     }
 
+    /**
+     * 校验一个书源：搜索 → 详情 + 目录 → 正文。全链路都跑通才算可用。
+     *
+     * 两处刻意放宽，从前它们会把好书源判死：
+     * 1. 只探第一章。可第一章常常是「作品相关」「防盗公告」这类没有正文的东西 ——
+     *    正文抓不到不是书源坏了。所以再探一章中间的，两章都空才判失败。
+     * 2. 要求正文 ≥100 字，否则失败。短章节（序章、过渡章）本来就不到 100 字。
+     *    现在只要**非空**就算通过，偏短则照常可用、附带提示。
+     */
     private suspend fun checkOne(id: String, keyword: String): SourceCheck {
         val rule = sourceRepo.getRule(id) ?: return SourceCheck(false, "书源规则损坏")
         if (rule.search == null) return SourceCheck(true, "仅发现页（不校验搜索）")
+        val startedAt = System.currentTimeMillis()
         return runCatching {
-            withTimeout(45_000) {
+            withTimeout(CHECK_TIMEOUT_MS) {
                 val hit = engine.search(rule, keyword).items.firstOrNull()
                     ?: error("搜索无结果")
                 val (_, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl)
-                val first = toc.firstOrNull() ?: error("目录为空")
-                val content = engine.getContent(
-                    rule, first.url,
-                    toc.mapTo(HashSet()) { it.url },
-                    chapterVariable = first.variable,
+                check(toc.isNotEmpty()) { "目录为空" }
+                val urls = toc.mapTo(HashSet()) { it.url }
+
+                val probes = listOfNotNull(
+                    toc.first(),
+                    toc.getOrNull(toc.size / 2).takeIf { toc.size > 1 },
                 )
-                val chars = content.elements
-                    .filterIsInstance<ContentElement.Paragraph>()
-                    .sumOf { it.text.length }
-                check(chars >= 100) { "正文过短（$chars 字）" }
-                "可用 · ${toc.size} 章"
+                var best = 0
+                var lastError: String? = null
+                for (chapter in probes) {
+                    val chars = runCatching {
+                        engine.getContent(rule, chapter.url, urls, chapter.variable)
+                            .elements
+                            .filterIsInstance<ContentElement.Paragraph>()
+                            .sumOf { it.text.length }
+                    }.getOrElse { lastError = it.message; 0 }
+                    if (chars > best) best = chars
+                    if (best >= SHORT_CONTENT_CHARS) break
+                }
+                check(best > 0) { lastError ?: "正文为空" }
+
+                val ms = System.currentTimeMillis() - startedAt
+                val note = if (best < SHORT_CONTENT_CHARS) " · 正文偏短（$best 字）" else ""
+                SourceCheck(true, "可用 · ${toc.size} 章 · ${ms}ms$note", ms)
             }
-        }.fold(
-            onSuccess = { SourceCheck(true, it) },
-            onFailure = { SourceCheck(false, it.message?.take(50) ?: "失败") },
-        )
+        }.getOrElse {
+            SourceCheck(false, it.message?.take(60) ?: "失败", System.currentTimeMillis() - startedAt)
+        }
     }
 
     val sources: StateFlow<List<BookSourceEntity>> = sourceRepo.sources
@@ -246,5 +273,13 @@ class SourceManageViewModel(
 
     fun delete(id: String) {
         viewModelScope.launch { sourceRepo.delete(id) }
+    }
+
+    private companion object {
+        /** 几乎每个站都搜得出结果的常见词；生僻词会把好书源误判成"搜索无结果" */
+        const val DEFAULT_CHECK_KEYWORD = "我的"
+        const val CHECK_TIMEOUT_MS = 60_000L
+        /** 低于此字数只提示"正文偏短"，不判失败 —— 序章、过渡章本来就短 */
+        const val SHORT_CONTENT_CHARS = 100
     }
 }

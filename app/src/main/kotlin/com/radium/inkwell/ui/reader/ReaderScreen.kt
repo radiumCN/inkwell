@@ -30,6 +30,15 @@ import androidx.compose.ui.text.AnnotatedString
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.selectWordAt
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -107,11 +116,32 @@ fun ReaderScreen(
         val spec = if (viewport.width > 0) buildLayoutSpec(viewport, state.settings, density) else null
 
         when {
-            state.error != null -> Text(
-                state.error!!,
-                Modifier.align(Alignment.Center),
-                color = Color(state.settings.theme.textColor),
-            )
+            state.error != null -> Column(
+                Modifier.align(Alignment.Center).padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    state.error!!,
+                    color = Color(state.settings.theme.textColor),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(20.dp))
+                // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
+                // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SecondaryButton(text = "重试", onClick = { viewModel.retry() })
+                    if (state.isNetBook) {
+                        PrimaryButton(
+                            text = "换源",
+                            onClick = { viewModel.searchOtherSources() },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onExit) {
+                    Text("返回书架", color = Color(state.settings.theme.footerColor))
+                }
+            }
             state.loading || spec == null -> CircularProgressIndicator(
                 Modifier.align(Alignment.Center),
                 color = Color(state.settings.theme.textColor),
@@ -185,6 +215,16 @@ fun ReaderScreen(
             )
         }
 
+        state.sourceCandidates?.let { candidates ->
+            ChangeSourceSheet(
+                state = state,
+                candidates = candidates,
+                onApplySource = { viewModel.applyChangeSource(it) },
+                onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },
+                onDismiss = { viewModel.dismissSourcePanel() },
+            )
+        }
+
         selection?.let { sel ->
             SelectionToolbar(
                 selectedText = sel.text,
@@ -226,9 +266,6 @@ fun ReaderScreen(
                 onSeekPercent = { viewModel.seekToPercent(it) },
                 onUpdateSettings = { viewModel.updateSettings(it) },
                 onSearchSources = { viewModel.searchOtherSources() },
-                onApplySource = { viewModel.applyChangeSource(it) },
-                onDismissSourcePanel = { viewModel.dismissSourcePanel() },
-                onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },
                 onDismiss = { viewModel.toggleMenu() },
             )
         }
