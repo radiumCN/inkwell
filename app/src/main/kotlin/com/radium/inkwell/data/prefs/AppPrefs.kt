@@ -31,6 +31,7 @@ class AppPrefs(private val context: Context) {
         val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
+        val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -130,6 +131,20 @@ class AppPrefs(private val context: Context) {
     suspend fun setExploreEnabled(on: Boolean) {
         context.appDataStore.edit { it[Keys.EXPLORE_ENABLED] = on }
         touch()
+    }
+
+    /**
+     * 查看隐藏书籍是否需要系统验证（指纹/面容/设备密码）。
+     *
+     * **不跨设备同步**：换台没录指纹的设备，同步过去就把人锁在自己的书外面了。
+     * 这是个没有找回途径的锁 —— 书在本地，我们不做账号。
+     */
+    val hiddenRequireAuth: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.HIDDEN_REQUIRE_AUTH] ?: false
+    }
+
+    suspend fun setHiddenRequireAuth(on: Boolean) {
+        context.appDataStore.edit { it[Keys.HIDDEN_REQUIRE_AUTH] = on }
     }
 
     val updateChannel: Flow<UpdateChannel> = context.appDataStore.data.map { p ->

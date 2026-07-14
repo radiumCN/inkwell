@@ -52,7 +52,14 @@ class BookshelfViewModel(
      */
     private val _showHidden = MutableStateFlow(false)
     val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
-    fun toggleShowHidden() { _showHidden.value = !_showHidden.value }
+
+    /** 查看隐藏书籍要不要先验证身份 */
+    val hiddenRequireAuth: StateFlow<Boolean> = appPrefs.hiddenRequireAuth
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** 验证过了才允许展开；收起来不需要验证（关灯不用钥匙） */
+    fun showHidden() { _showHidden.value = true }
+    fun hideHidden() { _showHidden.value = false }
 
     fun setHidden(bookId: String, hidden: Boolean) {
         viewModelScope.launch {

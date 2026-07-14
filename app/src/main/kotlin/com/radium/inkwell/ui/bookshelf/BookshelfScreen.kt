@@ -57,6 +57,10 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.radium.inkwell.util.BiometricAuth
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +98,28 @@ fun BookshelfScreen(
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     var overflowOpen by remember { mutableStateOf(false) }
+    val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
+    val scope = rememberCoroutineScope()
+
+    /**
+     * 展开隐藏书籍。开了验证就先过一遍系统的指纹/面容/设备密码。
+     * 收起不需要验证 —— 关灯不用钥匙。
+     */
+    fun revealHidden() {
+        if (!requireAuth || activity == null) {
+            viewModel.showHidden()
+            return
+        }
+        scope.launch {
+            when (val r = BiometricAuth.authenticate(activity, "查看隐藏的书")) {
+                BiometricAuth.Result.Success -> viewModel.showHidden()
+                // 用户自己按了取消，别再弹个错误教育他
+                BiometricAuth.Result.Cancelled -> Unit
+                is BiometricAuth.Result.Failed -> viewModel.messages.emit("验证失败: ${r.message}")
+            }
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -153,7 +179,7 @@ fun BookshelfScreen(
                                 },
                                 onClick = {
                                     overflowOpen = false
-                                    viewModel.toggleShowHidden()
+                                    if (showHidden) viewModel.hideHidden() else revealHidden()
                                 },
                             )
                         }
@@ -178,7 +204,7 @@ fun BookshelfScreen(
                 title = "$hiddenCount 本书已隐藏",
                 hint = "顶栏「⋮ → 显示隐藏的书」可以看回来",
                 actionLabel = "显示隐藏的书",
-                onAction = viewModel::toggleShowHidden,
+                onAction = ::revealHidden,
                 modifier = Modifier.padding(padding),
             )
         } else if (allBooks.isEmpty()) {

@@ -241,6 +241,12 @@ fun ReaderScreen(
             )
         }
 
+        // 阅读页里所有浮层（菜单、目录、设置、换源、全书搜索、选字工具条）都跟着**阅读主题**走。
+        // 从前它们读的是 App 的 MaterialTheme —— 正文是米色纸张，弹出来的面板却是 M3 的
+        // 淡紫白，两套配色硬拼在一起。这里换掉这一片区域的 MaterialTheme，
+        // 里头的 TabRow / Chip / Slider / 分隔线全都自动协调，不必挨个传颜色（漏一个就露馅）。
+        ReaderThemeScope(state.settings.theme) {
+
         if (state.searchResults != null) {
             BookSearchSheet(
                 state = state,
@@ -307,6 +313,8 @@ fun ReaderScreen(
             onOpenSearch = { viewModel.openSearchPanel() },
             onDismiss = { viewModel.toggleMenu() },
         )
+
+        }
     }
 }
 

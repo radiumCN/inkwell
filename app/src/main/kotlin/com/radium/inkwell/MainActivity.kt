@@ -2,7 +2,6 @@ package com.radium.inkwell
 
 import android.os.Bundle
 import android.view.KeyEvent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
@@ -14,7 +13,11 @@ import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.util.KeyEventBus
 import org.koin.android.ext.android.inject
 
-class MainActivity : ComponentActivity() {
+/**
+ * 继承 FragmentActivity 而不是 ComponentActivity：BiometricPrompt 只认 FragmentActivity。
+ * 除此之外与 ComponentActivity 没有区别（我们不用 Fragment）。
+ */
+class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private val keyEventBus: KeyEventBus by inject()
     private val appPrefs: AppPrefs by inject()

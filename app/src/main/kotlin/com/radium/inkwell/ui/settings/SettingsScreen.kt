@@ -40,6 +40,7 @@ import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
+import com.radium.inkwell.util.BiometricAuth
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,8 @@ fun SettingsScreen(
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
+    val hiddenRequireAuth by appPrefs.hiddenRequireAuth.collectAsState(initial = false)
+    val biometricAvailable = remember { BiometricAuth.isAvailable(context) }
 
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
@@ -175,6 +178,25 @@ fun SettingsScreen(
                 title = "订阅源",
                 subtitle = "RSS / Atom 订阅；粘个地址就能订阅",
                 onClick = onOpenRss,
+            )
+
+            SectionHeader("隐私")
+            SwitchRow(
+                title = "查看隐藏书籍需要验证",
+                subtitle = when {
+                    !biometricAvailable ->
+                        "这台设备还没设置指纹/面容或锁屏密码，无法开启"
+                    hiddenRequireAuth ->
+                        "展开隐藏的书前先验证指纹/面容（也可用设备密码）"
+                    else ->
+                        "已关闭。任何人点开「⋮ → 显示隐藏的书」都能看到"
+                },
+                checked = hiddenRequireAuth && biometricAvailable,
+                onCheckedChange = { on ->
+                    // 设备没有任何锁，开了就是把自己锁在外面 —— 这个锁没有找回途径
+                    if (!biometricAvailable) return@SwitchRow
+                    scope.launch { appPrefs.setHiddenRequireAuth(on) }
+                },
             )
 
             SectionHeader("存储")

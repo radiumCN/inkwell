@@ -19,6 +19,7 @@ rhino = "1.7.15"
 juniversalchardet = "2.5.0"
 jsonPath = "2.9.0"
 xpath = "2.5.3"
+biometric = "1.1.0"
 coil = "3.2.0"
 opencc4j = "1.14.0"
 junit = "4.13.2"
@@ -69,6 +70,8 @@ xpath = { module = "cn.wanghaomiao:JsoupXpath", version.ref = "xpath" }
 # 简繁转换（Apache-2.0）。不手搓字表：半吊子的映射会静默把字转错，
 # 而读者根本不会发现是转换出的错，只会觉得"这书源怎么有错别字"
 opencc4j = { module = "com.github.houbb:opencc4j", version.ref = "opencc4j" }
+# 系统级生物识别（指纹/面容），并支持退回设备密码 —— 没录指纹的人不该被锁在外面
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 
