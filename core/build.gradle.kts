@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.juniversalchardet)
     implementation(libs.json.path)
     implementation(libs.xpath)
+    implementation(libs.opencc4j)
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)

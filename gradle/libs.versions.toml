@@ -20,6 +20,7 @@ juniversalchardet = "2.5.0"
 jsonPath = "2.9.0"
 xpath = "2.5.3"
 coil = "3.2.0"
+opencc4j = "1.14.0"
 junit = "4.13.2"
 androidxTest = "1.7.0"
 androidxTestJunit = "1.3.0"
@@ -63,6 +64,9 @@ juniversalchardet = { module = "com.github.albfernandez:juniversalchardet", vers
 json-path = { module = "com.jayway.jsonpath:json-path", version.ref = "jsonPath" }
 # JsoupXpath（Apache-2.0）：Legado 的 @XPath 规则用的就是它
 xpath = { module = "cn.wanghaomiao:JsoupXpath", version.ref = "xpath" }
+# 简繁转换（Apache-2.0）。不手搓字表：半吊子的映射会静默把字转错，
+# 而读者根本不会发现是转换出的错，只会觉得"这书源怎么有错别字"
+opencc4j = { module = "com.github.houbb:opencc4j", version.ref = "opencc4j" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 

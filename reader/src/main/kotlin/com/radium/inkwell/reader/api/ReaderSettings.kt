@@ -16,6 +16,10 @@ data class ReaderSettings(
     val brightnessOverride: Float? = null,
     val keepScreenOn: Boolean = true,
     val volumeKeyFlip: Boolean = true,
+    /** 自动翻页间隔（秒）；每页停留这么久后自动往下翻 */
+    val autoFlipSeconds: Int = 15,
+    /** 正文的简繁转换 */
+    val chineseConvert: ChineseConvert = ChineseConvert.NONE,
 ) {
     companion object {
         const val FONT_SYSTEM = "system"
@@ -31,6 +35,16 @@ data class ReaderSettings(
             FONT_MONO to "等宽",
         )
     }
+}
+
+/**
+ * 简繁转换。只换字形，不做词汇转换（「軟體」不会变成「软件」）——
+ * 词汇映射要一整套词库，而读者要的通常只是"别让我看繁体"。
+ */
+enum class ChineseConvert(val label: String) {
+    NONE("不转换"),
+    TO_SIMPLIFIED("转简体"),
+    TO_TRADITIONAL("转繁体"),
 }
 
 enum class FlipAnimation(val label: String) {
