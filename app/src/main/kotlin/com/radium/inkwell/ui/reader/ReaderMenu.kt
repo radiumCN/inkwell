@@ -379,6 +379,20 @@ private val TITLE_TOP_OPTIONS = listOf(
     "大" to 48f,
 )
 
+/** 正文上下边距（dp）—— 每页正文离屏幕上/下的距离 */
+private val MARGIN_V_OPTIONS = listOf(
+    "紧凑" to 12f,
+    "标准" to 28f,
+    "宽松" to 48f,
+)
+
+/** 正文左右边距（dp） */
+private val MARGIN_H_OPTIONS = listOf(
+    "紧凑" to 16f,
+    "标准" to 24f,
+    "宽松" to 36f,
+)
+
 /**
  * 阅读设置面板。
  *
@@ -449,6 +463,24 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
             kotlin.math.abs(it.second - settings.titleTopSpacingDp) < 1f
         },
         onSelect = { onUpdate(settings.copy(titleTopSpacingDp = TITLE_TOP_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("上下边距")
+    ChipRow(
+        options = MARGIN_V_OPTIONS.map { it.first },
+        selectedIndex = MARGIN_V_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.marginVerticalDp) < 2f
+        },
+        onSelect = { onUpdate(settings.copy(marginVerticalDp = MARGIN_V_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("左右边距")
+    ChipRow(
+        options = MARGIN_H_OPTIONS.map { it.first },
+        selectedIndex = MARGIN_H_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.marginHorizontalDp) < 2f
+        },
+        onSelect = { onUpdate(settings.copy(marginHorizontalDp = MARGIN_H_OPTIONS[it].second)) },
     )
 
     SectionLabel("行距")
