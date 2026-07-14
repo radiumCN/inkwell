@@ -74,7 +74,8 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
     val marginH = with(density) { spec.marginLeftPx.toDp() }
     // 页眉/页脚对齐正文预留的那两条带 —— marginTop/Bottom 已经把挖孔折进去了，所以既清开
     // 摄像头、又不会像从前那样（固定 8dp）把页眉顶到屏幕最边、跟正文之间空出一大截。
-    val headerTop = with(density) { spec.marginTopPx.toDp() }
+    // 头部小标题的顶部留白独立于正文边距（= 挖孔 + 用户设的头部留白）
+    val headerTop = with(density) { spec.headerTopPaddingPx.toDp() }
     val footerBottom = with(density) { spec.marginBottomPx.toDp() }
 
     Box(Modifier.fillMaxSize()) {

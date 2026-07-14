@@ -7,6 +7,8 @@ data class ReaderSettings(
     val titleScale: Float = 1.4f,
     /** 章节标题上方的留白（dp）。让标题跟正文之间/跟页顶之间松紧可调 */
     val titleTopSpacingDp: Float = 24f,
+    /** 顶部小标题（页眉章节名）离屏幕上边的留白（dp），独立于正文边距 */
+    val headerTopSpacingDp: Float = 24f,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
     val paragraphSpacingEm: Float = 0.6f,
