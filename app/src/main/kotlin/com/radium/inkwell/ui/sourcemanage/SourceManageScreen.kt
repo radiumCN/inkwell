@@ -66,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.ui.components.CompactTextField
@@ -292,7 +293,7 @@ fun SourceManageScreen(
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SourceFilter.entries.forEach { f ->
@@ -313,7 +314,7 @@ fun SourceManageScreen(
             // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
             checkProgress?.let { p ->
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
@@ -362,7 +363,7 @@ fun SourceManageScreen(
                                 // 长按进多选，和书架的删除手势一致
                                 onLongClick = { viewModel.toggleSelect(source.id) },
                             )
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (selectionMode) {

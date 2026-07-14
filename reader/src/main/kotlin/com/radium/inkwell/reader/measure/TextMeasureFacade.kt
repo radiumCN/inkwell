@@ -29,9 +29,6 @@ interface MeasuredParagraph {
     val renderHandle: Any?
 }
 
-fun MeasuredParagraph.linesHeight(range: IntRange): Float =
-    lineBottom(range.last) - lineTop(range.first)
-
 data class ResolvedTextStyle(
     val fontSizePx: Float,
     val lineHeightPx: Float,

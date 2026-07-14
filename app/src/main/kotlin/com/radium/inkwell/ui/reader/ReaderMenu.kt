@@ -337,7 +337,7 @@ private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
                 )
             }
         } else {
-            LazyColumn(state = listState, modifier = Modifier.heightIn(max = 440.dp)) {
+            LazyColumn(state = listState, modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
                 items(filtered, key = { it.index }) { item ->
                     Text(
                         item.title,
@@ -618,7 +618,7 @@ private fun ThemeSwatches(settings: ReaderSettings, onUpdate: (ReaderSettings) -
 private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
     ) {
         Box(
             Modifier

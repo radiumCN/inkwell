@@ -39,12 +39,12 @@ fun EmptyState(
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 icon,
                 contentDescription = null,
-                Modifier.size(48.dp),
+                Modifier.size(Dimens.iconXL),
                 tint = MaterialTheme.colorScheme.outlineVariant,
             )
             Text(
@@ -175,13 +175,13 @@ fun BookListRow(
         modifier
             .fillMaxWidth()
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BookCover(
             title = title,
             coverModel = coverModel,
-            modifier = Modifier.size(width = 48.dp, height = 64.dp),
+            modifier = Modifier.size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight),
             placeholderChars = 2,
         )
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -216,7 +216,7 @@ fun BookListRow(
             }
             if (trailingLoading) {
                 CircularProgressIndicator(
-                    Modifier.size(18.dp),
+                    Modifier.size(Dimens.buttonSpinner),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary,
                 )

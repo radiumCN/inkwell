@@ -24,8 +24,6 @@ class BookRepository(
 
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
-    fun observeBook(id: String): Flow<BookEntity?> = bookDao.observeById(id)
-
     suspend fun getBook(id: String): BookEntity? = bookDao.getById(id)
 
     private fun booksDir(): File = File(context.filesDir, "books").apply { mkdirs() }

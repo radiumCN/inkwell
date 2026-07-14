@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.ui.components.OptionPickerSheet
@@ -323,7 +324,7 @@ fun SettingsScreen(
             },
             text = {
                 Column(
-                    Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    Modifier.heightIn(max = Dimens.dialogBodyMaxHeight).verticalScroll(rememberScrollState()),
                 ) {
                     Text(
                         info.notes.ifBlank { "暂无更新说明" },

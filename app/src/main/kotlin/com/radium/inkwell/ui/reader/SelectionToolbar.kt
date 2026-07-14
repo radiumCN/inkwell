@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.ui.components.PrimaryButton
 
@@ -50,7 +51,7 @@ fun SelectionToolbar(
         contentColor = androidx.compose.ui.graphics.Color(theme.textColor),
         shadowElevation = 8.dp,
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)) {
             Text(
                 "「$selectedText」",
                 style = MaterialTheme.typography.bodySmall,

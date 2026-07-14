@@ -37,41 +37,6 @@ data class PickerOption(
     val subtitle: String? = null,
 )
 
-/** 选择器行：看起来像设置项，点开是底部面板。替代裸 DropdownMenu 的入口 */
-@Composable
-fun PickerRow(
-    label: String,
-    value: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.weight(1f))
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.width(4.dp))
-        Icon(
-            Icons.Default.UnfoldMore,
-            contentDescription = null,
-            Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 /** 底部选择面板。选中项左侧打勾 —— 不再靠 "✓ " 前缀拼字符串 */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +56,7 @@ fun OptionPickerSheet(
                 style = MaterialTheme.typography.titleMedium,
             )
             header?.invoke()
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
                 items(options, key = { it.id }) { opt ->
                     OptionRow(opt, selected = opt.id == selectedId, onClick = { onSelect(opt) })
                 }

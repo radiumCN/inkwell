@@ -14,7 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,25 +29,72 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.PrimaryButton
 import coil3.compose.AsyncImage
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.repo.BookRepository
+import com.radium.inkwell.data.repo.BookSourceRepository
+import com.radium.inkwell.data.repo.NetBookRepository
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
     val bookRepo = koinInject<BookRepository>()
-    val book by produceState<BookEntity?>(initialValue = null, bookId) {
+    val netBookRepo = koinInject<NetBookRepository>()
+    val sourceRepo = koinInject<BookSourceRepository>()
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+
+    // 刷新完要把新的章节数显示出来，所以 book 得能被重新赋值
+    var reloadKey by remember { mutableStateOf(0) }
+    var refreshing by remember { mutableStateOf(false) }
+    val book by produceState<BookEntity?>(initialValue = null, bookId, reloadKey) {
         value = bookRepo.getBook(bookId)
+    }
+
+    /**
+     * 追更。**这是全 App 唯一能拿到新章节的途径** —— 在此之前 refreshToc 写好了却没有任何
+     * 入口能触发它：网文天天更新，而你的目录停在加书那天，读到最后一章就再也没有下文，
+     * 除非把书删了重加。
+     */
+    fun refreshToc() {
+        val b = book ?: return
+        if (refreshing) return
+        refreshing = true
+        scope.launch {
+            val rule = b.sourceId?.let { sourceRepo.getRule(it) }
+            if (rule == null) {
+                refreshing = false
+                snackbar.showSnackbar("书源不存在，先换源")
+                return@launch
+            }
+            val before = b.totalChapters
+            netBookRepo.refreshToc(b, rule)
+                .onSuccess { total ->
+                    reloadKey++
+                    val added = total - before
+                    snackbar.showSnackbar(
+                        if (added > 0) "更新了 $added 章" else "已经是最新的了"
+                    )
+                }
+                .onFailure { snackbar.showSnackbar("刷新失败: ${it.message}") }
+            refreshing = false
+        }
     }
 
     Scaffold(
@@ -55,8 +106,24 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    // 本地书没有"追更"可言
+                    if (book?.type == BookType.NET) {
+                        IconButton(onClick = ::refreshToc, enabled = !refreshing) {
+                            if (refreshing) {
+                                CircularProgressIndicator(
+                                    Modifier.size(Dimens.buttonSpinner),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录（追更）")
+                            }
+                        }
+                    }
+                },
             )
         },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         val b = book ?: return@Scaffold
         Column(
@@ -65,7 +132,7 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                 .padding(padding)
                 .padding(20.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
         ) {
             Row {
                 // 从前这里手搓了一份封面（Surface + AsyncImage + take(4) 占位），

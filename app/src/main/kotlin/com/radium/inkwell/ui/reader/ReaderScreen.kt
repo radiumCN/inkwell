@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -228,7 +229,7 @@ fun ReaderScreen(
                 Spacer(Modifier.height(20.dp))
                 // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
                 // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                     SecondaryButton(text = "重试", onClick = { viewModel.retry() })
                     if (state.isNetBook) {
                         PrimaryButton(
@@ -324,7 +325,7 @@ fun ReaderScreen(
                 Surface(
                     Modifier
                         .align(Alignment.TopCenter)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 3.dp,

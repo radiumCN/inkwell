@@ -270,7 +270,7 @@ fun BookshelfScreen(
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                     ) {
                         FilterChip(
                             selected = group == null,
@@ -295,8 +295,8 @@ fun BookshelfScreen(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                 ) {
                     items(books, key = { it.id }) { book ->
                         BookCard(
@@ -381,7 +381,7 @@ fun BookshelfScreen(
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
                                 .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                         ) {
                             // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
                             groups.forEach { g ->
@@ -453,7 +453,7 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(4.dp)
-                        .size(18.dp),
+                        .size(Dimens.iconSm),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -490,7 +490,7 @@ private fun HiddenAreaBar(
     Surface(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {

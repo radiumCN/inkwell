@@ -90,7 +90,7 @@ fun BookSearchSheet(
             }
 
             Spacer(Modifier.padding(top = 4.dp))
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
                 items(hits, key = { "${it.chapterIndex}:${it.charOffset}" }) { hit ->
                     Column(
                         Modifier

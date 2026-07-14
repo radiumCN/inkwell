@@ -94,7 +94,7 @@ fun ChangeSourceSheet(
                         Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    else -> LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                    else -> LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
                         items(candidates, key = { "${it.sourceId}|${it.bookUrl}" }) { c ->
                             Column(
                                 Modifier

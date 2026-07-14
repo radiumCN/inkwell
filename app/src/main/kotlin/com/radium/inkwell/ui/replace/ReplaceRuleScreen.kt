@@ -195,11 +195,11 @@ private fun Editor(
     Column(
         Modifier
             .fillMaxWidth()
-            .heightIn(max = 560.dp)
+            .heightIn(max = Dimens.sheetEditorMaxHeight)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Dimens.screenPadding)
             .padding(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         Text(
             if (draft.id.isEmpty()) "新建净化规则" else "编辑净化规则",

@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.theme.AppThemes
@@ -85,7 +86,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             // （自动翻页那排 chip 就这么把"45s"压成过竖排）
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
             ) {
                 ThemeMode.entries.forEach { mode ->
                     FilterChip(

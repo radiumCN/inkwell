@@ -177,7 +177,7 @@ private fun Header(
 
     Column(
         Modifier.padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Row {
             BookCover(
@@ -208,7 +208,7 @@ private fun Header(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
             SecondaryButton(
                 text = if (state.inShelf) "已在书架" else "加入书架",
                 onClick = viewModel::addToShelf,

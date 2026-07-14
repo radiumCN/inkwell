@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.SecondaryButton
@@ -71,7 +72,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
                 .padding(padding)
                 .padding(20.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
         ) {
             OutlinedTextField(
                 value = state.url,
@@ -96,7 +97,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                 SecondaryButton(
                     text = "测试并保存",
                     onClick = viewModel::testAndSave,

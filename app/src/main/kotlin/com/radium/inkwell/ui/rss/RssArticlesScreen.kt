@@ -77,7 +77,7 @@ fun RssArticlesScreen(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 ) {
                     state.sorts.forEachIndexed { i, sort ->
                         FilterChip(
