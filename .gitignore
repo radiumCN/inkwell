@@ -10,3 +10,6 @@ captures/
 *.apk
 *.aab
 /bookSource.json
+
+# 临时文件：截图、探针输出等，不入库
+/tmp/
