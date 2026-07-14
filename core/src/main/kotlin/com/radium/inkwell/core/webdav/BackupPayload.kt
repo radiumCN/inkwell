@@ -6,14 +6,54 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-/** WebDAV 备份载荷：书架元数据 + 进度 + 书源。不含书籍文件与正文缓存。 */
+/**
+ * WebDAV 备份载荷：书架元数据 + 阅读进度 + 书源 + 净化规则 + 应用/阅读设置。
+ * 不含书籍文件与正文缓存 —— 本地书的文件不上传，换设备要重新导入。
+ *
+ * 老版本的备份文件没有后加的字段，反序列化时按默认值补上（ignoreUnknownKeys + 默认值），
+ * 所以新旧版本可以共用同一个 backup.json.gz，不需要迁移。
+ */
 @Serializable
 data class BackupPayload(
-    val version: Int = 1,
+    val version: Int = 2,
     val deviceId: String,
     val exportedAt: Long,
     val books: List<BackupBook> = emptyList(),
     val sources: List<BackupSource> = emptyList(),
+    val replaceRules: List<BackupReplaceRule> = emptyList(),
+    /** 阅读排版设置；整块 LWW */
+    val readerSettings: BackupSettings? = null,
+    /** 应用设置（主题、更新渠道…）；整块 LWW */
+    val appSettings: BackupSettings? = null,
+)
+
+/**
+ * 一组设置的快照。
+ *
+ * 用 Map<String,String> 而不是强类型：BackupPayload 在 core，而阅读设置的类型定义在 reader 模块，
+ * core 不该反过来依赖它。键与取值语义由 app 层负责，读到不认识的键直接忽略 —— 老版本
+ * 也就能安全地读新版本写的备份。
+ *
+ * 整块 LWW（而非逐字段）：设置项之间常有关联（比如自定义配色的几个色值），
+ * 逐字段合并会拼出一套谁都没设过的配色。阅读设置与应用设置各有自己的时间戳，互不牵连。
+ */
+@Serializable
+data class BackupSettings(
+    val updatedAt: Long = 0,
+    val values: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class BackupReplaceRule(
+    val id: String,
+    val name: String,
+    val pattern: String,
+    val replacement: String = "",
+    val isRegex: Boolean = true,
+    val scope: String = "",
+    val enabled: Boolean = true,
+    val sortOrder: Int = 0,
+    val updatedAt: Long = 0,
 )
 
 @Serializable
@@ -41,6 +81,13 @@ data class BackupSource(
     val enabled: Boolean = true,
     val json: String,
     val updatedAt: Long = 0,
+    /**
+     * 书源的 legado 原文。从前没备份它 —— 换设备后同步下来的书源 sourceJson 为空，
+     * 转换器再升级也重转不了，用户只能手动重新导入一次。
+     */
+    val sourceJson: String = "",
+    val converterVersion: Int = 0,
+    val sortOrder: Int = 0,
 )
 
 object BackupCodec {
@@ -72,9 +119,17 @@ object BackupMerger {
     data class MergeResult(
         val books: List<BackupBook>,
         val sources: List<BackupSource>,
-        /** 合并后与本地不同的书（需要写回本地库） */
+        val replaceRules: List<BackupReplaceRule>,
+        /** 合并后与本地不同的条目（需要写回本地库） */
         val changedBooks: List<BackupBook>,
         val changedSources: List<BackupSource>,
+        val changedReplaceRules: List<BackupReplaceRule>,
+        /** 远端更新（需要写回本地）；null = 本地的更新或一样新 */
+        val readerSettings: BackupSettings?,
+        val appSettings: BackupSettings?,
+        /** 合并后要上传的设置（取较新的那份） */
+        val mergedReaderSettings: BackupSettings?,
+        val mergedAppSettings: BackupSettings?,
     )
 
     fun merge(local: BackupPayload, remote: BackupPayload): MergeResult {
@@ -104,7 +159,45 @@ object BackupMerger {
         }
         val changedSources = mergedSources.filter { it != localSources[it.id] }
 
-        return MergeResult(mergedBooks, mergedSources, changedBooks, changedSources)
+        val localRules = local.replaceRules.associateBy { it.id }
+        val remoteRules = remote.replaceRules.associateBy { it.id }
+        val mergedRules = (localRules.keys + remoteRules.keys).map { id ->
+            val l = localRules[id]
+            val r = remoteRules[id]
+            when {
+                l == null -> r!!
+                r == null -> l
+                else -> if (r.updatedAt > l.updatedAt) r else l
+            }
+        }
+        val changedRules = mergedRules.filter { it != localRules[it.id] }
+
+        val readerWinner = newer(local.readerSettings, remote.readerSettings)
+        val appWinner = newer(local.appSettings, remote.appSettings)
+
+        return MergeResult(
+            books = mergedBooks,
+            sources = mergedSources,
+            replaceRules = mergedRules,
+            changedBooks = changedBooks,
+            changedSources = changedSources,
+            changedReplaceRules = changedRules,
+            // 只有远端确实更新时才回写本地；否则别拿一份等价的设置去覆盖用户当前的
+            readerSettings = remote.readerSettings
+                ?.takeIf { it === readerWinner && it != local.readerSettings },
+            appSettings = remote.appSettings
+                ?.takeIf { it === appWinner && it != local.appSettings },
+            mergedReaderSettings = readerWinner,
+            mergedAppSettings = appWinner,
+        )
+    }
+
+    /** 整块 LWW；时间戳相同时本地优先（免得每次同步都来回覆盖） */
+    private fun newer(local: BackupSettings?, remote: BackupSettings?): BackupSettings? = when {
+        local == null -> remote
+        remote == null -> local
+        remote.updatedAt > local.updatedAt -> remote
+        else -> local
     }
 
     private fun mergeBook(l: BackupBook, r: BackupBook): BackupBook {
