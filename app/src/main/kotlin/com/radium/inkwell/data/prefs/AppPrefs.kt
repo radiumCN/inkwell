@@ -33,6 +33,8 @@ class AppPrefs(private val context: Context) {
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
+        /** 长按书籍的动作面板里是否出现「从书架隐藏」。默认关 —— 见 AppPrefs.hideBooksEnabled */
+        val HIDE_BOOKS_ENABLED = booleanPreferencesKey("hide_books_enabled")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -60,6 +62,7 @@ class AppPrefs(private val context: Context) {
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
+                "hide_books_enabled" to (p[Keys.HIDE_BOOKS_ENABLED] ?: false).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
                 "theme_dark" to theme.darkPreset,
@@ -86,6 +89,8 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
+            v["hide_books_enabled"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.HIDE_BOOKS_ENABLED] = it }
             v["theme_mode"]
                 ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
                 ?.let { p[Keys.THEME_MODE] = it }
@@ -120,6 +125,24 @@ class AppPrefs(private val context: Context) {
      */
     val textSelectionEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
         p[Keys.TEXT_SELECTION] ?: true
+    }
+
+    /**
+     * 长按书籍时是否出现「从书架隐藏」。**默认关**。
+     *
+     * 开着的话，任何人长按一本书都会看到这一项 —— 于是他知道了「这个 App 能藏书」，
+     * 进而知道该去找藏起来的东西。隐藏功能的价值恰恰在于别人想不到去找。
+     *
+     * 开关本身也不能放设置里（那等于换个地方泄密），它住在隐藏区内部 ——
+     * 长按书架标题进去才看得到。那个手势是唯一的信任根，一切从它长出来。
+     */
+    val hideBooksEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.HIDE_BOOKS_ENABLED] ?: false
+    }
+
+    suspend fun setHideBooksEnabled(on: Boolean) {
+        context.appDataStore.edit { it[Keys.HIDE_BOOKS_ENABLED] = on }
+        touch()
     }
 
     /** 正文读不出来时自动换一个能读的源。默认开 —— 与 Legado 原生一致 */

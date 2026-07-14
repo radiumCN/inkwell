@@ -102,6 +102,7 @@ fun BookshelfScreen(
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     var overflowOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
+    val hideBooksEnabled by viewModel.hideBooksEnabled.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -251,7 +252,9 @@ fun BookshelfScreen(
                     HiddenAreaBar(
                         requireAuth = requireAuth,
                         biometricAvailable = biometricAvailable,
+                        hideBooksEnabled = hideBooksEnabled,
                         onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+                        onToggleHideBooks = { viewModel.setHideBooksEnabled(it) },
                         onCollapse = { viewModel.hideHidden() },
                     )
                 }
@@ -323,18 +326,26 @@ fun BookshelfScreen(
                         actionTarget = null
                     },
                 )
-                SettingRow(
-                    title = if (book.hidden) "取消隐藏" else "从书架隐藏",
-                    subtitle = if (book.hidden) {
-                        "重新显示在书架上"
-                    } else {
-                        "书、进度、缓存都还在，只是列表里不显示"
-                    },
-                    onClick = {
-                        viewModel.setHidden(book.id, !book.hidden)
-                        actionTarget = null
-                    },
-                )
+                // 「从书架隐藏」默认**不出现**。它一旦出现在长按面板里，任何人随手长按一本书
+                // 就知道了「这个 App 能藏书」，进而知道该去找藏起来的东西 ——
+                // 而隐藏的价值恰恰在于别人想不到去找。开关在隐藏区内部（长按书架标题进去）。
+                //
+                // 「取消隐藏」不受开关管：它只在隐藏区里才可能被点到（书都藏起来了，
+                // 平时根本长按不到），而且关掉开关就再也解不开隐藏，等于把书锁死。
+                if (hideBooksEnabled || book.hidden) {
+                    SettingRow(
+                        title = if (book.hidden) "取消隐藏" else "从书架隐藏",
+                        subtitle = if (book.hidden) {
+                            "重新显示在书架上"
+                        } else {
+                            "书、进度、缓存都还在，只是列表里不显示"
+                        },
+                        onClick = {
+                            viewModel.setHidden(book.id, !book.hidden)
+                            actionTarget = null
+                        },
+                    )
+                }
                 SettingRow(
                     title = "从书架删除",
                     subtitle = "本地文件与缓存将一并删除",
@@ -464,7 +475,9 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
 private fun HiddenAreaBar(
     requireAuth: Boolean,
     biometricAvailable: Boolean,
+    hideBooksEnabled: Boolean,
     onToggleAuth: (Boolean) -> Unit,
+    onToggleHideBooks: (Boolean) -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -476,31 +489,65 @@ private fun HiddenAreaBar(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("隐藏的书", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        if (!biometricAvailable) {
-                            "这台设备还没设过指纹/面容或锁屏密码，无法上锁"
-                        } else if (requireAuth) {
-                            "下次展开需要验证"
-                        } else {
-                            "任何人长按书架标题都能展开"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = requireAuth && biometricAvailable,
-                    // 设备上一把锁都没有时开了它，就是把自己锁在门外 —— 这道锁没有找回途径
-                    enabled = biometricAvailable,
-                    onCheckedChange = onToggleAuth,
-                )
-            }
+            Text(
+                "隐藏的书",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+
+            SwitchLine(
+                title = "允许隐藏书籍",
+                subtitle = if (hideBooksEnabled) {
+                    "长按书籍时会出现「从书架隐藏」"
+                } else {
+                    "长按书籍时不出现隐藏选项 —— 别人看不出这个功能存在"
+                },
+                checked = hideBooksEnabled,
+                enabled = true,
+                onCheckedChange = onToggleHideBooks,
+            )
+
+            SwitchLine(
+                title = "展开时需要验证",
+                subtitle = when {
+                    !biometricAvailable -> "这台设备还没设过指纹/面容或锁屏密码，无法上锁"
+                    requireAuth -> "下次长按书架标题时，先验证指纹/面容"
+                    else -> "任何人长按书架标题都能展开"
+                },
+                checked = requireAuth && biometricAvailable,
+                // 设备上一把锁都没有时开了它，就是把自己锁在门外 —— 这道锁没有找回途径
+                enabled = biometricAvailable,
+                onCheckedChange = onToggleAuth,
+            )
+
             TextButton(onClick = onCollapse, modifier = Modifier.align(Alignment.End)) {
                 Text("收起")
             }
         }
+    }
+}
+
+/** 隐藏区里的开关行。用不了 SwitchRow —— 那个是给整宽设置页用的，塞进这张卡里左右会顶到边 */
+@Composable
+private fun SwitchLine(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
