@@ -50,38 +50,32 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val backPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = BACK_INK_ALPHA }
     // 单位渐变（x: 0→1）+ localMatrix 复用，避免每帧 new Shader 的分配抖动。
     //
-    // 阴影用**半透明黑但收窄了浓度**：纯黑 0x44 压在暖纸上会显出一道生硬的脏灰边，
-    // 是"硬"的主要来源之一。降到 0x30 出头，让阴影更像纸的自遮挡而不是一条黑线。
+    // 阴影浓度**对齐 legado**：从前我一直怕"脏灰边"把阴影压到 15~20%，这恰恰是它显平的根因 ——
+    // 阴影不够重，撑不起立体。legado 的折缝阴影近乎不透明，靠折缝那侧真的暗下去，纸背才卷得起来。
+    // 而 legado **没有白高光**：卷背的"亮"是干净纸背比暗谷相对更亮的错觉，不是真加一道白。
+    // 我从前那道白反而制造了"塑料条带"。这里整条移除。
     private val shadowMatrix = Matrix()
+    // 折缝投影（画在下页/背面交界，legado 的 folderShadow）：#333333 透明→69% 深
     private val foldShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            0x33000000, 0x00000000,
+            0xB0333333.toInt(), 0x00333333,
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
+    // 纸背靠折缝的暗谷（legado 的 backShadow）：#111111 不透明→透明。这是圆柱感的主来源
     private val backShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            0x26000000, 0x00000000,
+            0xFF111111.toInt(), 0x00111111,
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
-    // 卷起弧面高光：中间亮、两侧透明，模拟光照到卷曲纸面。
-    // 收到 0x22：纸不是塑料，中缝那道白太亮会显假
-    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        shader = android.graphics.LinearGradient(
-            0f, 0f, 1f, 0f,
-            intArrayOf(0x00FFFFFF, 0x18FFFFFF, 0x00FFFFFF),
-            floatArrayOf(0f, 0.5f, 1f),
-            android.graphics.Shader.TileMode.CLAMP,
-        )
-    }
-    // 前页正面靠折痕的投影：纸张翘起在正面留下的阴影（近折痕深、向外渐隐）
+    // 前页正面靠折痕的投影（legado 的 frontShadow）：#111111 50%→透明
     private val frontShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            0x00000000, 0x28000000,
+            0x00111111, 0x81111111.toInt(),
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
@@ -131,13 +125,12 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         drawFoldShadow(canvas)
         canvas.restore()
 
-        // 3. 前页背面（镜像 + 泛白）+ 折边阴影 + 弧面高光
+        // 3. 前页背面（铺纸色 + 淡墨镜像）+ 靠折缝的暗谷
         canvas.save()
         canvas.clipPath(pathCurl)
         canvas.clipOutPath(pathUnder)
         drawBack(canvas, front)
         drawBackShadow(canvas)
-        drawBackHighlight(canvas)
         canvas.restore()
     }
 
@@ -273,27 +266,6 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         canvas.drawRect(
             bezierStart1.x - w, bezierStart1.y - height * 2,
             bezierStart1.x, bezierStart1.y + height * 2, frontShadowPaint,
-        )
-        canvas.restore()
-    }
-
-    /** 卷起弧面中段高光；卷得越多高光越明显 */
-    private fun drawBackHighlight(canvas: Canvas) {
-        val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
-        val hlWidth = (fold / 4f).coerceIn(0f, 60f)
-        if (hlWidth < 2f) return
-        val degree = Math.toDegrees(
-            atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
-        ).toFloat()
-        shadowMatrix.reset()
-        shadowMatrix.setScale(hlWidth, 1f)
-        shadowMatrix.postTranslate(bezierStart1.x - hlWidth, bezierStart1.y)
-        highlightPaint.shader.setLocalMatrix(shadowMatrix)
-        canvas.save()
-        canvas.rotate(degree, bezierStart1.x, bezierStart1.y)
-        canvas.drawRect(
-            bezierStart1.x - hlWidth, bezierStart1.y - height * 2,
-            bezierStart1.x, bezierStart1.y + height * 2, highlightPaint,
         )
         canvas.restore()
     }
