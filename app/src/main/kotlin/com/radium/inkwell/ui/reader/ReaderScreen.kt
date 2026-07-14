@@ -69,6 +69,9 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 
+/** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
+private const val AUTO_CHANGED_HINT_MS = 8_000L
+
 @Composable
 fun ReaderScreen(
     bookId: String,
@@ -312,8 +315,12 @@ fun ReaderScreen(
 
         // 自动换源之后的提示条。换到的可能是删减版/另一个译本，正文跟原来不是一回事 ——
         // 不说的话用户只会觉得"这书怎么突然变了"，压根想不到是 App 换的源。
-        // 不自动消失：撤销是有价值的操作，不该在用户还没读到不对劲的地方之前就溜走。
+        // 停留一段时间给用户留出撤销窗口，随后自动消失，不长期挡视线（撤销/知道了 仍可手动触发）。
         state.autoChangedTo?.let { sourceName ->
+            LaunchedEffect(sourceName) {
+                delay(AUTO_CHANGED_HINT_MS)
+                viewModel.dismissAutoChanged()
+            }
             ReaderThemeScope(state.settings.theme) {
                 Surface(
                     Modifier
