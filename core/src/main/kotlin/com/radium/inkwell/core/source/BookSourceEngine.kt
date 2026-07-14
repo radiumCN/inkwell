@@ -22,6 +22,8 @@ data class SearchResult(
     val intro: String? = null,
     val latestChapter: String? = null,
     val sourceId: String,
+    /** 书源名称。只有 id（其实是书源网址）的话，换源列表里满屏都是域名，没人认得出哪个是哪个 */
+    val sourceName: String = "",
 )
 
 data class SearchPage(
@@ -467,6 +469,7 @@ class BookSourceEngine(
                 intro = evalField(stage, "intro", fields["intro"], itemCtx),
                 latestChapter = evalField(stage, "latestChapter", fields["latestChapter"], itemCtx),
                 sourceId = source.id,
+                sourceName = source.name,
             )
         }
         // nextPage 规则命中即可继续；书源没有该规则时，只要地址模板带 page 且这一页有结果，
