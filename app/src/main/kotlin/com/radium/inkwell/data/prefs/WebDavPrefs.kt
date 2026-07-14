@@ -17,6 +17,8 @@ data class WebDavConfig(
     val username: String = "",
     val password: String = "",
     val lastSyncAt: Long = 0,
+    /** 自动同步：冷启动 + 退到后台时静默同步 */
+    val autoSync: Boolean = true,
 ) {
     val isConfigured: Boolean get() = url.isNotBlank() && username.isNotBlank()
 }
@@ -29,6 +31,7 @@ class WebDavPrefs(private val context: Context) {
         val PASSWORD = stringPreferencesKey("password")
         val LAST_SYNC = longPreferencesKey("last_sync")
         val DEVICE_ID = stringPreferencesKey("device_id")
+        val AUTO_SYNC = androidx.datastore.preferences.core.booleanPreferencesKey("auto_sync")
     }
 
     val config: Flow<WebDavConfig> = context.webDavDataStore.data.map { p ->
@@ -37,7 +40,12 @@ class WebDavPrefs(private val context: Context) {
             username = p[Keys.USERNAME] ?: "",
             password = p[Keys.PASSWORD] ?: "",
             lastSyncAt = p[Keys.LAST_SYNC] ?: 0,
+            autoSync = p[Keys.AUTO_SYNC] ?: true,
         )
+    }
+
+    suspend fun setAutoSync(on: Boolean) {
+        context.webDavDataStore.edit { it[Keys.AUTO_SYNC] = on }
     }
 
     suspend fun save(url: String, username: String, password: String) {

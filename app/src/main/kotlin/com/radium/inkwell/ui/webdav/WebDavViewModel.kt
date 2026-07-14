@@ -17,6 +17,7 @@ data class WebDavUiState(
     val configured: Boolean = false,
     val busy: Boolean = false,
     val lastSyncAt: Long = 0,
+    val autoSync: Boolean = true,
     val message: String? = null,
 )
 
@@ -34,8 +35,14 @@ class WebDavViewModel(
             _state.value = WebDavUiState(
                 url = c.url, username = c.username, password = c.password,
                 configured = c.isConfigured, lastSyncAt = c.lastSyncAt,
+                autoSync = c.autoSync,
             )
         }
+    }
+
+    fun setAutoSync(on: Boolean) {
+        _state.value = _state.value.copy(autoSync = on)
+        viewModelScope.launch { prefs.setAutoSync(on) }
     }
 
     fun setUrl(v: String) = _state.value.let { _state.value = it.copy(url = v) }

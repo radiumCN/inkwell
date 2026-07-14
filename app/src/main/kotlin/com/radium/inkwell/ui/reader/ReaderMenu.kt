@@ -37,7 +37,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -67,6 +66,10 @@ import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.runtime.mutableIntStateOf
+import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -325,93 +328,123 @@ private val LINE_SPACING_OPTIONS = listOf(
     "宽松" to 1.9f,
 )
 
+/**
+ * 阅读设置面板。
+ *
+ * 分三页，而不是把九组「标签 + chip 行」直着堆下去 —— 那样面板长得要滚半天，
+ * 而且每组长得都一样（一个小标题压一排 chip），眼睛根本抓不住重点。
+ * 分页之后每页只有三四组，一屏就看完了。
+ *
+ * 分法按「改的频率」而不是按「技术类别」：
+ * - 排版：字号、行距、字体、背景、亮度 —— 最常调的
+ * - 翻页：翻页方式、自动翻页间隔、音量键翻页
+ * - 更多：设一次基本不再动的（简繁、预加载、屏幕常亮）
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 32.dp),
-    ) {
-        // 亮度
-        SectionLabel("亮度")
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Default.DarkMode, contentDescription = null,
-                Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SlimSlider(
-                value = settings.brightnessOverride ?: 0.5f,
-                onValueChange = { v ->
-                    onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
-                },
-                enabled = settings.brightnessOverride != null,
-                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-            )
-            Icon(
-                Icons.Default.LightMode, contentDescription = null,
-                Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(12)
-            FilterChip(
-                selected = settings.brightnessOverride == null,
-                onClick = {
-                    onUpdate(
-                        settings.copy(
-                            brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
-                        )
-                    )
-                },
-                label = { Text("系统") },
-            )
-        }
+    var tab by remember { mutableIntStateOf(0) }
 
-        // 字号
-        SectionLabel("字号")
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                onClick = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
-                modifier = Modifier.weight(1f),
-            ) { Text("A−", style = MaterialTheme.typography.titleMedium) }
-            Text(
-                "${settings.fontSizeSp.toInt()}",
-                Modifier.width(72.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.titleLarge,
-            )
-            OutlinedButton(
-                onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
-                modifier = Modifier.weight(1f),
-            ) { Text("A＋", style = MaterialTheme.typography.titleMedium) }
+    Column(Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+        TabRow(selectedTabIndex = tab) {
+            SETTINGS_TABS.forEachIndexed { i, title ->
+                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+            }
         }
+        Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding)) {
+            when (tab) {
+                0 -> LayoutTab(settings, onUpdate)
+                1 -> FlipTab(settings, onUpdate)
+                else -> MoreTab(settings, onUpdate)
+            }
+        }
+    }
+}
 
-        // 行距
-        SectionLabel("行距")
-        ChipRow(
-            options = LINE_SPACING_OPTIONS.map { it.first },
-            selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
-                kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
+@Composable
+private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+    // 字号：加减按钮 + 当前值，一行搞定
+    SectionLabel("字号")
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(
+            onClick = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
+            modifier = Modifier.weight(1f),
+        ) { Text("A−", style = MaterialTheme.typography.titleMedium) }
+        Text(
+            "${settings.fontSizeSp.toInt()}",
+            Modifier.width(72.dp),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.titleLarge,
+        )
+        OutlinedButton(
+            onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
+            modifier = Modifier.weight(1f),
+        ) { Text("A＋", style = MaterialTheme.typography.titleMedium) }
+    }
+
+    SectionLabel("行距")
+    ChipRow(
+        options = LINE_SPACING_OPTIONS.map { it.first },
+        selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
+        },
+        onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("字体")
+    ChipRow(
+        options = ReaderSettings.FONT_PRESETS.map { it.second },
+        selectedIndex = ReaderSettings.FONT_PRESETS.indexOfFirst { it.first == settings.fontId },
+        onSelect = { onUpdate(settings.copy(fontId = ReaderSettings.FONT_PRESETS[it].first)) },
+    )
+
+    SectionLabel("背景")
+    ThemeSwatches(settings, onUpdate)
+
+    SectionLabel("亮度")
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Default.DarkMode, contentDescription = null,
+            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SlimSlider(
+            value = settings.brightnessOverride ?: 0.5f,
+            onValueChange = { v ->
+                onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
             },
-            onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
+            enabled = settings.brightnessOverride != null,
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
         )
-
-        // 翻页方式
-        SectionLabel("翻页方式")
-        ChipRow(
-            options = FlipAnimation.entries.map { it.label },
-            selectedIndex = FlipAnimation.entries.indexOf(settings.flipAnimation),
-            onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
+        Icon(
+            Icons.Default.LightMode, contentDescription = null,
+            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-
-        // 简繁转换
-        SectionLabel("简繁转换")
-        ChipRow(
-            options = ChineseConvert.entries.map { it.label },
-            selectedIndex = ChineseConvert.entries.indexOf(settings.chineseConvert),
-            onSelect = { onUpdate(settings.copy(chineseConvert = ChineseConvert.entries[it])) },
+        Spacer(12)
+        FilterChip(
+            selected = settings.brightnessOverride == null,
+            onClick = {
+                onUpdate(
+                    settings.copy(
+                        brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
+                    )
+                )
+            },
+            label = { Text("系统") },
         )
+    }
+}
 
-        // 自动翻页间隔
+@Composable
+private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+    SectionLabel("翻页方式")
+    ChipRow(
+        options = FlipAnimation.entries.map { it.label },
+        selectedIndex = FlipAnimation.entries.indexOf(settings.flipAnimation),
+        onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
+    )
+
+    // 滚动模式没有"页"，这两项无从谈起 —— 与其留在那儿让人调了没反应，不如藏起来
+    if (settings.flipAnimation != FlipAnimation.SCROLL) {
         SectionLabel("自动翻页间隔")
         ChipRow(
             options = AUTO_FLIP_OPTIONS.map { "${it}s" },
@@ -419,59 +452,76 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
             onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
         )
 
-        // 预加载
-        SectionLabel("预加载章节")
-        ChipRow(
-            options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
-            selectedIndex = PRELOAD_OPTIONS.indexOf(settings.preloadChapters),
-            onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
+        SwitchRow(
+            title = "音量键翻页",
+            checked = settings.volumeKeyFlip,
+            onCheckedChange = { onUpdate(settings.copy(volumeKeyFlip = it)) },
         )
+    }
+}
 
-        // 字体
-        SectionLabel("字体")
-        ChipRow(
-            options = ReaderSettings.FONT_PRESETS.map { it.second },
-            selectedIndex = ReaderSettings.FONT_PRESETS.indexOfFirst { it.first == settings.fontId },
-            onSelect = { onUpdate(settings.copy(fontId = ReaderSettings.FONT_PRESETS[it].first)) },
-        )
+@Composable
+private fun MoreTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+    SectionLabel("简繁转换")
+    ChipRow(
+        options = ChineseConvert.entries.map { it.label },
+        selectedIndex = ChineseConvert.entries.indexOf(settings.chineseConvert),
+        onSelect = { onUpdate(settings.copy(chineseConvert = ChineseConvert.entries[it])) },
+    )
 
-        // 背景
-        SectionLabel("背景")
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            ReaderTheme.ALL.forEach { theme ->
-                val selected = theme.id == settings.theme.id
-                Box(
-                    Modifier
-                        // 触控目标 48dp（原来 44dp，差一点点）；clip 必须在 clickable 之前 ——
-                        // 否则涟漪是方的，会溢出这个圆形色块的边界
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(theme.background))
-                        .border(
-                            width = if (selected) 2.dp else 1.dp,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outlineVariant,
-                            shape = CircleShape,
-                        )
-                        .clickable { onUpdate(settings.copy(theme = theme)) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (selected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = theme.id,
-                            Modifier.size(20.dp),
-                            tint = Color(theme.textColor),
-                        )
-                    }
+    SectionLabel("预加载章节")
+    ChipRow(
+        options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
+        selectedIndex = PRELOAD_OPTIONS.indexOf(settings.preloadChapters),
+        onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
+    )
+
+    // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
+    SwitchRow(
+        title = "阅读时保持屏幕常亮",
+        checked = settings.keepScreenOn,
+        onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
+    )
+}
+
+@Composable
+private fun ThemeSwatches(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+    ) {
+        ReaderTheme.ALL.forEach { theme ->
+            val selected = theme.id == settings.theme.id
+            Box(
+                Modifier
+                    // 触控目标 48dp；clip 必须在 clickable 之前 ——
+                    // 否则涟漪是方的，会溢出这个圆形色块的边界
+                    .size(Dimens.touchTarget)
+                    .clip(CircleShape)
+                    .background(Color(theme.background))
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
+                        shape = CircleShape,
+                    )
+                    .clickable { onUpdate(settings.copy(theme = theme)) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = theme.id,
+                        Modifier.size(20.dp),
+                        tint = Color(theme.textColor),
+                    )
                 }
             }
         }
     }
 }
+
+private val SETTINGS_TABS = listOf("排版", "翻页", "更多")
 
 @Composable
 private fun SectionLabel(text: String) {
