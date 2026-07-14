@@ -46,7 +46,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
-    onOpenPreview: (sourceId: String, bookUrl: String) -> Unit,
+    onOpenPreview: (SearchResult) -> Unit,
     viewModel: SearchViewModel = koinViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -109,17 +109,23 @@ fun SearchScreen(
                 )
             } else {
                 LazyColumn(state = listState) {
-                    items(state.results, key = { "${it.sourceId}|${it.bookUrl}" }) { result ->
+                    items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
+                        val result = hit.result
                         BookListRow(
                             title = result.title,
                             subtitle = listOfNotNull(result.author, result.latestChapter)
                                 .joinToString(" · "),
-                            caption = "来源: ${result.sourceId}",
+                            // 同名同作者的书跨书源合并成一行；书源越多越可能就是要找的那本
+                            caption = if (hit.origins.size > 1) {
+                                "${hit.origins.size} 个书源 · ${result.sourceId}"
+                            } else {
+                                "来源: ${result.sourceId}"
+                            },
                             coverModel = result.coverUrl,
                             trailingLabel = "加入",
                             trailingLoading = state.addingUrl == result.bookUrl,
                             onTrailing = { viewModel.addToShelf(result) },
-                            onClick = { onOpenPreview(result.sourceId, result.bookUrl) },
+                            onClick = { onOpenPreview(result) },
                         )
                     }
                     if (state.loadingMore) {

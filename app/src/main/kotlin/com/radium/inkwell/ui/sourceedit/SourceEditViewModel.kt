@@ -124,7 +124,11 @@ class SourceEditViewModel(
                 val firstChapter = toc.firstOrNull() ?: error("目录为空")
                 report.appendLine("  首章: ${firstChapter.title}")
 
-                val content = engine.getContent(rule, firstChapter.url, toc.mapTo(HashSet()) { it.url })
+                val content = engine.getContent(
+                    rule, firstChapter.url,
+                    toc.mapTo(HashSet()) { it.url },
+                    chapterVariable = firstChapter.variable,
+                )
                 val preview = content.elements
                     .filterIsInstance<com.radium.inkwell.core.model.ContentElement.Paragraph>()
                     .take(2).joinToString(" / ") { it.text.take(40) }

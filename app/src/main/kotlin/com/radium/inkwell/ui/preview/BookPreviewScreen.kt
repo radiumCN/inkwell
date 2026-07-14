@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.BookCover
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -46,11 +47,10 @@ import org.koin.core.parameter.parametersOf
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookPreviewScreen(
-    sourceId: String,
-    bookUrl: String,
+    result: SearchResult,
     onRead: (String) -> Unit,
     onBack: () -> Unit,
-    viewModel: BookPreviewViewModel = koinViewModel { parametersOf(sourceId, bookUrl) },
+    viewModel: BookPreviewViewModel = koinViewModel { parametersOf(result) },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

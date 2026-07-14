@@ -18,10 +18,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
+/** 一本书；同名同作者的结果跨书源合并成一条，[origins] 是有这本书的所有书源 */
+data class SearchHit(
+    /** 代表条目：首个返回它的书源的结果，加书架/预览都用它 */
+    val result: SearchResult,
+    val origins: Set<String>,
+)
+
 data class SearchUiState(
     val query: String = "",
     val searching: Boolean = false,
-    val results: List<SearchResult> = emptyList(),
+    val results: List<SearchHit> = emptyList(),
     val sourceCount: Int = 0,
     val doneCount: Int = 0,
     val addingUrl: String? = null,
@@ -64,6 +71,7 @@ class SearchViewModel(
                 )
                 return@launch
             }
+            hits.clear()
             _state.value = _state.value.copy(
                 searching = true, results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
@@ -74,8 +82,9 @@ class SearchViewModel(
                 async {
                     limiter.withPermit {
                         val page = runCatching { engine.search(rule, keyword, page = 1) }.getOrNull()
+                        merge(page?.items.orEmpty())
                         _state.value = _state.value.copy(
-                            results = _state.value.results + (page?.items ?: emptyList()),
+                            results = ranked(keyword),
                             doneCount = _state.value.doneCount + 1,
                         )
                         rule.takeIf { page?.hasMore == true }
@@ -85,6 +94,39 @@ class SearchViewModel(
             pagingRules = more
             _state.value = _state.value.copy(searching = false, hasMore = more.isNotEmpty())
         }
+    }
+
+    // ---- 合并与相关度排序 ----
+
+    /** 同名同作者视为同一本书；键的顺序即首次出现的顺序，用于同档同源数时保持稳定 */
+    private val hits = LinkedHashMap<Pair<String, String>, SearchHit>()
+
+    private fun merge(items: List<SearchResult>) {
+        for (r in items) {
+            val key = r.title.trim() to r.author?.trim().orEmpty()
+            val old = hits[key]
+            hits[key] = if (old == null) SearchHit(r, setOf(r.sourceId))
+            else old.copy(origins = old.origins + r.sourceId)
+        }
+    }
+
+    /**
+     * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
+     * 同档内按「有这本书的书源数」降序 —— 越多书源都收录，越可能就是要找的那本。
+     *
+     * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
+     * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
+     */
+    private fun ranked(keyword: String): List<SearchHit> =
+        hits.values.sortedWith(
+            compareBy<SearchHit> { tier(it.result, keyword) }
+                .thenByDescending { it.origins.size }
+        )
+
+    private fun tier(r: SearchResult, keyword: String): Int = when {
+        r.title == keyword || r.author == keyword -> 0
+        r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
+        else -> 2
     }
 
     /** 还能继续翻页的书源（上一页 hasMore 为真的那些） */
@@ -98,18 +140,16 @@ class SearchViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(loadingMore = true)
             val limiter = Semaphore(8)
-            val seen = _state.value.results.mapTo(HashSet()) { it.sourceId to it.bookUrl }
             val still = pagingRules.map { rule ->
                 async {
                     limiter.withPermit {
                         val page = runCatching { engine.search(rule, keyword, page = next) }.getOrNull()
-                        val fresh = (page?.items ?: emptyList())
-                            .filter { (it.sourceId to it.bookUrl) !in seen }
-                        if (fresh.isNotEmpty()) {
-                            _state.value = _state.value.copy(results = _state.value.results + fresh)
-                        }
-                        // 这一页没有新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
-                        rule.takeIf { page?.hasMore == true && fresh.isNotEmpty() }
+                        val before = hits.size
+                        merge(page?.items.orEmpty())
+                        val gotNew = hits.size > before
+                        if (gotNew) _state.value = _state.value.copy(results = ranked(keyword))
+                        // 这一页没带来新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
+                        rule.takeIf { page?.hasMore == true && gotNew }
                     }
                 }
             }.awaitAll().filterNotNull()

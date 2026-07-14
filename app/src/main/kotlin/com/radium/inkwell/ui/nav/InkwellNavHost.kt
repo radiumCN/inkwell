@@ -46,25 +46,20 @@ fun InkwellNavHost() {
         composable<SearchRoute> {
             SearchScreen(
                 onBack = { navController.popBackStack() },
-                onOpenPreview = { sourceId, bookUrl ->
-                    navController.navigate(BookPreviewRoute.of(sourceId, bookUrl))
-                },
+                onOpenPreview = { navController.navigate(BookPreviewRoute.of(it)) },
             )
         }
         composable<ExploreRoute> {
             ExploreScreen(
                 onBack = { navController.popBackStack() },
                 onOpenSourceManage = { navController.navigate(SourceManageRoute) },
-                onOpenPreview = { sourceId, bookUrl ->
-                    navController.navigate(BookPreviewRoute.of(sourceId, bookUrl))
-                },
+                onOpenPreview = { navController.navigate(BookPreviewRoute.of(it)) },
             )
         }
         composable<BookPreviewRoute> { entry ->
             val route = entry.toRoute<BookPreviewRoute>()
             BookPreviewScreen(
-                sourceId = route.sourceId,
-                bookUrl = route.bookUrl,
+                result = route.result,
                 onRead = { navController.navigate(ReaderRoute(it)) },
                 onBack = { navController.popBackStack() },
             )
