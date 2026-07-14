@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#2B3A55</color>
+
+    <!--
+      可切换图标的底色。自适应图标把前景（整幅方图）缩进可见区里，四角露出的就是这一层 ——
+      所以这里的值必须和那张图自己的底色一致，否则图周围会显出一圈边框。换图时顺手核一下取色。
+    -->
+    <color name="ic_launcher_bg_classic">#F7F3E6</color>
+    <color name="ic_launcher_bg_line">#FDF6E3</color>
+    <color name="ic_launcher_bg_night">#17140F</color>
+    <color name="ic_launcher_bg_book">#FAF3E3</color>
+    <color name="ic_launcher_bg_ink">#F0E9DA</color>
 </resources>

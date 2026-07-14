@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 整幅方图内缩到自适应图标的可见区内；四角由 @color/ic_launcher_bg_night 补齐 -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_icon_night"
+    android:inset="17%" />

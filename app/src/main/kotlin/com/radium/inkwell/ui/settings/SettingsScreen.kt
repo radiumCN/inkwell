@@ -40,6 +40,8 @@ import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
+import com.radium.inkwell.util.AppIcon
+import com.radium.inkwell.util.AppIconManager
 import com.radium.inkwell.util.BiometricAuth
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateChecker
@@ -80,6 +82,10 @@ fun SettingsScreen(
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
     var showChannelPicker by remember { mutableStateOf(false) }
+    // 以 PackageManager 的组件状态为准，不另存偏好 —— 两边一旦不同步，界面就会勾着一个
+    // 桌面上根本没显示的图标
+    var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
+    var showIconPicker by remember { mutableStateOf(false) }
     var confirmClearCache by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
 
@@ -128,6 +134,11 @@ fun SettingsScreen(
                 title = "主题外观",
                 subtitle = "日间/夜间模式与自定义配色",
                 onClick = onOpenTheme,
+            )
+            SettingRow(
+                title = "应用图标",
+                subtitle = "${appIcon.label} · ${appIcon.description}",
+                onClick = { showIconPicker = true },
             )
 
             SwitchRow(
@@ -265,6 +276,23 @@ fun SettingsScreen(
                 }
             },
             onDismiss = { showChannelPicker = false },
+        )
+    }
+
+    if (showIconPicker) {
+        AppIconSheet(
+            selected = appIcon,
+            onSelect = { picked ->
+                showIconPicker = false
+                if (picked != appIcon) {
+                    AppIconManager.apply(context, picked)
+                    appIcon = picked
+                    scope.launch {
+                        snackbar.showSnackbar("已换成「${picked.label}」，桌面图标稍后刷新")
+                    }
+                }
+            },
+            onDismiss = { showIconPicker = false },
         )
     }
 

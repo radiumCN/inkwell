@@ -3,23 +3,98 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      application 的 android:icon 只出现在「设置 → 应用」「最近任务」这类地方，且**不随
+      alias 切换** —— 它是静态解析的。那里放默认款；桌面上显示哪个，由下面启用的 alias 决定。
+    -->
+
     <application
         android:name=".InkwellApp"
         android:label="@string/app_name"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_classic"
         android:theme="@style/Theme.Inkwell"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true">
 
+        <!--
+          MainActivity 自己**不带** LAUNCHER 入口，桌面入口全部由下面的 activity-alias 提供。
+
+          为什么非得这样：Android 的图标是装机时静态解析的，运行时改不了 android:icon。
+          想换图标只能准备多个带各自图标的 alias，再启用其中一个、禁用其余
+          （见 util/AppIcon.kt）。而被禁用的那个组件必须不是 MainActivity 本身 ——
+          alias 指向它，它一旦被禁，所有 alias 跟着失效。
+
+          alias 的 android:name 一旦发布就不能改：它被写进了用户桌面的快捷方式里。
+        -->
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <activity-alias
+            android:name=".IconClassic"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher_classic"
+            android:label="@string/app_name"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".IconLine"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher_line"
+            android:label="@string/app_name"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".IconNight"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher_night"
+            android:label="@string/app_name"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".IconBook"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher_book"
+            android:label="@string/app_name"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".IconInk"
+            android:targetActivity=".MainActivity"
+            android:icon="@mipmap/ic_launcher_ink"
+            android:label="@string/app_name"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- 导出书源：把 cacheDir 里的 JSON 通过分享面板交出去 -->
         <provider
