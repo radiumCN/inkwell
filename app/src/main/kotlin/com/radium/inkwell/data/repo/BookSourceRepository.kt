@@ -158,6 +158,14 @@ class BookSourceRepository(private val dao: BookSourceDao) {
 
     suspend fun delete(id: String) = dao.deleteById(id)
 
+    /** 批量删除/启停：书源动辄几百个，逐条走会很慢也很吵 */
+    suspend fun deleteAll(ids: Collection<String>) {
+        if (ids.isNotEmpty()) dao.deleteByIds(ids.toList())
+    }
+
+    suspend fun setEnabledAll(ids: Collection<String>, enabled: Boolean) {
+        if (ids.isNotEmpty()) dao.setEnabledForIds(ids.toList(), enabled)
+    }
 
     suspend fun getRule(id: String): BookSourceRule? =
         dao.getById(id)?.let { runCatching { json.decodeFromString<BookSourceRule>(it.json) }.getOrNull() }

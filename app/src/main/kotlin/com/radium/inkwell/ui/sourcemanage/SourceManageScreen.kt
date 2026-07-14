@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -23,7 +25,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -58,6 +62,11 @@ fun SourceManageScreen(
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val exploreOnlyIds by viewModel.exploreOnlyIds.collectAsStateWithLifecycle()
+    val selected by viewModel.selected.collectAsStateWithLifecycle()
+    val checks by viewModel.checks.collectAsStateWithLifecycle()
+    val checkProgress by viewModel.checkProgress.collectAsStateWithLifecycle()
+    val selectionMode = selected.isNotEmpty()
+    var confirmBatchDelete by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
@@ -71,7 +80,23 @@ fun SourceManageScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selectionMode) {
+                TopAppBar(
+                    title = { Text("已选 ${selected.size} 个") },
+                    navigationIcon = {
+                        IconButton(onClick = viewModel::clearSelection) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出多选")
+                        }
+                    },
+                    actions = {
+                        TextButton(onClick = viewModel::selectAll) { Text("全选") }
+                        TextButton(onClick = { viewModel.validate(selected) }) { Text("校验") }
+                        TextButton(onClick = { viewModel.setEnabledSelected(true) }) { Text("启用") }
+                        TextButton(onClick = { viewModel.setEnabledSelected(false) }) { Text("禁用") }
+                        TextButton(onClick = { confirmBatchDelete = true }) { Text("删除") }
+                    },
+                )
+            } else TopAppBar(
                 title = { Text("书源管理") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -79,6 +104,9 @@ fun SourceManageScreen(
                     }
                 },
                 actions = {
+                    if (sources.isNotEmpty() && checkProgress == null) {
+                        TextButton(onClick = { viewModel.validate() }) { Text("校验全部") }
+                    }
                     TextButton(onClick = { showImportMenu = true }) { Text("导入书源") }
                     DropdownMenu(
                         expanded = showImportMenu,
@@ -132,15 +160,64 @@ fun SourceManageScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.fillMaxSize().padding(padding)) {
+            // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
+            checkProgress?.let { p ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "正在校验 ${p.done}/${p.total}",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        LinearProgressIndicator(
+                            progress = { if (p.total == 0) 0f else p.done.toFloat() / p.total },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                    }
+                    TextButton(onClick = viewModel::cancelCheck) { Text("停止") }
+                }
+            }
+            // 校验完了最想干的事：把失效的一键清掉
+            if (checkProgress == null && checks.values.any { !it.ok }) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "失效 ${checks.values.count { !it.ok }} 个",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::deleteInvalid) { Text("删除失效书源") }
+                }
+            }
+            LazyColumn(Modifier.fillMaxSize()) {
                 items(sources, key = { it.id }) { source ->
+                    val check = checks[source.id]
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { onEdit(source.id) }
+                            .combinedClickable(
+                                onClick = {
+                                    if (selectionMode) viewModel.toggleSelect(source.id)
+                                    else onEdit(source.id)
+                                },
+                                // 长按进多选，和书架的删除手势一致
+                                onLongClick = { viewModel.toggleSelect(source.id) },
+                            )
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (selectionMode) {
+                            Checkbox(
+                                checked = source.id in selected,
+                                onCheckedChange = { viewModel.toggleSelect(source.id) },
+                            )
+                        }
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
@@ -169,22 +246,51 @@ fun SourceManageScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (check != null) {
+                                Text(
+                                    (if (check.ok) "✓ " else "✗ ") + check.message,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (check.ok) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error,
+                                    maxLines = 1,
+                                )
+                            }
                         }
-                        IconButton(onClick = { deleteTarget = source }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "删除",
-                                tint = MaterialTheme.colorScheme.outline,
+                        if (!selectionMode) {
+                            IconButton(onClick = { deleteTarget = source }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "删除",
+                                    tint = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                            Switch(
+                                checked = source.enabled,
+                                onCheckedChange = { viewModel.setEnabled(source.id, it) },
                             )
                         }
-                        Switch(
-                            checked = source.enabled,
-                            onCheckedChange = { viewModel.setEnabled(source.id, it) },
-                        )
                     }
                 }
             }
+            }
         }
+    }
+
+    if (confirmBatchDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmBatchDelete = false },
+            title = { Text("删除书源") },
+            text = { Text("确定删除选中的 ${selected.size} 个书源吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmBatchDelete = false
+                    viewModel.deleteSelected()
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmBatchDelete = false }) { Text("取消") }
+            },
+        )
     }
 
     if (showUrlImport) {

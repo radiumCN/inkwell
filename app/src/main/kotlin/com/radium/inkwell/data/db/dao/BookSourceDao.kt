@@ -34,6 +34,12 @@ interface BookSourceDao {
     @Query("DELETE FROM book_source WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    @Query("DELETE FROM book_source WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
+    @Query("UPDATE book_source SET enabled = :enabled WHERE id IN (:ids)")
+    suspend fun setEnabledForIds(ids: List<String>, enabled: Boolean)
+
     @Query("SELECT * FROM book_source")
     suspend fun getAll(): List<BookSourceEntity>
 }

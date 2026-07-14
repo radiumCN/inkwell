@@ -30,6 +30,10 @@ class BookSourceImportTest {
         override suspend fun getAllIds() = store.keys.toList()
         override suspend fun setEnabled(id: String, enabled: Boolean) {}
         override suspend fun deleteById(id: String) { store.remove(id) }
+        override suspend fun deleteByIds(ids: List<String>) { ids.forEach { store.remove(it) } }
+        override suspend fun setEnabledForIds(ids: List<String>, enabled: Boolean) {
+            ids.forEach { id -> store[id]?.let { store[id] = it.copy(enabled = enabled) } }
+        }
         override suspend fun getAll() = store.values.toList()
     }
 
@@ -154,5 +158,21 @@ class BookSourceImportTest {
         """
     }
 
+    /** 书源动辄几百个，逐条删会很慢；批量删除/启停走单条 SQL */
+    @Test
+    fun `批量删除与批量启停`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao)
+        repo.importJson("[" + LEGADO_SRC + "," + LEGADO_SRC2 + "]").getOrThrow()
+        assertEquals(2, dao.store.size)
+
+        val ids = dao.store.keys.toList()
+        repo.setEnabledAll(ids, false)
+        assertTrue(dao.store.values.none { it.enabled })
+
+        repo.deleteAll(listOf(ids[0]))
+        assertEquals(1, dao.store.size)
+        assertEquals(ids[1], dao.store.keys.single())
+    }
 
 }

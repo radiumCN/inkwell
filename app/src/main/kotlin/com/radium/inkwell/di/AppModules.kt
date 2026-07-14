@@ -71,7 +71,7 @@ val appModule = module {
         com.radium.inkwell.ui.preview.BookPreviewViewModel(results, get(), get())
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
-    viewModel { SourceManageViewModel(androidContext(), get()) }
+    viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
     viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
 }
