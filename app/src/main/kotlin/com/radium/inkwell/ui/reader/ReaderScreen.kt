@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,12 +42,15 @@ import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.reader.api.FlipAnimation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,30 +79,51 @@ fun ReaderScreen(
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
     val flipController = remember { FlipController() }
-    var viewport by remember { mutableStateOf(IntSize.Zero) }
 
     /**
-     * 排版规格。**只在视口稳定之后才产生** —— 这就是"进书抖一下"的修法。
+     * 挖孔尺寸。**首帧就得是对的** —— 这是"进书抖一下"的根。
      *
-     * displayCutout 的 inset 在首帧还没派发（值是 0），第二帧才拿到真实的挖孔尺寸。
-     * 而 Box 的尺寸正是扣掉这个 padding 之后的：
-     *   帧 1 —— viewport = 全屏（还没扣 cutout）→ 立刻排版 → 正文铺出来
-     *   帧 2 —— inset 到位 → Box 变小 → viewport 变 → 重排 → 文字整体挪一下
-     * 用户看到的就是那一下抖动。（它也是"返回再进来退回上一页"的同一个根因：
-     * 那次重排会把已保存的字符偏移吸附掉。）
+     * Compose 的 `WindowInsets.displayCutout` 在一棵新子树里首帧还没派发（值是 0），
+     * 第二帧才到位。从前正文的视口是「Box 扣掉 windowInsetsPadding 之后的实测尺寸」，
+     * 于是：
+     *   帧 1 —— inset 还是 0 → 视口 = 全屏 → 按全屏排了一遍 → 正文铺出来
+     *   帧 2 —— inset 到位 → Box 变小 → 视口变 → 重排 → 文字整体挪一下
+     * 那一下就是抖动。（也是"返回再进来退回上一页"的同一个根因：这次重排会把
+     * 已保存的字符偏移吸附掉。）
      *
-     * 所以：viewport 一变就重新计时，安静 [VIEWPORT_SETTLE_MS] 之后才认。
-     * 期间正文不渲染（显示的是纸张色 + 转圈），用户看到的是"空白 → 内容"，
-     * 而不是"内容 → 内容跳一下"。
+     * 但挖孔在哪，**窗口本来就知道** —— 我们是从书架页导航进来的，insets 老早派发过；
+     * 晚一帧的只是 Compose 在这棵新子树里的那次分发。所以首帧直接问 window 要
+     * （[rootDisplayCutout]，同步），之后以 Compose 的响应式值为准 —— 旋转、折叠、
+     * 分屏时它会自己更新，不必去猜什么时候该让缓存失效。
+     *
+     * 两者一致时（绝大多数情况）视口从头到尾没变过，压根不会有第二次排版。
      */
-    var spec by remember { mutableStateOf<LayoutSpec?>(null) }
+    val view = LocalView.current
+    val windowSize = LocalWindowInfo.current.containerSize
+    val seed = remember(view, windowSize) { rootDisplayCutout(view) }
 
-    LaunchedEffect(viewport, state.settings, density) {
-        if (viewport.width <= 0 || viewport.height <= 0) return@LaunchedEffect
-        // viewport 再变一次，这个协程就会被取消重来 —— 天然的防抖
-        delay(VIEWPORT_SETTLE_MS)
-        val settled = buildLayoutSpec(viewport, state.settings, density)
-        spec = settled
+    val live = WindowInsets.displayCutout
+    val layoutDirection = LocalLayoutDirection.current
+    // 逐个字段读，让 inset 变化能触发重组；全 0 就说明这一帧还没派发，用同步种子顶上。
+    // （真没有挖孔的设备上，种子本身也是 0，取谁都一样。）
+    val l = live.getLeft(density, layoutDirection)
+    val t = live.getTop(density)
+    val r = live.getRight(density, layoutDirection)
+    val b = live.getBottom(density)
+    val cutout = if (l == 0 && t == 0 && r == 0 && b == 0) seed else IntInsets(l, t, r, b)
+
+    val viewport = IntSize(
+        (windowSize.width - cutout.left - cutout.right).coerceAtLeast(0),
+        (windowSize.height - cutout.top - cutout.bottom).coerceAtLeast(0),
+    )
+
+    val spec = remember(viewport, state.settings, density) {
+        if (viewport.width <= 0 || viewport.height <= 0) null
+        else buildLayoutSpec(viewport, state.settings, density)
+    }
+
+    LaunchedEffect(spec) {
+        val settled = spec ?: return@LaunchedEffect
         val facade = ComposeTextMeasureFacade(fontFamilyResolver, density, SystemFontRegistry)
         viewModel.onLayoutReady(facade, settled)
     }
@@ -133,9 +157,15 @@ fun ReaderScreen(
         Modifier
             .fillMaxSize()
             .background(Color(state.settings.theme.background))
-            // 避开挖孔/刘海，页眉章节名不会顶进摄像头区域
-            .windowInsetsPadding(WindowInsets.displayCutout)
-            .onSizeChanged { viewport = it },
+            // 避开挖孔/刘海，页眉章节名不会顶进摄像头区域。
+            // 用自己算的 cutout 而不是 windowInsetsPadding：后者首帧是 0，会让 Box 先铺满
+            // 再缩回来 —— 正文画在 Box 里，Box 一动正文跟着动。两边同源才不会打架。
+            .absolutePadding(
+                left = with(density) { cutout.left.toDp() },
+                top = with(density) { cutout.top.toDp() },
+                right = with(density) { cutout.right.toDp() },
+                bottom = with(density) { cutout.bottom.toDp() },
+            ),
     ) {
         val layout = spec
 
@@ -337,6 +367,26 @@ fun ReaderScreen(
     }
 }
 
+/** 挖孔的四边留白，单位 px。只是个不带 Android 类型的小载体，方便比较相等。 */
+private data class IntInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+/**
+ * 同步读窗口当前的挖孔 inset。
+ *
+ * Compose 的 `WindowInsets.displayCutout` 是**响应式**的，代价是新子树的首帧读不到值。
+ * 而 window 上挂着的 rootWindowInsets 是**已经在那儿**的 —— Activity 早就布局过了。
+ * 首帧要一个正确的值，只能问它。
+ *
+ * view 还没 attach 时拿不到（返回 null），退回全 0：那就是从前的行为（首帧按全屏排、
+ * 第二帧纠正），不会更糟。
+ */
+private fun rootDisplayCutout(view: android.view.View): IntInsets {
+    val insets = ViewCompat.getRootWindowInsets(view)
+        ?.getInsets(WindowInsetsCompat.Type.displayCutout())
+        ?: return IntInsets(0, 0, 0, 0)
+    return IntInsets(insets.left, insets.top, insets.right, insets.bottom)
+}
+
 private fun buildLayoutSpec(
     viewport: IntSize,
     settings: ReaderSettings,
@@ -420,4 +470,3 @@ private fun KeepScreenOnEffect(activity: Activity?, keepOn: Boolean) {
  * 一帧 16ms；insets 通常在首次 layout 之后紧接着派发。给两帧的余量 ——
  * 太短会漏掉那次变化（抖动照旧），太长则进书时会多闪一下转圈。
  */
-private const val VIEWPORT_SETTLE_MS = 48L
