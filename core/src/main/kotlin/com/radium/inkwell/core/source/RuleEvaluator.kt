@@ -243,6 +243,34 @@ class RuleEvaluator(
      *
      * 用括号配对扫描而非正则：JS 表达式里会出现 `}` 与 `|`，正则切不干净。
      */
+    /**
+     * 地址本身就是 JS：`<js>…</js>` 或 `@js:…`，脚本的返回值才是真正的地址。
+     * 26 个书源里有 10 个这么写（起点、69书吧、思路客…），从前我们把整串当字面路径发出去，
+     * 于是请求打到 `站点/@js:url=%22https://…`，一律 404/403 —— 换源「找不到这本书」多半死在这。
+     *
+     * 与 Legado 的 analyzeJs 一致：多段 js 依次求值，上一段的结果作为下一段的 `result` 输入。
+     * 返回 null 表示这条地址不含 JS。
+     */
+    fun evalUrlJs(url: String, ctx: EvalContext): String? {
+        if (!url.contains("<js>", ignoreCase = true) && !url.trimStart().startsWith("@js:", ignoreCase = true)) {
+            return null
+        }
+        var result = url
+        var start = 0
+        var found = false
+        for (m in URL_JS.findAll(url)) {
+            found = true
+            if (m.range.first > start) result += url.substring(start, m.range.first).trim()
+            val script = m.groupValues[1].ifEmpty { m.groupValues[2] }
+            result = runJs(script, ctx, result)
+                ?: throw SourceException("地址脚本执行失败")
+            start = m.range.last + 1
+        }
+        if (!found) return null
+        if (url.length > start) result += url.substring(start)
+        return result
+    }
+
     fun expandTemplate(templateRaw: String, ctx: EvalContext): String {
         // @get:{k} 与 {{}} 都可能出现在同一条规则/地址里，先取变量再展开模板
         val template = withGetVars(templateRaw, ctx)
@@ -445,6 +473,8 @@ internal fun isJsonPathVar(name: String): Boolean = name.startsWith("$.") || nam
  * @param jsonPath {{$.x}} 的求值器。HTTP 层拼请求地址时没有页面上下文，传 null 即可；
  *   规则求值时由 RuleEvaluator 接到当前页的 JSON 上（详情页是 JSON API 的书源常这么写目录地址）。
  */
+private val URL_JS = Regex("<js>([\\s\\S]*?)</js>|@js:([\\s\\S]*)", RegexOption.IGNORE_CASE)
+
 internal fun expandTemplate(
     template: String,
     vars: Map<String, String>,

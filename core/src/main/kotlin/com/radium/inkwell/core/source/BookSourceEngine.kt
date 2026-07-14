@@ -2,6 +2,8 @@ package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 
@@ -327,14 +329,37 @@ class BookSourceEngine(
     ): FetchedPage {
         // 地址里的 {{}} 同样按 Legado 语义展开（JS 表达式 / 嵌套规则），不只是变量替换
         val urlCtx = urlContext(source, vars)
-        val url = resolveUrl(source.baseUrl, evaluator.expandTemplate(request.url, urlCtx))
+
+        // 地址整串可能是 JS（<js>…</js> / @js:…），脚本的返回值才是真地址；
+        // 而且脚本吐出来的地址常自带 ,{method/body/charset/headers} —— 只能在这里、
+        // 拿到结果之后才谈得上解析，转换期是看不见的。
+        var rawUrl = evaluator.evalUrlJs(request.url, urlCtx) ?: request.url
+        var method = request.method
+        var body = request.body
+        var headers = request.headers
+        var charset = request.charset
+        splitUrlOptions(rawUrl)?.let { (bare, opt) ->
+            rawUrl = bare
+            opt.method?.let { method = it }
+            opt.body?.let { body = it }
+            opt.charset?.let { charset = it }
+            if (opt.headers.isNotEmpty()) headers = headers + opt.headers
+        }
+        // 非 UTF-8 站点的关键词要按站点编码转义。静态地址在转换期就写成了 {{keyword|encode:gbk}}，
+        // JS 地址的编码只有此刻才知道，补上同样的管道即可复用。
+        charset?.lowercase()?.takeIf { it != "utf-8" && it != "utf8" }?.let { cs ->
+            rawUrl = rawUrl.replace("{{keyword}}", "{{keyword|encode:$cs}}")
+            body = body?.replace("{{keyword}}", "{{keyword|encode:$cs}}")
+        }
+
+        val url = resolveUrl(source.baseUrl, evaluator.expandTemplate(rawUrl, urlCtx))
         return doFetch(
             stage = stage,
             url = url,
-            method = request.method,
-            body = request.body?.let { evaluator.expandTemplate(it, urlCtx) },
-            headers = mergeHeaders(source.headers, request.headers, vars),
-            charset = request.charset ?: source.charset,
+            method = method,
+            body = body?.let { evaluator.expandTemplate(it, urlCtx) },
+            headers = mergeHeaders(source.headers, headers, vars),
+            charset = charset ?: source.charset,
             rateLimit = source.rateLimit,
         )
     }
@@ -547,4 +572,46 @@ internal fun resolveUrl(base: String, ref: String): String {
 private fun stripUrlOptions(url: String): String {
     val i = url.indexOf(",{")
     return if (i > 0) url.substring(0, i).trim() else url
+}
+
+/** Legado 的地址选项后缀：`url,{"method":"POST","body":"…"}`（常用单引号） */
+internal data class UrlOptions(
+    val method: String? = null,
+    val body: String? = null,
+    val charset: String? = null,
+    val headers: Map<String, String> = emptyMap(),
+)
+
+private val optionsJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+
+/**
+ * 切出地址尾部的 `,{…}` 选项。
+ *
+ * 不能见到第一个 `,{` 就切 —— 那个 `,{` 可能在 JS 字符串**里面**：
+ * `@js:url="https://m.wcxsw.org/search.php,{'body':'…'}"`。所以逐个候选位置试着解析成
+ * JSON，能解析出来的才是真选项。从前一刀切在第一个 `,{`，把地址从中间截断成
+ * `@js:url="https://m.wcxsw.o`，请求直接 403。
+ */
+internal fun splitUrlOptions(url: String): Pair<String, UrlOptions>? {
+    var i = url.indexOf(",{")
+    while (i > 0) {
+        val text = url.substring(i + 1)
+        val obj = runCatching { optionsJson.parseToJsonElement(text).jsonObject }.getOrNull()
+            ?: runCatching { optionsJson.parseToJsonElement(text.replace('\'', '"')).jsonObject }.getOrNull()
+        if (obj != null) {
+            fun str(k: String) = (obj[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            val hdr = (obj["headers"] as? kotlinx.serialization.json.JsonObject)
+                ?.mapValues { (_, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.orEmpty() }
+                ?.filterValues { it.isNotBlank() }
+                .orEmpty()
+            return url.substring(0, i).trim() to UrlOptions(
+                method = str("method")?.uppercase(),
+                body = str("body"),
+                charset = str("charset"),
+                headers = hdr,
+            )
+        }
+        i = url.indexOf(",{", i + 1)
+    }
+    return null
 }

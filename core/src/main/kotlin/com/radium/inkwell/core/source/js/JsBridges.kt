@@ -3,6 +3,7 @@ package com.radium.inkwell.core.source.js
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
+import com.radium.inkwell.core.source.splitUrlOptions
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -153,18 +154,50 @@ class JavaBridge(
 
     // ---- 网络 ----
 
-    fun ajax(url: String): String? = http?.fetch(url)
+    /**
+     * 与 Legado 一致：地址可自带 `,{'method':'POST','body':…,'headers':…}` 选项，
+     * 且**失败时返回错误文本而不是 null** —— 书源脚本普遍直接写 `java.ajax(url).match(…)`，
+     * 返回 null 会在 JS 里抛 TypeError，把整条脚本连同书源一起搞死（思路客、大文学等一批源就死在这）。
+     */
+    fun ajax(url: String): String = fetchWithOptions(url, "GET", null, emptyMap())
 
-    fun connect(url: String): String? = http?.fetch(url)
+    fun connect(url: String): String = fetchWithOptions(url, "GET", null, emptyMap())
 
-    fun connect(url: String, header: String?): String? =
-        http?.fetch(url, headers = parseHeaders(header))
+    fun connect(url: String, header: String?): String =
+        fetchWithOptions(url, "GET", null, parseHeaders(header))
 
-    fun get(url: String, headers: Map<*, *>?): String? =
-        http?.fetch(url, headers = toStringMap(headers))
+    private fun fetchWithOptions(
+        url: String,
+        method: String,
+        body: String?,
+        headers: Map<String, String>,
+    ): String {
+        val split = splitUrlOptions(url)
+        val bare = split?.first ?: url
+        val opt = split?.second
+        return http?.fetch(
+            bare,
+            method = opt?.method ?: method,
+            body = opt?.body ?: body,
+            headers = headers + opt?.headers.orEmpty(),
+        ) ?: ""
+    }
 
-    fun post(url: String, body: String?, headers: Map<*, *>?): String? =
-        http?.fetch(url, method = "POST", body = body, headers = toStringMap(headers))
+    // ---- 交互（我们没有 UI 回调，作空实现）----
+    // 缺一个方法，Rhino 就是 ReferenceError，整个书源直接判死。Legado 有的这些入口
+    // 宁可给空壳：脚本照常往下走，最坏是拿不到人机验证后的页面，而不是整源不可用。
+
+    fun startBrowser(url: String, title: String?): String = ""
+
+    fun startBrowserAwait(url: String, title: String?): String = ""
+
+    fun getVerificationCode(url: String): String = ""
+
+    fun get(url: String, headers: Map<*, *>?): String =
+        fetchWithOptions(url, "GET", null, toStringMap(headers))
+
+    fun post(url: String, body: String?, headers: Map<*, *>?): String =
+        fetchWithOptions(url, "POST", body, toStringMap(headers))
 
     fun head(url: String, headers: Map<*, *>?): String? =
         http?.fetch(url, method = "HEAD", headers = toStringMap(headers))

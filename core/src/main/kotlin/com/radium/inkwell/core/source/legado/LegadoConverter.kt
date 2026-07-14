@@ -33,7 +33,7 @@ object LegadoConverter {
      * 升级 App 不会自动重转，得靠这个版本号识别出「用旧转换器转的书源」并重转。
      * 否则我们修的每个转换器 bug 都只对「新导入的书源」生效，老用户永远踩着旧坑。
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     /** [sourceJson] 是该书源的 legado 原文，留着升级后重新转换用 */
     data class Converted(
@@ -541,7 +541,13 @@ object LegadoConverter {
     private fun convertSearchUrl(raw: String): RequestRule {
         var urlPart = raw.trim()
         var options: JsonObject? = null
-        val optIdx = urlPart.indexOf(",{")
+        // 地址整串是 JS 时，一个字都不能切：`,{` 往往落在 JS 字符串里
+        // （`@js:url="https://m.wcxsw.org/search.php,{'body':'…'}"`），
+        // 按老办法切在第一个 `,{` 会把地址拦腰截断。JS 的返回值与其自带的选项
+        // 都留到运行期由引擎处理。
+        val isJs = urlPart.contains("<js>", ignoreCase = true) ||
+            urlPart.startsWith("@js:", ignoreCase = true)
+        val optIdx = if (isJs) -1 else urlPart.indexOf(",{")
         if (optIdx > 0) {
             val optText = urlPart.substring(optIdx + 1)
             urlPart = urlPart.substring(0, optIdx)
