@@ -99,7 +99,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         cornerX = width
         cornerY = if (cornerBottom) height else 0f
         touch.x = touchX.coerceIn(-width * 1.5f, width - 1.5f)
-        touch.y = touchY.coerceIn(1f, height - 1f)
+        // 触点太贴近卷角时几何会退化：midY 逼近 cornerY，控制点被算到屏幕外十几万像素，
+        // 路径自交、Canvas 裁剪失效 —— 正面与镜像背面糊在一起。留出安全距离。
+        val minGap = height * MIN_CORNER_GAP
+        touch.y = if (cornerBottom) {
+            touchY.coerceIn(1f, height - minGap)
+        } else {
+            touchY.coerceIn(minGap, height - 1f)
+        }
         calcPoints()
         buildPaths()
 
@@ -313,5 +320,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             )
         }
         canvas.restore()
+    }
+
+    private companion object {
+        /**
+         * 触点与卷角之间必须留出的最小纵向距离（占页高的比例）。
+         * 低于它，`bezierControl2.y = midY - (cornerX-midX)² / (cornerY-midY)` 的分母趋零，
+         * 控制点飞到屏幕外十几万像素，路径自交、裁剪崩掉。
+         */
+        const val MIN_CORNER_GAP = 0.08f
     }
 }
