@@ -252,7 +252,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /** 背面靠折线处的暗部，给卷起的纸一点立体感。克制一点 —— 太宽会在折缝旁显出一道生硬的带子 */
     private fun drawBackShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 5f, maxWidth = 50f, towardLeft = false)
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 3.5f, maxWidth = 95f, towardLeft = false)
     }
 
     /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
