@@ -147,6 +147,19 @@ object AppThemes {
         val surfaceVariant = lerp(background, onBg, if (dark) 0.08f else 0.06f)
         val outline = lerp(onBg, background, 0.45f)
         val outlineVariant = lerp(onBg, background, 0.75f)
+
+        // surfaceContainer* 这一组从前**一个都没设**，于是全部落回 M3 基线值 —— 那是一套
+        // 淡紫。而底部弹层(surfaceContainerLow)、卡片、下拉菜单、隐藏区面板读的正是这几个槽位：
+        // 一个暖纸色的 App，弹出来的东西却是紫的。之前阅读页那次"割裂"是靠 ReaderThemeScope
+        // 局部盖掉的，根子一直在这儿。
+        //
+        // 都由背景朝正文色迈一小步得来，逐级抬高：浅色纸上是逐级压深，深色纸上是逐级提亮 ——
+        // lerp 到 onBg 天然满足两边。
+        val containerLowest = lerp(background, onBg, if (dark) 0.00f else 0.05f)
+        val containerLow = lerp(background, onBg, if (dark) 0.03f else 0.02f)
+        val containerMid = lerp(background, onBg, if (dark) 0.05f else 0.04f)
+        val containerHigh = lerp(background, onBg, if (dark) 0.08f else 0.07f)
+        val containerHighest = lerp(background, onBg, if (dark) 0.11f else 0.10f)
         // 深色模式下抬高强调色亮度，避免按钮发闷
         val primary = if (dark) lerp(seed, Color.White, 0.25f) else seed
         // 前景取黑/白中对比更高者（中灰强调色下亮度阈值会失效）
@@ -168,6 +181,18 @@ object AppThemes {
                 surface = surface, onSurface = onBg,
                 surfaceVariant = surfaceVariant,
                 onSurfaceVariant = lerp(onBg, background, 0.25f),
+                surfaceContainerLowest = containerLowest,
+                surfaceContainerLow = containerLow,
+                surfaceContainer = containerMid,
+                surfaceContainerHigh = containerHigh,
+                surfaceContainerHighest = containerHighest,
+                surfaceTint = primary,
+                surfaceDim = lerp(background, onBg, 0.10f),
+                surfaceBright = lerp(background, onBg, 0.02f),
+                inverseSurface = onBg,
+                inverseOnSurface = background,
+                inversePrimary = lerp(primary, background, 0.55f),
+                scrim = Color.Black,
                 outline = outline, outlineVariant = outlineVariant,
                 error = Color(0xFFF87171), onError = Color(0xFF450A0A),
             )
@@ -183,6 +208,18 @@ object AppThemes {
                 surface = surface, onSurface = onBg,
                 surfaceVariant = surfaceVariant,
                 onSurfaceVariant = lerp(onBg, background, 0.25f),
+                surfaceContainerLowest = containerLowest,
+                surfaceContainerLow = containerLow,
+                surfaceContainer = containerMid,
+                surfaceContainerHigh = containerHigh,
+                surfaceContainerHighest = containerHighest,
+                surfaceTint = primary,
+                surfaceDim = lerp(background, onBg, 0.10f),
+                surfaceBright = lerp(background, onBg, 0.02f),
+                inverseSurface = onBg,
+                inverseOnSurface = background,
+                inversePrimary = lerp(primary, background, 0.55f),
+                scrim = Color.Black,
                 outline = outline, outlineVariant = outlineVariant,
                 error = Color(0xFFDC2626), onError = Color.White,
             )

@@ -53,12 +53,31 @@ class BookshelfViewModel(
     private val _showHidden = MutableStateFlow(false)
     val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
 
+    /**
+     * 隐藏区的面板开着没有。
+     *
+     * 和 [showHidden] **分开**：从前它俩是同一个状态，于是「收起」一个按钮干了两件事 ——
+     * 关掉面板，顺手把书又藏回去。用户只是不想看那块面板，书却跟着消失了。
+     *
+     * 现在「收起」只管面板，书的显隐由面板里的开关说了算。
+     */
+    private val _hiddenPanelOpen = MutableStateFlow(false)
+    val hiddenPanelOpen: StateFlow<Boolean> = _hiddenPanelOpen.asStateFlow()
+
     /** 查看隐藏书籍要不要先验证身份 */
     val hiddenRequireAuth: StateFlow<Boolean> = appPrefs.hiddenRequireAuth
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    /** 验证过了才允许展开；收起来不需要验证（关灯不用钥匙） */
-    fun showHidden() { _showHidden.value = true }
+    /** 验证过了才允许进来。进来就默认把书显出来 —— 你就是为这个来的 */
+    fun openHiddenPanel() {
+        _hiddenPanelOpen.value = true
+        _showHidden.value = true
+    }
+
+    /** 只关面板。书显不显，看 [setShowHidden] —— 关灯不用钥匙，但也不该顺手把书收走 */
+    fun closeHiddenPanel() { _hiddenPanelOpen.value = false }
+
+    fun setShowHidden(on: Boolean) { _showHidden.value = on }
 
     /** 两个开关都只在隐藏区内部露面，所以设置这件事归书架管，而不是设置页 */
     fun setHiddenRequireAuth(on: Boolean) {
@@ -71,7 +90,11 @@ class BookshelfViewModel(
     fun setHideBooksEnabled(on: Boolean) {
         viewModelScope.launch { appPrefs.setHideBooksEnabled(on) }
     }
-    fun hideHidden() { _showHidden.value = false }
+    /** 一键收摊：面板关掉，书也藏回去 */
+    fun collapseHiddenAll() {
+        _hiddenPanelOpen.value = false
+        _showHidden.value = false
+    }
 
     fun setHidden(bookId: String, hidden: Boolean) {
         viewModelScope.launch {

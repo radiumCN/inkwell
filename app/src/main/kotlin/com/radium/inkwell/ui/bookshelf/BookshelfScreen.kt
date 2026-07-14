@@ -99,6 +99,7 @@ fun BookshelfScreen(
     var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
+    val panelOpen by viewModel.hiddenPanelOpen.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     var overflowOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
@@ -114,12 +115,12 @@ fun BookshelfScreen(
      */
     fun revealHidden() {
         if (!requireAuth || activity == null) {
-            viewModel.showHidden()
+            viewModel.openHiddenPanel()
             return
         }
         scope.launch {
             when (val r = BiometricAuth.authenticate(activity, "查看隐藏的书")) {
-                BiometricAuth.Result.Success -> viewModel.showHidden()
+                BiometricAuth.Result.Success -> viewModel.openHiddenPanel()
                 // 用户自己按了取消，别再弹个错误教育他
                 BiometricAuth.Result.Cancelled -> Unit
                 is BiometricAuth.Result.Failed -> viewModel.messages.emit("验证失败: ${r.message}")
@@ -143,7 +144,8 @@ fun BookshelfScreen(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = {},
-                            onLongClick = { if (showHidden) viewModel.hideHidden() else revealHidden() },
+                            // 面板开着时再长按 = 一键收摊（面板关掉、书也藏回去）—— 有人走过来时你需要这一下
+                            onLongClick = { if (panelOpen) viewModel.collapseHiddenAll() else revealHidden() },
                         ),
                     )
                 },
@@ -198,10 +200,10 @@ fun BookshelfScreen(
                             //
                             // 已经展开时才给一个「收起」—— 那时书角本来就带着标记，藏不住了，
                             // 而用户需要一条明确的路把它收回去。
-                            if (showHidden) {
+                            if (panelOpen || showHidden) {
                                 DropdownMenuItem(
                                     text = { Text("收起隐藏的书") },
-                                    onClick = { overflowOpen = false; viewModel.hideHidden() },
+                                    onClick = { overflowOpen = false; viewModel.collapseHiddenAll() },
                                 )
                             }
                             DropdownMenuItem(
@@ -248,14 +250,16 @@ fun BookshelfScreen(
             Column(Modifier.fillMaxSize().padding(padding)) {
                 // 隐藏区的"控制台"。**只在已经展开时出现** —— 这个开关的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
-                if (showHidden) {
+                if (panelOpen) {
                     HiddenAreaBar(
                         requireAuth = requireAuth,
                         biometricAvailable = biometricAvailable,
                         hideBooksEnabled = hideBooksEnabled,
                         onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
                         onToggleHideBooks = { viewModel.setHideBooksEnabled(it) },
-                        onCollapse = { viewModel.hideHidden() },
+                        showHidden = showHidden,
+                        onToggleShowHidden = { viewModel.setShowHidden(it) },
+                        onCollapse = { viewModel.closeHiddenPanel() },
                     )
                 }
 
@@ -476,8 +480,10 @@ private fun HiddenAreaBar(
     requireAuth: Boolean,
     biometricAvailable: Boolean,
     hideBooksEnabled: Boolean,
+    showHidden: Boolean,
     onToggleAuth: (Boolean) -> Unit,
     onToggleHideBooks: (Boolean) -> Unit,
+    onToggleShowHidden: (Boolean) -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -493,6 +499,20 @@ private fun HiddenAreaBar(
                 "隐藏的书",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(bottom = 6.dp),
+            )
+
+            // 这一条才是「书现在显不显」。从前它没有开关 —— 显隐跟面板绑死，
+            // 于是「收起」一按，面板关掉的同时把书也藏回去了。你只是不想看那块面板而已。
+            SwitchLine(
+                title = "在书架上显示",
+                subtitle = if (showHidden) {
+                    "隐藏的书正混在书架里（角上有标记）"
+                } else {
+                    "隐藏的书不在书架上"
+                },
+                checked = showHidden,
+                enabled = true,
+                onCheckedChange = onToggleShowHidden,
             )
 
             SwitchLine(
@@ -520,8 +540,9 @@ private fun HiddenAreaBar(
                 onCheckedChange = onToggleAuth,
             )
 
+            // 只关这块面板，不动书的显隐 —— 那是上面那个开关的事
             TextButton(onClick = onCollapse, modifier = Modifier.align(Alignment.End)) {
-                Text("收起")
+                Text("收起面板")
             }
         }
     }
