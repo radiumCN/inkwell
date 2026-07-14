@@ -33,4 +33,6 @@ data class BookEntity(
     val readAt: Long = 0,
     val addedAt: Long,
     val updatedAt: Long,
+    /** 书源脚本在详情阶段存下的变量（JSON）；见 ChapterEntity.variable */
+    val variable: String = "",
 )

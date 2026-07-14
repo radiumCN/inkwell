@@ -36,7 +36,8 @@ class NetReaderBookSource(
         val url = chapter.url ?: error("章节缺少地址")
         // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节
         cache.read(bookId, url)?.let { return it }
-        val remote = engine.getContent(rule, url, chapterUrls)
+        // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
+        val remote = engine.getContent(rule, url, chapterUrls, chapterVariable = chapter.variable)
         val content = ChapterContent(remote.elements)
         withContext(Dispatchers.IO) {
             cache.write(bookId, url, content)

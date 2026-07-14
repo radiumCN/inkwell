@@ -42,8 +42,9 @@ class NetBookRepository(
         bookUrl: String,
         detail: RemoteBookDetail,
         toc: List<RemoteChapter>,
+        fallback: SearchResult? = null,
     ): Result<String> = runCatching {
-        persist(sourceId, bookUrl, detail, toc, fallback = null)
+        persist(sourceId, bookUrl, detail, toc, fallback)
     }
 
     /** 该书是否已在书架；在则返回 bookId */
@@ -117,7 +118,12 @@ class NetBookRepository(
         chapterDao.deleteByBook(bookId)
         chapterDao.upsertAll(
             toc.map {
-                ChapterEntity(bookId, it.index, it.title, url = it.url, isCached = cache.has(bookId, it.url))
+                ChapterEntity(
+                    bookId, it.index, it.title,
+                    url = it.url,
+                    isCached = cache.has(bookId, it.url),
+                    variable = it.variable,
+                )
             }
         )
     }
