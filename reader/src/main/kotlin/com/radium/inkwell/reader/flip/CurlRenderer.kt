@@ -63,11 +63,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
-    // 纸背靠折缝的暗谷（legado 的 backShadow）：#111111 不透明→透明。这是圆柱感的主来源
+    // 纸背的表面渐变（legado 的 backShadow）：#111111 60%→透明，铺满大半个纸背 ——
+    // 暗谷→亮背这道贯穿整片的过渡才是圆柱感的来源；只有一道细线就还是平三角。
+    // 用 60% 而不是不透明：不透明 + 宽 = 糊成黑烟（beta.48 翻的车）
     private val backShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            0xFF111111.toInt(), 0x00111111,
+            0x99111111.toInt(), 0x00111111,
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
@@ -245,7 +247,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /** 背面靠折线处的暗部，给卷起的纸一点立体感。克制一点 —— 太宽会在折缝旁显出一道生硬的带子 */
     private fun drawBackShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 8f, maxWidth = 28f, towardLeft = false)
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 3.5f, maxWidth = 75f, towardLeft = false)
     }
 
     /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
