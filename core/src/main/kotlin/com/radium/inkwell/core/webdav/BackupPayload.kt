@@ -21,6 +21,7 @@ data class BackupPayload(
     val books: List<BackupBook> = emptyList(),
     val sources: List<BackupSource> = emptyList(),
     val replaceRules: List<BackupReplaceRule> = emptyList(),
+    val rssSources: List<BackupRssSource> = emptyList(),
     /** 阅读排版设置；整块 LWW */
     val readerSettings: BackupSettings? = null,
     /** 应用设置（主题、更新渠道…）；整块 LWW */
@@ -41,6 +42,16 @@ data class BackupPayload(
 data class BackupSettings(
     val updatedAt: Long = 0,
     val values: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class BackupRssSource(
+    val id: String,
+    val name: String,
+    val enabled: Boolean = true,
+    val json: String,
+    val sourceJson: String = "",
+    val updatedAt: Long = 0,
 )
 
 @Serializable
@@ -124,10 +135,12 @@ object BackupMerger {
         val books: List<BackupBook>,
         val sources: List<BackupSource>,
         val replaceRules: List<BackupReplaceRule>,
+        val rssSources: List<BackupRssSource>,
         /** 合并后与本地不同的条目（需要写回本地库） */
         val changedBooks: List<BackupBook>,
         val changedSources: List<BackupSource>,
         val changedReplaceRules: List<BackupReplaceRule>,
+        val changedRssSources: List<BackupRssSource>,
         /** 远端更新（需要写回本地）；null = 本地的更新或一样新 */
         val readerSettings: BackupSettings?,
         val appSettings: BackupSettings?,
@@ -176,6 +189,19 @@ object BackupMerger {
         }
         val changedRules = mergedRules.filter { it != localRules[it.id] }
 
+        val localRss = local.rssSources.associateBy { it.id }
+        val remoteRss = remote.rssSources.associateBy { it.id }
+        val mergedRss = (localRss.keys + remoteRss.keys).map { id ->
+            val l = localRss[id]
+            val r = remoteRss[id]
+            when {
+                l == null -> r!!
+                r == null -> l
+                else -> if (r.updatedAt > l.updatedAt) r else l
+            }
+        }
+        val changedRss = mergedRss.filter { it != localRss[it.id] }
+
         val readerWinner = newer(local.readerSettings, remote.readerSettings)
         val appWinner = newer(local.appSettings, remote.appSettings)
 
@@ -183,9 +209,11 @@ object BackupMerger {
             books = mergedBooks,
             sources = mergedSources,
             replaceRules = mergedRules,
+            rssSources = mergedRss,
             changedBooks = changedBooks,
             changedSources = changedSources,
             changedReplaceRules = changedRules,
+            changedRssSources = changedRss,
             // 只有远端确实更新时才回写本地；否则别拿一份等价的设置去覆盖用户当前的
             readerSettings = remote.readerSettings
                 ?.takeIf { it === readerWinner && it != local.readerSettings },
