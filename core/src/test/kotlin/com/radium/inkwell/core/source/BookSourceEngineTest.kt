@@ -37,7 +37,11 @@ class BookSourceEngineTest {
     }
 
     private fun engine(trace: RuleTraceCollector? = null, globalPurify: List<PurifyRule> = emptyList()) =
-        BookSourceEngine(SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1), globalPurify, trace)
+        BookSourceEngine(
+            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1),
+            { globalPurify },
+            trace,
+        )
 
     private fun source(): BookSourceRule = BookSourceRule.fromJson(sourceJson(base))
 
@@ -247,6 +251,43 @@ class BookSourceEngineTest {
         val texts = content.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text }
         assertTrue(texts.contains("山那边传来一声钟声。"))
         assertTrue(texts.none { it.contains("本站广告") })
+    }
+
+    /**
+     * 用户写的净化规则是会写错的。一条坏正则不该让整章正文加载失败 ——
+     * 那在阅读页表现为「正文规则未匹配到内容」，用户根本猜不到是自己的净化规则干的。
+     */
+    @Test
+    fun `bad user regex is skipped, not fatal`() = runBlocking {
+        val eng = engine(
+            globalPurify = listOf(
+                PurifyRule(pattern = "([unclosed", replacement = ""),
+                PurifyRule(pattern = "钟响", replacement = "钟声"),
+            ),
+        )
+        val content = eng.getContent(source(), "$base/chap/1")
+        val texts = content.elements.filterIsInstance<ContentElement.Paragraph>().map { it.text }
+        // 坏的那条被跳过，好的那条照常生效
+        assertTrue(texts.contains("山那边传来一声钟声。"))
+    }
+
+    /** 净化规则是每次取正文时现读的：引擎是单例，用户改完规则不该要重启 App */
+    @Test
+    fun `purify rules are read per call, not snapshotted at construction`() = runBlocking {
+        var rules = emptyList<PurifyRule>()
+        val eng = BookSourceEngine(
+            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1),
+            { rules },
+        )
+        val before = eng.getContent(source(), "$base/chap/1")
+            .elements.filterIsInstance<ContentElement.Paragraph>().map { it.text }
+        assertTrue(before.any { it.contains("钟响") })
+
+        rules = listOf(PurifyRule(pattern = "钟响", replacement = "钟声"))
+
+        val after = eng.getContent(source(), "$base/chap/1")
+            .elements.filterIsInstance<ContentElement.Paragraph>().map { it.text }
+        assertTrue(after.any { it.contains("钟声") }, "改完规则后应立刻生效，实际: $after")
     }
 
     // ---- GBK 站点 ----

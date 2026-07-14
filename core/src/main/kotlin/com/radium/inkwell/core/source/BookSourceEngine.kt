@@ -78,7 +78,11 @@ interface RuleTraceCollector {
 
 class BookSourceEngine(
     private val http: SourceHttpClient,
-    private val globalPurify: List<PurifyRule> = emptyList(),
+    /**
+     * 用户自定义的全局净化规则。取的是**函数**不是列表：引擎是单例，规则随时可改，
+     * 拿一份构造期的快照就永远读不到用户新加的规则。入参是当前书源，供按作用域筛选。
+     */
+    private val globalPurify: (BookSourceRule) -> List<PurifyRule> = { emptyList() },
     private val trace: RuleTraceCollector? = null,
     scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
     /** JS 渲染回退；未注入时行为与从前完全一致 */
@@ -240,7 +244,7 @@ class BookSourceEngine(
         render: Boolean,
     ): RemoteChapterContent? {
         // 净化：源级在前、全局在后；正则预编译
-        val purifiers = compilePurify(rule.purify + globalPurify)
+        val purifiers = compilePurify(rule.purify) + compileGlobalPurify(globalPurify(source))
         val elements = mutableListOf<ContentElement>()
         val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
         val stopAt = otherChapterUrls.filterNotTo(HashSet()) { it == firstUrl }
@@ -521,6 +525,13 @@ class BookSourceEngine(
         fun apply(text: String): String =
             regex?.replace(text, replacement) ?: text.replace(literal, replacement)
     }
+
+    /**
+     * 用户写的全局规则容错：一条正则写错，不该让整章正文加载失败 —— 跳过它就是。
+     * 书源自带的净化规则仍然是硬错（那是书源坏了，得让用户看见）。
+     */
+    private fun compileGlobalPurify(rules: List<PurifyRule>): List<CompiledPurify> =
+        rules.mapNotNull { runCatching { CompiledPurify(it) }.getOrNull() }
 
     private fun compilePurify(rules: List<PurifyRule>): List<CompiledPurify> =
         rules.map {
