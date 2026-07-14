@@ -27,6 +27,7 @@ class ReaderPrefs(private val context: Context) {
     private object Keys {
         val FONT_SIZE = floatPreferencesKey("font_size_sp")
         val TITLE_SCALE = floatPreferencesKey("title_scale")
+        val TITLE_TOP_SPACING = floatPreferencesKey("title_top_spacing")
         val LINE_SPACING = floatPreferencesKey("line_spacing")
         val PARA_SPACING = floatPreferencesKey("para_spacing")
         val MARGIN_H = floatPreferencesKey("margin_h")
@@ -67,6 +68,7 @@ class ReaderPrefs(private val context: Context) {
         ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
+            titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING] ?: 24f,
             fontId = p[Keys.FONT_ID] ?: ReaderSettings.FONT_SYSTEM,
             lineSpacingMult = p[Keys.LINE_SPACING] ?: 1.6f,
             paragraphSpacingEm = p[Keys.PARA_SPACING] ?: 0.6f,
@@ -92,6 +94,7 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.UPDATED_AT] = System.currentTimeMillis()
             p[Keys.FONT_SIZE] = settings.fontSizeSp
             p[Keys.TITLE_SCALE] = settings.titleScale
+            p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
             p[Keys.FONT_ID] = settings.fontId
             p[Keys.LINE_SPACING] = settings.lineSpacingMult
             p[Keys.PARA_SPACING] = settings.paragraphSpacingEm
@@ -184,6 +187,7 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
         values = themeBackupValues() + mapOf(
             "font_size_sp" to s.fontSizeSp.toString(),
             "title_scale" to s.titleScale.toString(),
+            "title_top_spacing" to s.titleTopSpacingDp.toString(),
             "font_id" to s.fontId,
             "line_spacing" to s.lineSpacingMult.toString(),
             "para_spacing" to s.paragraphSpacingEm.toString(),
@@ -222,6 +226,7 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
         base.copy(
             fontSizeSp = v["font_size_sp"]?.toFloatOrNull() ?: base.fontSizeSp,
             titleScale = v["title_scale"]?.toFloatOrNull() ?: base.titleScale,
+            titleTopSpacingDp = v["title_top_spacing"]?.toFloatOrNull() ?: base.titleTopSpacingDp,
             fontId = v["font_id"] ?: base.fontId,
             lineSpacingMult = v["line_spacing"]?.toFloatOrNull() ?: base.lineSpacingMult,
             paragraphSpacingEm = v["para_spacing"]?.toFloatOrNull() ?: base.paragraphSpacingEm,

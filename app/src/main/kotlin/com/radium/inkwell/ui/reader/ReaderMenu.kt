@@ -371,6 +371,14 @@ private val TITLE_SCALE_OPTIONS = listOf(
     "大" to 1.8f,
 )
 
+/** 章节标题上方留白（dp）。0 = 标题直接贴着正文顶 */
+private val TITLE_TOP_OPTIONS = listOf(
+    "无" to 0f,
+    "小" to 12f,
+    "标准" to 24f,
+    "大" to 48f,
+)
+
 /**
  * 阅读设置面板。
  *
@@ -432,6 +440,15 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
             kotlin.math.abs(it.second - settings.titleScale) < 0.05f
         },
         onSelect = { onUpdate(settings.copy(titleScale = TITLE_SCALE_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("标题上间距")
+    ChipRow(
+        options = TITLE_TOP_OPTIONS.map { it.first },
+        selectedIndex = TITLE_TOP_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.titleTopSpacingDp) < 1f
+        },
+        onSelect = { onUpdate(settings.copy(titleTopSpacingDp = TITLE_TOP_OPTIONS[it].second)) },
     )
 
     SectionLabel("行距")

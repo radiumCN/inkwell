@@ -5,6 +5,8 @@ data class ReaderSettings(
     val fontSizeSp: Float = 18f,
     /** 章节标题相对正文的倍数（legado 的标题字号）。1.0 = 与正文同大 */
     val titleScale: Float = 1.4f,
+    /** 章节标题上方的留白（dp）。让标题跟正文之间/跟页顶之间松紧可调 */
+    val titleTopSpacingDp: Float = 24f,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
     val paragraphSpacingEm: Float = 0.6f,

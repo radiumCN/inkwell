@@ -469,7 +469,7 @@ private fun buildLayoutSpec(
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,
         titleFontScale = settings.titleScale,
-        titleTopSpacingPx = 24.dp.toPx(),
+        titleTopSpacingPx = settings.titleTopSpacingDp.dp.toPx(),
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,
         justify = settings.justify,
