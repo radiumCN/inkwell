@@ -22,6 +22,8 @@ data class BookSourceRule(
     val baseUrl: String,
     val version: Int = 1,
     val comment: String = "",
+    /** 书源分组（legado 的 bookSourceGroup）；可能是逗号分隔的多个组 */
+    val group: String = "",
     val enabled: Boolean = true,
     /** 站点编码；null = 自动嗅探（Content-Type > meta），gbk/gb2312 一律按 GB18030 解码 */
     val charset: String? = null,

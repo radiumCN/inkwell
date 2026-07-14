@@ -201,6 +201,7 @@ object LegadoConverter {
                 append("由 Legado 书源转换")
                 src.str("bookSourceComment")?.takeIf { it.isNotBlank() }?.let { append("；", it.take(100)) }
             },
+            group = src.str("bookSourceGroup")?.trim().orEmpty(),
             enabled = src.bool("enabled") ?: true,
             charset = sourceCharset,
             headers = headers,
