@@ -59,6 +59,7 @@ import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.reader.measure.SystemFontRegistry
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.util.KeyEventBus
+import kotlinx.coroutines.delay
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -77,12 +78,30 @@ fun ReaderScreen(
     val flipController = remember { FlipController() }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
 
-    // 视口或排版设置变化 → 重建 LayoutSpec 注入引擎
+    /**
+     * 排版规格。**只在视口稳定之后才产生** —— 这就是"进书抖一下"的修法。
+     *
+     * displayCutout 的 inset 在首帧还没派发（值是 0），第二帧才拿到真实的挖孔尺寸。
+     * 而 Box 的尺寸正是扣掉这个 padding 之后的：
+     *   帧 1 —— viewport = 全屏（还没扣 cutout）→ 立刻排版 → 正文铺出来
+     *   帧 2 —— inset 到位 → Box 变小 → viewport 变 → 重排 → 文字整体挪一下
+     * 用户看到的就是那一下抖动。（它也是"返回再进来退回上一页"的同一个根因：
+     * 那次重排会把已保存的字符偏移吸附掉。）
+     *
+     * 所以：viewport 一变就重新计时，安静 [VIEWPORT_SETTLE_MS] 之后才认。
+     * 期间正文不渲染（显示的是纸张色 + 转圈），用户看到的是"空白 → 内容"，
+     * 而不是"内容 → 内容跳一下"。
+     */
+    var spec by remember { mutableStateOf<LayoutSpec?>(null) }
+
     LaunchedEffect(viewport, state.settings, density) {
-        if (viewport.width > 0 && viewport.height > 0) {
-            val facade = ComposeTextMeasureFacade(fontFamilyResolver, density, SystemFontRegistry)
-            viewModel.onLayoutReady(facade, buildLayoutSpec(viewport, state.settings, density))
-        }
+        if (viewport.width <= 0 || viewport.height <= 0) return@LaunchedEffect
+        // viewport 再变一次，这个协程就会被取消重来 —— 天然的防抖
+        delay(VIEWPORT_SETTLE_MS)
+        val settled = buildLayoutSpec(viewport, state.settings, density)
+        spec = settled
+        val facade = ComposeTextMeasureFacade(fontFamilyResolver, density, SystemFontRegistry)
+        viewModel.onLayoutReady(facade, settled)
     }
 
     // 音量键翻页（与点击共用动画路径）
@@ -118,13 +137,13 @@ fun ReaderScreen(
             .windowInsetsPadding(WindowInsets.displayCutout)
             .onSizeChanged { viewport = it },
     ) {
-        val spec = if (viewport.width > 0) buildLayoutSpec(viewport, state.settings, density) else null
+        val layout = spec
 
         // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
         // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
         if (state.settings.flipAnimation == FlipAnimation.SCROLL) {
-            LaunchedEffect(spec, state.chapterCount) {
-                if (spec != null && state.chapterCount > 0) viewModel.prepareScroll()
+            LaunchedEffect(layout, state.chapterCount) {
+                if (layout != null && state.chapterCount > 0) viewModel.prepareScroll()
             }
         }
 
@@ -155,7 +174,7 @@ fun ReaderScreen(
                     Text("返回书架", color = Color(state.settings.theme.footerColor))
                 }
             }
-            state.loading || spec == null -> CircularProgressIndicator(
+            state.loading || layout == null -> CircularProgressIndicator(
                 Modifier.align(Alignment.Center),
                 color = Color(state.settings.theme.textColor),
             )
@@ -163,7 +182,7 @@ fun ReaderScreen(
             state.settings.flipAnimation == FlipAnimation.SCROLL -> {
                 ScrollReader(
                     chapters = scrollChapters,
-                    layout = spec,
+                    layout = layout,
                     theme = state.settings.theme,
                     onVisible = { chapterIndex, elementIndex ->
                         viewModel.onScrollTo(chapterIndex, elementIndex)
@@ -185,7 +204,7 @@ fun ReaderScreen(
                             if (!state.textSelectionEnabled || page == null) return@pointerInput
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { pos ->
-                                    val sel = page.selectWordAt(pos.x, pos.y, spec)
+                                    val sel = page.selectWordAt(pos.x, pos.y, layout)
                                     if (sel != null && !sel.isEmpty) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         anchor = sel
@@ -196,7 +215,7 @@ fun ReaderScreen(
                                     val a = anchor ?: return@detectDragGesturesAfterLongPress
                                     change.consume()
                                     selection = page.extendSelection(
-                                        a, change.position.x, change.position.y, spec,
+                                        a, change.position.x, change.position.y, layout,
                                     )
                                 },
                             )
@@ -211,7 +230,7 @@ fun ReaderScreen(
                         current = state.page,
                         prev = state.prevPage,
                         next = state.nextPage,
-                        layout = spec,
+                        layout = layout,
                         theme = state.settings.theme,
                         animation = state.settings.flipAnimation,
                         // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
@@ -224,7 +243,7 @@ fun ReaderScreen(
                         controller = flipController,
                         selection = selection,
                     )
-                    PageInfoBar(state, spec)
+                    PageInfoBar(state, layout)
                 }
             }
         }
@@ -394,3 +413,11 @@ private fun KeepScreenOnEffect(activity: Activity?, keepOn: Boolean) {
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 }
+
+/**
+ * 视口安静多久才算稳定。
+ *
+ * 一帧 16ms；insets 通常在首次 layout 之后紧接着派发。给两帧的余量 ——
+ * 太短会漏掉那次变化（抖动照旧），太长则进书时会多闪一下转圈。
+ */
+private const val VIEWPORT_SETTLE_MS = 48L
