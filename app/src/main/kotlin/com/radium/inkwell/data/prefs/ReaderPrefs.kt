@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.prefs
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -14,11 +15,16 @@ import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.core.webdav.BackupSettings
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 private val Context.readerDataStore by preferencesDataStore(name = "reader_settings")
 
@@ -58,14 +64,25 @@ class ReaderPrefs(private val context: Context) {
         val UPDATED_AT = longPreferencesKey("updated_at")
     }
 
+    // 单例生命周期作用域：settings 提前热起来，`.value` 可同步读，消除进书时的主题闪烁。
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** 系统当前是否夜间（同步可读，不依赖 Compose） */
+    private fun isSystemDark(): Boolean =
+        (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+
     // 当前生效的是日间还是夜间。由 UI 层按 App 主题模式 + 系统日夜算出后喂进来（setDarkActive）。
     // 放内存不落库 —— 它是"此刻系统是不是夜间"，不是用户偏好。
-    private val darkActive = MutableStateFlow(false)
+    // 初值直接取系统夜间：UI 事后 setDarkActive 之前，首帧就已解析到正确的日/夜槽，不闪浅色。
+    private val darkActive = MutableStateFlow(isSystemDark())
 
     /** UI 层算出生效日夜后调这个；主题随之切到对应槽 */
     fun setDarkActive(dark: Boolean) { darkActive.value = dark }
 
-    val settings: Flow<ReaderSettings> = combine(context.readerDataStore.data, darkActive) { p, dark ->
+    // 热 StateFlow：App 启动即预热，进阅读页时 `.value` 已是真实设置，ViewModel 首帧就用它播种。
+    // 初始占位也按系统日夜给出深/浅底，避免 DataStore 首次读到之前那一帧仍是浅色默认。
+    val settings: StateFlow<ReaderSettings> = combine(context.readerDataStore.data, darkActive) { p, dark ->
         ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
@@ -89,7 +106,12 @@ class ReaderPrefs(private val context: Context) {
                 ?.let { runCatching { ChineseConvert.valueOf(it) }.getOrNull() }
                 ?: ChineseConvert.NONE,
         )
-    }
+    }.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        // 首个真实值到达前的占位：按系统日夜给深/浅底，绝不给浅色默认，杜绝进书闪一帧浅色
+        ReaderSettings(theme = if (isSystemDark()) ReaderTheme.NIGHT else ReaderTheme.PAPER),
+    )
 
     suspend fun update(settings: ReaderSettings) {
         context.readerDataStore.edit { p ->

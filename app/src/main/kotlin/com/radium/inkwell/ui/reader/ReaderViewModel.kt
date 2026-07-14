@@ -148,7 +148,8 @@ class ReaderViewModel(
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(ReaderUiState())
+    // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
+    private val _state = MutableStateFlow(ReaderUiState(settings = readerPrefs.settings.value))
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
 
     private var book: BookEntity? = null
