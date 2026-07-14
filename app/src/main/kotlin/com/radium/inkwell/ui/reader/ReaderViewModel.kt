@@ -30,6 +30,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -67,6 +68,8 @@ data class ReaderUiState(
     /** 换源搜索进度：已回来的书源数 / 总数 */
     val sourcesDone: Int = 0,
     val sourcesTotal: Int = 0,
+    /** 换源是否用作者卡人（同 Legado 的 changeSourceCheckAuthor） */
+    val checkAuthor: Boolean = true,
 )
 
 /**
@@ -82,6 +85,7 @@ class ReaderViewModel(
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
     private val contentCache: ChapterContentCache,
+    private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -215,8 +219,11 @@ class ReaderViewModel(
 
     private var sourceSearchJob: Job? = null
 
+    /** 书名已命中的全部结果（未按作者过滤）；作者开关一拨就地重筛，不必重搜 */
+    private val rawCandidates = mutableListOf<SearchResult>()
+
     /**
-     * 用书名(+作者)在其他启用书源中并发搜索，结果**边搜边出**。
+     * 用书名在其他启用书源中并发搜索，结果**边搜边出**。
      *
      * 从前是 awaitAll 等所有书源跑完才一次性出结果：几百个源里只要有一个站点吊着不回，
      * 整个换源面板就一直转圈；而且没有超时，那个源可能永远不回。
@@ -225,13 +232,16 @@ class ReaderViewModel(
         val b = book ?: return
         sourceSearchJob?.cancel()
         sourceSearchJob = viewModelScope.launch {
+            val checkAuthor = appPrefs.changeSourceCheckAuthor.first()
             val all = sourceRepo.getEnabledRules()
                 .filter { it.search != null && it.id != b.sourceId }
+            rawCandidates.clear()
             _state.value = _state.value.copy(
                 sourceCandidates = emptyList(),
                 searchingSources = true,
                 sourcesDone = 0,
                 sourcesTotal = all.size,
+                checkAuthor = checkAuthor,
             )
             // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
             val limiter = Semaphore(8)
@@ -241,12 +251,12 @@ class ReaderViewModel(
                         val hit = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
                             runCatching { engine.search(rule, b.title).items }
                                 .getOrDefault(emptyList())
-                                .firstOrNull { matches(it, b.title, b.author) }
+                                .firstOrNull { titleMatches(it.title, b.title) }
                         }
-                        val s = _state.value
-                        _state.value = s.copy(
-                            sourceCandidates = s.sourceCandidates.orEmpty() + listOfNotNull(hit),
-                            sourcesDone = s.sourcesDone + 1,
+                        if (hit != null) rawCandidates += hit
+                        _state.value = _state.value.copy(
+                            sourceCandidates = filtered(),
+                            sourcesDone = _state.value.sourcesDone + 1,
                         )
                     }
                 }
@@ -255,16 +265,41 @@ class ReaderViewModel(
         }
     }
 
+    /** 拨动「匹配作者」：就地重筛已搜到的结果，不重新发请求 */
+    fun setCheckAuthor(on: Boolean) {
+        viewModelScope.launch { appPrefs.setChangeSourceCheckAuthor(on) }
+        _state.value = _state.value.copy(checkAuthor = on)
+        _state.value = _state.value.copy(sourceCandidates = filtered())
+    }
+
+    private fun filtered(): List<SearchResult> {
+        val author = book?.author.orEmpty()
+        return if (!_state.value.checkAuthor) rawCandidates.toList()
+        else rawCandidates.filter { authorMatches(it.author, author) }
+    }
+
     /**
-     * 与 Legado 的换源判定对齐：书名必须命中，作者用**包含**而非相等 ——
-     * 书源返回的作者常带前缀（"作者：天蚕土豆"）或多个作者，一律要求相等会把绝大多数源判死。
-     * 任一边作者为空时不拿作者卡人。
+     * 书名判定。归一化掉书名号与空白：书源常返回「《武动乾坤》」，
+     * 直接比字符串会判死。双向包含，「武动乾坤」与「武动乾坤（精校版）」互相认得。
      */
-    private fun matches(r: SearchResult, title: String, author: String): Boolean {
-        if (r.title != title && !r.title.contains(title)) return false
-        val a = r.author?.trim().orEmpty()
-        if (author.isBlank() || a.isBlank()) return true
-        return a.contains(author) || author.contains(a)
+    private fun titleMatches(candidate: String, want: String): Boolean {
+        val a = normTitle(candidate)
+        val b = normTitle(want)
+        if (a.isEmpty() || b.isEmpty()) return false
+        return a == b || a.contains(b) || (b.contains(a) && a.length >= 2)
+    }
+
+    private fun normTitle(s: String) = s.trim().replace(TITLE_NOISE, "")
+
+    /**
+     * 作者判定与 Legado 对齐：用**包含**而非相等 —— 书源返回的作者常带前缀
+     * （「作者：天蚕土豆」）或含多个作者，一律要求相等会把绝大多数源判死。
+     * 任一边为空时不拿作者卡人。
+     */
+    private fun authorMatches(candidate: String?, want: String): Boolean {
+        val a = candidate?.trim().orEmpty()
+        if (want.isBlank() || a.isBlank()) return true
+        return a.contains(want) || want.contains(a)
     }
 
     fun applyChangeSource(candidate: SearchResult) {
@@ -297,6 +332,7 @@ class ReaderViewModel(
 
     fun dismissSourcePanel() {
         sourceSearchJob?.cancel()
+        rawCandidates.clear()
         _state.value = _state.value.copy(sourceCandidates = null, searchingSources = false)
     }
 
@@ -428,5 +464,8 @@ class ReaderViewModel(
     private companion object {
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
+
+        /** 书名归一化：去掉书名号与空白 */
+        val TITLE_NOISE = Regex("[《》〈〉\\s]")
     }
 }

@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -25,6 +26,20 @@ class AppPrefs(private val context: Context) {
         val CUSTOM_LIGHT_BG = longPreferencesKey("custom_light_bg")
         val CUSTOM_DARK_SEED = longPreferencesKey("custom_dark_seed")
         val CUSTOM_DARK_BG = longPreferencesKey("custom_dark_bg")
+        val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
+    }
+
+    /**
+     * 换源时是否用作者卡人。默认开（同 Legado）。
+     * 书源返回的作者字段五花八门（"作者：天蚕土豆"、多作者、干脆为空），
+     * 卡得太死会「所有书源都找不到这本书」；关掉就只认书名。
+     */
+    val changeSourceCheckAuthor: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true
+    }
+
+    suspend fun setChangeSourceCheckAuthor(on: Boolean) {
+        context.appDataStore.edit { it[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = on }
     }
 
     val updateChannel: Flow<UpdateChannel> = context.appDataStore.data.map { p ->
