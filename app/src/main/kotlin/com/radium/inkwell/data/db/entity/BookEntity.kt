@@ -37,4 +37,9 @@ data class BookEntity(
     val variable: String = "",
     /** 书架分组；空 = 未分组 */
     val groupName: String = "",
+    /**
+     * 从书架隐藏。**不是删除** —— 书、进度、缓存都还在，只是列表里不显示。
+     * 想看回来：书架顶栏「⋮ → 显示隐藏的书」。
+     */
+    val hidden: Boolean = false,
 )

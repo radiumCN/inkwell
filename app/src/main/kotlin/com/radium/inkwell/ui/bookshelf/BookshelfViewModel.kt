@@ -17,7 +17,12 @@ import kotlinx.coroutines.launch
 
 class BookshelfViewModel(
     private val bookRepo: BookRepository,
+    private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
 ) : ViewModel() {
+
+    /** 书架顶栏是否显示「发现」入口 */
+    val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     val allBooks: StateFlow<List<BookEntity>> = bookRepo.books
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -37,13 +42,43 @@ class BookshelfViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ---- 隐藏 ----
+
+    /**
+     * 是否临时显示隐藏的书。
+     *
+     * **进程内状态，不落库** —— 退出 App 就复位。落库的话「隐藏」就形同虚设：
+     * 用户看完一次，开关一直开着，那些书就再也没被隐藏过。
+     */
+    private val _showHidden = MutableStateFlow(false)
+    val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
+    fun toggleShowHidden() { _showHidden.value = !_showHidden.value }
+
+    fun setHidden(bookId: String, hidden: Boolean) {
+        viewModelScope.launch {
+            bookRepo.setHidden(bookId, hidden)
+            messages.emit(
+                if (hidden) "已隐藏。顶栏「⋮ → 显示隐藏的书」可以找回来"
+                else "已取消隐藏"
+            )
+        }
+    }
+
+    val hiddenCount: StateFlow<Int> = allBooks
+        .map { list -> list.count { it.hidden } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     val books: StateFlow<List<BookEntity>> =
-        combine(allBooks, _group) { list, g ->
-            when (g) {
-                null -> list
-                UNGROUPED -> list.filter { it.groupName.isBlank() }
-                else -> list.filter { it.groupName.trim() == g }
-            }
+        combine(allBooks, _group, _showHidden) { list, g, showHidden ->
+            list
+                .filter { showHidden || !it.hidden }
+                .filter { book ->
+                    when (g) {
+                        null -> true
+                        UNGROUPED -> book.groupName.isBlank()
+                        else -> book.groupName.trim() == g
+                    }
+                }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun assignGroup(bookId: String, group: String) {

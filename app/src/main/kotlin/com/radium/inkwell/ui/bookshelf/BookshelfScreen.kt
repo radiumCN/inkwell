@@ -52,6 +52,11 @@ import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +90,10 @@ fun BookshelfScreen(
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
+    val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
+    val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
+    val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
+    var overflowOpen by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
@@ -98,37 +107,81 @@ fun BookshelfScreen(
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
                     }
-                    IconButton(onClick = onOpenExplore) {
-                        Icon(Icons.Default.Explore, contentDescription = "发现")
+                    // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
+                    if (exploreEnabled) {
+                        IconButton(onClick = onOpenExplore) {
+                            Icon(Icons.Default.Explore, contentDescription = "发现")
+                        }
                     }
-                    IconButton(onClick = onOpenSourceManage) {
-                        Icon(Icons.Default.Source, contentDescription = "书源")
+                    // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
+                    IconButton(
+                        onClick = {
+                            importLauncher.launch(
+                                arrayOf(
+                                    "text/plain", "application/epub+zip",
+                                    "application/octet-stream", "application/x-mobipocket-ebook",
+                                )
+                            )
+                        },
+                        enabled = !importing,
+                    ) {
+                        if (importing) {
+                            CircularProgressIndicator(
+                                Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = LocalContentColor.current,
+                            )
+                        } else {
+                            Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                        }
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
+                    IconButton(onClick = { overflowOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    }
+                    DropdownMenu(
+                        expanded = overflowOpen,
+                        onDismissRequest = { overflowOpen = false },
+                    ) {
+                        // 隐藏的书唯一的回来的路。没有它，隐藏就等于把书弄丢了
+                        if (hiddenCount > 0 || showHidden) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (showHidden) "隐藏已隐藏的书"
+                                        else "显示隐藏的书（$hiddenCount）"
+                                    )
+                                },
+                                onClick = {
+                                    overflowOpen = false
+                                    viewModel.toggleShowHidden()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("书源管理") },
+                            onClick = { overflowOpen = false; onOpenSourceManage() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("设置") },
+                            onClick = { overflowOpen = false; onOpenSettings() },
+                        )
                     }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = {
-            FloatingActionButton(onClick = {
-                importLauncher.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream", "application/x-mobipocket-ebook"))
-            }) {
-                // FAB 是固定尺寸的，转圈也得钉住 24dp —— 默认的 40dp 会把图标位撑变形
-                if (importing) {
-                    CircularProgressIndicator(
-                        Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = LocalContentColor.current,
-                    )
-                } else {
-                    Icon(Icons.Default.Add, contentDescription = "导入本地书")
-                }
-            }
-        },
     ) { padding ->
-        if (allBooks.isEmpty()) {
+        if (allBooks.isNotEmpty() && books.isEmpty() && hiddenCount > 0 && !showHidden) {
+            // 书全被隐藏了。别甩个空白网格让人以为书没了
+            EmptyState(
+                icon = Icons.Default.VisibilityOff,
+                title = "$hiddenCount 本书已隐藏",
+                hint = "顶栏「⋮ → 显示隐藏的书」可以看回来",
+                actionLabel = "显示隐藏的书",
+                onAction = viewModel::toggleShowHidden,
+                modifier = Modifier.padding(padding),
+            )
+        } else if (allBooks.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.AutoStories,
                 title = "书架空空如也",
@@ -214,6 +267,18 @@ fun BookshelfScreen(
                     },
                 )
                 SettingRow(
+                    title = if (book.hidden) "取消隐藏" else "从书架隐藏",
+                    subtitle = if (book.hidden) {
+                        "重新显示在书架上"
+                    } else {
+                        "书、进度、缓存都还在，只是列表里不显示"
+                    },
+                    onClick = {
+                        viewModel.setHidden(book.id, !book.hidden)
+                        actionTarget = null
+                    },
+                )
+                SettingRow(
                     title = "从书架删除",
                     subtitle = "本地文件与缓存将一并删除",
                     onClick = {
@@ -291,13 +356,32 @@ fun BookshelfScreen(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
-        BookCover(
-            title = book.title,
-            coverModel = book.coverPath,
-            modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
-            placeholderChars = 6,
-        )
+    Column(
+        Modifier
+            // clip 在 clickable 之前：否则涟漪泛成整个「封面 + 标题」的大方块
+            .clip(MaterialTheme.shapes.medium)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    ) {
+        Box {
+            BookCover(
+                title = book.title,
+                coverModel = book.coverPath,
+                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
+                placeholderChars = 6,
+            )
+            // 「显示隐藏的书」开着时，得看得出哪些是隐藏的 —— 否则分不清，会重复隐藏
+            if (book.hidden) {
+                Icon(
+                    Icons.Default.VisibilityOff,
+                    contentDescription = "已隐藏",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(
             book.title,
             style = MaterialTheme.typography.bodySmall,

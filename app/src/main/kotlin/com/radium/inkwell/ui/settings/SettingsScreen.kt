@@ -72,6 +72,7 @@ fun SettingsScreen(
     val channel by appPrefs.updateChannel.collectAsState(initial = UpdateChannel.STABLE)
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
+    val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
 
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
@@ -124,6 +125,17 @@ fun SettingsScreen(
                 title = "主题外观",
                 subtitle = "日间/夜间模式与自定义配色",
                 onClick = onOpenTheme,
+            )
+
+            SwitchRow(
+                title = "显示「发现」入口",
+                subtitle = if (exploreEnabled) {
+                    "书架顶栏显示发现按钮，浏览书源的分类榜单"
+                } else {
+                    "已隐藏。仍可从搜索找书"
+                },
+                checked = exploreEnabled,
+                onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
             )
 
             SectionHeader("书源")

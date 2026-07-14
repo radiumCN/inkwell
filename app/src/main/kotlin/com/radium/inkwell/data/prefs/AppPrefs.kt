@@ -30,6 +30,7 @@ class AppPrefs(private val context: Context) {
         val CUSTOM_DARK_BG = longPreferencesKey("custom_dark_bg")
         val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
+        val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -55,6 +56,7 @@ class AppPrefs(private val context: Context) {
                 "update_channel" to (p[Keys.UPDATE_CHANNEL] ?: UpdateChannel.STABLE.name),
                 "change_source_check_author" to (p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true).toString(),
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
+                "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
                 "theme_dark" to theme.darkPreset,
@@ -77,6 +79,8 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = it }
             v["text_selection_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.TEXT_SELECTION] = it }
+            v["explore_enabled"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.EXPLORE_ENABLED] = it }
             v["theme_mode"]
                 ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
                 ?.let { p[Keys.THEME_MODE] = it }
@@ -115,6 +119,16 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setTextSelectionEnabled(on: Boolean) {
         context.appDataStore.edit { it[Keys.TEXT_SELECTION] = on }
+        touch()
+    }
+
+    /** 书架顶栏是否显示「发现」入口。不看发现页的人，那个图标只是碍事 */
+    val exploreEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.EXPLORE_ENABLED] ?: true
+    }
+
+    suspend fun setExploreEnabled(on: Boolean) {
+        context.appDataStore.edit { it[Keys.EXPLORE_ENABLED] = on }
         touch()
     }
 

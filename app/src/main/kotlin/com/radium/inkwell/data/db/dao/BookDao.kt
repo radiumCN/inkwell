@@ -37,4 +37,7 @@ interface BookDao {
 
     @Query("UPDATE book SET groupName = :group WHERE id = :id")
     suspend fun setGroup(id: String, group: String)
+
+    @Query("UPDATE book SET hidden = :hidden WHERE id = :id")
+    suspend fun setHidden(id: String, hidden: Boolean)
 }

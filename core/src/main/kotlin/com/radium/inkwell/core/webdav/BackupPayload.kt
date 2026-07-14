@@ -87,6 +87,8 @@ data class BackupBook(
     val updatedAt: Long = 0,
     /** 书架分组 */
     val groupName: String = "",
+    /** 从书架隐藏（不是删除） */
+    val hidden: Boolean = false,
 )
 
 @Serializable

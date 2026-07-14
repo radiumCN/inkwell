@@ -23,7 +23,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -109,6 +109,13 @@ abstract class InkwellDb : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS bookmark")
                 db.execSQL("ALTER TABLE book ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** 书籍隐藏。只加列 */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
             }
         }
 
