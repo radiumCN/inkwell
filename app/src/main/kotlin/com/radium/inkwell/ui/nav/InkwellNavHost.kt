@@ -82,6 +82,7 @@ fun InkwellNavHost() {
                 onBack = { navController.popBackStack() },
                 onOpenWebDav = { navController.navigate(WebDavSettingsRoute) },
                 onOpenTheme = { navController.navigate(ThemeSettingsRoute) },
+                onOpenSources = { navController.navigate(SourceManageRoute) },
             )
         }
         composable<ThemeSettingsRoute> {

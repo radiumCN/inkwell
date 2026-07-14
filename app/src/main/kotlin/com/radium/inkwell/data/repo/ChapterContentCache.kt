@@ -59,6 +59,15 @@ class ChapterContentCache(private val root: File) {
         file(bookId, chapterUrl).writeText(text)
     }
 
+    /** 全部正文缓存占用的字节数（设置页要显示，用户得知道清的是多少东西） */
+    fun sizeBytes(): Long =
+        root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /** 清空所有书的正文缓存。目录与阅读进度不受影响，只是下次读要重新联网抓 */
+    fun clearAll() {
+        root.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
     fun clear(bookId: String) {
         dir(bookId).deleteRecursively()
     }
