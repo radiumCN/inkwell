@@ -48,12 +48,18 @@ class WebDavClient(
         }
     }
 
-    /** 404 → null */
+    /**
+     * 取文件；不存在返回 null。
+     *
+     * 409 也当作不存在：GET 本身没有「冲突」语义，服务端回 409 只可能是**父目录不存在**
+     * （坚果云就是这么回的，而不是 404）。首次同步时 inkwell/ 目录还没建，
+     * 于是「读远端备份」直接报 `GET 失败: 409`，同步一次都成功不了。
+     */
     suspend fun get(path: String): ByteArray? {
         val resp = execute(request(path).get().build())
         resp.use {
             return when {
-                it.code == 404 -> null
+                it.code == 404 || it.code == 409 -> null
                 it.isSuccessful -> withContext(Dispatchers.IO) { it.body?.bytes() }
                 else -> throw WebDavException(it.code, "GET 失败: ${it.code}")
             }

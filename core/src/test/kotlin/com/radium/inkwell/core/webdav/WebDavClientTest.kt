@@ -46,6 +46,16 @@ class WebDavClientTest {
         assertNull(client.get("inkwell/none.gz"))
     }
 
+    /**
+     * 坚果云对「父目录不存在」的 GET 回 409 而不是 404。首次同步时 inkwell/ 还没建，
+     * 于是读远端备份直接抛 `GET 失败: 409`，同步一次都成不了 —— 用户看到的就是这个。
+     */
+    @Test
+    fun `get returns null on 409 (parent collection missing)`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(409))
+        assertNull(client.get("inkwell/backup.json.gz"))
+    }
+
     @Test
     fun `get returns bytes on success`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("hello"))
