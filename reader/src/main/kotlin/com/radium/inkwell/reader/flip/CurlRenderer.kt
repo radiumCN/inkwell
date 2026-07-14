@@ -347,6 +347,6 @@ class CurlRenderer(private val width: Float, private val height: Float) {
          * 从 14% 再压到 8%：大片平背面上，14% 仍能读出整段反字，像影印件贴反了；
          * legado 的背面几乎看不到字，只有一层纸光。宁可再淡一点。
          */
-        const val BACK_INK_ALPHA = 20 // ~8%
+        const val BACK_INK_ALPHA = 13 // ~5%
     }
 }
