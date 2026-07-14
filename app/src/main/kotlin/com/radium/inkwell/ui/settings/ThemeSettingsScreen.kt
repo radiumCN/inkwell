@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -162,7 +163,11 @@ private fun PresetRow(
     customBg: Color,
     onSelect: (String) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    // 横向可滚：5 个预设 + 自定义 = 6 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         presets.forEach { preset ->
             ThemeSwatch(
                 bg = preset.previewBg,

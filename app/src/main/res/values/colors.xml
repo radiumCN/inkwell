@@ -7,8 +7,8 @@
       所以这里的值必须和那张图自己的底色一致，否则图周围会显出一圈边框。换图时顺手核一下取色。
     -->
     <color name="ic_launcher_bg_classic">#FDF7E7</color>
-    <color name="ic_launcher_bg_line">#FBF7E4</color>
+    <color name="ic_launcher_bg_line">#FDF8E4</color>
     <color name="ic_launcher_bg_night">#17140D</color>
-    <color name="ic_launcher_bg_book">#FDF8E4</color>
+    <color name="ic_launcher_bg_book">#FBF7E4</color>
     <color name="ic_launcher_bg_ink">#F4EDDA</color>
 </resources>

@@ -38,13 +38,18 @@ object AppThemes {
     const val LIGHT_PAPER = "paper"
     const val LIGHT_WHITE = "white"
     const val LIGHT_BAMBOO = "bamboo"
+    const val LIGHT_KRAFT = "kraft"
+    const val LIGHT_MIST = "mist"
     const val DARK_WARM = "warm"
     const val DARK_BLACK = "black"
     const val DARK_INKBLUE = "inkblue"
+    const val DARK_MOSS = "moss"
+    const val DARK_PLUM = "plum"
     const val CUSTOM = "custom"
 
     val lightPresets: List<ThemePreset> by lazy {
         listOf(
+            // 默认。品牌色：墨褐 + 纸黄
             ThemePreset(
                 LIGHT_PAPER, "暖纸",
                 Color(0xFFFFFBEB), Color(0xFF92400E),
@@ -60,6 +65,18 @@ object AppThemes {
                 Color(0xFFF2F7EE), Color(0xFF3E6B4F),
                 schemeFrom(Color(0xFF3E6B4F), Color(0xFFF2F7EE), dark = false),
             ),
+            // 比暖纸更沉，像旧书的封皮
+            ThemePreset(
+                LIGHT_KRAFT, "牛皮",
+                Color(0xFFF7EEDD), Color(0xFF7C4A21),
+                schemeFrom(Color(0xFF7C4A21), Color(0xFFF7EEDD), dark = false),
+            ),
+            // 冷调中性灰，给嫌暖色"发黄"的人
+            ThemePreset(
+                LIGHT_MIST, "晨雾",
+                Color(0xFFF4F6F8), Color(0xFF4A5A6A),
+                schemeFrom(Color(0xFF4A5A6A), Color(0xFFF4F6F8), dark = false),
+            ),
         )
     }
 
@@ -70,6 +87,7 @@ object AppThemes {
                 Color(0xFF17140F), Color(0xFFE8A33D),
                 schemeFrom(Color(0xFFE8A33D), Color(0xFF17140F), dark = true),
             ),
+            // OLED 上黑像素不点亮，省电
             ThemePreset(
                 DARK_BLACK, "纯黑",
                 Color(0xFF000000), Color(0xFF9E9E9E),
@@ -79,6 +97,16 @@ object AppThemes {
                 DARK_INKBLUE, "墨蓝",
                 Color(0xFF10151F), Color(0xFF7C9CD0),
                 schemeFrom(Color(0xFF7C9CD0), Color(0xFF10151F), dark = true),
+            ),
+            ThemePreset(
+                DARK_MOSS, "苔绿",
+                Color(0xFF10170F), Color(0xFF7FB086),
+                schemeFrom(Color(0xFF7FB086), Color(0xFF10170F), dark = true),
+            ),
+            ThemePreset(
+                DARK_PLUM, "紫檀",
+                Color(0xFF17111A), Color(0xFFB593C9),
+                schemeFrom(Color(0xFFB593C9), Color(0xFF17111A), dark = true),
             ),
         )
     }

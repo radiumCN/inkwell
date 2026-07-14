@@ -28,6 +28,10 @@ class ReaderPrefs(private val context: Context) {
         val MARGIN_H = floatPreferencesKey("margin_h")
         val MARGIN_V = floatPreferencesKey("margin_v")
         val THEME = stringPreferencesKey("theme")
+        /** 自定义纸张的纸色/字色（ARGB）。只在 THEME == custom 时生效，
+            但换走再换回来还留着 —— 调半天的配色不该因为点了一下"暖纸"就没了 */
+        val CUSTOM_BG = longPreferencesKey("theme_custom_bg")
+        val CUSTOM_TEXT = longPreferencesKey("theme_custom_text")
         val FLIP = stringPreferencesKey("flip")
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
@@ -48,7 +52,7 @@ class ReaderPrefs(private val context: Context) {
             paragraphSpacingEm = p[Keys.PARA_SPACING] ?: 0.6f,
             marginHorizontalDp = p[Keys.MARGIN_H] ?: 24f,
             marginVerticalDp = p[Keys.MARGIN_V] ?: 28f,
-            theme = ReaderTheme.ALL.firstOrNull { it.id == p[Keys.THEME] } ?: ReaderTheme.PAPER,
+            theme = resolveTheme(p[Keys.THEME], p[Keys.CUSTOM_BG], p[Keys.CUSTOM_TEXT]),
             flipAnimation = p[Keys.FLIP]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: FlipAnimation.COVER,
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
@@ -72,6 +76,10 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.MARGIN_H] = settings.marginHorizontalDp
             p[Keys.MARGIN_V] = settings.marginVerticalDp
             p[Keys.THEME] = settings.theme.id
+            if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
+                p[Keys.CUSTOM_BG] = settings.theme.background
+                p[Keys.CUSTOM_TEXT] = settings.theme.textColor
+            }
             p[Keys.FLIP] = settings.flipAnimation.name
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
@@ -105,6 +113,8 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "margin_h" to s.marginHorizontalDp.toString(),
             "margin_v" to s.marginVerticalDp.toString(),
             "theme" to s.theme.id,
+            "theme_custom_bg" to s.theme.background.toString(),
+            "theme_custom_text" to s.theme.textColor.toString(),
             "flip" to s.flipAnimation.name,
             "brightness" to (s.brightnessOverride ?: -1f).toString(),
             "keep_screen_on" to s.keepScreenOn.toString(),
@@ -114,6 +124,17 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "chinese_convert" to s.chineseConvert.name,
         ),
     )
+}
+
+/**
+ * id → 主题。自定义主题不在 ReaderTheme.ALL 那张表上（它的颜色是用户存的），
+ * 所以按 id 查表这一步必须先把它摘出来 —— 否则自定义会被静默降级成"暖纸"。
+ *
+ * 读取、备份导入两处共用：各写一份的话，WebDAV 同步回来的自定义主题会丢色。
+ */
+private fun resolveTheme(id: String?, bg: Long?, text: Long?): ReaderTheme = when {
+    id == ReaderTheme.CUSTOM_ID && bg != null && text != null -> ReaderTheme.custom(bg, text)
+    else -> ReaderTheme.ALL.firstOrNull { it.id == id } ?: ReaderTheme.PAPER
 }
 
 suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
@@ -127,7 +148,11 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             paragraphSpacingEm = v["para_spacing"]?.toFloatOrNull() ?: base.paragraphSpacingEm,
             marginHorizontalDp = v["margin_h"]?.toFloatOrNull() ?: base.marginHorizontalDp,
             marginVerticalDp = v["margin_v"]?.toFloatOrNull() ?: base.marginVerticalDp,
-            theme = ReaderTheme.ALL.firstOrNull { it.id == v["theme"] } ?: base.theme,
+            theme = resolveTheme(
+                v["theme"],
+                v["theme_custom_bg"]?.toLongOrNull(),
+                v["theme_custom_text"]?.toLongOrNull(),
+            ),
             flipAnimation = v["flip"]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: base.flipAnimation,
             brightnessOverride = v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f },

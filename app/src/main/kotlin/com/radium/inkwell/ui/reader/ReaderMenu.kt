@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -406,6 +407,10 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
 
     SectionLabel("背景")
     ThemeSwatches(settings, onUpdate)
+    // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
+    if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
+        CustomPaperEditor(settings.theme) { onUpdate(settings.copy(theme = it)) }
+    }
 
     SectionLabel("亮度")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -490,40 +495,141 @@ private fun MoreTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
     )
 }
 
+/**
+ * 自定义纸张：调纸色（色相/浓度/明度）与字色深浅。
+ *
+ * **实时报对比度**，低于 7:1 就明说。不拦着用户配，但得让他知道代价 ——
+ * 「墨绿纸配灰字」看着挺雅，读两章眼睛就疼，而用户根本不会把眼疼归因到自己调的色上。
+ */
+@Composable
+private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Unit) {
+    val bgHsv = remember(theme.background) { argbToHsv(theme.background) }
+    // 字色深浅：0 = 与纸同色（看不见），1 = 纯黑/纯白（最刺眼）。取它在纸色明度上的相对位置
+    val textLevel = remember(theme.textColor) { argbToHsv(theme.textColor)[2] }
+
+    fun rebuild(h: Float = bgHsv[0], s: Float = bgHsv[1], v: Float = bgHsv[2], t: Float = textLevel) {
+        val bg = hsvToArgb(h, s, v)
+        // 字色沿用纸的色相，但压低浓度 —— 完全同色相的浓字会显脏，完全无彩的灰字又跟纸不搭
+        val text = hsvToArgb(h, (s * 0.45f).coerceAtMost(0.35f), t)
+        onChange(ReaderTheme.custom(bg, text))
+    }
+
+    val ratio = ReaderTheme.contrastRatio(theme.background, theme.textColor)
+
+    Spacer(Modifier.height(Dimens.gapM))
+    SectionLabel("纸色")
+    SlimSlider(value = bgHsv[0], valueRange = 0f..360f, onValueChange = { rebuild(h = it) })
+    SlimSlider(value = bgHsv[1], valueRange = 0f..0.25f, onValueChange = { rebuild(s = it) })
+    SlimSlider(value = bgHsv[2], valueRange = 0f..1f, onValueChange = { rebuild(v = it) })
+
+    SectionLabel("字色深浅")
+    SlimSlider(value = textLevel, valueRange = 0f..1f, onValueChange = { rebuild(t = it) })
+
+    Text(
+        text = "正文对比度 %.1f:1".format(ratio) + when {
+            ratio >= 7.0 -> " · 长时间阅读没问题"
+            ratio >= 4.5 -> " · 能看清，但读久了会累"
+            else -> " · 太低，读起来费劲"
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = if (ratio >= 7.0) MaterialTheme.colorScheme.onSurfaceVariant
+        else MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/** HSV ↔ ARGB。用 android.graphics.Color 的工具，不必自己写一遍 */
+private fun argbToHsv(argb: Long): FloatArray {
+    val out = FloatArray(3)
+    android.graphics.Color.colorToHSV(argb.toInt(), out)
+    return out
+}
+
+private fun hsvToArgb(h: Float, s: Float, v: Float): Long =
+    android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)).toLong() and 0xFFFFFFFFL
+
+/**
+ * 纸张主题选择。
+ *
+ * **横向可滚动**：从前是固定 Row，4 款刚好铺满一行；现在有 10 款，再塞进定宽的 Row 里
+ * 只会把每个色块压扁（自动翻页那排 chip 就是这么被压成竖排的）。
+ *
+ * **色块底下带名字**：六款浅色纸缩成 48dp 的圆点后，「暖纸/宣纸/牛皮/灰岩」肉眼几乎分不出，
+ * 光靠颜色选主题等于抽奖。名字也顺带修好了读屏 —— 从前 contentDescription 是 id，
+ * TalkBack 会念出英文的 "paper"。
+ */
 @Composable
 private fun ThemeSwatches(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
     Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         ReaderTheme.ALL.forEach { theme ->
-            val selected = theme.id == settings.theme.id
-            Box(
-                Modifier
-                    // 触控目标 48dp；clip 必须在 clickable 之前 ——
-                    // 否则涟漪是方的，会溢出这个圆形色块的边界
-                    .size(Dimens.touchTarget)
-                    .clip(CircleShape)
-                    .background(Color(theme.background))
-                    .border(
-                        width = if (selected) 2.dp else 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outlineVariant,
-                        shape = CircleShape,
-                    )
-                    .clickable { onUpdate(settings.copy(theme = theme)) },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (selected) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = theme.id,
-                        Modifier.size(20.dp),
-                        tint = Color(theme.textColor),
-                    )
-                }
+            ThemeSwatch(
+                theme = theme,
+                selected = theme.id == settings.theme.id,
+                onClick = { onUpdate(settings.copy(theme = theme)) },
+            )
+        }
+        // 自定义纸张：颜色不在 ReaderTheme.ALL 那张表上，得从当前 settings 里取。
+        // 没调过就先给一份暖纸的底，用户点进去再改
+        val custom = if (settings.theme.id == ReaderTheme.CUSTOM_ID) settings.theme
+        else ReaderTheme.custom(ReaderTheme.PAPER.background, ReaderTheme.PAPER.textColor)
+        ThemeSwatch(
+            theme = custom,
+            selected = settings.theme.id == ReaderTheme.CUSTOM_ID,
+            onClick = { onUpdate(settings.copy(theme = custom)) },
+        )
+    }
+}
+
+@Composable
+private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            Modifier
+                // 触控目标 48dp；clip 必须在 clickable 之前 ——
+                // 否则涟漪是方的，会溢出这个圆形色块的边界
+                .size(Dimens.touchTarget)
+                .clip(CircleShape)
+                .background(Color(theme.background))
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant,
+                    shape = CircleShape,
+                )
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            // 选中的打勾；没选中的放一个"文"字，直接把这款纸的正文对比度演示出来 ——
+            // 光看纸色选不出好不好读
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "已选择${theme.label}",
+                    Modifier.size(20.dp),
+                    tint = Color(theme.textColor),
+                )
+            } else {
+                Text(
+                    "文",
+                    color = Color(theme.textColor),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
         }
+        Text(
+            theme.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
