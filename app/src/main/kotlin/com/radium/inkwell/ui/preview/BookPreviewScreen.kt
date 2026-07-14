@@ -151,11 +151,14 @@ fun BookPreviewScreen(
     if (sourcePickerOpen) {
         OptionPickerSheet(
             title = "换源",
-            options = state.sources.map { PickerOption(id = it, label = it) },
-            selectedId = state.sources.getOrNull(state.currentSource),
+            // 书源名称当主标题，网址退到副标题 —— 从前列表里只有一串域名
+            options = state.sources.map { PickerOption(id = it.id, label = it.name, subtitle = it.id) },
+            selectedId = state.sources.getOrNull(state.currentSource)?.id,
             onSelect = { opt ->
                 sourcePickerOpen = false
-                state.sources.indexOf(opt.id).takeIf { it >= 0 }?.let { viewModel.switchSource(it) }
+                state.sources.indexOfFirst { it.id == opt.id }
+                    .takeIf { it >= 0 }
+                    ?.let { viewModel.switchSource(it) }
             },
             onDismiss = { sourcePickerOpen = false },
         )

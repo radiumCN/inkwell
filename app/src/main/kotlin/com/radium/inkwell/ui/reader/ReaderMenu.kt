@@ -248,12 +248,23 @@ fun ReaderMenu(
                                     .clickable { onApplySource(c) }
                                     .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
                             ) {
-                                Text("${c.title}  ${c.author ?: ""}", maxLines = 1)
+                                // 书源名称打头。从前这行首位是 sourceId（其实是书源网址），
+                                // 满屏 m.22biqu.net / cread.com# 谁也认不出哪个是哪个源
                                 Text(
-                                    "${c.sourceId}  ${c.latestChapter ?: ""}",
+                                    c.sourceName.ifBlank { c.sourceId },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    buildString {
+                                        append(c.sourceId)
+                                        c.latestChapter?.takeIf { it.isNotBlank() }?.let { append("  ·  $it") }
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }

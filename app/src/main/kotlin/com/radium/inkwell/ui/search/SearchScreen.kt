@@ -29,6 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +64,21 @@ fun SearchScreen(
             last >= listState.layoutInfo.totalItemsCount - 3
         }
     }
+    // 结果是边搜边出、且会按相关度重排的。LazyColumn 带 key 时会把首个可见项按 key 钉住 ——
+    // 更相关的书随后插到它前面，列表就等于被顶下去了，用户得手动往回滑才看得见最相关的那本。
+    // 所以：新搜索滚回顶部；搜索过程中只要用户自己没滑动过，就一直粘在顶部。
+    var userScrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { if (it) userScrolled = true }
+    }
+    LaunchedEffect(state.searchId) {
+        userScrolled = false
+        listState.scrollToItem(0)
+    }
+    LaunchedEffect(state.results.firstOrNull()) {
+        if (state.searching && !userScrolled) listState.scrollToItem(0)
+    }
+
     LaunchedEffect(nearEnd) {
         if (nearEnd) viewModel.loadMore()
     }

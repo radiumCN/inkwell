@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/** 换源候选：书源名称 + 网址 */
+data class SourceOption(val id: String, val name: String)
+
 data class BookPreviewUiState(
     val loading: Boolean = true,
     /** 详情/目录抓取失败；此时页面只能重试 */
@@ -29,7 +32,8 @@ data class BookPreviewUiState(
     /** 入库/跳转进行中，按钮置灰防重复点击 */
     val busy: Boolean = false,
     /** 有这本书的所有书源（sourceId），供换源；当前用的是 currentSource */
-    val sources: List<String> = emptyList(),
+    /** 有这本书的所有书源（供换源）；带名称，光有网址没人认得出是哪个源 */
+    val sources: List<SourceOption> = emptyList(),
     val currentSource: Int = 0,
 )
 
@@ -83,7 +87,9 @@ class BookPreviewViewModel(
                 author = result.author.orEmpty(),
                 coverUrl = result.coverUrl,
                 intro = result.intro,
-                sources = candidates.map { it.sourceId },
+                sources = candidates.map {
+                    SourceOption(id = it.sourceId, name = it.sourceName.ifBlank { it.sourceId })
+                },
                 currentSource = current,
             )
             val rule = sourceRepo.getRule(result.sourceId)

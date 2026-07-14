@@ -40,6 +40,8 @@ data class SearchUiState(
     val page: Int = 1,
     val hasMore: Boolean = false,
     val loadingMore: Boolean = false,
+    /** 每次新搜索 +1；界面靠它把列表滚回顶部 */
+    val searchId: Int = 0,
 )
 
 class SearchViewModel(
@@ -80,6 +82,7 @@ class SearchViewModel(
                 searching = true, results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
                 page = 1, hasMore = false, loadingMore = false,
+                searchId = _state.value.searchId + 1,
             )
             val limiter = Semaphore(8) // 并发上限
             val more = rules.map { rule ->
