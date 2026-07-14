@@ -187,9 +187,9 @@ fun SettingsScreen(
                     !biometricAvailable ->
                         "这台设备还没设置指纹/面容或锁屏密码，无法开启"
                     hiddenRequireAuth ->
-                        "展开隐藏的书前先验证指纹/面容（也可用设备密码）"
+                        "长按书架标题后，先验证指纹/面容（也可用设备密码）"
                     else ->
-                        "已关闭。任何人点开「⋮ → 显示隐藏的书」都能看到"
+                        "已关闭。长按书架标题即可直接展开隐藏的书"
                 },
                 checked = hiddenRequireAuth && biometricAvailable,
                 onCheckedChange = { on ->

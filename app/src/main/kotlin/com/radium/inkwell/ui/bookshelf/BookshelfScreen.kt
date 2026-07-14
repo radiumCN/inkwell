@@ -61,6 +61,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.util.BiometricAuth
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,7 +129,19 @@ fun BookshelfScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("书架") },
+                title = {
+                    // 长按标题 = 隐藏书籍的入口。它本身不可见、不可猜 ——
+                    // 一个写在菜单里的「显示隐藏的书」，等于告诉所有人这里藏了东西。
+                    Text(
+                        "书架",
+                        Modifier.combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                            onLongClick = { if (showHidden) viewModel.hideHidden() else revealHidden() },
+                        ),
+                    )
+                },
                 actions = {
                     IconButton(onClick = onOpenSearch) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
@@ -161,36 +174,40 @@ fun BookshelfScreen(
                             Icon(Icons.Default.Add, contentDescription = "导入本地书")
                         }
                     }
-                    IconButton(onClick = { overflowOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
-                    }
-                    DropdownMenu(
-                        expanded = overflowOpen,
-                        onDismissRequest = { overflowOpen = false },
-                    ) {
-                        // 隐藏的书唯一的回来的路。没有它，隐藏就等于把书弄丢了
-                        if (hiddenCount > 0 || showHidden) {
+                    // IconButton 与菜单必须包在同一个 Box 里：DropdownMenu 锚定的是**它自己**
+                    // 在布局里的位置，而它直接摆在 Row 里时占的是零宽的一格 ——
+                    // 于是菜单飘到按钮左边老远的地方去了。包一层，它才贴着按钮下方弹出。
+                    Box {
+                        IconButton(onClick = { overflowOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                        }
+                        DropdownMenu(
+                            expanded = overflowOpen,
+                            onDismissRequest = { overflowOpen = false },
+                        ) {
+                            // 这里**不放**「显示隐藏的书」。
+                            //
+                            // 从前它就明晃晃写着「显示隐藏的书（1）」—— 等于把「我藏了 1 本书」
+                            // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
+                            // 改为长按顶栏的「书架」标题。
+                            //
+                            // 已经展开时才给一个「收起」—— 那时书角本来就带着标记，藏不住了，
+                            // 而用户需要一条明确的路把它收回去。
+                            if (showHidden) {
+                                DropdownMenuItem(
+                                    text = { Text("收起隐藏的书") },
+                                    onClick = { overflowOpen = false; viewModel.hideHidden() },
+                                )
+                            }
                             DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (showHidden) "隐藏已隐藏的书"
-                                        else "显示隐藏的书（$hiddenCount）"
-                                    )
-                                },
-                                onClick = {
-                                    overflowOpen = false
-                                    if (showHidden) viewModel.hideHidden() else revealHidden()
-                                },
+                                text = { Text("书源管理") },
+                                onClick = { overflowOpen = false; onOpenSourceManage() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("设置") },
+                                onClick = { overflowOpen = false; onOpenSettings() },
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("书源管理") },
-                            onClick = { overflowOpen = false; onOpenSourceManage() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("设置") },
-                            onClick = { overflowOpen = false; onOpenSettings() },
-                        )
                     }
                 },
             )
@@ -198,13 +215,12 @@ fun BookshelfScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         if (allBooks.isNotEmpty() && books.isEmpty() && hiddenCount > 0 && !showHidden) {
-            // 书全被隐藏了。别甩个空白网格让人以为书没了
+            // 书全被隐藏了。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
+            // 就显示一个和真正空书架一模一样的空态：别人看不出区别，而你知道长按标题能回来。
             EmptyState(
-                icon = Icons.Default.VisibilityOff,
-                title = "$hiddenCount 本书已隐藏",
-                hint = "顶栏「⋮ → 显示隐藏的书」可以看回来",
-                actionLabel = "显示隐藏的书",
-                onAction = ::revealHidden,
+                icon = Icons.Default.AutoStories,
+                title = "书架空空如也",
+                hint = "导入本地 txt / EPUB / MOBI，或从书源搜索添加",
                 modifier = Modifier.padding(padding),
             )
         } else if (allBooks.isEmpty()) {

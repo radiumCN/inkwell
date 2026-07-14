@@ -65,7 +65,9 @@ class BookshelfViewModel(
         viewModelScope.launch {
             bookRepo.setHidden(bookId, hidden)
             messages.emit(
-                if (hidden) "已隐藏。顶栏「⋮ → 显示隐藏的书」可以找回来"
+                // 找回的路必须在这里说清楚 —— 入口是个不可见的手势，
+                // 不当场告诉他，他就再也想不起来了
+                if (hidden) "已隐藏。长按顶栏「书架」标题可以找回"
                 else "已取消隐藏"
             )
         }
