@@ -400,6 +400,7 @@ private fun CurlLayer(
                     front.asAndroidBitmap(),
                     under.asAndroidBitmap(),
                     touchX, touchY, cornerBottom,
+                    paperColor = theme.background.toInt(),
                 )
             }
         }

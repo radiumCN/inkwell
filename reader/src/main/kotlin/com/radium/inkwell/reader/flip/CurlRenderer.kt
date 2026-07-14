@@ -2,8 +2,6 @@ package com.radium.inkwell.reader.flip
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -37,40 +35,44 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val pathCurl = Path()   // 卷起区域（含背面）
     private val pathUnder = Path()  // 露出下页的区域
     private val backMatrix = Matrix()
-    private val backPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        // 背面提亮泛白，模拟纸背
-        colorFilter = ColorMatrixColorFilter(
-            ColorMatrix(
-                floatArrayOf(
-                    0.55f, 0f, 0f, 0f, 110f,
-                    0f, 0.55f, 0f, 0f, 110f,
-                    0f, 0f, 0.55f, 0f, 110f,
-                    0f, 0f, 0f, 1f, 0f,
-                )
-            )
-        )
-    }
-    // 单位渐变（x: 0→1）+ localMatrix 复用，避免每帧 new Shader 的分配抖动
+
+    /**
+     * 纸背的正确画法：**先铺纸色，再把镜像正面以很低的透明度叠上去** —— 那是墨从纸的另一面
+     * 淡淡透出来的样子。
+     *
+     * 从前用 `0.55·c + 110` 的 colorMatrix 直接洗白整张正面位图：`+110` 对 RGB 一视同仁地加，
+     * 把暖纸（245,239,220）压成中性的（245,241,231），于是纸背发灰发冷 —— 跟正面的暖纸割裂。
+     * 而且文字被洗成半吊子的灰，既不像透出的墨、也不像正面的黑。
+     *
+     * backPaint 只留一个可调的 alpha：铺过纸色之后，镜像文字用它压到 ~14% 的浓度。
+     */
+    private var paperColor = 0xFFF5EFDC.toInt()
+    private val backPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { alpha = BACK_INK_ALPHA }
+    // 单位渐变（x: 0→1）+ localMatrix 复用，避免每帧 new Shader 的分配抖动。
+    //
+    // 阴影用**半透明黑但收窄了浓度**：纯黑 0x44 压在暖纸上会显出一道生硬的脏灰边，
+    // 是"硬"的主要来源之一。降到 0x30 出头，让阴影更像纸的自遮挡而不是一条黑线。
     private val shadowMatrix = Matrix()
     private val foldShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        shader = android.graphics.LinearGradient(
-            0f, 0f, 1f, 0f,
-            0x44000000, 0x00000000,
-            android.graphics.Shader.TileMode.CLAMP,
-        )
-    }
-    private val backShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
             0x33000000, 0x00000000,
             android.graphics.Shader.TileMode.CLAMP,
         )
     }
-    // 卷起弧面高光：中间亮、两侧透明，模拟光照到卷曲纸面
+    private val backShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.LinearGradient(
+            0f, 0f, 1f, 0f,
+            0x26000000, 0x00000000,
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    // 卷起弧面高光：中间亮、两侧透明，模拟光照到卷曲纸面。
+    // 收到 0x22：纸不是塑料，中缝那道白太亮会显假
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            intArrayOf(0x00FFFFFF, 0x33FFFFFF, 0x00FFFFFF),
+            intArrayOf(0x00FFFFFF, 0x22FFFFFF, 0x00FFFFFF),
             floatArrayOf(0f, 0.5f, 1f),
             android.graphics.Shader.TileMode.CLAMP,
         )
@@ -95,7 +97,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         touchX: Float,
         touchY: Float,
         cornerBottom: Boolean,
+        paperColor: Int,
     ) {
+        this.paperColor = paperColor
         cornerX = width
         cornerY = if (cornerBottom) height else 0f
         touch.x = touchX.coerceIn(-width * 1.5f, width - 1.5f)
@@ -213,7 +217,11 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     private fun drawBack(canvas: Canvas, front: Bitmap) {
-        // 沿折线 (start1 → start2) 镜像前页作为背面
+        // 先把整个背面铺成纸色（此时 canvas 已被 clip 到背面区域）——
+        // 这一步决定了纸背是暖纸还是灰白。铺满纸色，纸背就和正面同一种纸。
+        canvas.drawColor(paperColor)
+
+        // 再沿折线 (start1 → start2) 镜像前页，用很低的 alpha 叠上去 = 淡淡透出的墨
         val dx = bezierStart2.x - bezierStart1.x
         val dy = bezierStart2.y - bezierStart1.y
         val len2 = dx * dx + dy * dy + 1e-6f
@@ -329,5 +337,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
          * 控制点飞到屏幕外十几万像素，路径自交、裁剪崩掉。
          */
         const val MIN_CORNER_GAP = 0.08f
+
+        /** 纸背透出的墨的浓度。真纸从背面看，另一面的字只是极淡的一层，不是灰版正文 */
+        const val BACK_INK_ALPHA = 36 // ~14%
     }
 }
