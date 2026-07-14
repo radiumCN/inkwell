@@ -250,9 +250,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         canvas.drawBitmap(front, backMatrix, backPaint)
     }
 
-    /** 背面靠折线处的暗部，增强纸张卷曲的立体感 */
+    /**
+     * 背面靠折线处的暗部 —— 这是"圆柱感"的主要来源。卷起的纸不是平的三角，
+     * 靠折缝那一侧陷进阴影（圆柱的谷）、往外渐亮到纸背本色（圆柱的背），眼睛才读成一根管子。
+     * 加宽到接近纸背的一半：太窄就还是一张平贴的反面。
+     */
     private fun drawBackShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 6f, maxWidth = 40f, towardLeft = false)
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 3.2f, maxWidth = 120f, towardLeft = false)
     }
 
     /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
@@ -280,7 +284,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /** 卷起弧面中段高光；卷得越多高光越明显 */
     private fun drawBackHighlight(canvas: Canvas) {
         val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
-        val hlWidth = (fold / 3f).coerceIn(0f, 90f)
+        // 与加宽后的谷影配套：高光也放宽，圆柱的"背"才有一条完整的亮带，而不是一道细白线
+        val hlWidth = (fold / 2.6f).coerceIn(0f, 130f)
         if (hlWidth < 2f) return
         val degree = Math.toDegrees(
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
@@ -298,8 +303,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         canvas.restore()
     }
 
+    /** 翻起页投在下页上的阴影。加宽、渐隐更远 —— legado 那道柔和的宽影就是立体感的另一半 */
     private fun drawFoldShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 4f, maxWidth = 60f, towardLeft = true)
+        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 2.6f, maxWidth = 110f, towardLeft = true)
     }
 
     /** 沿折线画渐变阴影条；shader 为单位渐变，用 localMatrix 定位（无每帧分配） */
@@ -341,7 +347,11 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     private companion object {
-        /** 纸背透出的墨的浓度。真纸从背面看，另一面的字只是极淡的一层，不是灰版正文 */
-        const val BACK_INK_ALPHA = 36 // ~14%
+        /**
+         * 纸背透出的墨的浓度。真纸从背面看，另一面的字只是极淡的一层。
+         * 从 14% 再压到 8%：大片平背面上，14% 仍能读出整段反字，像影印件贴反了；
+         * legado 的背面几乎看不到字，只有一层纸光。宁可再淡一点。
+         */
+        const val BACK_INK_ALPHA = 20 // ~8%
     }
 }
