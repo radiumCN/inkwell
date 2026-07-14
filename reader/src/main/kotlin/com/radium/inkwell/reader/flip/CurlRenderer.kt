@@ -72,7 +72,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = android.graphics.LinearGradient(
             0f, 0f, 1f, 0f,
-            intArrayOf(0x00FFFFFF, 0x22FFFFFF, 0x00FFFFFF),
+            intArrayOf(0x00FFFFFF, 0x18FFFFFF, 0x00FFFFFF),
             floatArrayOf(0f, 0.5f, 1f),
             android.graphics.Shader.TileMode.CLAMP,
         )
@@ -250,13 +250,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         canvas.drawBitmap(front, backMatrix, backPaint)
     }
 
-    /**
-     * 背面靠折线处的暗部 —— 这是"圆柱感"的主要来源。卷起的纸不是平的三角，
-     * 靠折缝那一侧陷进阴影（圆柱的谷）、往外渐亮到纸背本色（圆柱的背），眼睛才读成一根管子。
-     * 加宽到接近纸背的一半：太窄就还是一张平贴的反面。
-     */
+    /** 背面靠折线处的暗部，给卷起的纸一点立体感。克制一点 —— 太宽会在折缝旁显出一道生硬的带子 */
     private fun drawBackShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 3.2f, maxWidth = 120f, towardLeft = false)
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 5f, maxWidth = 50f, towardLeft = false)
     }
 
     /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
@@ -284,8 +280,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /** 卷起弧面中段高光；卷得越多高光越明显 */
     private fun drawBackHighlight(canvas: Canvas) {
         val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
-        // 与加宽后的谷影配套：高光也放宽，圆柱的"背"才有一条完整的亮带，而不是一道细白线
-        val hlWidth = (fold / 2.6f).coerceIn(0f, 130f)
+        val hlWidth = (fold / 4f).coerceIn(0f, 60f)
         if (hlWidth < 2f) return
         val degree = Math.toDegrees(
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
@@ -303,9 +298,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         canvas.restore()
     }
 
-    /** 翻起页投在下页上的阴影。加宽、渐隐更远 —— legado 那道柔和的宽影就是立体感的另一半 */
+    /** 翻起页投在下页上的柔和阴影 */
     private fun drawFoldShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 2.6f, maxWidth = 110f, towardLeft = true)
+        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 4f, maxWidth = 60f, towardLeft = true)
     }
 
     /** 沿折线画渐变阴影条；shader 为单位渐变，用 localMatrix 定位（无每帧分配） */
