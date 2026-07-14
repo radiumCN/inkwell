@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -245,7 +246,7 @@ fun ReaderMenu(
                                 Modifier
                                     .fillMaxWidth()
                                     .clickable { onApplySource(c) }
-                                    .padding(horizontal = 24.dp, vertical = 10.dp),
+                                    .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
                             ) {
                                 Text("${c.title}  ${c.author ?: ""}", maxLines = 1)
                                 Text(
@@ -300,7 +301,7 @@ private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
                         Modifier
                             .fillMaxWidth()
                             .clickable { onSelect(item.index) }
-                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                            .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
                         fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
                         color = if (item.index == current) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurface,

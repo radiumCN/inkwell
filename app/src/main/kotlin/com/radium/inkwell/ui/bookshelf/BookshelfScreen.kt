@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -28,6 +29,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -99,8 +101,16 @@ fun BookshelfScreen(
             FloatingActionButton(onClick = {
                 importLauncher.launch(arrayOf("text/plain", "application/epub+zip", "application/octet-stream", "application/x-mobipocket-ebook"))
             }) {
-                if (importing) CircularProgressIndicator(Modifier.padding(12.dp))
-                else Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                // FAB 是固定尺寸的，转圈也得钉住 24dp —— 默认的 40dp 会把图标位撑变形
+                if (importing) {
+                    CircularProgressIndicator(
+                        Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
+                } else {
+                    Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                }
             }
         },
     ) { padding ->

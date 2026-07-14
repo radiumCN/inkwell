@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.CompactTextField
@@ -104,14 +105,13 @@ fun SourceEditScreen(
                     modifier = Modifier.weight(1f).padding(end = 6.dp)
                         .align(androidx.compose.ui.Alignment.CenterVertically),
                 )
-                OutlinedButton(
+                SecondaryButton(
+                    text = "全链路测试",
                     onClick = viewModel::testSearchChain,
                     enabled = !state.testing,
+                    loading = state.testing,
                     modifier = Modifier.weight(1f).padding(start = 6.dp).align(androidx.compose.ui.Alignment.CenterVertically),
-                ) {
-                    if (state.testing) CircularProgressIndicator(Modifier.padding(4.dp))
-                    else Text("全链路测试")
-                }
+                )
             }
             if (state.testReport.isNotBlank()) {
                 Text(

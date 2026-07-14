@@ -43,7 +43,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import org.koin.androidx.compose.koinViewModel
@@ -132,7 +134,7 @@ fun BookPreviewScreen(
                         Modifier
                             .fillMaxWidth()
                             .clickable(enabled = !state.busy) { viewModel.read(chapter.index) }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                            .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -202,13 +204,13 @@ private fun Header(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(
+            SecondaryButton(
+                text = if (state.inShelf) "已在书架" else "加入书架",
                 onClick = viewModel::addToShelf,
                 enabled = !state.busy && !state.inShelf,
+                loading = state.busy && !state.inShelf,
                 modifier = Modifier.weight(1f),
-            ) {
-                Text(if (state.inShelf) "已在书架" else "加入书架")
-            }
+            )
             Button(
                 onClick = { viewModel.read() },
                 enabled = !state.busy,

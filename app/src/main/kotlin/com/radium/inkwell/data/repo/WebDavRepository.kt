@@ -33,6 +33,11 @@ class WebDavRepository(
         check(config.isConfigured) { "尚未配置 WebDAV" }
         val client = WebDavClient(config.url, config.username, config.password)
 
+        // 先建目录再读：首次同步时 inkwell/ 还不存在，直接 GET 备份文件，
+        // 坚果云对「父目录不存在」回的是 409 而不是 404 —— 同步就一次都成不了。
+        // MKCOL 是幂等的（已存在返回 405，客户端当成功）。
+        client.mkcol(DIR)
+
         val local = buildLocalPayload()
         val remote = client.get(BACKUP)?.let { BackupCodec.decode(it) }
 
@@ -47,7 +52,6 @@ class WebDavRepository(
             toUpload = local.copy(books = merged.books, sources = merged.sources)
         }
 
-        client.mkcol(DIR)
         client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
         prefs.markSynced(System.currentTimeMillis())
         if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"

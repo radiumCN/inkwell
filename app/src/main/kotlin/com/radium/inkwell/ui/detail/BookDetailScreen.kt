@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.PrimaryButton
 import coil3.compose.AsyncImage
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.repo.BookRepository
@@ -66,26 +68,14 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row {
-                Surface(
-                    Modifier.size(width = 96.dp, height = 128.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    if (b.coverPath != null) {
-                        AsyncImage(
-                            model = b.coverPath,
-                            contentDescription = b.title,
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        Text(
-                            b.title.take(4),
-                            Modifier.padding(8.dp),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                    }
-                }
+                // 从前这里手搓了一份封面（Surface + AsyncImage + take(4) 占位），
+                // 而 components 里早就有 BookCover —— 圆角还硬编码成 8.dp。
+                BookCover(
+                    title = b.title,
+                    coverModel = b.coverPath,
+                    modifier = Modifier.size(width = 96.dp, height = 128.dp),
+                    placeholderChars = 4,
+                )
                 Column(Modifier.padding(start = 16.dp).align(Alignment.CenterVertically)) {
                     Text(b.title, style = MaterialTheme.typography.titleLarge)
                     if (b.author.isNotBlank()) {
@@ -102,9 +92,11 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                     )
                 }
             }
-            Button(onClick = onRead, modifier = Modifier.fillMaxWidth()) {
-                Text(if (b.readAt > 0) "继续阅读" else "开始阅读")
-            }
+            PrimaryButton(
+                text = if (b.readAt > 0) "继续阅读" else "开始阅读",
+                onClick = onRead,
+                modifier = Modifier.fillMaxWidth(),
+            )
             if (!b.intro.isNullOrBlank()) {
                 Text("简介", style = MaterialTheme.typography.titleMedium)
                 Text(b.intro, style = MaterialTheme.typography.bodyMedium)

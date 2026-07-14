@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
@@ -94,19 +96,19 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
+                SecondaryButton(
+                    text = "测试并保存",
                     onClick = viewModel::testAndSave,
                     enabled = !state.busy,
                     modifier = Modifier.weight(1f),
-                ) { Text("测试并保存") }
-                Button(
+                )
+                PrimaryButton(
+                    text = "立即同步",
                     onClick = viewModel::syncNow,
                     enabled = !state.busy && state.configured,
+                    loading = state.busy,
                     modifier = Modifier.weight(1f),
-                ) {
-                    if (state.busy) CircularProgressIndicator(Modifier.padding(4.dp))
-                    else Text("立即同步")
-                }
+                )
             }
             if (state.lastSyncAt > 0) {
                 Text(
