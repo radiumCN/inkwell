@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.SlimSlider
 import androidx.compose.animation.AnimatedVisibility
@@ -410,13 +411,24 @@ private val MARGIN_H_OPTIONS = listOf(
 private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
 
-    Column(Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+    Column(Modifier.fillMaxWidth()) {
+        // TabRow 钉在顶不滚，只让下面的内容滚 —— 排版页项目多（字号/标题/边距/行距/字体/背景/亮度），
+        // 一屏放不下。从前内容 Column 既没 verticalScroll 也没高度上限，超出的部分被 sheet 直接裁掉、
+        // 还滚不动，背景/亮度全被压在屏幕外。
         TabRow(selectedTabIndex = tab) {
             SETTINGS_TABS.forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                // 上限 = 半屏多一点，太高会顶到状态栏；内容不足这个高度时 Column 自然收缩，不留空
+                .heightIn(max = Dimens.sheetEditorMaxHeight)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Dimens.screenPadding)
+                .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
+        ) {
             when (tab) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
