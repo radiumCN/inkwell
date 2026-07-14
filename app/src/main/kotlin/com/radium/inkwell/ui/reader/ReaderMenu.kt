@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -72,9 +73,15 @@ fun ReaderMenu(
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
+    // 菜单栏跟随阅读主题的纸张色。从前用 MaterialTheme.surface（白色），
+    // 而正文是米色/夜间色 —— 白条压在纸上非常割裂。
+    val theme = state.settings.theme
+    val barColor = Color(theme.background)
+    val barContent = Color(theme.textColor)
+
     Column(Modifier.fillMaxSize()) {
         // 顶栏
-        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
+        Surface(color = barColor, contentColor = barContent, shadowElevation = 4.dp) {
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -83,22 +90,35 @@ fun ReaderMenu(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(state.bookTitle, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text(
+                        state.bookTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         state.chapterTitle,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 次要文字也跟主题走：M3 的灰色在夜间纸张上会糊掉
+                        color = barContent.copy(alpha = 0.65f),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
 
-        // 中央空白区域点击关闭菜单
-        Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onDismiss))
+        // 中央区域：轻蒙层，把菜单读成「浮在正文之上的一层」，点击关闭
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.18f))
+                .clickable(onClick = onDismiss)
+        )
 
         // 底栏
-        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
+        Surface(color = barColor, contentColor = barContent, shadowElevation = 8.dp) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 8.dp)) {
                 // 章节进度
                 Row(
