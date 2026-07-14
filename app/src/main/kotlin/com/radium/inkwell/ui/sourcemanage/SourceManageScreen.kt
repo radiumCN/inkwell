@@ -25,6 +25,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlaylistAddCheck
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -45,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
@@ -81,19 +86,58 @@ fun SourceManageScreen(
     Scaffold(
         topBar = {
             if (selectionMode) {
+                // 批量操作栏：文字按钮塞不下五个（标题会被挤成竖排单字）。
+                // 按 Material 的 overflow 规则 —— 高频动作留成图标，低频的收进溢出菜单。
+                var overflowOpen by remember { mutableStateOf(false) }
                 TopAppBar(
-                    title = { Text("已选 ${selected.size} 个") },
+                    title = {
+                        Text(
+                            "已选 ${selected.size} 个",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = viewModel::clearSelection) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出多选")
+                            Icon(Icons.Default.Close, contentDescription = "退出多选")
                         }
                     },
                     actions = {
-                        TextButton(onClick = viewModel::selectAll) { Text("全选") }
-                        TextButton(onClick = { viewModel.validate(selected) }) { Text("校验") }
-                        TextButton(onClick = { viewModel.setEnabledSelected(true) }) { Text("启用") }
-                        TextButton(onClick = { viewModel.setEnabledSelected(false) }) { Text("禁用") }
-                        TextButton(onClick = { confirmBatchDelete = true }) { Text("删除") }
+                        IconButton(onClick = viewModel::selectAll) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                        }
+                        IconButton(onClick = { viewModel.validate(selected) }) {
+                            Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验")
+                        }
+                        IconButton(onClick = { confirmBatchDelete = true }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除",
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        IconButton(onClick = { overflowOpen = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                        }
+                        DropdownMenu(
+                            expanded = overflowOpen,
+                            onDismissRequest = { overflowOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("启用") },
+                                onClick = {
+                                    overflowOpen = false
+                                    viewModel.setEnabledSelected(true)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("禁用") },
+                                onClick = {
+                                    overflowOpen = false
+                                    viewModel.setEnabledSelected(false)
+                                },
+                            )
+                        }
                     },
                 )
             } else TopAppBar(
