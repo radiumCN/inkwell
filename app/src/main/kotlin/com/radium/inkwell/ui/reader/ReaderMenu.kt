@@ -197,14 +197,28 @@ fun ReaderMenu(
                     )
             )
 
-            // 底栏
+            // 底栏。与顶栏同规格：不投阴影，只用一根发丝分隔线 ——
+            // 8dp 的投影落在同色的纸上就是一道脏灰线，而且顶栏已经改掉了，
+            // 一边发丝线一边糊阴影，两条栏根本不像一套东西
             Surface(
                 color = barColor,
                 contentColor = barContent,
-                shadowElevation = 8.dp,
                 modifier = Modifier.animateEnterExit(bottomBarEnter(), bottomBarExit()),
             ) {
-                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(vertical = 8.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            drawLine(
+                                color = barContent.copy(alpha = 0.10f),
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx(),
+                            )
+                        }
+                        .navigationBarsPadding()
+                        .padding(vertical = 8.dp)
+                ) {
                     // 章节进度
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp),

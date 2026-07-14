@@ -160,6 +160,7 @@ fun SourceManageScreen(
                                 tint = MaterialTheme.colorScheme.error,
                             )
                         }
+                        Box {
                         IconButton(onClick = { overflowOpen = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "更多")
                         }
@@ -202,6 +203,7 @@ fun SourceManageScreen(
                                 onClick = { overflowOpen = false; viewModel.exportSelected() },
                             )
                         }
+                        }
                     },
                 )
             } else TopAppBar(
@@ -220,6 +222,7 @@ fun SourceManageScreen(
                     IconButton(onClick = { showSortPicker = true }) {
                         Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序")
                     }
+                    Box {
                     IconButton(onClick = { showImportMenu = true }) {
                         Icon(Icons.Default.Add, contentDescription = "导入书源")
                     }
@@ -250,6 +253,7 @@ fun SourceManageScreen(
                                 showUrlImport = true
                             },
                         )
+                    }
                     }
                 },
             )

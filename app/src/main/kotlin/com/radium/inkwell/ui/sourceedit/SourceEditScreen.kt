@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -88,14 +89,16 @@ fun SourceEditScreen(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp),
             )
             Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                OutlinedButton(
+                SecondaryButton(
+                    text = "校验/格式化",
                     onClick = viewModel::formatJson,
                     modifier = Modifier.weight(1f).padding(end = 6.dp),
-                ) { Text("校验/格式化") }
-                Button(
+                )
+                PrimaryButton(
+                    text = "保存",
                     onClick = viewModel::save,
                     modifier = Modifier.weight(1f).padding(start = 6.dp),
-                ) { Text("保存") }
+                )
             }
             Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 CompactTextField(

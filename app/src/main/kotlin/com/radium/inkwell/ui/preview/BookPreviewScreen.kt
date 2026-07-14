@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -107,14 +108,15 @@ fun BookPreviewScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = viewModel::load) { Text("重试") }
+                PrimaryButton(text = "重试", onClick = viewModel::load)
 
                 // 这本书还有别的书源 —— 一个源挂了不该让人卡死在这
                 if (state.sources.size > 1) {
                     Spacer(Modifier.height(24.dp))
-                    OutlinedButton(onClick = { sourcePickerOpen = true }) {
-                        Text("换个书源试试（共 ${state.sources.size} 个）")
-                    }
+                    SecondaryButton(
+                        text = "换个书源试试（共 ${state.sources.size} 个）",
+                        onClick = { sourcePickerOpen = true },
+                    )
                 }
             }
 
@@ -214,13 +216,12 @@ private fun Header(
                 loading = state.busy && !state.inShelf,
                 modifier = Modifier.weight(1f),
             )
-            Button(
+            PrimaryButton(
+                text = "开始阅读",
                 onClick = { viewModel.read() },
                 enabled = !state.busy,
                 modifier = Modifier.weight(1f),
-            ) {
-                Text("开始阅读")
-            }
+            )
         }
 
         if (!state.intro.isNullOrBlank()) {

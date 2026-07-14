@@ -81,7 +81,12 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
         ) {
             SectionLabel("模式")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 横滚兜底：眼下 3 个 chip 放得下，但一旦文案变长或加一档，固定 Row 会把它们压扁
+            // （自动翻页那排 chip 就这么把"45s"压成过竖排）
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 ThemeMode.entries.forEach { mode ->
                     FilterChip(
                         selected = config.mode == mode,

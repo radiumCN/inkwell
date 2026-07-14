@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -279,7 +280,7 @@ private fun Editor(
 
         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
             Spacer(Modifier.weight(1f))
-            Button(onClick = onSave, enabled = patternError == null) { Text("保存") }
+            PrimaryButton(text = "保存", onClick = onSave, enabled = patternError == null)
         }
     }
 }

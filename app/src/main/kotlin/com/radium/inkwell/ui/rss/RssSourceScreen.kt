@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.rss
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,6 +78,7 @@ fun RssSourceScreen(
                     }
                 },
                 actions = {
+                    Box {
                     IconButton(onClick = { showImportMenu = true }) {
                         Icon(Icons.Default.Add, contentDescription = "添加订阅源")
                     }
@@ -101,6 +103,7 @@ fun RssSourceScreen(
                                 )
                             },
                         )
+                    }
                     }
                 },
             )
