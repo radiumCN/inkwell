@@ -94,6 +94,8 @@ data class ReaderTheme(
         val GREEN = ReaderTheme("green", "青竹", 0xFFCCE8CF, 0xFF2E4033, 0xFF1F2E23, 0xFF5F7A66)
         /** 中性灰，一点黄都不带 —— 有人就是觉得暖色纸「脏」 */
         val STONE = ReaderTheme("stone", "灰岩", 0xFFE9E7E2, 0xFF33302B, 0xFF23211D, 0xFF87847D)
+        /** 微暖的本白纸，正文墨绿灰 —— 比暖纸更素净、比净白更耐看 */
+        val IVORY = ReaderTheme("ivory", "象牙", 0xFFEEECDF, 0xFF3C3A2E, 0xFF323026, 0xFF838174)
 
         // ---- 深色纸 ----
         val NIGHT = ReaderTheme("night", "夜色", 0xFF121212, 0xFFA3A3A3, 0xFFC4C4C4, 0xFF6B6B6B, isDark = true)
@@ -102,9 +104,11 @@ data class ReaderTheme(
         val INKBLUE = ReaderTheme("inkblue", "墨蓝", 0xFF10151F, 0xFF8CA6C9, 0xFFA9BEDA, 0xFF5C6E88, isDark = true)
         /** 真·纯黑：OLED 屏上黑像素不点亮，省电，且没有暗角 */
         val OLED = ReaderTheme("oled", "纯黑", 0xFF000000, 0xFF999999, 0xFFBBBBBB, 0xFF636363, isDark = true)
+        /** 近黑底 + 中性亮灰字，不带任何色偏 —— 纯黑太硬、夜色偏暖时的中间选择 */
+        val OBSIDIAN = ReaderTheme("obsidian", "曜石", 0xFF1C1C1C, 0xFFE9E9E9, 0xFFECECEC, 0xFF8D8D8D, isDark = true)
 
-        val LIGHT = listOf(PAPER, RICE, KRAFT, GREEN, STONE, WHITE)
-        val DARK = listOf(NIGHT, CHARCOAL, INKBLUE, OLED)
+        val LIGHT = listOf(PAPER, RICE, KRAFT, GREEN, STONE, IVORY, WHITE)
+        val DARK = listOf(NIGHT, CHARCOAL, INKBLUE, OBSIDIAN, OLED)
         val ALL = LIGHT + DARK
 
         /** 自定义纸张的 id；配色存在 ReaderPrefs 里，不在这张表上 */
