@@ -1,5 +1,8 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,7 +72,14 @@ fun EmptyState(
     }
 }
 
-/** 书封缩略图：有封面显示图片，无封面用书名首字占位 */
+/**
+ * 书封缩略图。
+ *
+ * 默认封面**永远垫在底层**，图片加载成功就把它盖住。从前只有 `coverModel == null` 才画占位，
+ * 于是「有封面地址、但抓不下来」这种最常见的情况（书源的图床挂了、防盗链、超时）
+ * 落进 AsyncImage 的失败分支后就是一整块空白灰方 —— 连书名都没有，用户根本认不出是哪本书。
+ * 垫在底层就不必去猜 Coil 的加载状态：成功即遮住，失败即透出。
+ */
 @Composable
 fun BookCover(
     title: String,
@@ -83,24 +93,69 @@ fun BookCover(
         color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 1.dp,
     ) {
-        if (coverModel != null) {
-            AsyncImage(
-                model = coverModel,
-                contentDescription = title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(6.dp)) {
-                Text(
-                    title.take(placeholderChars),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
+        Box {
+            DefaultCover(title, placeholderChars)
+            if (coverModel != null) {
+                AsyncImage(
+                    model = coverModel,
+                    contentDescription = title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
     }
+}
+
+/**
+ * 没有封面时长这样：一块带书脊的素封面，印着书名。
+ *
+ * 底色由**书名决定**（同一本书永远同一个色），而不是随机或一律灰 ——
+ * 一屏灰方块里找书，等于逐个读字；有了颜色，位置和色块本身就成了记忆线索。
+ * 色板全部取自 App 的墨/纸语汇，且都足够深，白字压得住（不必逐个算对比度）。
+ */
+@Composable
+private fun DefaultCover(title: String, maxChars: Int) {
+    val base = remember(title) { COVER_PALETTE[colorIndex(title)] }
+    Box(Modifier.fillMaxSize().background(base)) {
+        // 书脊：左侧一道压深的窄条。没有它，纯色块看着像色卡而不像书
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(0.07f)
+                .background(Color.Black.copy(alpha = 0.16f))
+        )
+        Text(
+            title.take(maxChars),
+            Modifier
+                .align(Alignment.Center)
+                .padding(start = 12.dp, end = 6.dp),
+            style = MaterialTheme.typography.titleSmall,
+            color = Color.White.copy(alpha = 0.92f),
+            textAlign = TextAlign.Center,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 墨/纸语汇里的深色调；都够深，白字直接压得住 */
+private val COVER_PALETTE = listOf(
+    Color(0xFF92400E), // 赭石（品牌主色）
+    Color(0xFF2B3A55), // 墨蓝
+    Color(0xFF3E6B4F), // 竹绿
+    Color(0xFF7C4A21), // 牛皮
+    Color(0xFF5B4B7A), // 紫檀
+    Color(0xFF6B3A3A), // 绛
+    Color(0xFF44615E), // 苍
+    Color(0xFF7A5C2E), // 秋香
+)
+
+/** 按书名取色。hashCode 在 JVM 上是规范定义的，同一本书跨设备、跨启动都是同一个色 */
+internal fun colorIndex(title: String): Int {
+    val h = title.hashCode()
+    // Int.MIN_VALUE 取绝对值还是它自己（负数），直接 % 会得到负下标
+    return ((h % COVER_PALETTE.size) + COVER_PALETTE.size) % COVER_PALETTE.size
 }
 
 /** 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点 */

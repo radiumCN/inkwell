@@ -414,17 +414,21 @@ fun BookshelfScreen(
 @Composable
 private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> Unit) {
     Column(
-        Modifier
-            // clip 在 clickable 之前：否则涟漪泛成整个「封面 + 标题」的大方块
-            .clip(MaterialTheme.shapes.medium)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
+        // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
+        // 就直接啃掉了书名第一个字的一角。
+        //
+        // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
+        // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         Box {
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
                 modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
-                placeholderChars = 6,
+                // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
+                placeholderChars = 14,
             )
             // 「显示隐藏的书」开着时，得看得出哪些是隐藏的 —— 否则分不清，会重复隐藏
             if (book.hidden) {
