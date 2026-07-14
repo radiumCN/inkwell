@@ -75,7 +75,7 @@ val appModule = module {
     single { BookSourceRepository(get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get()) }
-    single { WebDavRepository(get(), get(), get()) }
+    single { WebDavRepository(get(), get(), get(), get(), get(), get()) }
 
     viewModel { BookshelfViewModel(get()) }
     viewModel { (bookId: String) ->

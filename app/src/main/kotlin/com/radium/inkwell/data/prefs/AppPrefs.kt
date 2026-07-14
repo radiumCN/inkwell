@@ -10,7 +10,9 @@ import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
 import com.radium.inkwell.update.UpdateChannel
+import com.radium.inkwell.core.webdav.BackupSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.appDataStore by preferencesDataStore(name = "app_prefs")
@@ -27,6 +29,62 @@ class AppPrefs(private val context: Context) {
         val CUSTOM_DARK_SEED = longPreferencesKey("custom_dark_seed")
         val CUSTOM_DARK_BG = longPreferencesKey("custom_dark_bg")
         val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
+        /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
+        val UPDATED_AT = longPreferencesKey("settings_updated_at")
+    }
+
+    private suspend fun touch() {
+        context.appDataStore.edit { it[Keys.UPDATED_AT] = System.currentTimeMillis() }
+    }
+
+    suspend fun updatedAt(): Long = context.appDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
+
+    /** 从远端导入后按远端的时间戳落章，免得两台设备来回覆盖 */
+    suspend fun stampUpdatedAt(at: Long) {
+        context.appDataStore.edit { it[Keys.UPDATED_AT] = at }
+    }
+
+    /** WebDAV 备份用：设置 ↔ 字符串表。读到不认识的键忽略，新旧版本能共用同一份备份 */
+    suspend fun exportForBackup(): BackupSettings {
+        val p = context.appDataStore.data.first()
+        val theme = themeConfig.first()
+        return BackupSettings(
+            updatedAt = p[Keys.UPDATED_AT] ?: 0L,
+            values = mapOf(
+                "update_channel" to (p[Keys.UPDATE_CHANNEL] ?: UpdateChannel.STABLE.name),
+                "change_source_check_author" to (p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true).toString(),
+                "theme_mode" to theme.mode.name,
+                "theme_light" to theme.lightPreset,
+                "theme_dark" to theme.darkPreset,
+                "custom_light_seed" to theme.customLightSeed.toString(),
+                "custom_light_bg" to theme.customLightBg.toString(),
+                "custom_dark_seed" to theme.customDarkSeed.toString(),
+                "custom_dark_bg" to theme.customDarkBg.toString(),
+            ),
+        )
+    }
+
+    suspend fun importFromBackup(backup: BackupSettings) {
+        val v = backup.values
+        val base = themeConfig.first()
+        context.appDataStore.edit { p ->
+            v["update_channel"]
+                ?.takeIf { name -> UpdateChannel.entries.any { it.name == name } }
+                ?.let { p[Keys.UPDATE_CHANNEL] = it }
+            v["change_source_check_author"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = it }
+            v["theme_mode"]
+                ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
+                ?.let { p[Keys.THEME_MODE] = it }
+            p[Keys.THEME_LIGHT] = v["theme_light"] ?: base.lightPreset
+            p[Keys.THEME_DARK] = v["theme_dark"] ?: base.darkPreset
+            p[Keys.CUSTOM_LIGHT_SEED] = v["custom_light_seed"]?.toLongOrNull() ?: base.customLightSeed
+            p[Keys.CUSTOM_LIGHT_BG] = v["custom_light_bg"]?.toLongOrNull() ?: base.customLightBg
+            p[Keys.CUSTOM_DARK_SEED] = v["custom_dark_seed"]?.toLongOrNull() ?: base.customDarkSeed
+            p[Keys.CUSTOM_DARK_BG] = v["custom_dark_bg"]?.toLongOrNull() ?: base.customDarkBg
+            // 这份设置来自远端，时间戳照抄远端的
+            p[Keys.UPDATED_AT] = backup.updatedAt
+        }
     }
 
     /**
@@ -40,6 +98,7 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setChangeSourceCheckAuthor(on: Boolean) {
         context.appDataStore.edit { it[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = on }
+        touch()
     }
 
     val updateChannel: Flow<UpdateChannel> = context.appDataStore.data.map { p ->
@@ -50,6 +109,7 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setUpdateChannel(channel: UpdateChannel) {
         context.appDataStore.edit { it[Keys.UPDATE_CHANNEL] = channel.name }
+        touch()
     }
 
     val themeConfig: Flow<ThemeConfig> = context.appDataStore.data.map { p ->
@@ -77,5 +137,6 @@ class AppPrefs(private val context: Context) {
             p[Keys.CUSTOM_DARK_SEED] = config.customDarkSeed
             p[Keys.CUSTOM_DARK_BG] = config.customDarkBg
         }
+        touch()
     }
 }

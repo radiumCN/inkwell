@@ -4,6 +4,7 @@ import com.radium.inkwell.core.webdav.BackupBook
 import com.radium.inkwell.core.webdav.BackupCodec
 import com.radium.inkwell.core.webdav.BackupMerger
 import com.radium.inkwell.core.webdav.BackupPayload
+import com.radium.inkwell.core.webdav.BackupReplaceRule
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
 import com.radium.inkwell.data.db.dao.BookDao
@@ -11,6 +12,11 @@ import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookType
+import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.data.prefs.ReaderPrefs
+import com.radium.inkwell.data.prefs.exportForBackup
+import com.radium.inkwell.data.prefs.importFromBackup
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import kotlinx.coroutines.flow.first
 
@@ -18,6 +24,9 @@ class WebDavRepository(
     private val bookDao: BookDao,
     private val sourceDao: BookSourceDao,
     private val prefs: WebDavPrefs,
+    private val readerPrefs: ReaderPrefs,
+    private val appPrefs: AppPrefs,
+    private val replaceRules: ReplaceRuleRepository,
 ) {
     private companion object {
         const val DIR = "inkwell"
@@ -48,8 +57,17 @@ class WebDavRepository(
         } else {
             val merged = BackupMerger.merge(local, remote)
             applyToLocal(merged)
-            applied = merged.changedBooks.size + merged.changedSources.size
-            toUpload = local.copy(books = merged.books, sources = merged.sources)
+            applied = merged.changedBooks.size +
+                merged.changedSources.size +
+                merged.changedReplaceRules.size +
+                listOfNotNull(merged.readerSettings, merged.appSettings).size
+            toUpload = local.copy(
+                books = merged.books,
+                sources = merged.sources,
+                replaceRules = merged.replaceRules,
+                readerSettings = merged.mergedReaderSettings,
+                appSettings = merged.mergedAppSettings,
+            )
         }
 
         client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
@@ -70,8 +88,25 @@ class WebDavRepository(
             )
         },
         sources = sourceDao.getAll().map { s ->
-            BackupSource(s.id, s.name, s.enabled, s.json, s.updatedAt)
+            BackupSource(
+                id = s.id, name = s.name, enabled = s.enabled, json = s.json,
+                updatedAt = s.updatedAt,
+                // 带上 legado 原文与转换器版本：换设备后书源才能被新版转换器重转，
+                // 否则同步下来的书源 sourceJson 是空的，只能手动重新导入
+                sourceJson = s.sourceJson,
+                converterVersion = s.converterVersion,
+                sortOrder = s.sortOrder,
+            )
         },
+        replaceRules = replaceRules.getAll().map { r ->
+            BackupReplaceRule(
+                id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
+                isRegex = r.isRegex, scope = r.scope, enabled = r.enabled,
+                sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+            )
+        },
+        readerSettings = readerPrefs.exportForBackup(),
+        appSettings = appPrefs.exportForBackup(),
     )
 
     private suspend fun applyToLocal(merged: BackupMerger.MergeResult) {
@@ -104,7 +139,24 @@ class WebDavRepository(
             }
         }
         merged.changedSources.forEach { s ->
-            sourceDao.upsert(BookSourceEntity(s.id, s.name, s.enabled, 0, s.json, s.updatedAt))
+            sourceDao.upsert(
+                BookSourceEntity(
+                    id = s.id, name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
+                    json = s.json, updatedAt = s.updatedAt,
+                    sourceJson = s.sourceJson, converterVersion = s.converterVersion,
+                )
+            )
         }
+        replaceRules.upsertAll(
+            merged.changedReplaceRules.map { r ->
+                ReplaceRuleEntity(
+                    id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
+                    isRegex = r.isRegex, scope = r.scope, enabled = r.enabled,
+                    sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+                )
+            }
+        )
+        merged.readerSettings?.let { readerPrefs.importFromBackup(it) }
+        merged.appSettings?.let { appPrefs.importFromBackup(it) }
     }
 }

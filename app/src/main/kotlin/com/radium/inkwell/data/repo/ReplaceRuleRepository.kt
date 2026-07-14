@@ -81,23 +81,38 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
 
     suspend fun getById(id: String): ReplaceRuleEntity? = dao.getById(id)
 
-    /** 首次启动塞一批常见的广告净化规则，省得用户对着空列表发呆 */
+    /**
+     * 首次启动塞一批常见的广告净化规则，省得用户对着空列表发呆。
+     *
+     * id 必须是**确定性**的，不能用随机 UUID：两台设备各自预置一套，一同步就变成
+     * 两倍的重复规则（WebDAV 合并是按 id 走的，认不出它们是同一条）。
+     */
     suspend fun seedIfEmpty() {
         if (dao.getAll().isNotEmpty()) return
         DEFAULTS.forEachIndexed { i, d ->
             dao.upsert(
                 ReplaceRuleEntity(
-                    id = UUID.randomUUID().toString(),
+                    id = "seed:${d.first}",
                     name = d.first,
                     pattern = d.second,
                     replacement = "",
                     isRegex = true,
                     enabled = false, // 默认不开：净化是有损的，得让用户自己点头
                     sortOrder = i,
-                    updatedAt = System.currentTimeMillis(),
+                    // 预置规则的时间戳落在纪元原点：任何一台设备的真实改动都比它新，
+                    // 同步时不会拿一份没人动过的默认值去覆盖对面的修改。
+                    updatedAt = 0,
                 )
             )
         }
+    }
+
+    // ---- WebDAV 备份 ----
+
+    suspend fun getAll(): List<ReplaceRuleEntity> = dao.getAll()
+
+    suspend fun upsertAll(rules: List<ReplaceRuleEntity>) {
+        rules.forEach { dao.upsert(it) }
     }
 
     private companion object {
