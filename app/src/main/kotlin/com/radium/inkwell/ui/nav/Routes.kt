@@ -46,6 +46,9 @@ data class SearchRoute(val initialQuery: String? = null)
 object ExploreRoute
 
 @Serializable
+object ReplaceRuleRoute
+
+@Serializable
 object SourceManageRoute
 
 @Serializable

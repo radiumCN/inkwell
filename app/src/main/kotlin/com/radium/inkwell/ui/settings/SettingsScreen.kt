@@ -54,6 +54,7 @@ fun SettingsScreen(
     onOpenWebDav: () -> Unit,
     onOpenTheme: () -> Unit,
     onOpenSources: () -> Unit,
+    onOpenReplaceRules: () -> Unit,
 ) {
     val context = LocalContext.current
     val updateChecker = koinInject<UpdateChecker>()
@@ -128,6 +129,11 @@ fun SettingsScreen(
                 title = "书源管理",
                 subtitle = "导入、启用、校验与删除",
                 onClick = onOpenSources,
+            )
+            SettingRow(
+                title = "净化替换规则",
+                subtitle = "删掉正文里的广告、水印与防盗段落",
+                onClick = onOpenReplaceRules,
             )
             SwitchRow(
                 title = "换源时匹配作者",

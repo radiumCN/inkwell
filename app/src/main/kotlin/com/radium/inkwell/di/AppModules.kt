@@ -14,6 +14,7 @@ import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.reader.ReaderViewModel
@@ -29,12 +30,17 @@ import org.koin.dsl.module
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), InkwellDb::class.java, "inkwell.db")
-            .addMigrations(InkwellDb.MIGRATION_1_2, InkwellDb.MIGRATION_2_3)
+            .addMigrations(
+                InkwellDb.MIGRATION_1_2,
+                InkwellDb.MIGRATION_2_3,
+                InkwellDb.MIGRATION_3_4,
+            )
             .build()
     }
     single { get<InkwellDb>().bookDao() }
     single { get<InkwellDb>().chapterDao() }
     single { get<InkwellDb>().bookSourceDao() }
+    single { get<InkwellDb>().replaceRuleDao() }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
     single { BookParserRegistry(listOf(EpubParser(), MobiParser(), TxtParser())) }
@@ -54,11 +60,20 @@ val appModule = module {
     single<com.radium.inkwell.core.source.PageRenderer> {
         com.radium.inkwell.data.source.WebViewPageRenderer(androidContext())
     }
-    single { BookSourceEngine(http = get(), scriptRuntime = get(), renderer = get()) }
+    single {
+        val replaceRules = get<ReplaceRuleRepository>()
+        BookSourceEngine(
+            http = get(),
+            scriptRuntime = get(),
+            renderer = get(),
+            globalPurify = { source -> replaceRules.purifyFor(source) },
+        )
+    }
     single { com.radium.inkwell.update.UpdateChecker() }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
     single { BookSourceRepository(get()) }
+    single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get()) }
     single { WebDavRepository(get(), get(), get()) }
 
@@ -74,4 +89,5 @@ val appModule = module {
     viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
     viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
+    viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
 }

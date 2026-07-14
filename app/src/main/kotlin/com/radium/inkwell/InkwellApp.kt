@@ -30,6 +30,13 @@ class InkwellApp : Application() {
             runCatching { koin.get<BookSourceRepository>().reconvertOutdated() }
         }
 
+        // 首次启动预置几条常见的广告净化规则（默认关闭，用户自己决定开哪条）
+        appScope.launch {
+            runCatching {
+                koin.get<com.radium.inkwell.data.repo.ReplaceRuleRepository>().seedIfEmpty()
+            }
+        }
+
         // 冷启动静默同步（已配置 WebDAV 时）；失败不打扰用户
         appScope.launch {
             runCatching {

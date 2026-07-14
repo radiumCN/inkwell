@@ -7,19 +7,27 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.ChapterDao
+import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 
 @Database(
-    entities = [BookEntity::class, ChapterEntity::class, BookSourceEntity::class],
-    version = 3,
+    entities = [
+        BookEntity::class,
+        ChapterEntity::class,
+        BookSourceEntity::class,
+        ReplaceRuleEntity::class,
+    ],
+    version = 4,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun chapterDao(): ChapterDao
     abstract fun bookSourceDao(): BookSourceDao
+    abstract fun replaceRuleDao(): ReplaceRuleDao
 
     companion object {
         /**
@@ -45,6 +53,27 @@ abstract class InkwellDb : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book_source ADD COLUMN sourceJson TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE book_source ADD COLUMN converterVersion INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** 用户自定义的净化替换规则。纯新增表，不动任何既有数据 */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS replace_rule (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        pattern TEXT NOT NULL,
+                        replacement TEXT NOT NULL DEFAULT '',
+                        isRegex INTEGER NOT NULL DEFAULT 1,
+                        scope TEXT NOT NULL DEFAULT '',
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        sortOrder INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }
