@@ -155,11 +155,20 @@ class NetBookRepository(
         book: BookEntity,
         newResult: SearchResult,
         newRule: BookSourceRule,
+        /**
+         * 精确还原进度，供「撤销自动换源」用。
+         *
+         * 常规换源靠 [alignProgress] 按章节标题对齐，且把字符偏移抹成 0（换了站，同一章的分段
+         * 与字数都不同，偏移没有意义）。但撤销是**回到原来那个源**，偏移在那儿是有效的 ——
+         * 走对齐反而会把用户读到的位置弄丢，撤销就成了另一次破坏。
+         */
+        restore: ReadAnchor? = null,
     ): Result<Unit> = runCatching {
         val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl)
         check(toc.isNotEmpty()) { "新书源目录为空" }
-        // 换源只能沿用章节序号：换了站，同一章的正文分段与字数都不同，字符偏移没有意义
-        val (newIndex, _) = alignProgress(book.id, book, toc)
+        val (newIndex, newOffset) = restore
+            ?.let { it.chapterIndex.coerceIn(0, toc.lastIndex) to it.charOffset }
+            ?: alignProgress(book.id, book, toc).let { it.first to 0 }
 
         cache.clear(book.id) // 旧源的正文缓存整本作废
         writeToc(book.id, toc)
@@ -171,11 +180,14 @@ class NetBookRepository(
                 totalChapters = toc.size,
                 latestChapterTitle = toc.lastOrNull()?.title,
                 readChapterIndex = newIndex,
-                readCharOffset = 0,
+                readCharOffset = newOffset,
                 updatedAt = System.currentTimeMillis(),
             )
         )
     }
+
+    /** 阅读位置的真身：第几章 + 章内第几个字 */
+    data class ReadAnchor(val chapterIndex: Int, val charOffset: Int)
 
     private fun normalizeTitle(t: String): String =
         t.replace(Regex("[\\s　（）()【】\\[\\]:：、,，.。]"), "")

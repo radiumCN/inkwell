@@ -30,6 +30,7 @@ class AppPrefs(private val context: Context) {
         val CUSTOM_DARK_BG = longPreferencesKey("custom_dark_bg")
         val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
+        val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
@@ -57,6 +58,7 @@ class AppPrefs(private val context: Context) {
                 "update_channel" to (p[Keys.UPDATE_CHANNEL] ?: UpdateChannel.STABLE.name),
                 "change_source_check_author" to (p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true).toString(),
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
+                "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
@@ -80,6 +82,8 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = it }
             v["text_selection_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.TEXT_SELECTION] = it }
+            v["auto_change_source"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
             v["theme_mode"]
@@ -116,6 +120,16 @@ class AppPrefs(private val context: Context) {
      */
     val textSelectionEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
         p[Keys.TEXT_SELECTION] ?: true
+    }
+
+    /** 正文读不出来时自动换一个能读的源。默认开 —— 与 Legado 原生一致 */
+    val autoChangeSource: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.AUTO_CHANGE_SOURCE] ?: true
+    }
+
+    suspend fun setAutoChangeSource(on: Boolean) {
+        context.appDataStore.edit { it[Keys.AUTO_CHANGE_SOURCE] = on }
+        touch()
     }
 
     suspend fun setTextSelectionEnabled(on: Boolean) {

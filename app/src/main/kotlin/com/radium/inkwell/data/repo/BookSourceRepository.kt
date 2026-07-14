@@ -186,6 +186,31 @@ class BookSourceRepository(private val dao: BookSourceDao) {
             runCatching { json.decodeFromString<BookSourceRule>(entity.json) }.getOrNull()
         }
 
+    /**
+     * 启用的书源，**连校验结果一起带出来**。
+     *
+     * [getEnabledRules] 只给 rule，把 entity 上的 checkStatus/respondTime/sortOrder 全丢了 ——
+     * 自动换源要靠这些决定先试谁（校验通过的、响应快的优先占住并发名额）。
+     */
+    suspend fun getEnabledForSwitch(): List<EnabledSource> =
+        dao.getEnabled().mapNotNull { entity ->
+            val rule = runCatching { json.decodeFromString<BookSourceRule>(entity.json) }
+                .getOrNull() ?: return@mapNotNull null
+            EnabledSource(
+                rule = rule,
+                checkStatus = entity.checkStatus,
+                respondTime = entity.respondTime,
+                sortOrder = entity.sortOrder,
+            )
+        }
+
+    data class EnabledSource(
+        val rule: BookSourceRule,
+        val checkStatus: Int,
+        val respondTime: Long,
+        val sortOrder: Int,
+    )
+
     fun parseRule(text: String): Result<BookSourceRule> =
         runCatching { json.decodeFromString(text.trim()) }
 

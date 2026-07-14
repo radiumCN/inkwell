@@ -74,6 +74,7 @@ fun SettingsScreen(
     }
     val channel by appPrefs.updateChannel.collectAsState(initial = UpdateChannel.STABLE)
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
+    val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
     val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
     val hiddenRequireAuth by appPrefs.hiddenRequireAuth.collectAsState(initial = false)
@@ -172,6 +173,16 @@ fun SettingsScreen(
                 },
                 checked = textSelection,
                 onCheckedChange = { on -> scope.launch { appPrefs.setTextSelectionEnabled(on) } },
+            )
+            SwitchRow(
+                title = "自动换源",
+                subtitle = if (autoChangeSource) {
+                    "正文读不出来或超过 15 秒没回来时，自动找一个能读出这一章的源。换完会提示，可撤销"
+                } else {
+                    "已关闭。读不出来时停在错误页，由你手动换源"
+                },
+                checked = autoChangeSource,
+                onCheckedChange = { on -> scope.launch { appPrefs.setAutoChangeSource(on) } },
             )
             SwitchRow(
                 title = "换源时匹配作者",

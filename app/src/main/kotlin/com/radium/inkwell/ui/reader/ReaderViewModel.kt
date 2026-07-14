@@ -14,6 +14,8 @@ import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
+import com.radium.inkwell.data.repo.AutoSourceSwitcher
+import com.radium.inkwell.data.repo.TitleMatch
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReadPosition
 import com.radium.inkwell.reader.api.ReaderBookSource
@@ -106,7 +108,27 @@ data class ReaderUiState(
     val sourcesTotal: Int = 0,
     /** 换源是否用作者卡人（同 Legado 的 changeSourceCheckAuthor） */
     val checkAuthor: Boolean = true,
+    /** 正在自动换源（正文读不出来时自动找一个能读的源） */
+    val autoChanging: Boolean = false,
+    val autoChangeDone: Int = 0,
+    val autoChangeTotal: Int = 0,
+    /**
+     * 刚自动换过源 → 顶部提示条 + 撤销。非空 = 新源的名字。
+     *
+     * 必须告诉用户：自动换源可能换到删减版/盗版，正文和原来不是一回事。
+     * 静默换掉的话，用户只会觉得"这书怎么突然变了"，根本想不到是 App 干的。
+     */
+    val autoChangedTo: String? = null,
 )
+
+/**
+ * 正文加载超时。
+ *
+ * 从前代码里根本没有"超时"这个概念 —— 只能干等 OkHttp 的 10s 读超时抛出来，
+ * 而带 JS 渲染回退或多页正文的章节能拖到分钟级都不报错，用户就一直看着转圈。
+ * 「书源网络很差」这个场景需要一个明确的放弃点。
+ */
+private class ContentTimeoutException : Exception("正文加载超时")
 
 /**
  * 阅读会话：持有数据源、3 章分页窗口、页游标。
@@ -123,6 +145,7 @@ class ReaderViewModel(
     private val contentCache: ChapterContentCache,
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
+    private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -199,6 +222,8 @@ class ReaderViewModel(
             }
         } catch (e: Exception) {
             _state.value = _state.value.copy(loading = false, error = e.message ?: "打开书籍失败")
+            // 书源被删了、目录拉不到 —— 这两种进书就废的情况，Legado 原生也自动换源
+            maybeAutoChangeSource(e.message ?: "打开书籍失败")
         }
     }
 
@@ -375,7 +400,9 @@ class ReaderViewModel(
     /** 正文加载失败后重试：清掉分页缓存重来一遍（站点抽风、临时封 IP 都可能只是一次性的） */
     fun retry() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(error = null, loading = true)
+            // 手动重试 = 用户想再给一次机会（可能网络恢复了）；自动换源的额度跟着复位
+        autoChangeUsed = false
+        _state.value = _state.value.copy(error = null, loading = true)
             engineMutex.withLock {
                 paginated.clear()
                 showPosition(position)
@@ -487,34 +514,19 @@ class ReaderViewModel(
         else rawCandidates.filter { authorMatches(it.author, author) }
     }
 
-    /**
-     * 书名判定。归一化掉书名号与空白：书源常返回「《武动乾坤》」，
-     * 直接比字符串会判死。双向包含，「武动乾坤」与「武动乾坤（精校版）」互相认得。
-     */
-    private fun titleMatches(candidate: String, want: String): Boolean {
-        val a = normTitle(candidate)
-        val b = normTitle(want)
-        if (a.isEmpty() || b.isEmpty()) return false
-        return a == b || a.contains(b) || (b.contains(a) && a.length >= 2)
-    }
+    // 书名/作者判定见 TitleMatch —— 手动换源与自动换源必须用同一套标准，
+    // 各写一份迟早写出分歧（列表里明明列着的源，自动换源却说找不到）
+    private fun titleMatches(candidate: String, want: String) = TitleMatch.matches(candidate, want)
 
-    private fun normTitle(s: String) = s.trim().replace(TITLE_NOISE, "")
-
-    /**
-     * 作者判定与 Legado 对齐：用**包含**而非相等 —— 书源返回的作者常带前缀
-     * （「作者：天蚕土豆」）或含多个作者，一律要求相等会把绝大多数源判死。
-     * 任一边为空时不拿作者卡人。
-     */
-    private fun authorMatches(candidate: String?, want: String): Boolean {
-        val a = candidate?.trim().orEmpty()
-        if (want.isBlank() || a.isBlank()) return true
-        return a.contains(want) || want.contains(a)
-    }
+    private fun authorMatches(candidate: String?, want: String) =
+        TitleMatch.authorMatches(candidate, want)
 
     fun applyChangeSource(candidate: SearchResult) {
         val b = book ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(changingSource = true)
+            // 旧源的预取还在飞：清完缓存后它们回来会把旧正文写进新源的缓存目录
+            prefetchJob?.cancel()
             val rule = sourceRepo.getRule(candidate.sourceId)
             if (rule == null) {
                 _state.value = _state.value.copy(changingSource = false, error = "书源不存在")
@@ -541,6 +553,157 @@ class ReaderViewModel(
                     )
                 }
         }
+    }
+
+    // ---------- 自动换源 ----------
+
+    /** 换源前的现场：撤销要靠它原样退回去 */
+    private data class UndoSnapshot(
+        val sourceId: String,
+        val bookUrl: String,
+        val anchor: NetBookRepository.ReadAnchor,
+    )
+
+    private var undoSnapshot: UndoSnapshot? = null
+    private var autoChangeJob: Job? = null
+
+    /**
+     * 一次阅读会话最多自动换一次。
+     *
+     * 探测时已经把这一章的正文真抓下来过了 —— 换过去还失败，说明问题不在书源
+     * （网断了、规则被净化规则吃空了……），再换一个只会把用户在几个源之间反复甩，
+     * 而且每换一次就清一次正文缓存。到此为止，把选择权交回给用户。
+     */
+    private var autoChangeUsed = false
+
+    /**
+     * 正文/目录读不出来 → 去找一个真能读的源。
+     *
+     * 必须**异步启动**：调用点（ensurePaginated / ensureScroll）是在 engineMutex 里跑的，
+     * 而换完源要走 loadSession，它也要拿这把锁 —— 同步调用就是自锁。
+     */
+    private fun maybeAutoChangeSource(cause: String) {
+        val b = book ?: return
+        if (b.type != BookType.NET) return // 本地书没有"源"可换
+        if (autoChangeUsed || autoChangeJob?.isActive == true) return
+
+        autoChangeJob = viewModelScope.launch {
+            if (!appPrefs.autoChangeSource.first()) return@launch
+            autoChangeUsed = true
+
+            val chapterTitle = chapterDao.get(bookId, position.chapterIndex)?.title
+            _state.value = _state.value.copy(
+                autoChanging = true,
+                autoChangeDone = 0,
+                autoChangeTotal = 0,
+            )
+
+            val probe = autoSwitcher.findWorkingSource(
+                title = b.title,
+                author = b.author.orEmpty(),
+                exclude = b.sourceId,
+                target = AutoSourceSwitcher.Target(position.chapterIndex, chapterTitle),
+                checkAuthor = appPrefs.changeSourceCheckAuthor.first(),
+                onProgress = { done, total ->
+                    _state.value = _state.value.copy(autoChangeDone = done, autoChangeTotal = total)
+                },
+            )
+
+            if (probe == null) {
+                _state.value = _state.value.copy(
+                    autoChanging = false,
+                    loading = false,
+                    error = "$cause\n自动换源失败：其他书源也读不出这一章",
+                )
+                return@launch
+            }
+
+            // 旧源的预取还在天上飞。不掐掉的话，changeSource 清完缓存之后它们才回来，
+            // 会把**旧源的正文**写进新源的缓存目录，并给新目录的同序号章节打上"已缓存"。
+            prefetchJob?.cancel()
+
+            val snapshot = b.sourceId?.let { sid ->
+                b.bookUrl?.let { url ->
+                    UndoSnapshot(sid, url, NetBookRepository.ReadAnchor(position.chapterIndex, position.charOffset))
+                }
+            }
+
+            netBookRepo.changeSource(b, probe.result, probe.rule)
+                .onSuccess {
+                    undoSnapshot = snapshot
+                    _state.value = _state.value.copy(
+                        autoChanging = false,
+                        loading = true,
+                        error = null,
+                        autoChangedTo = probe.rule.name,
+                    )
+                    loadSession()
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(
+                        autoChanging = false,
+                        loading = false,
+                        error = "$cause\n自动换源失败: ${it.message}",
+                    )
+                }
+        }
+    }
+
+    /**
+     * 撤销自动换源，退回原来的源和原来读到的那个字。
+     *
+     * 自动换源可能换到删减版或另一个译本 —— 正文跟原来根本不是一回事。用户得有一键退回的路，
+     * 否则"帮了倒忙"就成了不可逆的。
+     */
+    fun undoAutoChange() {
+        val snap = undoSnapshot ?: return
+        val b = book ?: return
+        viewModelScope.launch {
+            val rule = sourceRepo.getRule(snap.sourceId)
+            if (rule == null) {
+                undoSnapshot = null
+                _state.value = _state.value.copy(
+                    autoChangedTo = null,
+                    toast = "原书源已不存在，无法退回",
+                )
+                return@launch
+            }
+            _state.value = _state.value.copy(changingSource = true)
+            prefetchJob?.cancel()
+
+            val back = SearchResult(
+                title = b.title,
+                bookUrl = snap.bookUrl,
+                author = b.author,
+                sourceId = rule.id,
+                sourceName = rule.name,
+            )
+            netBookRepo.changeSource(b, back, rule, restore = snap.anchor)
+                .onSuccess {
+                    undoSnapshot = null
+                    // autoChangeUsed 保持 true：用户明确表示要待在这个源上。
+                    // 放开的话，回来立刻又读不出正文，转头就被自动换走 —— 撤销等于没撤。
+                    _state.value = _state.value.copy(
+                        changingSource = false,
+                        autoChangedTo = null,
+                        loading = true,
+                        error = null,
+                    )
+                    loadSession()
+                }
+                .onFailure {
+                    _state.value = _state.value.copy(
+                        changingSource = false,
+                        toast = "退回失败: ${it.message}",
+                    )
+                }
+        }
+    }
+
+    /** 用户看到了提示条、不想撤销 */
+    fun dismissAutoChanged() {
+        undoSnapshot = null
+        _state.value = _state.value.copy(autoChangedTo = null)
     }
 
     fun dismissSourcePanel() {
@@ -570,7 +733,11 @@ class ReaderViewModel(
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
      */
     private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int): ChapterContent {
-        val raw = src.loadChapter(chapterIndex)
+        // 慢到这个份上的源基本没救（正常源 1-3 秒）。用 withTimeoutOrNull 而不是 withTimeout：
+        // 后者抛的是 CancellationException，会被下游的 catch(Exception) 吞掉，还会跟"协程被正常
+        // 取消"混为一谈 —— 翻页时取消上一次加载也会被当成超时，进而触发自动换源。
+        val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
+            ?: throw ContentTimeoutException()
         val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
         val purified = if (purifier.isEmpty) raw
         else raw.copy(elements = purifier.apply(raw.elements))
@@ -640,6 +807,8 @@ class ReaderViewModel(
         } catch (e: Exception) {
             if (chapterIndex == position.chapterIndex) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
+                // 邻章预加载失败不算数（上面的 if 已经挡掉）—— 只有当前章读不出来才值得换源
+                maybeAutoChangeSource("章节加载失败: ${e.message}")
             }
             null
         }
@@ -776,6 +945,8 @@ class ReaderViewModel(
         } catch (e: Exception) {
             if (chapterIndex == position.chapterIndex) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
+                // 邻章预加载失败不算数（上面的 if 已经挡掉）—— 只有当前章读不出来才值得换源
+                maybeAutoChangeSource("章节加载失败: ${e.message}")
             }
             null
         }
@@ -847,7 +1018,10 @@ class ReaderViewModel(
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
 
-        /** 书名归一化：去掉书名号与空白 */
-        val TITLE_NOISE = Regex("[《》〈〉\\s]")
+        /**
+         * 单章正文加载上限。超过就判这个源"网络很差"，触发自动换源。
+         * 正常源 1-3 秒；15 秒还没回来的基本没救，继续等只是让用户对着转圈发呆。
+         */
+        const val CONTENT_TIMEOUT_MS = 15_000L
     }
 }

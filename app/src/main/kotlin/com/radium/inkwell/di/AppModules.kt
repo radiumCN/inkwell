@@ -13,6 +13,7 @@ import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
+import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.WebDavRepository
@@ -84,11 +85,12 @@ val appModule = module {
     single { BookSourceRepository(get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get()) }
+    single { AutoSourceSwitcher(get(), get()) }
     single { WebDavRepository(get(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { BookshelfViewModel(get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

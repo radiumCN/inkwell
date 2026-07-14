@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -178,6 +180,29 @@ fun ReaderScreen(
         }
 
         when {
+            // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
+            // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
+            state.autoChanging -> Column(
+                Modifier.align(Alignment.Center).padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator(color = Color(state.settings.theme.textColor))
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    "正在自动换源…",
+                    color = Color(state.settings.theme.textColor),
+                    textAlign = TextAlign.Center,
+                )
+                if (state.autoChangeTotal > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "已试 ${state.autoChangeDone}/${state.autoChangeTotal} 个书源",
+                        color = Color(state.settings.theme.footerColor),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
             state.error != null -> Column(
                 Modifier.align(Alignment.Center).padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -274,6 +299,35 @@ fun ReaderScreen(
                         selection = selection,
                     )
                     PageInfoBar(state, layout)
+                }
+            }
+        }
+
+        // 自动换源之后的提示条。换到的可能是删减版/另一个译本，正文跟原来不是一回事 ——
+        // 不说的话用户只会觉得"这书怎么突然变了"，压根想不到是 App 换的源。
+        // 不自动消失：撤销是有价值的操作，不该在用户还没读到不对劲的地方之前就溜走。
+        state.autoChangedTo?.let { sourceName ->
+            ReaderThemeScope(state.settings.theme) {
+                Surface(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 3.dp,
+                ) {
+                    Row(
+                        Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "已自动换到「$sourceName」",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        TextButton(onClick = { viewModel.undoAutoChange() }) { Text("撤销") }
+                        TextButton(onClick = { viewModel.dismissAutoChanged() }) { Text("知道了") }
+                    }
                 }
             }
         }
