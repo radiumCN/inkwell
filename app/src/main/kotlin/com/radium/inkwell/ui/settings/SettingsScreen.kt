@@ -55,6 +55,7 @@ fun SettingsScreen(
     onOpenTheme: () -> Unit,
     onOpenSources: () -> Unit,
     onOpenReplaceRules: () -> Unit,
+    onOpenRss: () -> Unit,
 ) {
     val context = LocalContext.current
     val updateChecker = koinInject<UpdateChecker>()
@@ -155,6 +156,13 @@ fun SettingsScreen(
                 },
                 checked = checkAuthor,
                 onCheckedChange = { on -> scope.launch { appPrefs.setChangeSourceCheckAuthor(on) } },
+            )
+
+            SectionHeader("订阅")
+            SettingRow(
+                title = "订阅源",
+                subtitle = "RSS / Atom 订阅；粘个地址就能订阅",
+                onClick = onOpenRss,
             )
 
             SectionHeader("存储")

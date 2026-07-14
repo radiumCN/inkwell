@@ -1,0 +1,32 @@
+package com.radium.inkwell.data.db.dao
+
+import androidx.room.Dao
+import androidx.room.Query
+import androidx.room.Upsert
+import com.radium.inkwell.data.db.entity.RssSourceEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface RssSourceDao {
+
+    @Query("SELECT * FROM rss_source ORDER BY sortOrder ASC, name ASC")
+    fun observeAll(): Flow<List<RssSourceEntity>>
+
+    @Query("SELECT * FROM rss_source WHERE enabled = 1 ORDER BY sortOrder ASC, name ASC")
+    suspend fun getEnabled(): List<RssSourceEntity>
+
+    @Query("SELECT * FROM rss_source WHERE id = :id")
+    suspend fun getById(id: String): RssSourceEntity?
+
+    @Query("SELECT * FROM rss_source")
+    suspend fun getAll(): List<RssSourceEntity>
+
+    @Upsert
+    suspend fun upsertAll(sources: List<RssSourceEntity>)
+
+    @Query("UPDATE rss_source SET enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(id: String, enabled: Boolean)
+
+    @Query("DELETE FROM rss_source WHERE id = :id")
+    suspend fun deleteById(id: String)
+}

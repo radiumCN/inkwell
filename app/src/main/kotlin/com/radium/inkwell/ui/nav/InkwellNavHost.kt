@@ -15,6 +15,9 @@ import com.radium.inkwell.ui.settings.SettingsScreen
 import com.radium.inkwell.ui.settings.ThemeSettingsScreen
 import com.radium.inkwell.ui.sourceedit.SourceEditScreen
 import com.radium.inkwell.ui.replace.ReplaceRuleScreen
+import com.radium.inkwell.ui.rss.RssArticleScreen
+import com.radium.inkwell.ui.rss.RssArticlesScreen
+import com.radium.inkwell.ui.rss.RssSourceScreen
 import com.radium.inkwell.ui.sourcemanage.SourceManageScreen
 import com.radium.inkwell.ui.webdav.WebDavSettingsScreen
 
@@ -85,7 +88,38 @@ fun InkwellNavHost() {
                 onOpenTheme = { navController.navigate(ThemeSettingsRoute) },
                 onOpenSources = { navController.navigate(SourceManageRoute) },
                 onOpenReplaceRules = { navController.navigate(ReplaceRuleRoute) },
+                onOpenRss = { navController.navigate(RssSourceRoute) },
             )
+        }
+        composable<RssSourceRoute> {
+            RssSourceScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSource = { navController.navigate(RssArticlesRoute(it)) },
+            )
+        }
+        composable<RssArticlesRoute> { entry ->
+            val route = entry.toRoute<RssArticlesRoute>()
+            RssArticlesScreen(
+                sourceId = route.sourceId,
+                onBack = { navController.popBackStack() },
+                onOpenArticle = { article ->
+                    navController.navigate(
+                        RssArticleRoute.of(
+                            com.radium.inkwell.ui.rss.RssArticleArgs(
+                                sourceId = article.sourceId,
+                                title = article.title,
+                                link = article.link,
+                                description = article.description,
+                                pubDate = article.pubDate,
+                            )
+                        )
+                    )
+                },
+            )
+        }
+        composable<RssArticleRoute> { entry ->
+            val route = entry.toRoute<RssArticleRoute>()
+            RssArticleScreen(args = route.args, onBack = { navController.popBackStack() })
         }
         composable<ReplaceRuleRoute> {
             ReplaceRuleScreen(onBack = { navController.popBackStack() })

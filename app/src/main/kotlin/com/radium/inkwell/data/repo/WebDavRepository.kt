@@ -5,6 +5,7 @@ import com.radium.inkwell.core.webdav.BackupCodec
 import com.radium.inkwell.core.webdav.BackupMerger
 import com.radium.inkwell.core.webdav.BackupPayload
 import com.radium.inkwell.core.webdav.BackupReplaceRule
+import com.radium.inkwell.core.webdav.BackupRssSource
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
 import com.radium.inkwell.data.db.dao.BookDao
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.first
 class WebDavRepository(
     private val bookDao: BookDao,
     private val sourceDao: BookSourceDao,
+    private val rssDao: com.radium.inkwell.data.db.dao.RssSourceDao,
     private val prefs: WebDavPrefs,
     private val readerPrefs: ReaderPrefs,
     private val appPrefs: AppPrefs,
@@ -60,11 +62,13 @@ class WebDavRepository(
             applied = merged.changedBooks.size +
                 merged.changedSources.size +
                 merged.changedReplaceRules.size +
+                merged.changedRssSources.size +
                 listOfNotNull(merged.readerSettings, merged.appSettings).size
             toUpload = local.copy(
                 books = merged.books,
                 sources = merged.sources,
                 replaceRules = merged.replaceRules,
+                rssSources = merged.rssSources,
                 readerSettings = merged.mergedReaderSettings,
                 appSettings = merged.mergedAppSettings,
             )
@@ -104,6 +108,12 @@ class WebDavRepository(
                 id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
                 isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
                 sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+            )
+        },
+        rssSources = rssDao.getAll().map { r ->
+            BackupRssSource(
+                id = r.id, name = r.name, enabled = r.enabled, json = r.json,
+                sourceJson = r.sourceJson, updatedAt = r.updatedAt,
             )
         },
         readerSettings = readerPrefs.exportForBackup(),
@@ -156,6 +166,14 @@ class WebDavRepository(
                     id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
                     isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
                     sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+                )
+            }
+        )
+        rssDao.upsertAll(
+            merged.changedRssSources.map { r ->
+                com.radium.inkwell.data.db.entity.RssSourceEntity(
+                    id = r.id, name = r.name, enabled = r.enabled, json = r.json,
+                    sourceJson = r.sourceJson, updatedAt = r.updatedAt,
                 )
             }
         )

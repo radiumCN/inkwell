@@ -46,6 +46,28 @@ data class SearchRoute(val initialQuery: String? = null)
 object ExploreRoute
 
 @Serializable
+object RssSourceRoute
+
+@Serializable
+data class RssArticlesRoute(val sourceId: String)
+
+/**
+ * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
+ * 而且不少源的摘要（description）本来就是全文，重抓反而丢了它。
+ * 内容含 `/ ? &`，作为 path 参数会被切断，故 Base64 传递。
+ */
+@Serializable
+data class RssArticleRoute(val argsArg: String) {
+    val args: com.radium.inkwell.ui.rss.RssArticleArgs
+        get() = ROUTE_JSON.decodeFromString(decodeArg(argsArg))
+
+    companion object {
+        fun of(args: com.radium.inkwell.ui.rss.RssArticleArgs) =
+            RssArticleRoute(encodeArg(ROUTE_JSON.encodeToString(args)))
+    }
+}
+
+@Serializable
 object ReplaceRuleRoute
 
 @Serializable

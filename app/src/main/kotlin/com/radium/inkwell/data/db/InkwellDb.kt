@@ -8,10 +8,12 @@ import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
+import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.data.db.entity.RssSourceEntity
 
 @Database(
     entities = [
@@ -19,8 +21,9 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
         ChapterEntity::class,
         BookSourceEntity::class,
         ReplaceRuleEntity::class,
+        RssSourceEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -28,6 +31,7 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun bookSourceDao(): BookSourceDao
     abstract fun replaceRuleDao(): ReplaceRuleDao
+    abstract fun rssSourceDao(): RssSourceDao
 
     companion object {
         /**
@@ -105,6 +109,28 @@ abstract class InkwellDb : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS bookmark")
                 db.execSQL("ALTER TABLE book ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** 订阅源。纯新增表 */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS rss_source (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        icon TEXT NOT NULL DEFAULT '',
+                        groupName TEXT NOT NULL DEFAULT '',
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        sortOrder INTEGER NOT NULL DEFAULT 0,
+                        json TEXT NOT NULL,
+                        sourceJson TEXT NOT NULL DEFAULT '',
+                        converterVersion INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
             }
         }
 

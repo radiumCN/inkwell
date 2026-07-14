@@ -38,6 +38,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_5_6,
                 InkwellDb.MIGRATION_6_7,
                 InkwellDb.MIGRATION_7_8,
+                InkwellDb.MIGRATION_8_9,
             )
             .build()
     }
@@ -45,6 +46,7 @@ val appModule = module {
     single { get<InkwellDb>().chapterDao() }
     single { get<InkwellDb>().bookSourceDao() }
     single { get<InkwellDb>().replaceRuleDao() }
+    single { get<InkwellDb>().rssSourceDao() }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
     single { BookParserRegistry(listOf(EpubParser(), MobiParser(), TxtParser())) }
@@ -73,13 +75,15 @@ val appModule = module {
             globalPurify = { source -> replaceRules.purifyFor(source) },
         )
     }
+    single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
+    single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
     single { com.radium.inkwell.update.UpdateChecker() }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
     single { BookSourceRepository(get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get()) }
-    single { WebDavRepository(get(), get(), get(), get(), get(), get()) }
+    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { BookshelfViewModel(get()) }
     viewModel { (bookId: String) ->
@@ -94,4 +98,9 @@ val appModule = module {
     viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
+    viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
+    viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }
+    viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->
+        com.radium.inkwell.ui.rss.RssArticleViewModel(args, get())
+    }
 }

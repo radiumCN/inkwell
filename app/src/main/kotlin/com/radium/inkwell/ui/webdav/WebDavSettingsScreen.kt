@@ -119,7 +119,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
                 )
             }
             Text(
-                "同步内容：书架与阅读进度、书源（含原文）、净化替换规则、阅读排版与应用设置。\n" +
+                "同步内容：书架与阅读进度、书源（含原文）、订阅源、净化替换规则、阅读排版与应用设置。\n" +
                     "不同步：本地书籍文件、已缓存的章节正文 —— 换设备后本地书需重新导入文件。\n" +
                     "冲突按“新者胜”合并：书与书源逐条比时间戳，设置整块比。删除不会同步。",
                 style = MaterialTheme.typography.bodySmall,
