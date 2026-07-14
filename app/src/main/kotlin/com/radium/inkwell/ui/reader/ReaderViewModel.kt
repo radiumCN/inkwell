@@ -37,6 +37,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import com.radium.inkwell.core.source.Purifier
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class TocItem(val index: Int, val title: String)
@@ -61,6 +62,10 @@ data class ReaderUiState(
     val menuVisible: Boolean = false,
     val atBookEnd: Boolean = false,
     val isNetBook: Boolean = false,
+    /** 长按选字是否开启 */
+    val textSelectionEnabled: Boolean = true,
+    /** 一次性提示（建了净化规则之类） */
+    val toast: String? = null,
     /** 换源：null=未打开面板；空列表=搜索中/无结果 */
     val sourceCandidates: List<SearchResult>? = null,
     val searchingSources: Boolean = false,
@@ -86,6 +91,7 @@ class ReaderViewModel(
     private val engine: BookSourceEngine,
     private val contentCache: ChapterContentCache,
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
+    private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -111,6 +117,12 @@ class ReaderViewModel(
                 _state.value = _state.value.copy(settings = s)
             }
         }
+        viewModelScope.launch {
+            appPrefs.textSelectionEnabled.collect { on ->
+                _state.value = _state.value.copy(textSelectionEnabled = on)
+            }
+        }
+        observeBookRules()
     }
 
     private suspend fun loadSession() {
@@ -213,6 +225,43 @@ class ReaderViewModel(
 
     fun clearBookEnd() {
         _state.value = _state.value.copy(atBookEnd = false)
+    }
+
+    /** 书内净化规则变了 → 已分好的页全部作废，重排当前章 */
+    private fun observeBookRules() {
+        viewModelScope.launch {
+            var first = true
+            replaceRules.observeForBook(bookId).collect {
+                if (first) { first = false; return@collect } // 首帧是初始值，别白重排一次
+                engineMutex.withLock {
+                    paginated.clear()
+                    showPosition(position)
+                }
+            }
+        }
+    }
+
+    // ---------- 长按选字 ----------
+
+    fun setTextSelectionEnabled(on: Boolean) {
+        viewModelScope.launch { appPrefs.setTextSelectionEnabled(on) }
+    }
+
+    /** 用选中的文字建一条只对本书生效的净化规则 */
+    fun purifySelection(selected: String, replacement: String = "") {
+        val text = selected.trim()
+        if (text.isEmpty()) return
+        viewModelScope.launch {
+            replaceRules.createFromSelection(bookId, text, replacement)
+            _state.value = _state.value.copy(
+                error = null,
+                toast = if (replacement.isEmpty()) "已删除「${text.take(12)}」" else "已替换「${text.take(12)}」",
+            )
+        }
+    }
+
+    fun clearToast() {
+        _state.value = _state.value.copy(toast = null)
     }
 
     // ---------- 换源 ----------
@@ -416,7 +465,13 @@ class ReaderViewModel(
         val facade = facade ?: return null
         val spec = spec ?: return null
         return try {
-            val content = src.loadChapter(chapterIndex)
+            val raw = src.loadChapter(chapterIndex)
+            // 书内净化在这里应用，而不是抓取时：用户在阅读页长按选中一句话建规则，
+            // 指望的是眼前这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化
+            // 再也不会跑到它头上。
+            val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
+            val content = if (purifier.isEmpty) raw
+            else raw.copy(elements = purifier.apply(raw.elements))
             val title = src.chapterTitle(chapterIndex) ?: ""
             val result = withContext(Dispatchers.Default) {
                 Paginator(facade).paginate(chapterIndex, title, content, spec)

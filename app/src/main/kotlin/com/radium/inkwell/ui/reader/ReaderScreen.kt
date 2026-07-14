@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -19,6 +20,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.extendSelection
+import com.radium.inkwell.reader.render.selectWordAt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -74,6 +85,11 @@ fun ReaderScreen(
         onDispose { keyBus.volumeFlipEnabled = false }
     }
 
+    var selection by remember { mutableStateOf<TextSelection?>(null) }
+    var anchor by remember { mutableStateOf<TextSelection?>(null) }
+    val haptic = LocalHapticFeedback.current
+    val clipboard = LocalClipboardManager.current
+
     val activity = LocalActivity.current
     BrightnessEffect(activity, state.settings.brightnessOverride)
     KeepScreenOnEffect(activity, state.settings.keepScreenOn)
@@ -101,22 +117,59 @@ fun ReaderScreen(
                 color = Color(state.settings.theme.textColor),
             )
             else -> {
-                PageFlipContainer(
-                    current = state.page,
-                    prev = state.prevPage,
-                    next = state.nextPage,
-                    layout = spec,
-                    theme = state.settings.theme,
-                    animation = state.settings.flipAnimation,
-                    gesturesEnabled = !state.menuVisible,
-                    canFlip = { dir ->
-                        if (dir == FlipDirection.FORWARD) state.hasNext else state.hasPrev
-                    },
-                    onCommit = { viewModel.flip(it) },
-                    onCenterTap = { viewModel.toggleMenu() },
-                    controller = flipController,
-                )
-                PageInfoBar(state, spec)
+                val page = state.page
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        // 长按选字。放在**父节点**上而不是覆盖一层同级的 Box：
+                        // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
+                        // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
+                        // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
+                        .pointerInput(state.textSelectionEnabled, page, spec) {
+                            if (!state.textSelectionEnabled || page == null) return@pointerInput
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { pos ->
+                                    val sel = page.selectWordAt(pos.x, pos.y, spec)
+                                    if (sel != null && !sel.isEmpty) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        anchor = sel
+                                        selection = sel
+                                    }
+                                },
+                                onDrag = { change, _ ->
+                                    val a = anchor ?: return@detectDragGesturesAfterLongPress
+                                    change.consume()
+                                    selection = page.extendSelection(
+                                        a, change.position.x, change.position.y, spec,
+                                    )
+                                },
+                            )
+                        }
+                        // 选中状态下点空白处取消。翻页手势此时已关掉，不会有人抢这个 tap
+                        .pointerInput(selection != null) {
+                            if (selection == null) return@pointerInput
+                            detectTapGestures { selection = null; anchor = null }
+                        }
+                ) {
+                    PageFlipContainer(
+                        current = state.page,
+                        prev = state.prevPage,
+                        next = state.nextPage,
+                        layout = spec,
+                        theme = state.settings.theme,
+                        animation = state.settings.flipAnimation,
+                        // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
+                        gesturesEnabled = !state.menuVisible && selection == null,
+                        canFlip = { dir ->
+                            if (dir == FlipDirection.FORWARD) state.hasNext else state.hasPrev
+                        },
+                        onCommit = { viewModel.flip(it) },
+                        onCenterTap = { viewModel.toggleMenu() },
+                        controller = flipController,
+                        selection = selection,
+                    )
+                    PageInfoBar(state, spec)
+                }
             }
         }
 
@@ -128,6 +181,39 @@ fun ReaderScreen(
             Text(
                 "已经是最后一页了",
                 Modifier.align(Alignment.BottomCenter),
+                color = Color(state.settings.theme.footerColor),
+            )
+        }
+
+        selection?.let { sel ->
+            SelectionToolbar(
+                selectedText = sel.text,
+                theme = state.settings.theme,
+                onCopy = {
+                    clipboard.setText(AnnotatedString(sel.text))
+                    selection = null; anchor = null
+                },
+                onPurify = {
+                    viewModel.purifySelection(sel.text)
+                    selection = null; anchor = null
+                },
+                onReplace = { to ->
+                    viewModel.purifySelection(sel.text, to)
+                    selection = null; anchor = null
+                },
+                onDismiss = { selection = null; anchor = null },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        state.toast?.let { msg ->
+            LaunchedEffect(msg) {
+                kotlinx.coroutines.delay(1800)
+                viewModel.clearToast()
+            }
+            Text(
+                msg,
+                Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
                 color = Color(state.settings.theme.footerColor),
             )
         }

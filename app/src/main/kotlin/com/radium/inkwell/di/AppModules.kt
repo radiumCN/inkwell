@@ -34,6 +34,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_1_2,
                 InkwellDb.MIGRATION_2_3,
                 InkwellDb.MIGRATION_3_4,
+                InkwellDb.MIGRATION_4_5,
             )
             .build()
     }
@@ -79,7 +80,7 @@ val appModule = module {
 
     viewModel { BookshelfViewModel(get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

@@ -20,6 +20,14 @@ data class ReplaceRuleEntity(
     val replacement: String = "",
     val isRegex: Boolean = true,
     val scope: String = "",
+    /**
+     * 只对这一本书生效（阅读页长按选字建的规则）。空 = 通用规则。
+     *
+     * 与 [scope] 是两个维度：scope 限的是「哪些书源」，bookId 限的是「哪一本书」。
+     * 书内规则在**渲染时**应用，而不是抓取时 —— 抓取时应用的话，用户刚建的规则对
+     * 已经缓存的章节毫无反应，而他恰恰是对着眼前这一页建的。
+     */
+    val bookId: String = "",
     val enabled: Boolean = true,
     val sortOrder: Int = 0,
     val updatedAt: Long = 0,

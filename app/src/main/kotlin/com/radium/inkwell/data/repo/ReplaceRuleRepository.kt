@@ -34,13 +34,36 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
     fun observeAll(): Flow<List<ReplaceRuleEntity>> = dao.observeAll()
 
     /**
-     * 引擎的取规则钩子。作用域为空 = 对所有书源生效；
-     * 否则逗号分隔，命中书源 id 或书源名的任一片段即应用。
+     * 引擎的取规则钩子（抓取时应用，结果进缓存）。只给**通用规则** ——
+     * 书内规则挂在具体某本书上，而引擎不知道自己在给哪本书抓正文。
+     *
+     * 作用域为空 = 对所有书源生效；否则逗号分隔，命中书源 id 或书源名的任一片段即应用。
      */
     fun purifyFor(source: BookSourceRule): List<PurifyRule> =
         snapshot.get()
-            .filter { it.enabled && it.pattern.isNotEmpty() && matchesScope(it.scope, source) }
-            .map { PurifyRule(pattern = it.pattern, replacement = it.replacement, isRegex = it.isRegex) }
+            .filter {
+                it.enabled && it.pattern.isNotEmpty() && it.bookId.isEmpty() &&
+                    matchesScope(it.scope, source)
+            }
+            .map { it.toPurify() }
+
+    /**
+     * 某本书专属的净化规则（**渲染时**应用）。
+     *
+     * 之所以不走引擎那条路：引擎的净化发生在抓取时、结果直接进缓存。用户在阅读页
+     * 长按选中一句话建规则，指望的是眼前这一页立刻干净 —— 而这一页早就缓存好了，
+     * 抓取时的净化再也不会跑到它头上。渲染时应用则对已缓存的章节同样立刻生效。
+     */
+    fun purifyForBook(bookId: String): List<PurifyRule> =
+        snapshot.get()
+            .filter { it.enabled && it.pattern.isNotEmpty() && it.bookId == bookId }
+            .map { it.toPurify() }
+
+    /** 某本书的规则变了就重新分页；只关心影响这本书的那些 */
+    fun observeForBook(bookId: String): Flow<List<ReplaceRuleEntity>> = dao.observeForBook(bookId)
+
+    private fun ReplaceRuleEntity.toPurify() =
+        PurifyRule(pattern = pattern, replacement = replacement, isRegex = isRegex)
 
     private fun matchesScope(scope: String, source: BookSourceRule): Boolean {
         if (scope.isBlank()) return true
@@ -60,6 +83,7 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
         replacement: String,
         isRegex: Boolean,
         scope: String,
+        bookId: String = "",
     ): ReplaceRuleEntity {
         val rule = ReplaceRuleEntity(
             id = UUID.randomUUID().toString(),
@@ -68,12 +92,29 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
             replacement = replacement,
             isRegex = isRegex,
             scope = scope,
+            bookId = bookId,
             sortOrder = dao.maxSortOrder() + 1,
             updatedAt = System.currentTimeMillis(),
         )
         dao.upsert(rule)
         return rule
     }
+
+    /**
+     * 阅读页长按选中一段文字 → 一条只对这本书生效的净化规则。
+     *
+     * 一律用**纯文本**而不是正则：用户选的是眼前的一句话，里面的 `.` `(` `*` 都是字面量，
+     * 当正则解释八成会匹配错、甚至编译不过。要正则的人可以回规则页把开关拨过去。
+     */
+    suspend fun createFromSelection(bookId: String, selected: String, replacement: String = ""): ReplaceRuleEntity =
+        create(
+            name = selected.take(16).replace('\n', ' '),
+            pattern = selected,
+            replacement = replacement,
+            isRegex = false,
+            scope = "",
+            bookId = bookId,
+        )
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 

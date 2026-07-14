@@ -160,6 +160,9 @@ private fun RuleRow(
                     append(rule.pattern)
                     if (rule.replacement.isNotEmpty()) append("  →  ${rule.replacement}")
                     if (rule.scope.isNotBlank()) append("  ·  仅 ${rule.scope}")
+                    // 阅读页长按建的规则只对那一本书生效，列表里得看得出来，
+                    // 否则用户会纳闷"这条规则怎么在别的书里不管用"
+                    if (rule.bookId.isNotEmpty()) append("  ·  本书专属")
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

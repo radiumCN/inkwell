@@ -16,6 +16,10 @@ interface ReplaceRuleDao {
     @Query("SELECT * FROM replace_rule ORDER BY sortOrder ASC, updatedAt ASC")
     suspend fun getAll(): List<ReplaceRuleEntity>
 
+    /** 通用规则（bookId 为空）+ 指定书的规则 */
+    @Query("SELECT * FROM replace_rule WHERE bookId = '' OR bookId = :bookId ORDER BY sortOrder ASC")
+    fun observeForBook(bookId: String): Flow<List<ReplaceRuleEntity>>
+
     @Query("SELECT * FROM replace_rule WHERE id = :id")
     suspend fun getById(id: String): ReplaceRuleEntity?
 

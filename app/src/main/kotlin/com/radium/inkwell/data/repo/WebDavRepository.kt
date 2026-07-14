@@ -101,7 +101,7 @@ class WebDavRepository(
         replaceRules = replaceRules.getAll().map { r ->
             BackupReplaceRule(
                 id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
-                isRegex = r.isRegex, scope = r.scope, enabled = r.enabled,
+                isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
                 sortOrder = r.sortOrder, updatedAt = r.updatedAt,
             )
         },
@@ -151,7 +151,7 @@ class WebDavRepository(
             merged.changedReplaceRules.map { r ->
                 ReplaceRuleEntity(
                     id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
-                    isRegex = r.isRegex, scope = r.scope, enabled = r.enabled,
+                    isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
                     sortOrder = r.sortOrder, updatedAt = r.updatedAt,
                 )
             }

@@ -20,7 +20,7 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
         BookSourceEntity::class,
         ReplaceRuleEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -74,6 +74,13 @@ abstract class InkwellDb : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        /** 净化规则挂到具体某本书上（阅读页长按选字建的规则）；只加列 */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE replace_rule ADD COLUMN bookId TEXT NOT NULL DEFAULT ''")
             }
         }
     }

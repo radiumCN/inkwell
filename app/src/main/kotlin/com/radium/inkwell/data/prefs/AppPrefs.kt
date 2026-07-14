@@ -29,6 +29,7 @@ class AppPrefs(private val context: Context) {
         val CUSTOM_DARK_SEED = longPreferencesKey("custom_dark_seed")
         val CUSTOM_DARK_BG = longPreferencesKey("custom_dark_bg")
         val CHANGE_SOURCE_CHECK_AUTHOR = booleanPreferencesKey("change_source_check_author")
+        val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -53,6 +54,7 @@ class AppPrefs(private val context: Context) {
             values = mapOf(
                 "update_channel" to (p[Keys.UPDATE_CHANNEL] ?: UpdateChannel.STABLE.name),
                 "change_source_check_author" to (p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true).toString(),
+                "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
                 "theme_dark" to theme.darkPreset,
@@ -73,6 +75,8 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.UPDATE_CHANNEL] = it }
             v["change_source_check_author"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = it }
+            v["text_selection_enabled"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.TEXT_SELECTION] = it }
             v["theme_mode"]
                 ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
                 ?.let { p[Keys.THEME_MODE] = it }
@@ -98,6 +102,19 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setChangeSourceCheckAuthor(on: Boolean) {
         context.appDataStore.edit { it[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = on }
+        touch()
+    }
+
+    /**
+     * 阅读页是否允许长按选字。默认开。
+     * 关掉的理由是实打实的：长按选字要占用长按手势，翻页时手指停顿久一点就会误触选中。
+     */
+    val textSelectionEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.TEXT_SELECTION] ?: true
+    }
+
+    suspend fun setTextSelectionEnabled(on: Boolean) {
+        context.appDataStore.edit { it[Keys.TEXT_SELECTION] = on }
         touch()
     }
 
