@@ -39,9 +39,26 @@ class SourceHttpClient(
     private val retryBaseDelayMs: Long = 500,
 ) {
 
+    private val cookieJar = MemoryCookieJar()
+
     private val client: OkHttpClient = baseClient.newBuilder()
-        .cookieJar(MemoryCookieJar())
+        .cookieJar(cookieJar)
         .build()
+
+    /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
+    fun cookieOf(url: String): String = url.toHttpUrlOrNull()
+        ?.let { u -> cookieJar.loadForRequest(u).joinToString("; ") { "${it.name}=${it.value}" } }
+        .orEmpty()
+
+    fun setCookie(url: String, cookie: String) {
+        val u = url.toHttpUrlOrNull() ?: return
+        val cookies = cookie.split(';').mapNotNull { Cookie.parse(u, it.trim()) }
+        cookieJar.saveFromResponse(u, cookies)
+    }
+
+    fun removeCookie(url: String) {
+        url.toHttpUrlOrNull()?.let { cookieJar.clear(it.host) }
+    }
 
     private val buckets = ConcurrentHashMap<String, TokenBucket>()
 
@@ -164,6 +181,10 @@ class SourceHttpClient(
 
 /** 按 host 的内存 Cookie 存储 */
 private class MemoryCookieJar : CookieJar {
+
+    fun clear(host: String) {
+        store.remove(host)
+    }
 
     private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
 

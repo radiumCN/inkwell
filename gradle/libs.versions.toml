@@ -18,6 +18,7 @@ jsoup = "1.21.1"
 rhino = "1.7.15"
 juniversalchardet = "2.5.0"
 jsonPath = "2.9.0"
+xpath = "2.5.3"
 coil = "3.2.0"
 junit = "4.13.2"
 androidxTest = "1.7.0"
@@ -60,6 +61,8 @@ jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }
 juniversalchardet = { module = "com.github.albfernandez:juniversalchardet", version.ref = "juniversalchardet" }
 json-path = { module = "com.jayway.jsonpath:json-path", version.ref = "jsonPath" }
+# JsoupXpath（Apache-2.0）：Legado 的 @XPath 规则用的就是它
+xpath = { module = "cn.wanghaomiao:JsoupXpath", version.ref = "xpath" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 

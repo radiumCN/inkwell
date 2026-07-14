@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.rhino)
     implementation(libs.juniversalchardet)
     implementation(libs.json.path)
+    implementation(libs.xpath)
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
