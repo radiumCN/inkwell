@@ -59,6 +59,11 @@ class BookshelfViewModel(
 
     /** 验证过了才允许展开；收起来不需要验证（关灯不用钥匙） */
     fun showHidden() { _showHidden.value = true }
+
+    /** 开关只在隐藏区内部露面，所以设置这件事也归书架管，而不是设置页 */
+    fun setHiddenRequireAuth(on: Boolean) {
+        viewModelScope.launch { appPrefs.setHiddenRequireAuth(on) }
+    }
     fun hideHidden() { _showHidden.value = false }
 
     fun setHidden(bookId: String, hidden: Boolean) {

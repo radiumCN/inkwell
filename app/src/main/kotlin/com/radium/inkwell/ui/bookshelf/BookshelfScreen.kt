@@ -34,6 +34,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -102,6 +104,8 @@ fun BookshelfScreen(
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val biometricAvailable = remember { BiometricAuth.isAvailable(context) }
 
     /**
      * 展开隐藏书籍。开了验证就先过一遍系统的指纹/面容/设备密码。
@@ -241,6 +245,17 @@ fun BookshelfScreen(
             )
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
+                // 隐藏区的"控制台"。**只在已经展开时出现** —— 这个开关的存在本身就是线索，
+                // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
+                if (showHidden) {
+                    HiddenAreaBar(
+                        requireAuth = requireAuth,
+                        biometricAvailable = biometricAvailable,
+                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+                        onCollapse = { viewModel.hideHidden() },
+                    )
+                }
+
                 // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕
                 if (groups.isNotEmpty()) {
                     Row(
@@ -431,5 +446,57 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
         )
+    }
+}
+
+/**
+ * 隐藏区的控制台。只有已经通过长按标题（并验证）进来的人才看得到。
+ *
+ * 「查看时需要验证」这个开关从前住在设置 → 隐私里，副标题还写着「长按书架标题后先验证指纹」——
+ * 等于把「这个 App 能藏书」和暗号一起印在了任何人都能翻到的地方。一个只有你知道的东西，
+ * 它的开关也只能长在你已经进去之后的地方。
+ */
+@Composable
+private fun HiddenAreaBar(
+    requireAuth: Boolean,
+    biometricAvailable: Boolean,
+    onToggleAuth: (Boolean) -> Unit,
+    onCollapse: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("隐藏的书", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (!biometricAvailable) {
+                            "这台设备还没设过指纹/面容或锁屏密码，无法上锁"
+                        } else if (requireAuth) {
+                            "下次展开需要验证"
+                        } else {
+                            "任何人长按书架标题都能展开"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = requireAuth && biometricAvailable,
+                    // 设备上一把锁都没有时开了它，就是把自己锁在门外 —— 这道锁没有找回途径
+                    enabled = biometricAvailable,
+                    onCheckedChange = onToggleAuth,
+                )
+            }
+            TextButton(onClick = onCollapse, modifier = Modifier.align(Alignment.End)) {
+                Text("收起")
+            }
+        }
     }
 }

@@ -42,7 +42,6 @@ import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.util.AppIcon
 import com.radium.inkwell.util.AppIconManager
-import com.radium.inkwell.util.BiometricAuth
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateChecker
 import kotlinx.coroutines.Dispatchers
@@ -77,8 +76,6 @@ fun SettingsScreen(
     val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
     val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
-    val hiddenRequireAuth by appPrefs.hiddenRequireAuth.collectAsState(initial = false)
-    val biometricAvailable = remember { BiometricAuth.isAvailable(context) }
 
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
@@ -202,24 +199,14 @@ fun SettingsScreen(
                 onClick = onOpenRss,
             )
 
-            SectionHeader("隐私")
-            SwitchRow(
-                title = "查看隐藏书籍需要验证",
-                subtitle = when {
-                    !biometricAvailable ->
-                        "这台设备还没设置指纹/面容或锁屏密码，无法开启"
-                    hiddenRequireAuth ->
-                        "长按书架标题后，先验证指纹/面容（也可用设备密码）"
-                    else ->
-                        "已关闭。长按书架标题即可直接展开隐藏的书"
-                },
-                checked = hiddenRequireAuth && biometricAvailable,
-                onCheckedChange = { on ->
-                    // 设备没有任何锁，开了就是把自己锁在外面 —— 这个锁没有找回途径
-                    if (!biometricAvailable) return@SwitchRow
-                    scope.launch { appPrefs.setHiddenRequireAuth(on) }
-                },
-            )
+            // 这里从前有一整块「隐私」分区，写着「查看隐藏书籍需要验证 / 长按书架标题后先验证指纹」。
+            //
+            // 它把秘密完整地说了两遍：既宣告「这个 App 能藏书」，又把暗号（长按书架标题）
+            // 印在副标题里。任何人翻一下设置就全知道了 —— 隐藏功能等于不存在。
+            //
+            // 一个只有你知道的东西，它的开关也只能长在**你已经进去之后**的地方。
+            // 所以这个开关搬进了隐藏区内部（展开隐藏的书之后才看得到）。
+            // 设置页里现在一个字都不提隐藏书籍，翻起来就是个普通阅读器。
 
             SectionHeader("存储")
             SettingRow(

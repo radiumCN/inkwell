@@ -72,6 +72,8 @@ import androidx.compose.material3.TabRow
 import androidx.compose.runtime.mutableIntStateOf
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -126,14 +128,27 @@ fun ReaderMenu(
         Column(Modifier.fillMaxSize()) {
             // 顶栏从上滑入，底栏从下滑入 —— 用 animateEnterExit 而不是再套一层
             // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
+            // 不投阴影：这条栏和正文是同一个纸色，4dp 的投影落在纸上就是一道脏灰线，
+            // 而它想表达的"浮起来"根本没表达出来。改用一根发丝分隔线 —— 纸书里
+            // 书签和纸页之间也不该有阴影。
             Surface(
                 color = barColor,
                 contentColor = barContent,
-                shadowElevation = 4.dp,
                 modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .drawBehind {
+                            drawLine(
+                                color = barContent.copy(alpha = 0.10f),
+                                start = Offset(0f, size.height),
+                                end = Offset(size.width, size.height),
+                                strokeWidth = 1.dp.toPx(),
+                            )
+                        }
+                        .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onExit) {
