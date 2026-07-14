@@ -1,7 +1,6 @@
 package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.source.js.RhinoScriptRuntime
-import com.radium.inkwell.core.source.legado.LegadoConverter
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -98,24 +97,22 @@ class JsUrlTest {
         assertEquals("keyword={{key}}", opt.body)
     }
 
-    // ---- 转换器不能提前切坏 JS 地址 ----
+    // ---- 原生模型原样保留 JS 搜索地址（不再有转换期切坏的可能）----
 
     @Test
-    fun `转换器保留整条 JS 搜索地址`() {
+    fun `原生模型原样保留整条 JS 搜索地址`() {
         val legado = """
-            [{
+            {
               "bookSourceName": "思路客",
               "bookSourceUrl": "https://www.siluke.com",
               "searchUrl": "@js:url=\"https://m.siluke.com/search.php,{'body':'keyword={{key}}','method':'POST'}\";result=url;",
               "ruleSearch": {"bookList": "class.item", "name": "tag.h3@text", "bookUrl": "tag.a@href"},
               "ruleToc": {"chapterList": "class.chapter@tag.a", "chapterName": "text", "chapterUrl": "href"},
               "ruleContent": {"content": "id.content@html"}
-            }]
+            }
         """.trimIndent()
-        val result = LegadoConverter.convert(legado)
-        assertEquals(emptyList(), result.skipped.map { it.reason })
-        val url = result.converted.single().rule.search!!.request.url
-        // 整串留着，一个字都不许在转换期切掉
+        val url = BookSourceRule.fromJson(legado).searchUrl!!
+        // 整串原文入库，一个字都不许被切掉
         assertTrue(url.startsWith("@js:"), "JS 地址被截断了: $url")
         assertTrue(url.endsWith("result=url;"), "JS 地址被截断了: $url")
     }

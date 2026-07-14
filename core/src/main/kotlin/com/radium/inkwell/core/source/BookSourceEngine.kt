@@ -100,12 +100,14 @@ class BookSourceEngine(
     private val needsRender = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage {
-        val rule = source.search ?: throw SourceException("书源「${source.name}」未配置搜索规则")
-        val vars = varsOf(source, "keyword" to keyword, "page" to page.toString())
-        val fetched = fetchByRequest(source, rule.request, vars, "search")
+        val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
+            ?: throw SourceException("书源「${source.name}」未配置搜索规则")
+        val rule = source.ruleSearch ?: throw SourceException("书源「${source.name}」未配置搜索规则")
+        val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
+        val fetched = fetchByRequest(source, searchUrl, vars, "search")
         return parseListPage(
-            source, "search", fetched, vars, rule.list, rule.fields, rule.nextPage,
-            pageable = pageable(rule.request.url, rule.request.body),
+            source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+            pageable = pageable(searchUrl),
         )
     }
 
@@ -117,39 +119,55 @@ class BookSourceEngine(
         templates.any { it != null && PAGE_VAR.containsMatchIn(it) }
 
     suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage {
-        val rule = source.explore.getOrNull(exploreIndex)
+        val item = source.explore.getOrNull(exploreIndex)
             ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
-        val vars = varsOf(source, "page" to page.toString())
-        val fetched = fetchByRequest(source, RequestRule(url = rule.url), vars, "explore")
+        // Legado：发现页列表/字段规则缺省时复用搜索规则
+        val rule = source.ruleExplore ?: source.ruleSearch
+            ?: throw SourceException("书源「${source.name}」未配置发现规则")
+        val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
+        val fetched = fetchByRequest(source, item.url, vars, "explore")
         return parseListPage(
-            source, "explore", fetched, vars, rule.list, rule.fields, rule.nextPage,
-            pageable = pageable(rule.url),
+            source, "explore", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+            pageable = pageable(item.url),
         )
     }
 
+    /** 搜索/发现列表项的字段规则 → 引擎内部字段名 */
+    private fun listFieldMap(r: SearchRuleSet): Map<String, String> = buildMap {
+        r.name?.let { put("title", it) }
+        r.bookUrl?.let { put("bookUrl", it) }
+        r.author?.let { put("author", it) }
+        r.coverUrl?.let { put("coverUrl", it) }
+        r.intro?.let { put("intro", it) }
+        r.lastChapter?.let { put("latestChapter", it) }
+    }
+
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail {
-        val rule = source.detail ?: throw SourceException("书源「${source.name}」未配置详情规则")
         val url = resolveUrl(source.baseUrl, bookUrl)
         // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
         // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
-        return withRenderFallback(source) { render -> parseDetail(source, rule, url, render) }
+        // Legado 里 ruleBookInfo 可缺省（详情页即目录页），缺省时直接用详情页地址当目录地址。
+        return withRenderFallback(source) { render -> parseDetail(source, url, render) }
             ?: RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
     }
 
     private suspend fun parseDetail(
         source: BookSourceRule,
-        rule: DetailRule,
         url: String,
         render: Boolean,
     ): RemoteBookDetail? {
+        val info = source.ruleBookInfo
+        if (info == null) {
+            // 无详情规则：详情页即目录页，不抓取，直接把地址透传给目录阶段
+            return RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
+        }
         val fetched = fetchPage(source, url, "detail", render)
         val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, bookUrl = url))
-        val f = rule.fields
-        val title = evalField("detail", "title", f["title"], ctx)
-        val author = evalField("detail", "author", f["author"], ctx)
-        val cover = evalUrlField("detail", "coverUrl", f["coverUrl"], ctx)
-        val intro = evalField("detail", "intro", f["intro"], ctx)
-        val tocRule = evalUrlField("detail", "tocUrl", f["tocUrl"], ctx)?.takeIf { it.isNotBlank() }
+        val title = evalField("detail", "title", info.name, ctx)
+        val author = evalField("detail", "author", info.author, ctx)
+        val cover = evalUrlField("detail", "coverUrl", info.coverUrl, ctx)
+        val intro = evalField("detail", "intro", info.intro, ctx)
+        val tocRule = evalUrlField("detail", "tocUrl", info.tocUrl, ctx)?.takeIf { it.isNotBlank() }
 
         // 一个字段都没匹配上 → 这一页大概率是 JS 渲染的，返回 null 交给渲染兜底重试。
         //
@@ -159,7 +177,9 @@ class BookSourceEngine(
         // 校验里那一大片「详情页未匹配到书名」就是这么来的，而它们在阅读 APP 里好好的。
         val nothingMatched = title.isNullOrBlank() && author.isNullOrBlank() &&
             cover.isNullOrBlank() && intro.isNullOrBlank() && tocRule == null
-        if (nothingMatched && !f.values.all { it.isNullOrBlank() }) return null
+        val anyRuleConfigured = listOf(info.name, info.author, info.coverUrl, info.intro, info.tocUrl)
+            .any { !it.isNullOrBlank() }
+        if (nothingMatched && anyRuleConfigured) return null
 
         val tocUrl = tocRule?.let { resolveUrl(fetched.finalUrl, it) }
             ?: fetched.finalUrl // 缺省：详情页即目录页
@@ -173,17 +193,21 @@ class BookSourceEngine(
     }
 
     suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> {
-        val rule = source.toc ?: throw SourceException("书源「${source.name}」未配置目录规则")
+        val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
         return withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
             ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
     }
 
     private suspend fun collectToc(
         source: BookSourceRule,
-        rule: TocRule,
+        rule: TocRuleSet,
         tocUrl: String,
         render: Boolean,
     ): List<RemoteChapter>? {
+        // Legado：chapterList 前导 `-` 表示整体倒序
+        val listRaw = rule.chapterList.orEmpty().trim()
+        val reverse = listRaw.startsWith("-")
+        val listRule = if (reverse) listRaw.substring(1) else listRaw
         val collected = mutableListOf<Triple<String, String, String>>()
         var url: String? = resolveUrl(source.baseUrl, tocUrl)
         val visited = HashSet<String>()
@@ -193,24 +217,24 @@ class BookSourceEngine(
             pages++
             val fetched = fetchPage(source, url, "toc", render)
             val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, tocUrl = url))
-            for (item in evalList("toc", rule.list, ctx)) {
+            for (item in evalList("toc", listRule, ctx)) {
                 // 每个章节项一份变量表：@put 存的参数属于这一章，不能串到别的章节上
                 val itemCtx = item.copy(js = item.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap()))
-                val title = evalField("toc", "title", rule.fields["title"], itemCtx)
-                val chapUrl = evalUrlField("toc", "url", rule.fields["url"], itemCtx)
+                val title = evalField("toc", "title", rule.chapterName, itemCtx)
+                val chapUrl = evalUrlField("toc", "url", rule.chapterUrl, itemCtx)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { resolveUrl(fetched.finalUrl, it) }
                 if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank()) {
                     collected += Triple(title, chapUrl, encodeVars(itemCtx.js.scriptVars))
                 }
             }
-            url = rule.nextPage
+            url = rule.nextTocUrl
                 ?.let { evalUrlField("toc", "nextPage", it, ctx) }
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveUrl(fetched.finalUrl, it) }
         }
         if (collected.isEmpty()) return null
-        val ordered = if (rule.reverse) collected.asReversed() else collected
+        val ordered = if (reverse) collected.asReversed() else collected
         return ordered.mapIndexed { i, (title, u, vars) -> RemoteChapter(i, title, u, vars) }
     }
 
@@ -229,7 +253,7 @@ class BookSourceEngine(
         otherChapterUrls: Set<String> = emptySet(),
         chapterVariable: String = "",
     ): RemoteChapterContent {
-        val rule = source.content ?: throw SourceException("书源「${source.name}」未配置正文规则")
+        val rule = source.ruleContent ?: throw SourceException("书源「${source.name}」未配置正文规则")
         return withRenderFallback(source) { render ->
             collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
         } ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
@@ -248,14 +272,14 @@ class BookSourceEngine(
 
     private suspend fun collectContent(
         source: BookSourceRule,
-        rule: ContentRule,
+        rule: ContentRuleSet,
         chapterUrl: String,
         otherChapterUrls: Set<String>,
         chapterVariable: String,
         render: Boolean,
     ): RemoteChapterContent? {
-        // 净化：源级在前、用户的通用规则在后；正则预编译
-        val sourcePurifier = Purifier.strict(rule.purify)
+        // 净化：源级(replaceRegex) 在前、用户的通用规则在后；正则预编译
+        val sourcePurifier = Purifier.strict(parseReplaceRegex(rule.replaceRegex))
         val userPurifier = Purifier.lenient(globalPurify(source))
         val elements = mutableListOf<ContentElement>()
         val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
@@ -281,7 +305,7 @@ class BookSourceEngine(
                 })
                 elements += converter.convert(body)
             }
-            url = rule.nextPage
+            url = rule.nextContentUrl
                 ?.let { evalUrlField("content", "nextPage", it, ctx) }
                 ?.takeIf { it.isNotBlank() }
                 ?.let { resolveUrl(fetched.finalUrl, it) }
@@ -339,7 +363,7 @@ class BookSourceEngine(
 
     private suspend fun fetchByRequest(
         source: BookSourceRule,
-        request: RequestRule,
+        urlTemplate: String,
         vars: Map<String, String>,
         stage: String,
     ): FetchedPage {
@@ -347,25 +371,24 @@ class BookSourceEngine(
         val urlCtx = urlContext(source, vars)
 
         // 地址整串可能是 JS（<js>…</js> / @js:…），脚本的返回值才是真地址；
-        // 而且脚本吐出来的地址常自带 ,{method/body/charset/headers} —— 只能在这里、
-        // 拿到结果之后才谈得上解析，转换期是看不见的。
-        var rawUrl = evaluator.evalUrlJs(request.url, urlCtx) ?: request.url
-        var method = request.method
-        var body = request.body
-        var headers = request.headers
-        var charset = request.charset
+        // 而且地址常自带 ,{method/body/charset/headers} —— 拿到最终地址后才谈得上解析。
+        var rawUrl = evaluator.evalUrlJs(urlTemplate, urlCtx) ?: urlTemplate
+        var method = "GET"
+        var body: String? = null
+        var headers: Map<String, String> = emptyMap()
+        var charset: String? = null
         splitUrlOptions(rawUrl)?.let { (bare, opt) ->
             rawUrl = bare
             opt.method?.let { method = it }
             opt.body?.let { body = it }
             opt.charset?.let { charset = it }
-            if (opt.headers.isNotEmpty()) headers = headers + opt.headers
+            if (opt.headers.isNotEmpty()) headers = opt.headers
         }
-        // 非 UTF-8 站点的关键词要按站点编码转义。静态地址在转换期就写成了 {{keyword|encode:gbk}}，
-        // JS 地址的编码只有此刻才知道，补上同样的管道即可复用。
+        // 非 UTF-8 站点的关键词要按站点编码转义。Legado 地址里关键词写作 {{key}}，
+        // 编码只有拿到 charset 选项后才知道，补上 encode 管道。
         charset?.lowercase()?.takeIf { it != "utf-8" && it != "utf8" }?.let { cs ->
-            rawUrl = rawUrl.replace("{{keyword}}", "{{keyword|encode:$cs}}")
-            body = body?.replace("{{keyword}}", "{{keyword|encode:$cs}}")
+            rawUrl = rawUrl.replace("{{key}}", "{{key|encode:$cs}}")
+            body = body?.replace("{{key}}", "{{key|encode:$cs}}")
         }
 
         val url = resolveUrl(source.baseUrl, evaluator.expandTemplate(rawUrl, urlCtx))
@@ -490,7 +513,7 @@ class BookSourceEngine(
 
     private fun evalList(stage: String, rule: String, ctx: EvalContext): List<EvalContext> =
         try {
-            val nodes = evaluator.evalToNodes(RuleParser.parse(rule), ctx)
+            val nodes = evaluator.evalToNodes(LegadoRuleAnalyzer.analyze(rule), ctx)
             trace?.onRule(RuleTrace(stage, "list", rule, "${nodes.size} 个节点"))
             nodes
         } catch (e: Exception) {
@@ -506,7 +529,7 @@ class BookSourceEngine(
     private fun evalUrlField(stage: String, name: String, rule: String?, ctx: EvalContext): String? {
         if (rule.isNullOrBlank()) return null
         return try {
-            val value = evaluator.evalToStrings(RuleParser.parse(rule), ctx)
+            val value = evaluator.evalToStrings(LegadoRuleAnalyzer.analyze(rule), ctx)
                 .firstOrNull { it.isNotBlank() }
             trace?.onRule(RuleTrace(stage, name, rule, value?.take(200)))
             value
@@ -520,7 +543,7 @@ class BookSourceEngine(
     private fun evalField(stage: String, name: String, rule: String?, ctx: EvalContext): String? {
         if (rule.isNullOrBlank()) return null
         return try {
-            val value = evaluator.evalToString(RuleParser.parse(rule), ctx)
+            val value = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule), ctx)
             trace?.onRule(RuleTrace(stage, name, rule, value?.take(200)))
             value
         } catch (e: Exception) {
@@ -534,6 +557,25 @@ class BookSourceEngine(
         val PAGE_VAR = Regex("\\{\\{[^}]*page[^}]*\\}\\}")
         const val MAX_TOC_PAGES = 200
         const val MAX_CONTENT_PAGES = 50
+    }
+}
+
+/**
+ * Legado replaceRegex：多行 `##正则##替换`（或 `正则##替换`），逐行解析为净化规则。
+ * 含 JS 的整块忽略（我们的净化不跑脚本）。非法正则由 [Purifier] 兜底跳过。
+ */
+internal fun parseReplaceRegex(raw: String?): List<PurifyRule> {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty() || text.contains("<js>", ignoreCase = true) || text.contains("@js:", ignoreCase = true)) {
+        return emptyList()
+    }
+    return text.lines().mapNotNull { line ->
+        val t = line.trim().removePrefix("##")
+        if (t.isEmpty()) return@mapNotNull null
+        val sep = t.indexOf("##")
+        val pattern = if (sep < 0) t else t.substring(0, sep)
+        val replacement = if (sep < 0) "" else t.substring(sep + 2).removeSuffix("###")
+        if (pattern.isBlank()) null else PurifyRule(pattern = pattern, replacement = replacement, isRegex = true)
     }
 }
 

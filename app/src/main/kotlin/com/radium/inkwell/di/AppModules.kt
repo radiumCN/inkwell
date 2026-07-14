@@ -20,7 +20,7 @@ import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.reader.ReaderViewModel
 import com.radium.inkwell.ui.search.SearchViewModel
-import com.radium.inkwell.ui.sourceedit.SourceEditViewModel
+import com.radium.inkwell.ui.sourcedetail.SourceDetailViewModel
 import com.radium.inkwell.ui.sourcemanage.SourceManageViewModel
 import com.radium.inkwell.ui.webdav.WebDavViewModel
 import com.radium.inkwell.util.KeyEventBus
@@ -42,6 +42,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_8_9,
                 InkwellDb.MIGRATION_9_10,
                 InkwellDb.MIGRATION_10_11,
+                InkwellDb.MIGRATION_11_12,
             )
             .build()
     }
@@ -99,7 +100,7 @@ val appModule = module {
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
-    viewModel { (sourceId: String?) -> SourceEditViewModel(sourceId, get(), get(), get()) }
+    viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }

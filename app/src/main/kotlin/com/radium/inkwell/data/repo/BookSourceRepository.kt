@@ -1,12 +1,14 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
-import com.radium.inkwell.core.source.legado.LegadoConverter
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 class BookSourceRepository(private val dao: BookSourceDao) {
 
@@ -53,61 +55,35 @@ class BookSourceRepository(private val dao: BookSourceDao) {
             }
     }
 
-    /** 导入书源 JSON：自动识别 Legado 格式并转换；自有格式高 version 覆盖 */
-    suspend fun importJson(text: String): Result<ImportReport> = runCatching {
-        if (LegadoConverter.looksLikeLegado(text)) {
-            return@runCatching importLegado(text)
-        }
-        val trimmed = text.trim()
-        val rules: List<BookSourceRule> = if (trimmed.startsWith("[")) {
-            json.decodeFromString(trimmed)
-        } else {
-            listOf(json.decodeFromString(trimmed))
-        }
-        upsertRules(rules)
-    }
-
-    private suspend fun importLegado(text: String): ImportReport {
-        val result = LegadoConverter.convert(text)
-        return upsertRules(
-            result.converted.map { it.rule },
-            // 留存 legado 原文：转换器修好后才能把已导入的书源重新转一遍
-            sourceJsonById = result.converted.associate { it.rule.id to it.sourceJson },
-            skipped = result.skipped.map { "${it.name}: ${it.reason}" },
-        )
-    }
-
     /**
-     * 把用旧版转换器转过的书源重新转一遍。
-     *
-     * 书源在导入时就转换成我们的规则格式存库了，升级 App 不会重转 —— 于是转换器的每个修复
-     * 都只对「新导入的书源」生效，老用户永远踩着旧坑（追书神器的目录地址少了 /toc/ 前缀，
-     * 装了新版依然 404，就是这么来的）。
-     *
-     * @return 重转的书源数；沿用用户的启用状态与排序
+     * 导入书源 JSON（Legado 原生格式，数组或单对象）。只收小说源（`bookSourceType == 0`）；
+     * 音频/漫画/文件源按类型过滤并计入 skipped。规则原文原样入库，运行期由引擎直接求值。
      */
-    suspend fun reconvertOutdated(): Int {
-        val outdated = dao.getAll().filter {
-            it.converterVersion < LegadoConverter.VERSION && it.sourceJson.isNotBlank()
+    suspend fun importJson(text: String): Result<ImportReport> = runCatching {
+        val root = json.parseToJsonElement(text.trim())
+        val objs = when (root) {
+            is JsonArray -> root.toList()
+            else -> listOf(root)
         }
-        if (outdated.isEmpty()) return 0
-        var done = 0
-        val now = System.currentTimeMillis()
-        val toWrite = ArrayList<BookSourceEntity>(outdated.size)
-        for (old in outdated) {
-            val rule = runCatching {
-                LegadoConverter.convert(old.sourceJson).converted.singleOrNull()?.rule
-            }.getOrNull() ?: continue // 新转换器认为这个源不可用了，保留旧的，别把用户的书源弄没
-            toWrite += old.copy(
-                name = rule.name,
-                json = json.encodeToString(BookSourceRule.serializer(), rule),
-                converterVersion = LegadoConverter.VERSION,
-                updatedAt = now,
-            )
-            done++
+        val rules = ArrayList<BookSourceRule>()
+        val skipped = ArrayList<String>()
+        objs.forEach { el ->
+            val obj = el as? JsonObject ?: return@forEach
+            val name = (obj["bookSourceName"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+                ?: (obj["bookSourceUrl"] as? JsonPrimitive)?.content ?: "未命名"
+            val type = (obj["bookSourceType"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+            if (type != 0) {
+                skipped += "$name: 非文字书源（type=$type）不支持"
+                return@forEach
+            }
+            val rule = runCatching { BookSourceRule.fromJson(obj.toString()) }.getOrNull()
+            if (rule == null || rule.bookSourceUrl.isBlank()) {
+                skipped += "$name: 解析失败或缺少 bookSourceUrl"
+                return@forEach
+            }
+            rules += rule
         }
-        if (toWrite.isNotEmpty()) dao.upsertAll(toWrite)
-        return done
+        upsertRules(rules, skipped)
     }
 
     /**
@@ -116,10 +92,9 @@ class BookSourceRepository(private val dao: BookSourceDao) {
      */
     private suspend fun upsertRules(
         rules: List<BookSourceRule>,
-        sourceJsonById: Map<String, String> = emptyMap(),
         skipped: List<String> = emptyList(),
     ): ImportReport {
-        // 同 id 保留最后一个（同站多源撞 id 时避免同事务重复主键）
+        // 同 id（= bookSourceUrl）保留最后一个，避免同事务重复主键
         val deduped = rules.associateBy { it.id }.values
         val existingById = dao.getAll().associateBy { it.id }
         val now = System.currentTimeMillis()
@@ -131,11 +106,7 @@ class BookSourceRepository(private val dao: BookSourceDao) {
         deduped.forEach { rule ->
             try {
                 val existing = existingById[rule.id]
-                val existingVersion = existing?.let {
-                    runCatching { json.decodeFromString<BookSourceRule>(it.json).version }.getOrDefault(0)
-                } ?: -1
-                if (rule.version < existingVersion) return@forEach // 保留更高版本
-                val ruleJson = json.encodeToString(BookSourceRule.serializer(), rule)
+                val ruleJson = rule.toJson()
                 // 规则没变才留着旧的校验结论；规则一变，上一版的"可用"就不能给新规则背书了
                 val keepCheck = existing?.takeIf { it.json == ruleJson }
                 toWrite += BookSourceEntity(
@@ -146,8 +117,6 @@ class BookSourceRepository(private val dao: BookSourceDao) {
                     sortOrder = existing?.sortOrder ?: 0,
                     json = ruleJson,
                     updatedAt = now,
-                    sourceJson = sourceJsonById[rule.id].orEmpty(),
-                    converterVersion = LegadoConverter.VERSION,
                     groupName = rule.group,
                     checkStatus = keepCheck?.checkStatus ?: CheckStatus.UNCHECKED,
                     checkMessage = keepCheck?.checkMessage.orEmpty(),
@@ -244,10 +213,10 @@ class BookSourceRepository(private val dao: BookSourceDao) {
         dao.setGroupForIds(ids.toList(), group.trim())
     }
 
-    /** 导出为 legado 格式（原文）；没有原文的（手写书源）导出我们自己的规则 JSON */
+    /** 导出为 Legado 原生格式（库里存的就是原生 JSON） */
     suspend fun exportJson(ids: Collection<String>): String {
         val all = dao.getAll().filter { it.id in ids }
-        val items = all.map { it.sourceJson.ifBlank { it.json } }
+        val items = all.map { it.json }
         return items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
     }
 }

@@ -71,8 +71,8 @@ class WebViewPageRendererTest {
     @Test
     fun 静态抓取拿不到而渲染回退能拿到() = runBlocking {
         val rule = BookSourceRule.fromJson(
-            """{"id":"js.test","name":"JS渲染站","baseUrl":"$base",
-                "content":{"content":"css:#article@html"}}"""
+            """{"bookSourceUrl":"$base","bookSourceName":"JS渲染站",
+                "ruleContent":{"content":"#article@html"}}"""
         )
 
         // 无渲染器：静态 HTML 里 #article 是空的 → 规则匹配不到内容

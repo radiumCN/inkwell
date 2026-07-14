@@ -1,6 +1,6 @@
 package com.radium.inkwell.data.repo
 
-import com.radium.inkwell.core.source.legado.LegadoConverter
+import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.ui.sourcemanage.SourceSort
@@ -13,7 +13,7 @@ class SourceGroupAndSortTest {
     @Test
     fun `legado 的 bookSourceGroup 被带进书源`() {
         val legado = """
-        [{
+        {
           "bookSourceUrl": "https://a.com",
           "bookSourceName": "站A",
           "bookSourceGroup": "精品,漫画",
@@ -21,9 +21,9 @@ class SourceGroupAndSortTest {
           "ruleSearch": {"bookList": "class.item", "name": "tag.h3@text", "bookUrl": "tag.a@href"},
           "ruleToc": {"chapterList": "tag.dd@tag.a", "chapterName": "text", "chapterUrl": "href"},
           "ruleContent": {"content": "id.content@html"}
-        }]
+        }
         """.trimIndent()
-        val rule = LegadoConverter.convert(legado).converted.single().rule
+        val rule = BookSourceRule.fromJson(legado)
         assertEquals("精品,漫画", rule.group)
     }
 

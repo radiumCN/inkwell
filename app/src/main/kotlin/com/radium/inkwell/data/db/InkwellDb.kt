@@ -23,7 +23,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -117,6 +117,21 @@ abstract class InkwellDb : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book ADD COLUMN newChapterCount INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * 书源引擎改为原生 Legado：库里旧的 `json` 是自研格式，新模型（bookSourceUrl/ruleSearch…）
+         * 解不动，留着只会静默失效。**清空 book_source**，让升级用户看到空列表、主动重新导入
+         * （订阅源 rss_source 存的本就是原生 Legado 规则，不受影响）。
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DELETE FROM book_source")
+                // 历史列随原生化下线（minSdk 35 的 SQLite 支持 DROP COLUMN）。
+                // 只删 book_source 的；rss_source 的同名列仍在用，不动。
+                db.execSQL("ALTER TABLE book_source DROP COLUMN sourceJson")
+                db.execSQL("ALTER TABLE book_source DROP COLUMN converterVersion")
             }
         }
 

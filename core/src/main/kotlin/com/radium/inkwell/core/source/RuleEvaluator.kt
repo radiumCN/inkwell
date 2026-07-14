@@ -61,8 +61,6 @@ class RuleEvaluator(
 
     /** 求值为节点列表（list 规则用）；每个节点携带原上下文的 baseUrl/vars */
     fun evalToNodes(node: RuleNode, ctx: EvalContext): List<EvalContext> = when (node) {
-        is RuleNode.Css ->
-            selectElements(node.query, ctx).map { ctx.copy(element = it, json = null) }
         is RuleNode.Legado -> ctx.element
             ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
             ?.map { ctx.copy(element = it, json = null) }
@@ -97,25 +95,12 @@ class RuleEvaluator(
                 evalToNodes(o, ctx).takeIf { it.isNotEmpty() }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToNodes(it, ctx) }
-        is RuleNode.Pipe -> node.ops.fold(evalToNodes(node.source, ctx)) { acc, op ->
-            when (op) {
-                PipeOp.First -> acc.take(1)
-                PipeOp.Last -> acc.takeLast(1)
-                is PipeOp.Index -> listOfNotNull(acc.getOrNull(op.n))
-                is PipeOp.Select -> acc.flatMap { c ->
-                    c.element?.select(op.query)?.map { c.copy(element = it, json = null) }.orEmpty()
-                }
-                else -> acc // 字符串类管道对节点列表无意义，忽略
-            }
-        }
+        // 管道里剩下的都是字符串后处理（正则替换/js/put/rule），对节点列表无意义，取源即可
+        is RuleNode.Pipe -> evalToNodes(node.source, ctx)
     }
 
     /** 求值为字符串列表；空串结果被丢弃 */
     fun evalToStrings(node: RuleNode, ctx: EvalContext): List<String> = when (node) {
-        is RuleNode.Css ->
-            selectElements(node.query, ctx)
-                .map { extract(it, node.extractor) }
-                .filter { it.isNotEmpty() }
         is RuleNode.Legado ->
             ctx.element?.let { LegadoSelector.strings(it, withGetVars(node.rule, ctx)) }.orEmpty()
         is RuleNode.XPath -> xpathStrings(node.path, ctx)
@@ -130,44 +115,14 @@ class RuleEvaluator(
                 evalToStrings(o, ctx).takeIf { list -> list.any { it.isNotBlank() } }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToStrings(it, ctx) }
-        is RuleNode.Pipe -> {
-            val src = node.source
-            if (src is RuleNode.Css && node.ops.any { it is PipeOp.Select }) {
-                // 含 select 的管道（「选中 → 取第 n 个 → 下钻」）必须按节点求值：
-                // select 之前的都是节点操作，提取器作用在最终选中的节点上，其余管道再按字符串处理。
-                val split = node.ops.indexOfLast { it is PipeOp.Select } + 1
-                val nodes = evalToNodes(RuleNode.Pipe(src, node.ops.take(split)), ctx)
-                val strings = nodes.mapNotNull { it.element?.let { el -> extract(el, src.extractor) } }
-                    .filter { it.isNotEmpty() }
-                node.ops.drop(split).fold(strings) { acc, op -> applyOp(op, acc, ctx) }
-                    .filter { it.isNotEmpty() }
-            } else {
-                node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
-                    .filter { it.isNotEmpty() }
-            }
-        }
+        is RuleNode.Pipe ->
+            node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
+                .filter { it.isNotEmpty() }
     }
 
     /** 求值为单个字符串；多条结果用换行拼接，空结果返回 null */
     fun evalToString(node: RuleNode, ctx: EvalContext): String? =
         evalToStrings(node, ctx).takeIf { it.isNotEmpty() }?.joinToString("\n")
-
-    // ---- css ----
-
-    private fun selectElements(query: String, ctx: EvalContext): List<Element> {
-        val el = ctx.element ?: return emptyList()
-        return if (query.isEmpty()) listOf(el) else el.select(query).toList()
-    }
-
-    private fun extract(el: Element, extractor: CssExtractor): String = when (extractor) {
-        CssExtractor.Text -> el.text()
-        CssExtractor.OwnText -> el.ownText()
-        CssExtractor.Html -> el.html()
-        CssExtractor.OuterHtml -> el.outerHtml()
-        CssExtractor.Href -> el.attr("href")
-        CssExtractor.Src -> el.attr("src")
-        is CssExtractor.Attr -> el.attr(extractor.name)
-    }
 
     // ---- xpath ----
 
@@ -361,17 +316,10 @@ class RuleEvaluator(
         for ((key, value) in obj) {
             val ruleText = (value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: continue
             val v = runCatching {
-                evalToStrings(RuleParser.parse(convertPutValue(ruleText)), ctx).firstOrNull()
+                evalToStrings(LegadoRuleAnalyzer.analyze(ruleText), ctx).firstOrNull()
             }.getOrNull().orEmpty()
             ctx.js.scriptVars[key] = v
         }
-    }
-
-    /** @put 的 value 是一条 Legado 规则原文，按前缀分派到对应引擎 */
-    private fun convertPutValue(rule: String): String = when {
-        rule.startsWith("$.") || rule.startsWith("$[") -> "json:$rule"
-        rule.startsWith("@js:") -> "js:" + rule.substring(4)
-        else -> "legado:$rule"
     }
 
     private fun varValue(name: String, ctx: EvalContext): String =
@@ -385,33 +333,19 @@ class RuleEvaluator(
 
     private fun applyOp(op: PipeOp, list: List<String>, ctx: EvalContext): List<String> = when (op) {
         is PipeOp.RegexReplace -> list.map { regexOf(op.pattern).replace(it, op.replacement) }
-        is PipeOp.Match -> list.mapNotNull { s ->
-            regexOf(op.pattern).find(s)?.let { m ->
-                if (m.groupValues.size > 1) m.groupValues[1] else m.value
-            }
-        }
-        PipeOp.Trim -> list.map { it.trim() }
-        PipeOp.StripTags -> list.map { Jsoup.parse(it).text() }
-        PipeOp.First -> list.take(1)
-        PipeOp.Last -> list.takeLast(1)
-        is PipeOp.Index -> listOfNotNull(list.getOrNull(op.n))
-        is PipeOp.Select -> list // 节点级操作，字符串管道里无意义
         is PipeOp.Put -> {
             applyPut(op.spec, ctx)
             list // 只有副作用
         }
         is PipeOp.Rule -> {
             // 上一步的产物是一段新内容（HTML 或 JSON），在它上面重新求值
-            val node = runCatching { RuleParser.parse(op.rule) }.getOrNull()
+            val node = runCatching { LegadoRuleAnalyzer.analyze(op.rule) }.getOrNull()
             if (node == null) list
             else list.flatMap { s ->
                 val sub = ctx.copy(element = Jsoup.parse(s, ctx.baseUrl), json = s)
                 runCatching { evalToStrings(node, sub) }.getOrDefault(emptyList())
             }
         }
-        is PipeOp.Join -> if (list.isEmpty()) emptyList() else listOf(list.joinToString(op.sep))
-        is PipeOp.Prepend -> list.map { expandTemplate(op.s, ctx.vars) + it }
-        is PipeOp.Append -> list.map { it + expandTemplate(op.s, ctx.vars) }
         is PipeOp.Js -> list.mapNotNull { s -> runJs(op.script, ctx, input = s) }
     }
 

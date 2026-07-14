@@ -4,8 +4,8 @@ import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
 import com.radium.inkwell.core.source.EvalContext
 import com.radium.inkwell.core.source.JsContext
+import com.radium.inkwell.core.source.LegadoRuleAnalyzer
 import com.radium.inkwell.core.source.RuleEvaluator
-import com.radium.inkwell.core.source.RuleParser
 import com.radium.inkwell.core.source.SourceException
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.js.ScriptRuntime
@@ -46,7 +46,7 @@ class RssEngine(
             vars = mapOf("baseUrl" to rule.id, "page" to page.toString()),
             js = JsContext(sourceKey = rule.id),
         )
-        val nodes = evaluator.evalToNodes(RuleParser.parse(rule.articles), root)
+        val nodes = evaluator.evalToNodes(LegadoRuleAnalyzer.analyze(rule.articles), root)
         val items = nodes.mapNotNull { item ->
             val title = field(rule.title, item)
             val link = field(rule.link, item)
@@ -82,7 +82,7 @@ class RssEngine(
                 baseUrl = fetched.finalUrl,
                 js = JsContext(sourceKey = rule.id),
             )
-            val html = evaluator.evalToString(RuleParser.parse(rule.content), ctx)
+            val html = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule.content), ctx)
             if (!html.isNullOrBlank()) {
                 val body = Jsoup.parseBodyFragment(html, fetched.finalUrl).body()
                 return htmlToElements.convert(body).takeIf { it.isNotEmpty() }
@@ -95,7 +95,7 @@ class RssEngine(
 
     private fun field(rule: String?, ctx: EvalContext): String? {
         if (rule.isNullOrBlank()) return null
-        return runCatching { evaluator.evalToString(RuleParser.parse(rule), ctx) }.getOrNull()
+        return runCatching { evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule), ctx) }.getOrNull()
     }
 
     private fun expandPage(url: String, page: Int): String =

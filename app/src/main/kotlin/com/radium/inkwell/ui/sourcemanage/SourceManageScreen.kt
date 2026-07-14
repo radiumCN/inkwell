@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -78,7 +77,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun SourceManageScreen(
     onBack: () -> Unit,
-    onEdit: (String?) -> Unit,
+    onOpen: (String) -> Unit,
     viewModel: SourceManageViewModel = koinViewModel(),
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
@@ -260,11 +259,6 @@ fun SourceManageScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { onEdit(null) }) {
-                Icon(Icons.Default.Add, contentDescription = "新建书源")
-            }
-        },
     ) { padding ->
         if (sources.isEmpty()) {
             EmptyState(
@@ -358,7 +352,7 @@ fun SourceManageScreen(
                             .combinedClickable(
                                 onClick = {
                                     if (selectionMode) viewModel.toggleSelect(source.id)
-                                    else onEdit(source.id)
+                                    else onOpen(source.id)
                                 },
                                 // 长按进多选，和书架的删除手势一致
                                 onLongClick = { viewModel.toggleSelect(source.id) },

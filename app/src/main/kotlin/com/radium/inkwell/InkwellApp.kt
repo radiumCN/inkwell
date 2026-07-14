@@ -27,12 +27,6 @@ class InkwellApp : Application() {
             modules(appModule)
         }.koin
 
-        // 转换器升级后把旧转换器转过的书源重新转一遍。
-        // 书源在导入时就转换好存库了，不重转的话我们修的每个转换器 bug 都只对新导入的书源生效。
-        appScope.launch {
-            runCatching { koin.get<BookSourceRepository>().reconvertOutdated() }
-        }
-
         // 首次启动预置几条常见的广告净化规则（默认关闭，用户自己决定开哪条）
         appScope.launch {
             runCatching {

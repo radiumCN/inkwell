@@ -1,4 +1,4 @@
-package com.radium.inkwell.ui.sourceedit
+package com.radium.inkwell.ui.sourcedetail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,103 +10,49 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class SourceEditUiState(
-    val jsonText: String = TEMPLATE,
+/**
+ * 书源详情（只读）。书源不在手机上编辑 —— 手机上编辑 JSON 体验差，规则一律靠导入。
+ * 这里只做两件事：展示规则原文（只读）、跑一键全链路冒烟测试帮用户判断源好不好。
+ */
+data class SourceDetailUiState(
+    val name: String = "",
+    val jsonText: String = "",
     val testKeyword: String = "剑",
     val testing: Boolean = false,
     val testReport: String = "",
     val message: String? = null,
-) {
-    companion object {
-        val TEMPLATE = """
-            {
-              "schemaVersion": 1,
-              "id": "com.example.mysite",
-              "name": "示例书源",
-              "baseUrl": "https://www.example.com",
-              "version": 1,
-              "charset": null,
-              "headers": {},
-              "search": {
-                "request": { "url": "/search?q={{keyword}}", "method": "GET" },
-                "list": "css:div.result-item",
-                "fields": {
-                  "title": "css:h3 a@text",
-                  "bookUrl": "css:h3 a@href",
-                  "author": "css:.author@text"
-                }
-              },
-              "detail": {
-                "fields": { "intro": "css:.intro@text", "tocUrl": "css:a.toc@href" }
-              },
-              "toc": {
-                "list": "css:dd a",
-                "fields": { "title": "css:@text", "url": "css:@href" }
-              },
-              "content": {
-                "content": "css:div#content@html",
-                "purify": []
-              }
-            }
-        """.trimIndent()
-    }
-}
+)
 
-class SourceEditViewModel(
-    private val sourceId: String?,
+class SourceDetailViewModel(
+    private val sourceId: String,
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(SourceEditUiState())
-    val state: StateFlow<SourceEditUiState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(SourceDetailUiState())
+    val state: StateFlow<SourceDetailUiState> = _state.asStateFlow()
 
     init {
-        if (sourceId != null) {
-            viewModelScope.launch {
-                sourceRepo.getEntity(sourceId)?.let {
-                    _state.value = _state.value.copy(jsonText = it.json)
-                }
+        viewModelScope.launch {
+            sourceRepo.getEntity(sourceId)?.let {
+                _state.value = _state.value.copy(name = it.name, jsonText = prettyOrRaw(it.json))
             }
         }
     }
 
-    fun setJson(text: String) {
-        _state.value = _state.value.copy(jsonText = text)
-    }
+    /** 规则原文按原生格式美化展示；解析不出来就原样显示（不因展示失败而空屏） */
+    private fun prettyOrRaw(json: String): String =
+        sourceRepo.parseRule(json).map { sourceRepo.encodeRule(it) }.getOrDefault(json)
 
     fun setTestKeyword(text: String) {
         _state.value = _state.value.copy(testKeyword = text)
     }
 
-    fun formatJson() {
-        sourceRepo.parseRule(_state.value.jsonText)
-            .onSuccess {
-                _state.value = _state.value.copy(
-                    jsonText = sourceRepo.encodeRule(it),
-                    message = "校验通过",
-                )
-            }
-            .onFailure { _state.value = _state.value.copy(message = "JSON 错误: ${it.message?.take(120)}") }
-    }
-
-    fun save() {
-        viewModelScope.launch {
-            sourceRepo.importJson(_state.value.jsonText)
-                .onSuccess {
-                    _state.value = _state.value.copy(
-                        message = if (it.imported > 0) "已保存" else "保存失败: ${it.skipped.firstOrNull() ?: "未知原因"}",
-                    )
-                }
-                .onFailure { _state.value = _state.value.copy(message = "保存失败: ${it.message?.take(120)}") }
-        }
-    }
-
     /** 搜索→取第1本→详情→目录→第1章正文，一键冒烟 */
     fun testSearchChain() {
         val rule = sourceRepo.parseRule(_state.value.jsonText).getOrElse {
-            _state.value = _state.value.copy(message = "JSON 错误: ${it.message?.take(120)}")
+            _state.value = _state.value.copy(message = "规则解析失败: ${it.message?.take(120)}")
             return
         }
         viewModelScope.launch {

@@ -98,12 +98,6 @@ data class BackupSource(
     val enabled: Boolean = true,
     val json: String,
     val updatedAt: Long = 0,
-    /**
-     * 书源的 legado 原文。从前没备份它 —— 换设备后同步下来的书源 sourceJson 为空，
-     * 转换器再升级也重转不了，用户只能手动重新导入一次。
-     */
-    val sourceJson: String = "",
-    val converterVersion: Int = 0,
     val sortOrder: Int = 0,
 )
 

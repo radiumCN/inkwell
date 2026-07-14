@@ -20,7 +20,7 @@ import com.radium.inkwell.ui.reader.ReaderScreen
 import com.radium.inkwell.ui.search.SearchScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
 import com.radium.inkwell.ui.settings.ThemeSettingsScreen
-import com.radium.inkwell.ui.sourceedit.SourceEditScreen
+import com.radium.inkwell.ui.sourcedetail.SourceDetailScreen
 import com.radium.inkwell.ui.replace.ReplaceRuleScreen
 import com.radium.inkwell.ui.rss.RssArticleScreen
 import com.radium.inkwell.ui.rss.RssArticlesScreen
@@ -105,12 +105,12 @@ fun InkwellNavHost() {
         composable<SourceManageRoute> {
             SourceManageScreen(
                 onBack = { navController.popBackStack() },
-                onEdit = { navController.navigate(SourceEditRoute(it)) },
+                onOpen = { navController.navigate(SourceDetailRoute(it)) },
             )
         }
-        composable<SourceEditRoute> { entry ->
-            val route = entry.toRoute<SourceEditRoute>()
-            SourceEditScreen(
+        composable<SourceDetailRoute> { entry ->
+            val route = entry.toRoute<SourceDetailRoute>()
+            SourceDetailScreen(
                 sourceId = route.sourceId,
                 onBack = { navController.popBackStack() },
             )

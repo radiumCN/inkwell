@@ -1,8 +1,7 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
-import com.radium.inkwell.core.source.RequestRule
-import com.radium.inkwell.core.source.SearchRule
+import com.radium.inkwell.core.source.SearchRuleSet
 import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -17,14 +16,10 @@ import kotlin.test.assertTrue
 class AutoSourceRankTest {
 
     private fun rule(id: String, hasSearch: Boolean = true) = BookSourceRule(
-        id = id,
-        name = "源$id",
-        baseUrl = "https://$id.example.com",
-        search = if (hasSearch) {
-            SearchRule(request = RequestRule(url = "/s?q={{keyword}}"), list = ".item")
-        } else {
-            null
-        },
+        bookSourceUrl = id,
+        bookSourceName = "源$id",
+        searchUrl = if (hasSearch) "/s?q={{key}}" else null,
+        ruleSearch = if (hasSearch) SearchRuleSet(bookList = ".item", name = ".t", bookUrl = ".u") else null,
     )
 
     private fun src(

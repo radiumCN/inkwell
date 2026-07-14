@@ -73,8 +73,9 @@ object ReplaceRuleRoute
 @Serializable
 object SourceManageRoute
 
+/** 书源详情（只读）；书源不在应用内编辑，只能导入 */
 @Serializable
-data class SourceEditRoute(val sourceId: String? = null)
+data class SourceDetailRoute(val sourceId: String)
 
 @Serializable
 object SettingsRoute

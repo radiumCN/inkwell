@@ -97,10 +97,6 @@ class WebDavRepository(
             BackupSource(
                 id = s.id, name = s.name, enabled = s.enabled, json = s.json,
                 updatedAt = s.updatedAt,
-                // 带上 legado 原文与转换器版本：换设备后书源才能被新版转换器重转，
-                // 否则同步下来的书源 sourceJson 是空的，只能手动重新导入
-                sourceJson = s.sourceJson,
-                converterVersion = s.converterVersion,
                 sortOrder = s.sortOrder,
             )
         },
@@ -157,7 +153,6 @@ class WebDavRepository(
                 BookSourceEntity(
                     id = s.id, name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
                     json = s.json, updatedAt = s.updatedAt,
-                    sourceJson = s.sourceJson, converterVersion = s.converterVersion,
                 )
             )
         }

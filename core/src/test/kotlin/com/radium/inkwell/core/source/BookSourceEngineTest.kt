@@ -41,6 +41,7 @@ class BookSourceEngineTest {
             SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1),
             { globalPurify },
             trace,
+            scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
         )
 
     private fun source(): BookSourceRule = BookSourceRule.fromJson(sourceJson(base))
@@ -64,7 +65,7 @@ class BookSourceEngineTest {
         assertEquals("$base/img/1.jpg", first.coverUrl)
         assertEquals("一个平凡少年的故事。", first.intro)
         assertEquals("第五章 大结局", first.latestChapter)
-        assertEquals("com.test.novel", first.sourceId)
+        assertEquals(base, first.sourceId)
         assertEquals("仙路漫漫", result.items[1].title)
         assertNull(result.items[1].intro)
 
@@ -107,7 +108,8 @@ class BookSourceEngineTest {
     @Test
     fun `toc reverse flips order and reindexes`() = runBlocking {
         val src = source()
-        val reversed = src.copy(toc = src.toc!!.copy(reverse = true))
+        // 原生 Legado：chapterList 前导 `-` 表示整体倒序
+        val reversed = src.copy(ruleToc = src.ruleToc!!.copy(chapterList = "-" + src.ruleToc!!.chapterList))
         val toc = engine().getToc(reversed, "$base/book/1/toc")
         assertEquals("第五章 大结局", toc[0].title)
         assertEquals("第一章 山村少年", toc[4].title)
@@ -180,15 +182,13 @@ class BookSourceEngineTest {
      */
     @Test
     fun `没有 nextPage 规则时靠地址里的 page 变量判定还能翻页`() = runBlocking {
-        val json = sourceJson(base).replace("\"nextPage\": \"css:a.next@href\"", "\"nextPage\": null")
-
-        val pageable = BookSourceRule.fromJson(json)
-        val page = engine().search(pageable, "修真")
+        // 原生 Legado 的搜索没有 nextPage 规则，翻页全靠 searchUrl 里的 {{page}}
+        val page = engine().search(source(), "修真")
         assertTrue(page.items.isNotEmpty())
         assertTrue(page.hasMore, "searchUrl 里有 {{page}} 且这一页有结果 → 还能往下翻")
 
         // 地址里没有 page 变量：请求「第 2 页」拿回来的还是第 1 页，不该声称还有更多
-        val fixed = BookSourceRule.fromJson(json.replace("&page={{page}}", ""))
+        val fixed = BookSourceRule.fromJson(sourceJson(base).replace("&page={{page}}", ""))
         assertFalse(engine().search(fixed, "修真").hasMore)
     }
 
@@ -200,7 +200,7 @@ class BookSourceEngineTest {
     @Test
     fun `没有书名规则的详情页不算失败，书名留空交给调用方回落`() = runBlocking {
         val noTitleRule = BookSourceRule.fromJson(
-            sourceJson(base).replace(""""title": "css:h1@text",""", "")
+            sourceJson(base).replace(""""name": "h1@text",""", "")
         )
         val detail = engine().getDetail(noTitleRule, "$base/book/1")
         assertEquals("", detail.title, "书名留空，由调用方回落到搜索结果")
@@ -229,7 +229,7 @@ class BookSourceEngineTest {
 
     @Test
     fun `missing rule section throws`() = runBlocking {
-        val bare = source().copy(search = null, toc = null, content = null)
+        val bare = source().copy(searchUrl = null, ruleSearch = null, ruleToc = null, ruleContent = null)
         assertFailsWith<SourceException> { engine().search(bare, "x") }
         assertFailsWith<SourceException> { engine().getToc(bare, "$base/book/1/toc") }
         assertFailsWith<SourceException> { engine().getContent(bare, "$base/chap/1") }
@@ -243,9 +243,9 @@ class BookSourceEngineTest {
     @Test
     fun `模板型 tocUrl 从详情页 JSON 取值`() = runBlocking {
         val src = BookSourceRule.fromJson(
-            """{"id":"com.test.api","name":"API站","baseUrl":"$base",
-                "detail":{"fields":{"title":"json:${'$'}.name","tocUrl":"text:/api/book/{{${'$'}.id}}/toc"}},
-                "toc":{"list":"json:${'$'}.chapters","fields":{"title":"json:${'$'}.t","url":"json:${'$'}.u"}}}"""
+            """{"bookSourceUrl":"$base","bookSourceName":"API站",
+                "ruleBookInfo":{"name":"${'$'}.name","tocUrl":"/api/book/{{${'$'}.id}}/toc"},
+                "ruleToc":{"chapterList":"${'$'}.chapters","chapterName":"${'$'}.t","chapterUrl":"${'$'}.u"}}"""
         )
         val detail = engine().getDetail(src, "$base/api/detail")
         assertEquals("$base/api/book/777/toc", detail.tocUrl)
@@ -307,8 +307,8 @@ class BookSourceEngineTest {
     @Test
     fun `gbk site content decoded via meta sniffing`() = runBlocking {
         val gbkSrc = BookSourceRule.fromJson(
-            """{"id":"com.test.gbk","name":"GBK站","baseUrl":"$base",
-                "content":{"content":"css:div#content@html"}}"""
+            """{"bookSourceUrl":"$base","bookSourceName":"GBK站",
+                "ruleContent":{"content":"div#content@html"}}"""
         )
         val content = engine().getContent(gbkSrc, "$base/gbk/chap")
         val paras = content.elements.filterIsInstance<ContentElement.Paragraph>()
@@ -341,14 +341,15 @@ class BookSourceEngineTest {
     @Test
     fun `schema parses with unknown keys and defaults`() {
         val src = source()
-        assertEquals(1, src.schemaVersion)
-        assertEquals("com.test.novel", src.id)
+        assertEquals(0, src.bookSourceType)
+        assertEquals(base, src.id)
         assertTrue(src.enabled)
         assertNull(src.charset)
         assertEquals("1", src.headers["X-Test"])
-        assertEquals(false, src.toc!!.reverse)
-        assertEquals(1, src.content!!.purify.size)
-        // 往返序列化
+        assertEquals("ul.chapters li a", src.ruleToc!!.chapterList)
+        // replaceRegex 解析出一条源级净化
+        assertEquals(1, parseReplaceRegex(src.ruleContent!!.replaceRegex).size)
+        // 往返序列化（未知键被忽略，不参与相等）
         val roundTrip = BookSourceRule.fromJson(src.toJson())
         assertEquals(src, roundTrip)
     }
@@ -400,18 +401,13 @@ class BookSourceEngineTest {
      */
     @Test
     fun `目录 put 的变量传到正文 get`() = runBlocking {
-        val putPipe = "put:b64:" + b64("""{"cid":"tag.a@data-cid"}""")
-        val contentRule = "text:b64:" + b64("章节ID=@get:{cid}")
+        // 原生 Legado：目录 chapterUrl 用 @put 存 cid，正文用 <js>java.get</js> 取回本章的 cid
         val json = """
-            {"schemaVersion":1,"id":"t","name":"传参站","baseUrl":"BASE","version":1,
-             "toc":{"list":"legado:class.chap","fields":{
-               "title":"legado:tag.a@text",
-               "url":"legado:tag.a@href | PUT"}},
-             "content":{"content":"CONTENT"}}
-        """.trimIndent()
-            .replace("BASE", base)
-            .replace("PUT", putPipe)
-            .replace("CONTENT", contentRule)
+            {"bookSourceUrl":"BASE","bookSourceName":"传参站",
+             "ruleToc":{"chapterList":"class.chap","chapterName":"tag.a@text",
+               "chapterUrl":"tag.a@href@put:{\"cid\":\"tag.a@data-cid\"}"},
+             "ruleContent":{"content":"<js>\"章节ID=\"+java.get(\"cid\")</js>"}}
+        """.trimIndent().replace("BASE", base)
         val src = BookSourceRule.fromJson(json)
 
         val toc = engine().getToc(src, "$base/vartoc")
@@ -427,61 +423,45 @@ class BookSourceEngineTest {
         assertEquals("章节ID=c202", (c2.elements.first() as ContentElement.Paragraph).text)
     }
 
-    private fun b64(s: String) =
-        java.util.Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8))
-
     private companion object {
 
+        // 原生 Legado 格式（字段名与开源阅读一致）；规则由 LegadoRuleAnalyzer 直接求值
         fun sourceJson(base: String) = """
         {
-          "schemaVersion": 1,
-          "id": "com.test.novel",
-          "name": "测试书站",
-          "baseUrl": "$base",
-          "version": 1,
-          "charset": null,
-          "headers": { "X-Test": "1" },
-          "search": {
-            "request": { "url": "/search?q={{keyword}}&page={{page}}", "method": "GET" },
-            "list": "css:div.result",
-            "fields": {
-              "title": "css:h3 a@text",
-              "bookUrl": "css:h3 a@href",
-              "author": "css:span.author@text | regex:作者[：:]",
-              "coverUrl": "css:img@src",
-              "intro": "css:p.intro@text",
-              "latestChapter": "css:span.latest@text"
-            },
-            "nextPage": "css:a.next@href"
+          "bookSourceUrl": "$base",
+          "bookSourceName": "测试书站",
+          "bookSourceType": 0,
+          "header": "{\"X-Test\":\"1\"}",
+          "searchUrl": "/search?q={{key}}&page={{page}}",
+          "ruleSearch": {
+            "bookList": "div.result",
+            "name": "h3 a@text",
+            "bookUrl": "h3 a@href",
+            "author": "span.author@text##作者[：:]",
+            "coverUrl": "img@src",
+            "intro": "p.intro@text",
+            "lastChapter": "span.latest@text"
           },
-          "detail": {
-            "fields": {
-              "title": "css:h1@text",
-              "author": "css:meta[name=author]@attr(content)",
-              "coverUrl": "css:div.cover img@src",
-              "intro": "css:div.intro@text",
-              "tocUrl": "css:a.toc@href"
-            }
+          "ruleBookInfo": {
+            "name": "h1@text",
+            "author": "@css:meta[name=author]@content",
+            "coverUrl": "div.cover img@src",
+            "intro": "div.intro@text",
+            "tocUrl": "a.toc@href"
           },
-          "toc": {
-            "list": "css:ul.chapters li a",
-            "fields": { "title": "css:@text", "url": "css:@href" },
-            "nextPage": "css:a.nextpage@href",
-            "reverse": false
+          "ruleToc": {
+            "chapterList": "ul.chapters li a",
+            "chapterName": "text",
+            "chapterUrl": "href",
+            "nextTocUrl": "a.nextpage@href"
           },
-          "content": {
-            "content": "css:div#content@html",
-            "nextPage": "css:a#next@href",
-            "purify": [ { "pattern": "本站广告.*", "replacement": "", "isRegex": true } ]
+          "ruleContent": {
+            "content": "div#content@html",
+            "nextContentUrl": "a#next@href",
+            "replaceRegex": "##本站广告.*##"
           },
-          "explore": [
-            {
-              "name": "玄幻",
-              "url": "/list/{{page}}.html",
-              "list": "css:div.result",
-              "fields": { "title": "css:h3 a@text", "bookUrl": "css:h3 a@href" }
-            }
-          ],
+          "exploreUrl": "玄幻::/list/{{page}}.html",
+          "ruleExplore": { "bookList": "div.result", "name": "h3 a@text", "bookUrl": "h3 a@href" },
           "unknownFutureKey": { "x": 1 }
         }
         """
