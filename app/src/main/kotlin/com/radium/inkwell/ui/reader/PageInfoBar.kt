@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +48,7 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
     val density = LocalDensity.current
     val context = LocalContext.current
     val footerColor = Color(state.settings.theme.footerColor)
+    val footerNumStyle = remember { TextStyle(fontSize = FOOTER_SP, fontFeatureSettings = "tnum") }
 
     var time by remember { mutableStateOf(currentTime()) }
     var battery by remember { mutableIntStateOf(readBattery(context)) }
@@ -69,36 +72,55 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
     }
 
     val marginH = with(density) { spec.marginLeftPx.toDp() }
+    // 页眉/页脚对齐正文预留的那两条带 —— marginTop/Bottom 已经把挖孔折进去了，所以既清开
+    // 摄像头、又不会像从前那样（固定 8dp）把页眉顶到屏幕最边、跟正文之间空出一大截。
+    val headerTop = with(density) { spec.marginTopPx.toDp() }
+    val footerBottom = with(density) { spec.marginBottomPx.toDp() }
 
-    Box(Modifier.fillMaxSize().padding(horizontal = marginH, vertical = 8.dp)) {
+    Box(Modifier.fillMaxSize()) {
+        // 页眉：章节名，落在正文上方的页眉带里
         Text(
             state.chapterTitle,
-            Modifier.align(Alignment.TopStart).padding(end = 48.dp),
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(start = marginH, end = marginH, top = headerTop),
             color = footerColor,
-            fontSize = 11.sp,
+            fontSize = FOOTER_SP,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            "${state.pageInChapter + 1}/${state.pageCount}",
-            Modifier.align(Alignment.BottomStart),
-            color = footerColor,
-            fontSize = 11.sp,
-        )
+
+        // 页脚：左页码、右「进度 · 时间 · 电量」，同一条基线
         Row(
-            Modifier.align(Alignment.BottomEnd),
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(start = marginH, end = marginH, bottom = footerBottom),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "${"%.1f".format(bookPercent)}%  ·  $time",
+                "${state.pageInChapter + 1} / ${state.pageCount}",
                 color = footerColor,
-                fontSize = 11.sp,
+                style = footerNumStyle,
             )
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${"%.1f".format(bookPercent)}%",
+                color = footerColor,
+                style = footerNumStyle,
+            )
+            Text(
+                "  ·  $time",
+                color = footerColor,
+                style = footerNumStyle,
+            )
+            Spacer(Modifier.width(8.dp))
             BatteryIndicator(level = battery, color = footerColor)
         }
     }
 }
+
+private val FOOTER_SP = 11.sp
 
 /** 小电池图标：描边外框 + 正极触点 + 按电量填充 */
 @Composable
