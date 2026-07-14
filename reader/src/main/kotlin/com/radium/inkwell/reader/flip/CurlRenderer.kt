@@ -245,13 +245,13 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /** 背面靠折线处的暗部，给卷起的纸一点立体感。克制一点 —— 太宽会在折缝旁显出一道生硬的带子 */
     private fun drawBackShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 3.5f, maxWidth = 95f, towardLeft = false)
+        drawShadowStrip(canvas, backShadowPaint, widthDivisor = 8f, maxWidth = 28f, towardLeft = false)
     }
 
     /** 前页正面靠折痕的投影，向页面主体渐隐（纸张翘起的正面阴影） */
     private fun drawFrontShadow(canvas: Canvas) {
         val fold = hypot((touch.x - cornerX).toDouble(), (touch.y - cornerY).toDouble()).toFloat()
-        val w = (fold / 5f).coerceIn(0f, 30f)
+        val w = (fold / 7f).coerceIn(0f, 20f)
         if (w < 2f) return
         val degree = Math.toDegrees(
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
@@ -272,7 +272,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /** 翻起页投在下页上的柔和阴影 */
     private fun drawFoldShadow(canvas: Canvas) {
-        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 4f, maxWidth = 60f, towardLeft = true)
+        drawShadowStrip(canvas, foldShadowPaint, widthDivisor = 7f, maxWidth = 32f, towardLeft = true)
     }
 
     /** 沿折线画渐变阴影条；shader 为单位渐变，用 localMatrix 定位（无每帧分配） */
