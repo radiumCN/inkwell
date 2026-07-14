@@ -2,6 +2,7 @@ package com.radium.inkwell
 
 import android.app.Application
 import com.radium.inkwell.data.prefs.WebDavPrefs
+import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.di.appModule
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,12 @@ class InkwellApp : Application() {
             androidContext(this@InkwellApp)
             modules(appModule)
         }.koin
+
+        // 转换器升级后把旧转换器转过的书源重新转一遍。
+        // 书源在导入时就转换好存库了，不重转的话我们修的每个转换器 bug 都只对新导入的书源生效。
+        appScope.launch {
+            runCatching { koin.get<BookSourceRepository>().reconvertOutdated() }
+        }
 
         // 冷启动静默同步（已配置 WebDAV 时）；失败不打扰用户
         appScope.launch {

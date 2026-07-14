@@ -28,7 +28,19 @@ import kotlinx.serialization.json.jsonObject
  */
 object LegadoConverter {
 
-    data class Converted(val rule: BookSourceRule, val warnings: List<String>)
+    /**
+     * 转换器版本。改动了转换逻辑就 +1 —— 书源在导入时就转换好存进库了，
+     * 升级 App 不会自动重转，得靠这个版本号识别出「用旧转换器转的书源」并重转。
+     * 否则我们修的每个转换器 bug 都只对「新导入的书源」生效，老用户永远踩着旧坑。
+     */
+    const val VERSION = 2
+
+    /** [sourceJson] 是该书源的 legado 原文，留着升级后重新转换用 */
+    data class Converted(
+        val rule: BookSourceRule,
+        val warnings: List<String>,
+        val sourceJson: String,
+    )
     data class Skipped(val name: String, val url: String, val reason: String)
     data class Result(val converted: List<Converted>, val skipped: List<Skipped>)
 
@@ -52,7 +64,8 @@ object LegadoConverter {
             val name = obj.str("bookSourceName") ?: "未命名"
             val url = obj.str("bookSourceUrl") ?: ""
             try {
-                converted += convertOne(obj)
+                val c = convertOne(obj)
+                converted += c.copy(sourceJson = obj.toString())
             } catch (e: LegadoUnsupported) {
                 skipped += Skipped(name, url, e.message ?: "不支持")
             } catch (e: Exception) {
@@ -198,7 +211,7 @@ object LegadoConverter {
             content = ContentRule(content = contentRule, nextPage = contentNext, purify = purify),
             explore = explore,
         )
-        return Converted(rule, warnings.toList())
+        return Converted(rule, warnings.toList(), sourceJson = "")
     }
 
     /** 搜索规则整体构建；必填字段无法转换时抛 LegadoUnsupported */

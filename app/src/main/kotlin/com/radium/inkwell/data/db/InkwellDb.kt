@@ -13,7 +13,7 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 
 @Database(
     entities = [BookEntity::class, ChapterEntity::class, BookSourceEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -31,6 +31,20 @@ abstract class InkwellDb : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE chapter ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * 留存书源的 legado 原文 + 转换器版本号。书源在导入时就被转换成我们的规则格式存库了，
+         * 升级 App 不会重转 —— 于是我们修的每个转换器 bug 都只对「新导入的书源」生效。
+         * 有了原文与版本号，升级后就能把旧转换器转出来的书源重新转一遍。
+         *
+         * 老数据的 sourceJson 为空（当时没存），重转不了，只能让用户重新导入一次。
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_source ADD COLUMN sourceJson TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE book_source ADD COLUMN converterVersion INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

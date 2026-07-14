@@ -29,7 +29,7 @@ import org.koin.dsl.module
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), InkwellDb::class.java, "inkwell.db")
-            .addMigrations(InkwellDb.MIGRATION_1_2)
+            .addMigrations(InkwellDb.MIGRATION_1_2, InkwellDb.MIGRATION_2_3)
             .build()
     }
     single { get<InkwellDb>().bookDao() }

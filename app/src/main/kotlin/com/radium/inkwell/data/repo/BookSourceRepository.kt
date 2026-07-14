@@ -70,8 +70,43 @@ class BookSourceRepository(private val dao: BookSourceDao) {
         val result = LegadoConverter.convert(text)
         return upsertRules(
             result.converted.map { it.rule },
+            // 留存 legado 原文：转换器修好后才能把已导入的书源重新转一遍
+            sourceJsonById = result.converted.associate { it.rule.id to it.sourceJson },
             skipped = result.skipped.map { "${it.name}: ${it.reason}" },
         )
+    }
+
+    /**
+     * 把用旧版转换器转过的书源重新转一遍。
+     *
+     * 书源在导入时就转换成我们的规则格式存库了，升级 App 不会重转 —— 于是转换器的每个修复
+     * 都只对「新导入的书源」生效，老用户永远踩着旧坑（追书神器的目录地址少了 /toc/ 前缀，
+     * 装了新版依然 404，就是这么来的）。
+     *
+     * @return 重转的书源数；沿用用户的启用状态与排序
+     */
+    suspend fun reconvertOutdated(): Int {
+        val outdated = dao.getAll().filter {
+            it.converterVersion < LegadoConverter.VERSION && it.sourceJson.isNotBlank()
+        }
+        if (outdated.isEmpty()) return 0
+        var done = 0
+        val now = System.currentTimeMillis()
+        val toWrite = ArrayList<BookSourceEntity>(outdated.size)
+        for (old in outdated) {
+            val rule = runCatching {
+                LegadoConverter.convert(old.sourceJson).converted.singleOrNull()?.rule
+            }.getOrNull() ?: continue // 新转换器认为这个源不可用了，保留旧的，别把用户的书源弄没
+            toWrite += old.copy(
+                name = rule.name,
+                json = json.encodeToString(BookSourceRule.serializer(), rule),
+                converterVersion = LegadoConverter.VERSION,
+                updatedAt = now,
+            )
+            done++
+        }
+        if (toWrite.isNotEmpty()) dao.upsertAll(toWrite)
+        return done
     }
 
     /**
@@ -80,6 +115,7 @@ class BookSourceRepository(private val dao: BookSourceDao) {
      */
     private suspend fun upsertRules(
         rules: List<BookSourceRule>,
+        sourceJsonById: Map<String, String> = emptyMap(),
         skipped: List<String> = emptyList(),
     ): ImportReport {
         // 同 id 保留最后一个（同站多源撞 id 时避免同事务重复主键）
@@ -106,6 +142,8 @@ class BookSourceRepository(private val dao: BookSourceDao) {
                     sortOrder = existing?.sortOrder ?: 0,
                     json = json.encodeToString(BookSourceRule.serializer(), rule),
                     updatedAt = now,
+                    sourceJson = sourceJsonById[rule.id].orEmpty(),
+                    converterVersion = LegadoConverter.VERSION,
                 )
                 if (existing == null) added++ else updated++
             } catch (e: Exception) {
@@ -119,6 +157,7 @@ class BookSourceRepository(private val dao: BookSourceDao) {
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 
     suspend fun delete(id: String) = dao.deleteById(id)
+
 
     suspend fun getRule(id: String): BookSourceRule? =
         dao.getById(id)?.let { runCatching { json.decodeFromString<BookSourceRule>(it.json) }.getOrNull() }
