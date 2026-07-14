@@ -243,8 +243,9 @@ class BookSourceEngine(
         chapterVariable: String,
         render: Boolean,
     ): RemoteChapterContent? {
-        // 净化：源级在前、全局在后；正则预编译
-        val purifiers = compilePurify(rule.purify) + compileGlobalPurify(globalPurify(source))
+        // 净化：源级在前、用户的通用规则在后；正则预编译
+        val sourcePurifier = Purifier.strict(rule.purify)
+        val userPurifier = Purifier.lenient(globalPurify(source))
         val elements = mutableListOf<ContentElement>()
         val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
         val stopAt = otherChapterUrls.filterNotTo(HashSet()) { it == firstUrl }
@@ -275,7 +276,7 @@ class BookSourceEngine(
                 ?.let { resolveUrl(fetched.finalUrl, it) }
                 ?.takeIf { it !in stopAt } // 翻到别的章节了 → 本章结束
         }
-        return applyPurify(elements, purifiers).takeIf { it.isNotEmpty() }?.let { RemoteChapterContent(it) }
+        return userPurifier.apply(sourcePurifier.apply(elements)).takeIf { it.isNotEmpty() }?.let { RemoteChapterContent(it) }
     }
 
     // ---- JS 渲染回退 ----
@@ -513,49 +514,6 @@ class BookSourceEngine(
         } catch (e: Exception) {
             trace?.onRule(RuleTrace(stage, name, rule, null, e.message))
             throw e
-        }
-    }
-
-    // ---- 净化 ----
-
-    private class CompiledPurify(rule: PurifyRule) {
-        private val regex: Regex? = if (rule.isRegex) Regex(rule.pattern) else null
-        private val literal: String = rule.pattern
-        private val replacement: String = rule.replacement
-        fun apply(text: String): String =
-            regex?.replace(text, replacement) ?: text.replace(literal, replacement)
-    }
-
-    /**
-     * 用户写的全局规则容错：一条正则写错，不该让整章正文加载失败 —— 跳过它就是。
-     * 书源自带的净化规则仍然是硬错（那是书源坏了，得让用户看见）。
-     */
-    private fun compileGlobalPurify(rules: List<PurifyRule>): List<CompiledPurify> =
-        rules.mapNotNull { runCatching { CompiledPurify(it) }.getOrNull() }
-
-    private fun compilePurify(rules: List<PurifyRule>): List<CompiledPurify> =
-        rules.map {
-            try {
-                CompiledPurify(it)
-            } catch (e: Exception) {
-                throw SourceException("净化规则正则错误: ${it.pattern}", e)
-            }
-        }
-
-    /** 逐段落应用净化；替换后全空的段落丢弃 */
-    private fun applyPurify(
-        elements: List<ContentElement>,
-        purifiers: List<CompiledPurify>,
-    ): List<ContentElement> {
-        if (purifiers.isEmpty()) return elements
-        fun clean(text: String): String? =
-            purifiers.fold(text) { acc, p -> p.apply(acc) }.trim().takeIf { it.isNotEmpty() }
-        return elements.mapNotNull { el ->
-            when (el) {
-                is ContentElement.Paragraph -> clean(el.text)?.let { ContentElement.Paragraph(it) }
-                is ContentElement.Heading -> clean(el.text)?.let { ContentElement.Heading(el.level, it) }
-                else -> el
-            }
         }
     }
 

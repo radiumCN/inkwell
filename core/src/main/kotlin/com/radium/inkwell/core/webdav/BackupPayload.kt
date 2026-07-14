@@ -51,6 +51,8 @@ data class BackupReplaceRule(
     val replacement: String = "",
     val isRegex: Boolean = true,
     val scope: String = "",
+    /** 只对这一本书生效；空 = 通用规则 */
+    val bookId: String = "",
     val enabled: Boolean = true,
     val sortOrder: Int = 0,
     val updatedAt: Long = 0,
