@@ -104,6 +104,11 @@ class BookRepository(
         bookDao.setGroup(id, group)
     }
 
+    /** 打开书就把「有新章节」的红点清掉 —— 打开即已知晓 */
+    suspend fun clearNewChapters(id: String) {
+        bookDao.clearNewChapters(id)
+    }
+
     suspend fun setHidden(id: String, hidden: Boolean) {
         bookDao.setHidden(id, hidden)
     }

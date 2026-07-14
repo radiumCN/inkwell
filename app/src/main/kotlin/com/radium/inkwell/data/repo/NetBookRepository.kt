@@ -92,13 +92,15 @@ class NetBookRepository(
         return bookId
     }
 
-    /** 刷新目录（追更） */
+    /** 刷新目录（追更）。返回**新增的章节数**（0 = 已经是最新的） */
     suspend fun refreshToc(book: BookEntity, rule: BookSourceRule): Result<Int> = runCatching {
         val toc = engine.getToc(rule, book.tocUrl ?: book.bookUrl ?: error("缺少目录地址"))
         check(toc.isNotEmpty()) { "目录解析为空" }
         // 追更同样要对齐进度：站点在前面插入公告章/防盗章后目录整体后移，
         // 沿用旧序号会直接跳章（从前只有换源做了对齐，追更没做）
         val (readIndex, readOffset) = alignProgress(book.id, book, toc)
+        val added = (toc.size - book.totalChapters).coerceAtLeast(0)
+
         writeToc(book.id, toc)
         bookDao.update(
             book.copy(
@@ -106,10 +108,13 @@ class NetBookRepository(
                 latestChapterTitle = toc.lastOrNull()?.title,
                 readChapterIndex = readIndex,
                 readCharOffset = readOffset,
+                // 累加而不是覆盖：连刷两次、第二次没新章，不该把第一次的 5 章抹成 0 ——
+                // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
+                newChapterCount = book.newChapterCount + added,
                 updatedAt = System.currentTimeMillis(),
             )
         )
-        toc.size
+        added
     }
 
     /** isCached 按章节 URL 判定：目录变动后序号会错位，缓存得跟着章节走 */

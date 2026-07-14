@@ -40,4 +40,8 @@ interface BookDao {
 
     @Query("UPDATE book SET hidden = :hidden WHERE id = :id")
     suspend fun setHidden(id: String, hidden: Boolean)
+
+    /** 打开这本书 = 你已经知道它更新了，红点清零 */
+    @Query("UPDATE book SET newChapterCount = 0 WHERE id = :id")
+    suspend fun clearNewChapters(id: String)
 }

@@ -41,6 +41,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_7_8,
                 InkwellDb.MIGRATION_8_9,
                 InkwellDb.MIGRATION_9_10,
+                InkwellDb.MIGRATION_10_11,
             )
             .build()
     }
@@ -88,7 +89,7 @@ val appModule = module {
     single { AutoSourceSwitcher(get(), get()) }
     single { WebDavRepository(get(), get(), get(), get(), get(), get(), get()) }
 
-    viewModel { BookshelfViewModel(get(), get()) }
+    viewModel { BookshelfViewModel(get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }

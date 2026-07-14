@@ -13,12 +13,65 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import com.radium.inkwell.data.db.entity.BookType
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
 
 class BookshelfViewModel(
     private val bookRepo: BookRepository,
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
+    private val netBookRepo: com.radium.inkwell.data.repo.NetBookRepository,
+    private val sourceRepo: com.radium.inkwell.data.repo.BookSourceRepository,
 ) : ViewModel() {
+
+    // ---------- 追更 ----------
+
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    /**
+     * 下拉刷新：把书架上所有**网络书**的目录并发刷一遍。
+     *
+     * 在此之前，追更只能一本一本进详情页点刷新 —— 而你根本不知道哪本书更新了，
+     * 于是只能挨个点开碰运气。那不叫追更。
+     *
+     * 限流 4 而不是全部并发：几十本书同时打同一个站点，会被限流甚至封 IP，
+     * 结果是一本都刷不出来。
+     */
+    fun refreshAll() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch {
+            val books = allBooks.value.filter { it.type == BookType.NET }
+            if (books.isEmpty()) {
+                _refreshing.value = false
+                messages.emit("书架上没有网络书")
+                return@launch
+            }
+            val limiter = Semaphore(4)
+            val added = books.map { book ->
+                async {
+                    limiter.withPermit {
+                        val rule = book.sourceId?.let { sourceRepo.getRule(it) }
+                            ?: return@withPermit 0
+                        // 单本失败不能拖垮整轮 —— 几十本书里总有一两个源在抽风
+                        netBookRepo.refreshToc(book, rule).getOrDefault(0)
+                    }
+                }
+            }.awaitAll()
+
+            val updatedBooks = added.count { it > 0 }
+            val totalChapters = added.sum()
+            _refreshing.value = false
+            messages.emit(
+                if (updatedBooks == 0) "没有新章节"
+                else "$updatedBooks 本书更新了，共 $totalChapters 章"
+            )
+        }
+    }
 
     /** 书架顶栏是否显示「发现」入口 */
     val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabled

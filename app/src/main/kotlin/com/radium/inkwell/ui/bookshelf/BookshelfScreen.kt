@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -103,6 +105,7 @@ fun BookshelfScreen(
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     var overflowOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
+    val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val hideBooksEnabled by viewModel.hideBooksEnabled.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
@@ -291,6 +294,11 @@ fun BookshelfScreen(
                         )
                     }
                 }
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = { viewModel.refreshAll() },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
@@ -306,6 +314,7 @@ fun BookshelfScreen(
                             onLongClick = { actionTarget = book },
                         )
                     }
+                }
                 }
             }
         }
@@ -451,11 +460,22 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
                     Icons.Default.VisibilityOff,
                     contentDescription = "已隐藏",
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        .align(Alignment.TopStart)
                         .padding(4.dp)
                         .size(Dimens.iconSm),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            // 追更红点：自从你上次打开之后，新增了几章。
+            // 画在封面右上角而不是占一行 —— 网格里每多一行文字，一屏就少一排书
+            if (book.newChapterCount > 0) {
+                Badge(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ) {
+                    Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
+                }
             }
         }
         Text(
@@ -463,8 +483,19 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
             style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = Dimens.gapXS),
         )
+        // 最新章节。数据一直存在 BookEntity 里，却从来没画出来过 ——
+        // 于是"这本书更到哪了"只能靠点进去看
+        if (!book.latestChapterTitle.isNullOrBlank()) {
+            Text(
+                book.latestChapterTitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

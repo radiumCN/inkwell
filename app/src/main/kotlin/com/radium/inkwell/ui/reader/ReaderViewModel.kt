@@ -195,6 +195,8 @@ class ReaderViewModel(
             (source as? AutoCloseable)?.close()
             val b = bookRepo.getBook(bookId) ?: error("书籍不存在")
             book = b
+            // 打开即已知晓：书架上那个"有 N 章新的"红点该灭了
+            if (b.newChapterCount > 0) bookRepo.clearNewChapters(bookId)
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
             val chapters = chapterDao.getByBook(bookId)
             val src = if (b.type == BookType.NET) {
