@@ -209,9 +209,21 @@ class BookSourceEngineTest {
         assertEquals("一个平凡少年踏上修真之路。", detail.intro)
     }
 
+    /**
+     * 详情页解析不出来**不该判死书源**。
+     *
+     * 书名/作者在搜索结果里早就拿到了，详情页的规则只是「有就覆盖」—— Legado 从不因此判错。
+     * 从前我们拿「书名没匹配到」当作「这一页没解析出来」的信号并直接抛错，于是站点改版、
+     * 或书名规则只对 PC 版页面有效这类小事，都会让整个书源被判死；而同样的书源在阅读 APP
+     * 里好好的。真正决定这本书能不能读的是目录，让目录那步去报错才有信息量。
+     */
     @Test
-    fun `detail without matched title throws`() = runBlocking {
-        assertFailsWith<SourceException> { engine().getDetail(source(), "$base/book/empty") }
+    fun `detail page that parses nothing is not fatal`() = runBlocking {
+        val detail = engine().getDetail(source(), "$base/book/empty")
+        assertEquals("", detail.title)      // 调用方回落到搜索结果的书名
+        assertEquals("$base/book/empty", detail.tocUrl) // 缺省：详情页即目录页
+        // 该失败的是目录那步，错误信息也更有指向性
+        assertFailsWith<SourceException> { engine().getToc(source(), detail.tocUrl) }
         Unit
     }
 

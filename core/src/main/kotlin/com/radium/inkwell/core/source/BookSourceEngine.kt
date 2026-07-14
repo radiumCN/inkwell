@@ -130,8 +130,10 @@ class BookSourceEngine(
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail {
         val rule = source.detail ?: throw SourceException("书源「${source.name}」未配置详情规则")
         val url = resolveUrl(source.baseUrl, bookUrl)
+        // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
+        // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
         return withRenderFallback(source) { render -> parseDetail(source, rule, url, render) }
-            ?: throw SourceException("详情页未匹配到书名: $url")
+            ?: RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
     }
 
     private suspend fun parseDetail(
@@ -144,21 +146,28 @@ class BookSourceEngine(
         val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, bookUrl = url))
         val f = rule.fields
         val title = evalField("detail", "title", f["title"], ctx)
-        // 书源不配书名规则是常态：JSON API 源的「详情页」往往只是目录接口，压根没有书名，
-        // 书名搜索结果里已经给过了（Legado 同样是把搜索结果的书名带下来）。
-        // 只有「配了书名规则却没匹配到」才说明这一页真没解析出来 —— 那时返回 null，
-        // 交给 JS 渲染兜底重试。从前一律要求详情页解析出书名，把这一整类书源判了死刑。
-        if (!f["title"].isNullOrBlank() && title.isNullOrBlank()) return null
-        val tocUrl = evalUrlField("detail", "tocUrl", f["tocUrl"], ctx)
-            ?.takeIf { it.isNotBlank() }
-            ?.let { resolveUrl(fetched.finalUrl, it) }
+        val author = evalField("detail", "author", f["author"], ctx)
+        val cover = evalUrlField("detail", "coverUrl", f["coverUrl"], ctx)
+        val intro = evalField("detail", "intro", f["intro"], ctx)
+        val tocRule = evalUrlField("detail", "tocUrl", f["tocUrl"], ctx)?.takeIf { it.isNotBlank() }
+
+        // 一个字段都没匹配上 → 这一页大概率是 JS 渲染的，返回 null 交给渲染兜底重试。
+        //
+        // 判据不能是「书名没匹配到」。书名在搜索结果里早就拿到了，详情页的书名规则
+        // 只是「有就覆盖」—— Legado 从不因此判错。我们从前拿它当「页面没解析出来」的信号，
+        // 于是站点改版、或书名规则只对 PC 版页面有效这类小事，都会让整个书源被判死。
+        // 校验里那一大片「详情页未匹配到书名」就是这么来的，而它们在阅读 APP 里好好的。
+        val nothingMatched = title.isNullOrBlank() && author.isNullOrBlank() &&
+            cover.isNullOrBlank() && intro.isNullOrBlank() && tocRule == null
+        if (nothingMatched && !f.values.all { it.isNullOrBlank() }) return null
+
+        val tocUrl = tocRule?.let { resolveUrl(fetched.finalUrl, it) }
             ?: fetched.finalUrl // 缺省：详情页即目录页
         return RemoteBookDetail(
             title = title.orEmpty(), // 可能为空 → 调用方回落到搜索结果的书名
-            author = evalField("detail", "author", f["author"], ctx),
-            coverUrl = evalUrlField("detail", "coverUrl", f["coverUrl"], ctx)
-                ?.let { resolveUrl(fetched.finalUrl, it) },
-            intro = evalField("detail", "intro", f["intro"], ctx),
+            author = author,
+            coverUrl = cover?.let { resolveUrl(fetched.finalUrl, it) },
+            intro = intro,
             tocUrl = tocUrl,
         )
     }
