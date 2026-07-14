@@ -18,12 +18,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-/** 一本书；同名同作者的结果跨书源合并成一条，[origins] 是有这本书的所有书源 */
-data class SearchHit(
-    /** 代表条目：首个返回它的书源的结果，加书架/预览都用它 */
-    val result: SearchResult,
-    val origins: Set<String>,
-)
+/**
+ * 一本书；同名同作者的结果跨书源合并成一条。
+ * 保留每个书源各自的结果（bookUrl 各不相同）—— 预览页要靠它换源：
+ * 代表书源挂了还有别的可用，否则用户就卡死在报错页。
+ */
+data class SearchHit(val results: List<SearchResult>) {
+    /** 代表条目：首个返回它的书源 */
+    val result: SearchResult get() = results.first()
+    val origins: Set<String> get() = results.mapTo(LinkedHashSet()) { it.sourceId }
+}
 
 data class SearchUiState(
     val query: String = "",
@@ -105,8 +109,11 @@ class SearchViewModel(
         for (r in items) {
             val key = r.title.trim() to r.author?.trim().orEmpty()
             val old = hits[key]
-            hits[key] = if (old == null) SearchHit(r, setOf(r.sourceId))
-            else old.copy(origins = old.origins + r.sourceId)
+            hits[key] = when {
+                old == null -> SearchHit(listOf(r))
+                old.results.any { it.sourceId == r.sourceId } -> old
+                else -> SearchHit(old.results + r)
+            }
         }
     }
 

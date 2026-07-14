@@ -67,8 +67,8 @@ val appModule = module {
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get()) }
-    viewModel { (result: com.radium.inkwell.core.source.SearchResult) ->
-        com.radium.inkwell.ui.preview.BookPreviewViewModel(result, get(), get())
+    viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->
+        com.radium.inkwell.ui.preview.BookPreviewViewModel(results, get(), get())
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get()) }

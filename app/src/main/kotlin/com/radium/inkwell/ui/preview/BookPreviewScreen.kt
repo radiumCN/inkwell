@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.preview
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,10 +50,10 @@ import org.koin.core.parameter.parametersOf
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookPreviewScreen(
-    result: SearchResult,
+    results: List<SearchResult>,
     onRead: (String) -> Unit,
     onBack: () -> Unit,
-    viewModel: BookPreviewViewModel = koinViewModel { parametersOf(result) },
+    viewModel: BookPreviewViewModel = koinViewModel { parametersOf(results) },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -87,7 +90,7 @@ fun BookPreviewScreen(
             }
 
             state.error != null -> Column(
-                Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -100,6 +103,22 @@ fun BookPreviewScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = viewModel::load) { Text("重试") }
+
+                // 这本书还有别的书源 —— 一个源挂了不该让人卡死在这
+                val others = state.sources.withIndex().filter { it.index != state.currentSource }
+                if (others.isNotEmpty()) {
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "换个书源试试（共 ${state.sources.size} 个）",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    others.forEach { (i, sourceId) ->
+                        TextButton(onClick = { viewModel.switchSource(i) }) {
+                            Text(sourceId, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
 
             else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
@@ -160,6 +179,29 @@ private fun Header(state: BookPreviewUiState, viewModel: BookPreviewViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
+                if (state.sources.size > 1) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    TextButton(onClick = { menuOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                        Text("换源（${state.sources.size} 个书源）", style = MaterialTheme.typography.labelMedium)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        state.sources.forEachIndexed { i, sourceId ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (i == state.currentSource) "✓ $sourceId" else sourceId,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.switchSource(i)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
 

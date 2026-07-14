@@ -46,7 +46,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
-    onOpenPreview: (SearchResult) -> Unit,
+    onOpenPreview: (List<SearchResult>) -> Unit,
     viewModel: SearchViewModel = koinViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -125,7 +125,7 @@ fun SearchScreen(
                             trailingLabel = "加入",
                             trailingLoading = state.addingUrl == result.bookUrl,
                             onTrailing = { viewModel.addToShelf(result) },
-                            onClick = { onOpenPreview(result) },
+                            onClick = { onOpenPreview(hit.results) },
                         )
                     }
                     if (state.loadingMore) {

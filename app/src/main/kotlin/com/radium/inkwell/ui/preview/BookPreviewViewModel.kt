@@ -28,6 +28,9 @@ data class BookPreviewUiState(
     val inShelf: Boolean = false,
     /** 入库/跳转进行中，按钮置灰防重复点击 */
     val busy: Boolean = false,
+    /** 有这本书的所有书源（sourceId），供换源；当前用的是 currentSource */
+    val sources: List<String> = emptyList(),
+    val currentSource: Int = 0,
 )
 
 /**
@@ -37,10 +40,24 @@ data class BookPreviewUiState(
  * 解析不出书名/作者/封面 —— 这些字段一律回落到它。
  */
 class BookPreviewViewModel(
-    private val result: SearchResult,
+    /** 同一本书在各个书源下的搜索结果；首个是代表书源 */
+    private val candidates: List<SearchResult>,
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
 ) : ViewModel() {
+
+    /** 当前用的是第几个书源 */
+    private var current = 0
+
+    private val result: SearchResult get() = candidates[current]
+
+    /** 换到另一个书源重新加载 —— 一个源挂了不该让人卡死在报错页 */
+    fun switchSource(index: Int) {
+        if (index !in candidates.indices || index == current) return
+        current = index
+        detail = null
+        load()
+    }
 
     private val _state = MutableStateFlow(BookPreviewUiState())
     val state: StateFlow<BookPreviewUiState> = _state.asStateFlow()
@@ -66,6 +83,8 @@ class BookPreviewViewModel(
                 author = result.author.orEmpty(),
                 coverUrl = result.coverUrl,
                 intro = result.intro,
+                sources = candidates.map { it.sourceId },
+                currentSource = current,
             )
             val rule = sourceRepo.getRule(result.sourceId)
             if (rule == null) {
@@ -76,8 +95,9 @@ class BookPreviewViewModel(
                 netBookRepo.fetchDetailAndToc(rule, result.bookUrl)
             }.onSuccess { (d, toc) ->
                 detail = d
-                _state.value = BookPreviewUiState(
+                _state.value = _state.value.copy(
                     loading = false,
+                    error = null,
                     sourceName = rule.name,
                     title = d.title.ifBlank { result.title },
                     author = d.author ?: result.author.orEmpty(),

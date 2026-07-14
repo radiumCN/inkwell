@@ -59,7 +59,7 @@ fun InkwellNavHost() {
         composable<BookPreviewRoute> { entry ->
             val route = entry.toRoute<BookPreviewRoute>()
             BookPreviewScreen(
-                result = route.result,
+                results = route.results,
                 onRead = { navController.navigate(ReaderRoute(it)) },
                 onBack = { navController.popBackStack() },
             )

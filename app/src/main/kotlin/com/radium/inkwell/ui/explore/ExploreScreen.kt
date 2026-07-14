@@ -57,7 +57,7 @@ import org.koin.androidx.compose.koinViewModel
 fun ExploreScreen(
     onBack: () -> Unit,
     onOpenSourceManage: () -> Unit,
-    onOpenPreview: (SearchResult) -> Unit,
+    onOpenPreview: (List<SearchResult>) -> Unit,
     viewModel: ExploreViewModel = koinViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -168,7 +168,7 @@ fun ExploreScreen(
                             trailingLabel = "加入",
                             trailingLoading = state.addingUrl == book.bookUrl,
                             onTrailing = { viewModel.addToShelf(book) },
-                            onClick = { onOpenPreview(book) },
+                            onClick = { onOpenPreview(listOf(book)) },
                         )
                     }
                     if (state.loadingMore) {

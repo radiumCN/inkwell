@@ -18,11 +18,13 @@ data class BookDetailRoute(val bookId: String)
  * （书名搜索时就给过了），得靠它回落。内容含 `/ ? &`，作为 path 参数会被切断，故 Base64 传递。
  */
 @Serializable
-data class BookPreviewRoute(val resultArg: String) {
-    val result: SearchResult get() = ROUTE_JSON.decodeFromString(decodeArg(resultArg))
+data class BookPreviewRoute(val resultsArg: String) {
+    /** 同一本书在各个书源下的搜索结果；预览页靠它换源 */
+    val results: List<SearchResult> get() = ROUTE_JSON.decodeFromString(decodeArg(resultsArg))
 
     companion object {
-        fun of(result: SearchResult) = BookPreviewRoute(encodeArg(ROUTE_JSON.encodeToString(result)))
+        fun of(results: List<SearchResult>) =
+            BookPreviewRoute(encodeArg(ROUTE_JSON.encodeToString(results)))
     }
 }
 
