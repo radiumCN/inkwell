@@ -20,7 +20,7 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
         BookSourceEntity::class,
         ReplaceRuleEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -81,6 +81,21 @@ abstract class InkwellDb : RoomDatabase() {
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE replace_rule ADD COLUMN bookId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /**
+         * 书源分组 + 校验结果落库。
+         * 校验一轮几百个源要好几分钟，结果只存内存的话退出页面就没了 ——
+         * 用户根本没机会拿它做后续处理（筛选失效、按响应时间排序、批量禁用）。
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE book_source ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE book_source ADD COLUMN checkStatus INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE book_source ADD COLUMN checkMessage TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE book_source ADD COLUMN respondTime INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE book_source ADD COLUMN checkedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

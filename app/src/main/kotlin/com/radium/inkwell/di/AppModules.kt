@@ -35,6 +35,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_2_3,
                 InkwellDb.MIGRATION_3_4,
                 InkwellDb.MIGRATION_4_5,
+                InkwellDb.MIGRATION_5_6,
             )
             .build()
     }

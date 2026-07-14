@@ -47,6 +47,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.ui.platform.LocalContext
+import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SearchField
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,10 +81,39 @@ fun SourceManageScreen(
     viewModel: SourceManageViewModel = koinViewModel(),
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
+    val visible by viewModel.visibleSources.collectAsStateWithLifecycle()
     val exploreOnlyIds by viewModel.exploreOnlyIds.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
-    val checks by viewModel.checks.collectAsStateWithLifecycle()
     val checkProgress by viewModel.checkProgress.collectAsStateWithLifecycle()
+    val query by viewModel.query.collectAsStateWithLifecycle()
+    val filter by viewModel.filter.collectAsStateWithLifecycle()
+    val sort by viewModel.sort.collectAsStateWithLifecycle()
+    val groupFilter by viewModel.group.collectAsStateWithLifecycle()
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val failedCount by viewModel.failedCount.collectAsStateWithLifecycle()
+    val options by viewModel.options.collectAsStateWithLifecycle()
+
+    var showCheckOptions by remember { mutableStateOf(false) }
+    var showSortPicker by remember { mutableStateOf(false) }
+    var showGroupPicker by remember { mutableStateOf(false) }
+    var showGroupAssign by remember { mutableStateOf(false) }
+    var groupInput by remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    // 导出：写到缓存目录后交给系统分享（存网盘、发给别人都行）
+    LaunchedEffect(Unit) {
+        viewModel.exportFile.collect { file ->
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file,
+            )
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "导出书源"))
+        }
+    }
     val selectionMode = selected.isNotEmpty()
     var confirmBatchDelete by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -137,6 +181,26 @@ fun SourceManageScreen(
                                     viewModel.setEnabledSelected(false)
                                 },
                             )
+                            DropdownMenuItem(
+                                text = { Text("置顶") },
+                                onClick = { overflowOpen = false; viewModel.moveToTop() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("置底") },
+                                onClick = { overflowOpen = false; viewModel.moveToBottom() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("设置分组") },
+                                onClick = {
+                                    overflowOpen = false
+                                    groupInput = ""
+                                    showGroupAssign = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出选中") },
+                                onClick = { overflowOpen = false; viewModel.exportSelected() },
+                            )
                         }
                     },
                 )
@@ -149,9 +213,16 @@ fun SourceManageScreen(
                 },
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
-                        TextButton(onClick = { viewModel.validate() }) { Text("校验全部") }
+                        IconButton(onClick = { showCheckOptions = true }) {
+                            Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验书源")
+                        }
                     }
-                    TextButton(onClick = { showImportMenu = true }) { Text("导入书源") }
+                    IconButton(onClick = { showSortPicker = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序")
+                    }
+                    IconButton(onClick = { showImportMenu = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "导入书源")
+                    }
                     DropdownMenu(
                         expanded = showImportMenu,
                         onDismissRequest = { showImportMenu = false },
@@ -205,6 +276,36 @@ fun SourceManageScreen(
             )
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
+            // 几百个书源，没有搜索和筛选就只能一路滑
+            SearchField(
+                value = query,
+                onValueChange = viewModel::setQuery,
+                placeholder = "搜索书源名称或网址",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SourceFilter.entries.forEach { f ->
+                    FilterChip(
+                        selected = filter == f,
+                        onClick = { viewModel.setFilter(f) },
+                        label = { Text(f.label) },
+                    )
+                }
+                if (groups.isNotEmpty()) {
+                    FilterChip(
+                        selected = groupFilter != null,
+                        onClick = { showGroupPicker = true },
+                        label = { Text(groupFilter ?: "分组") },
+                    )
+                }
+            }
             // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
             checkProgress?.let { p ->
                 Row(
@@ -224,24 +325,28 @@ fun SourceManageScreen(
                     TextButton(onClick = viewModel::cancelCheck) { Text("停止") }
                 }
             }
-            // 校验完了最想干的事：把失效的一键清掉
-            if (checkProgress == null && checks.values.any { !it.ok }) {
+            // 校验完最想干的事。禁用放在删除前面：删是不可逆的，而站点抽风、临时封 IP
+            // 都会造成一次性的"失效"，禁用了还能改天再校验一次
+            if (checkProgress == null && failedCount > 0) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "失效 ${checks.values.count { !it.ok }} 个",
+                        "失效 $failedCount 个",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = viewModel::deleteInvalid) { Text("删除失效书源") }
+                    TextButton(onClick = { viewModel.setFilter(SourceFilter.FAILED) }) { Text("只看失效") }
+                    TextButton(onClick = viewModel::disableInvalid) { Text("禁用") }
+                    TextButton(onClick = viewModel::deleteInvalid) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(sources, key = { it.id }) { source ->
-                    val check = checks[source.id]
+                items(visible, key = { it.id }) { source ->
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -290,13 +395,15 @@ fun SourceManageScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (check != null) {
+                            if (source.checkStatus != CheckStatus.UNCHECKED) {
+                                val ok = source.checkStatus == CheckStatus.OK
                                 Text(
-                                    (if (check.ok) "✓ " else "✗ ") + check.message,
+                                    (if (ok) "✓ " else "✗ ") + source.checkMessage,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (check.ok) MaterialTheme.colorScheme.primary
+                                    color = if (ok) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.error,
                                     maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
@@ -318,6 +425,106 @@ fun SourceManageScreen(
             }
             }
         }
+    }
+
+    // 校验前先让人挑选项：正文那步最慢也最容易被站点限流，
+    // 只想快速筛一遍死源时关掉它能快好几倍
+    if (showCheckOptions) {
+        var draft by remember { mutableStateOf(options) }
+        val target = if (selected.isEmpty()) sources.size else selected.size
+        AlertDialog(
+            onDismissRequest = { showCheckOptions = false },
+            title = { Text("校验 $target 个书源") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    OutlinedTextField(
+                        value = draft.keyword,
+                        onValueChange = { draft = draft.copy(keyword = it) },
+                        label = { Text("搜索关键词") },
+                        supportingText = { Text("要一个几乎每个站都搜得出结果的常见词") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    CheckItemRow("校验详情页", draft.checkDetail) { draft = draft.copy(checkDetail = it) }
+                    CheckItemRow("校验目录", draft.checkToc) { draft = draft.copy(checkToc = it) }
+                    CheckItemRow("校验正文", draft.checkContent) { draft = draft.copy(checkContent = it) }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "单源超时 ${draft.timeoutMs / 1000} 秒",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Slider(
+                        value = (draft.timeoutMs / 1000).toFloat(),
+                        onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
+                        valueRange = 15f..180f,
+                        steps = 10,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setOptions(draft)
+                    showCheckOptions = false
+                    viewModel.validate(selected)
+                }) { Text("开始校验") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCheckOptions = false }) { Text("取消") }
+            },
+        )
+    }
+
+    if (showSortPicker) {
+        OptionPickerSheet(
+            title = "排序",
+            options = SourceSort.entries.map { PickerOption(id = it.name, label = it.label) },
+            selectedId = sort.name,
+            onSelect = { opt ->
+                showSortPicker = false
+                runCatching { SourceSort.valueOf(opt.id) }.getOrNull()?.let(viewModel::setSort)
+            },
+            onDismiss = { showSortPicker = false },
+        )
+    }
+
+    if (showGroupPicker) {
+        OptionPickerSheet(
+            title = "按分组筛选",
+            options = listOf(PickerOption(id = "", label = "全部分组")) +
+                groups.map { PickerOption(id = it, label = it) },
+            selectedId = groupFilter.orEmpty(),
+            onSelect = { opt ->
+                showGroupPicker = false
+                viewModel.setGroupFilter(opt.id.takeIf { it.isNotEmpty() })
+            },
+            onDismiss = { showGroupPicker = false },
+        )
+    }
+
+    if (showGroupAssign) {
+        AlertDialog(
+            onDismissRequest = { showGroupAssign = false },
+            title = { Text("设置分组") },
+            text = {
+                OutlinedTextField(
+                    value = groupInput,
+                    onValueChange = { groupInput = it },
+                    label = { Text("分组名") },
+                    placeholder = { Text("留空则移出分组") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showGroupAssign = false
+                    viewModel.setGroup(groupInput)
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGroupAssign = false }) { Text("取消") }
+            },
+        )
     }
 
     if (confirmBatchDelete) {
@@ -382,5 +589,16 @@ fun SourceManageScreen(
                 TextButton(onClick = { deleteTarget = null }) { Text("取消") }
             },
         )
+    }
+}
+
+@Composable
+private fun CheckItemRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

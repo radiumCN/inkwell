@@ -20,4 +20,23 @@ data class BookSourceEntity(
     val sourceJson: String = "",
     /** 转换时的 [com.radium.inkwell.core.source.legado.LegadoConverter.VERSION] */
     val converterVersion: Int = 0,
+
+    /** 书源分组（legado 的 bookSourceGroup）；可能是逗号分隔的多个组 */
+    val groupName: String = "",
+
+    // ---- 校验结果。存库而不是只放内存：几百个源校验一轮好几分钟，
+    // 退出页面就丢光的话，用户根本没法拿结果做后续处理（筛选、排序、批量禁用）。
+    /** 0=未校验 1=可用 2=失效 */
+    val checkStatus: Int = CheckStatus.UNCHECKED,
+    /** 校验详情（可用 · N 章 / 失败原因） */
+    val checkMessage: String = "",
+    /** 全链路响应耗时(ms)；-1 = 未校验或失败 */
+    val respondTime: Long = -1,
+    val checkedAt: Long = 0,
 )
+
+object CheckStatus {
+    const val UNCHECKED = 0
+    const val OK = 1
+    const val FAILED = 2
+}

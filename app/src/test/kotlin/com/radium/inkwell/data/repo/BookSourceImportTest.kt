@@ -35,6 +35,28 @@ class BookSourceImportTest {
             ids.forEach { id -> store[id]?.let { store[id] = it.copy(enabled = enabled) } }
         }
         override suspend fun getAll() = store.values.toList()
+
+        override suspend fun saveCheck(
+            id: String, status: Int, message: String, respondTime: Long, checkedAt: Long,
+        ) {
+            store[id]?.let {
+                store[id] = it.copy(
+                    checkStatus = status, checkMessage = message,
+                    respondTime = respondTime, checkedAt = checkedAt,
+                )
+            }
+        }
+
+        override suspend fun setSortOrder(id: String, sortOrder: Int) {
+            store[id]?.let { store[id] = it.copy(sortOrder = sortOrder) }
+        }
+
+        override suspend fun setGroupForIds(ids: List<String>, group: String) {
+            ids.forEach { id -> store[id]?.let { store[id] = it.copy(groupName = group) } }
+        }
+
+        override suspend fun minSortOrder() = store.values.minOfOrNull { it.sortOrder }
+        override suspend fun maxSortOrder() = store.values.maxOfOrNull { it.sortOrder }
     }
 
     private val legadoArray = """

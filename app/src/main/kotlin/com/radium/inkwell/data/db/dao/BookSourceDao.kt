@@ -42,4 +42,26 @@ interface BookSourceDao {
 
     @Query("SELECT * FROM book_source")
     suspend fun getAll(): List<BookSourceEntity>
+
+    @Query(
+        """
+        UPDATE book_source
+           SET checkStatus = :status, checkMessage = :message,
+               respondTime = :respondTime, checkedAt = :checkedAt
+         WHERE id = :id
+        """
+    )
+    suspend fun saveCheck(id: String, status: Int, message: String, respondTime: Long, checkedAt: Long)
+
+    @Query("UPDATE book_source SET sortOrder = :sortOrder WHERE id = :id")
+    suspend fun setSortOrder(id: String, sortOrder: Int)
+
+    @Query("UPDATE book_source SET groupName = :group WHERE id IN (:ids)")
+    suspend fun setGroupForIds(ids: List<String>, group: String)
+
+    @Query("SELECT MIN(sortOrder) FROM book_source")
+    suspend fun minSortOrder(): Int?
+
+    @Query("SELECT MAX(sortOrder) FROM book_source")
+    suspend fun maxSortOrder(): Int?
 }

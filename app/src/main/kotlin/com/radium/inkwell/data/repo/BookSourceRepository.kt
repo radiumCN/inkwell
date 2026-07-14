@@ -4,6 +4,7 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.legado.LegadoConverter
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 
@@ -134,16 +135,24 @@ class BookSourceRepository(private val dao: BookSourceDao) {
                     runCatching { json.decodeFromString<BookSourceRule>(it.json).version }.getOrDefault(0)
                 } ?: -1
                 if (rule.version < existingVersion) return@forEach // 保留更高版本
+                val ruleJson = json.encodeToString(BookSourceRule.serializer(), rule)
+                // 规则没变才留着旧的校验结论；规则一变，上一版的"可用"就不能给新规则背书了
+                val keepCheck = existing?.takeIf { it.json == ruleJson }
                 toWrite += BookSourceEntity(
                     id = rule.id,
                     name = rule.name,
                     // 重复导入保留用户的启用/禁用与排序
                     enabled = existing?.enabled ?: rule.enabled,
                     sortOrder = existing?.sortOrder ?: 0,
-                    json = json.encodeToString(BookSourceRule.serializer(), rule),
+                    json = ruleJson,
                     updatedAt = now,
                     sourceJson = sourceJsonById[rule.id].orEmpty(),
                     converterVersion = LegadoConverter.VERSION,
+                    groupName = rule.group,
+                    checkStatus = keepCheck?.checkStatus ?: CheckStatus.UNCHECKED,
+                    checkMessage = keepCheck?.checkMessage.orEmpty(),
+                    respondTime = keepCheck?.respondTime ?: -1,
+                    checkedAt = keepCheck?.checkedAt ?: 0,
                 )
                 if (existing == null) added++ else updated++
             } catch (e: Exception) {
@@ -182,4 +191,38 @@ class BookSourceRepository(private val dao: BookSourceDao) {
 
     fun encodeRule(rule: BookSourceRule): String =
         json.encodeToString(BookSourceRule.serializer(), rule)
+
+    // ---- 校验结果 / 排序 / 分组 ----
+
+    suspend fun saveCheck(id: String, ok: Boolean, message: String, respondMs: Long) {
+        dao.saveCheck(
+            id = id,
+            status = if (ok) CheckStatus.OK else CheckStatus.FAILED,
+            message = message,
+            respondTime = if (ok) respondMs else -1,
+            checkedAt = System.currentTimeMillis(),
+        )
+    }
+
+    /** 置顶：排到当前最小序号之前。序号本身允许为负，不必整体重排 */
+    suspend fun moveToTop(ids: Collection<String>) {
+        var order = (dao.minSortOrder() ?: 0) - 1
+        ids.forEach { dao.setSortOrder(it, order--) }
+    }
+
+    suspend fun moveToBottom(ids: Collection<String>) {
+        var order = (dao.maxSortOrder() ?: 0) + 1
+        ids.forEach { dao.setSortOrder(it, order++) }
+    }
+
+    suspend fun setGroup(ids: Collection<String>, group: String) {
+        dao.setGroupForIds(ids.toList(), group.trim())
+    }
+
+    /** 导出为 legado 格式（原文）；没有原文的（手写书源）导出我们自己的规则 JSON */
+    suspend fun exportJson(ids: Collection<String>): String {
+        val all = dao.getAll().filter { it.id in ids }
+        val items = all.map { it.sourceJson.ifBlank { it.json } }
+        return items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
+    }
 }

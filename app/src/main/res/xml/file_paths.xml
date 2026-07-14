@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 导出的书源 JSON 写在 cacheDir 里，只把这一个子目录暴露给分享目标 -->
+    <cache-path name="export" path="." />
+</paths>
