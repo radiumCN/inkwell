@@ -7,10 +7,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.ChapterDao
+import com.radium.inkwell.data.db.dao.BookmarkDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.BookmarkEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 
 @Database(
@@ -19,8 +21,9 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
         ChapterEntity::class,
         BookSourceEntity::class,
         ReplaceRuleEntity::class,
+        BookmarkEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -28,6 +31,7 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun bookSourceDao(): BookSourceDao
     abstract fun replaceRuleDao(): ReplaceRuleDao
+    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         /**
@@ -74,6 +78,26 @@ abstract class InkwellDb : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        /** 书签。位置存 (章, 章内字符偏移)，与阅读进度同一套坐标 —— 存页码会被改字号毁掉 */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS bookmark (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        bookId TEXT NOT NULL,
+                        chapterIndex INTEGER NOT NULL,
+                        charOffset INTEGER NOT NULL,
+                        chapterTitle TEXT NOT NULL,
+                        excerpt TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_bookmark_bookId ON bookmark(bookId)")
             }
         }
 

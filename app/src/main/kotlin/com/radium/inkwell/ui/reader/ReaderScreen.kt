@@ -241,6 +241,16 @@ fun ReaderScreen(
             )
         }
 
+        if (state.searchResults != null) {
+            BookSearchSheet(
+                state = state,
+                onSearch = { viewModel.searchInBook(it) },
+                onCancel = { viewModel.cancelSearch() },
+                onSelect = { viewModel.gotoHit(it) },
+                onDismiss = { viewModel.dismissSearch() },
+            )
+        }
+
         state.sourceCandidates?.let { candidates ->
             ChangeSourceSheet(
                 state = state,
@@ -292,6 +302,11 @@ fun ReaderScreen(
                 onSeekPercent = { viewModel.seekToPercent(it) },
                 onUpdateSettings = { viewModel.updateSettings(it) },
                 onSearchSources = { viewModel.searchOtherSources() },
+                onToggleAutoFlip = { viewModel.toggleAutoFlip() },
+                onToggleBookmark = { viewModel.toggleBookmark() },
+                onGotoBookmark = { viewModel.gotoBookmark(it) },
+                onDeleteBookmark = { viewModel.deleteBookmark(it) },
+                onOpenSearch = { viewModel.openSearchPanel() },
                 onDismiss = { viewModel.toggleMenu() },
             )
         }

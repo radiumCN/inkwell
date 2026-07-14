@@ -26,6 +26,13 @@ import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.reader.render.ScrollChapter
+import com.radium.inkwell.core.text.ChineseConverter
+import com.radium.inkwell.reader.api.ChineseConvert
+import kotlinx.coroutines.delay
+import com.radium.inkwell.data.db.entity.BookmarkEntity
+import com.radium.inkwell.reader.paginate.PageItem
+import kotlinx.coroutines.isActive
+import com.radium.inkwell.core.model.ContentElement
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -44,6 +51,23 @@ import com.radium.inkwell.core.source.Purifier
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class TocItem(val index: Int, val title: String)
+
+/** 全书搜索的一条命中 */
+data class ChapterHit(
+    val chapterIndex: Int,
+    val chapterTitle: String,
+    val charOffset: Int,
+    val excerpt: String,
+)
+
+/** 命中处前后各截一段，给用户看上下文 */
+private fun String.snippetAround(at: Int, length: Int, radius: Int = 18): String {
+    val from = (at - radius).coerceAtLeast(0)
+    val to = (at + length + radius).coerceAtMost(this.length)
+    val prefix = if (from > 0) "…" else ""
+    val suffix = if (to < this.length) "…" else ""
+    return prefix + substring(from, to).replace('\n', ' ') + suffix
+}
 
 data class ReaderUiState(
     val bookTitle: String = "",
@@ -69,6 +93,15 @@ data class ReaderUiState(
     val textSelectionEnabled: Boolean = true,
     /** 一次性提示（建了净化规则之类） */
     val toast: String? = null,
+    /** 自动翻页中 */
+    val autoFlipping: Boolean = false,
+    val bookmarks: List<BookmarkEntity> = emptyList(),
+    /** 当前页是否已加书签 */
+    val bookmarked: Boolean = false,
+    /** 全书搜索：null=面板没开 */
+    val searchResults: List<ChapterHit>? = null,
+    val searching: Boolean = false,
+    val searchProgress: Int = 0,
     /** 换源：null=未打开面板；空列表=搜索中/无结果 */
     val sourceCandidates: List<SearchResult>? = null,
     val searchingSources: Boolean = false,
@@ -95,6 +128,7 @@ class ReaderViewModel(
     private val contentCache: ChapterContentCache,
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
+    private val bookmarkDao: com.radium.inkwell.data.db.dao.BookmarkDao,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReaderUiState())
@@ -116,8 +150,19 @@ class ReaderViewModel(
     init {
         viewModelScope.launch {
             loadSession()
+            var lastConvert: ChineseConvert? = null
             readerPrefs.settings.collect { s ->
                 _state.value = _state.value.copy(settings = s)
+                // 简繁一改，已排好的页全部作废（字变了，断行也变了）
+                if (lastConvert != null && lastConvert != s.chineseConvert) {
+                    engineMutex.withLock {
+                        paginated.clear()
+                        scrollCache.clear()
+                        _scrollChapters.value = emptyList()
+                        showPosition(position)
+                    }
+                }
+                lastConvert = s.chineseConvert
             }
         }
         viewModelScope.launch {
@@ -126,6 +171,7 @@ class ReaderViewModel(
             }
         }
         observeBookRules()
+        observeBookmarks()
     }
 
     private suspend fun loadSession() {
@@ -219,11 +265,182 @@ class ReaderViewModel(
     }
 
     fun toggleMenu() {
+        // 一点屏幕就停自动翻页：想接着自动翻，再点一次「自动」就是了 ——
+        // 反过来（点了没反应、页面还在自己翻）会让人以为应用卡死了
+        if (_state.value.autoFlipping) {
+            stopAutoFlip()
+            return
+        }
         _state.value = _state.value.copy(menuVisible = !_state.value.menuVisible)
     }
 
     fun updateSettings(settings: ReaderSettings) {
         viewModelScope.launch { readerPrefs.update(settings) }
+    }
+
+    // ---------- 书签 ----------
+
+    private fun observeBookmarks() {
+        viewModelScope.launch {
+            bookmarkDao.observeForBook(bookId).collect { list ->
+                _state.value = _state.value.copy(
+                    bookmarks = list,
+                    bookmarked = list.any { it.chapterIndex == position.chapterIndex && inCurrentPage(it.charOffset) },
+                )
+            }
+        }
+    }
+
+    /** 书签落在当前页里才算"本页已加书签" —— 否则整章任意一个书签都会把图标点亮 */
+    private fun inCurrentPage(offset: Int): Boolean {
+        val s = _state.value
+        val page = s.page?.spec ?: return false
+        return offset >= page.startCharOffset && offset < page.endCharOffset
+    }
+
+    fun toggleBookmark() {
+        val s = _state.value
+        val existing = s.bookmarks.firstOrNull {
+            it.chapterIndex == position.chapterIndex && inCurrentPage(it.charOffset)
+        }
+        viewModelScope.launch {
+            if (existing != null) {
+                bookmarkDao.deleteById(existing.id)
+                _state.value = _state.value.copy(toast = "已删除书签")
+            } else {
+                bookmarkDao.upsert(
+                    BookmarkEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        bookId = bookId,
+                        chapterIndex = position.chapterIndex,
+                        charOffset = position.charOffset,
+                        chapterTitle = s.chapterTitle,
+                        excerpt = currentPageExcerpt(),
+                        createdAt = System.currentTimeMillis(),
+                    )
+                )
+                _state.value = _state.value.copy(toast = "已加书签")
+            }
+        }
+    }
+
+    /** 当前页头一段文字，书签列表上给用户认位置 */
+    private fun currentPageExcerpt(): String {
+        val page = _state.value.page ?: return ""
+        val first = page.spec.items.filterIsInstance<PageItem.TextSlice>().firstOrNull()
+            ?: return ""
+        val para = page.measured[first.elementIndex] ?: return ""
+        return para.text.take(40).trim()
+    }
+
+    fun deleteBookmark(id: String) {
+        viewModelScope.launch { bookmarkDao.deleteById(id) }
+    }
+
+    fun gotoBookmark(bookmark: BookmarkEntity) {
+        _state.value = _state.value.copy(menuVisible = false)
+        gotoChapter(bookmark.chapterIndex, bookmark.charOffset)
+    }
+
+    // ---------- 全书搜索 ----------
+
+    private var searchJob: Job? = null
+
+    /**
+     * 全书搜索。逐章扫，命中就往外冒 —— 不等全书扫完再一次性出结果：
+     * 几千章的书要抓好几分钟，而用户想找的那句话八成就在前几章。
+     */
+    fun searchInBook(keyword: String) {
+        val key = keyword.trim()
+        if (key.isEmpty()) return
+        searchJob?.cancel()
+        val src = source ?: return
+        searchJob = viewModelScope.launch {
+            _state.value = _state.value.copy(searchResults = emptyList(), searching = true, searchProgress = 0)
+            val total = _state.value.chapterCount
+            for (i in 0 until total) {
+                if (!isActive) return@launch
+                val content = runCatching { loadPurified(src, i) }.getOrNull()
+                if (content != null) {
+                    var offset = 0
+                    for (el in content.elements) {
+                        val text = when (el) {
+                            is ContentElement.Paragraph -> el.text
+                            is ContentElement.Heading -> el.text
+                            else -> ""
+                        }
+                        var from = 0
+                        while (true) {
+                            val at = text.indexOf(key, from, ignoreCase = true)
+                            if (at < 0) break
+                            val hit = ChapterHit(
+                                chapterIndex = i,
+                                chapterTitle = src.chapterTitle(i) ?: "",
+                                charOffset = offset + at,
+                                excerpt = text.snippetAround(at, key.length),
+                            )
+                            _state.value = _state.value.copy(
+                                searchResults = (_state.value.searchResults ?: emptyList()) + hit,
+                            )
+                            from = at + key.length
+                        }
+                        offset += el.charLength
+                    }
+                }
+                _state.value = _state.value.copy(searchProgress = i + 1)
+            }
+            _state.value = _state.value.copy(searching = false)
+        }
+    }
+
+    /** 只打开面板，不搜 —— 关键词还没输呢 */
+    fun openSearchPanel() {
+        _state.value = _state.value.copy(searchResults = emptyList(), searching = false, searchProgress = 0)
+    }
+
+    fun cancelSearch() {
+        searchJob?.cancel()
+        _state.value = _state.value.copy(searching = false)
+    }
+
+    fun dismissSearch() {
+        searchJob?.cancel()
+        _state.value = _state.value.copy(searchResults = null, searching = false)
+    }
+
+    fun gotoHit(hit: ChapterHit) {
+        _state.value = _state.value.copy(searchResults = null, menuVisible = false)
+        gotoChapter(hit.chapterIndex, hit.charOffset)
+    }
+
+    // ---------- 自动翻页 ----------
+
+    private var autoFlipJob: Job? = null
+
+    fun toggleAutoFlip() {
+        if (_state.value.autoFlipping) {
+            stopAutoFlip()
+            return
+        }
+        _state.value = _state.value.copy(autoFlipping = true, menuVisible = false)
+        autoFlipJob = viewModelScope.launch {
+            while (true) {
+                delay(_state.value.settings.autoFlipSeconds.coerceAtLeast(3) * 1000L)
+                val s = _state.value
+                // 到书末就停下，而不是每隔几秒弹一次"已经是最后一页了"
+                if (!s.hasNext) {
+                    stopAutoFlip()
+                    break
+                }
+                flip(FlipDirection.FORWARD)
+            }
+        }
+    }
+
+    fun stopAutoFlip() {
+        autoFlipJob?.cancel()
+        autoFlipJob = null
+        _state.value = _state.value.copy(autoFlipping = false)
     }
 
     /** 正文加载失败后重试：清掉分页缓存重来一遍（站点抽风、临时封 IP 都可能只是一次性的） */
@@ -413,7 +630,7 @@ class ReaderViewModel(
         } else {
             result.chapter.pageIndexFor(target.charOffset)
         }
-        showPage(target.chapterIndex, pageIdx)
+        showPage(target.chapterIndex, pageIdx, keepOffset = target.charOffset)
         preloadNeighbors(target.chapterIndex)
     }
 
@@ -426,7 +643,20 @@ class ReaderViewModel(
     private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int): ChapterContent {
         val raw = src.loadChapter(chapterIndex)
         val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
-        return if (purifier.isEmpty) raw else raw.copy(elements = purifier.apply(raw.elements))
+        val purified = if (purifier.isEmpty) raw
+        else raw.copy(elements = purifier.apply(raw.elements))
+
+        // 简繁转换放在净化之后：净化规则是用户按**眼前看到的字**写的，
+        // 若先转换再净化，他写的规则就对不上了
+        return when (_state.value.settings.chineseConvert) {
+            ChineseConvert.NONE -> purified
+            ChineseConvert.TO_SIMPLIFIED -> purified.copy(
+                elements = ChineseConverter.convert(purified.elements, ChineseConverter::toSimplified),
+            )
+            ChineseConvert.TO_TRADITIONAL -> purified.copy(
+                elements = ChineseConverter.convert(purified.elements, ChineseConverter::toTraditional),
+            )
+        }
     }
 
     // ---------- 滚动模式 ----------
@@ -551,10 +781,22 @@ class ReaderViewModel(
         return prev to next
     }
 
-    private fun showPage(chapterIndex: Int, pageIndex: Int) {
+    /**
+     * [keepOffset] 定位时保留的原始字符偏移。
+     *
+     * 不保留会丢进度：showPage 默认把 position 吸附到所在页的**起始**偏移，这在分页稳定时
+     * 无损。可重进阅读页时视口要测两次（系统栏隐藏前 / 后），分页就跑了两遍 ——
+     * 第一遍用较矮的视口，保存的偏移落进某一页后被吸附到那页开头（比原偏移更靠前），
+     * 还顺手存回了库；第二遍视口变高、重新分页，再拿这个已经退化的偏移去定位，就退了一页。
+     * 用户看到的正是「返回再进来，退回上一页」。
+     */
+    private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
         val result = paginated[chapterIndex] ?: return
         val page = renderable(result, pageIndex) ?: return
-        position = ReadPosition(chapterIndex, page.spec.startCharOffset)
+        val offset = keepOffset
+            ?.takeIf { it != Int.MAX_VALUE && it >= page.spec.startCharOffset && it < page.spec.endCharOffset }
+            ?: page.spec.startCharOffset
+        position = ReadPosition(chapterIndex, offset)
         val (prev, next) = neighborPages(chapterIndex, pageIndex)
         _state.value = _state.value.copy(
             chapterIndex = chapterIndex,

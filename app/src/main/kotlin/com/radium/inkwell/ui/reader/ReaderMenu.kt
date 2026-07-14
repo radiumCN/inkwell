@@ -49,6 +49,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import com.radium.inkwell.reader.api.ChineseConvert
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import com.radium.inkwell.data.db.entity.BookmarkEntity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +79,11 @@ fun ReaderMenu(
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
     onSearchSources: () -> Unit,
+    onToggleAutoFlip: () -> Unit,
+    onToggleBookmark: () -> Unit,
+    onGotoBookmark: (BookmarkEntity) -> Unit,
+    onDeleteBookmark: (String) -> Unit,
+    onOpenSearch: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var showToc by remember { mutableStateOf(false) }
@@ -105,6 +120,16 @@ fun ReaderMenu(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                IconButton(onClick = onToggleBookmark) {
+                    Icon(
+                        if (state.bookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = if (state.bookmarked) "删除书签" else "加书签",
+                        tint = if (state.bookmarked) MaterialTheme.colorScheme.primary else barContent,
+                    )
+                }
+                IconButton(onClick = onOpenSearch) {
+                    Icon(Icons.Default.Search, contentDescription = "全书搜索", tint = barContent)
                 }
             }
         }
@@ -155,6 +180,16 @@ fun ReaderMenu(
                             Text(" 换源")
                         }
                     }
+                    // 滚动模式下没有"页"，自动翻页无从谈起
+                    if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
+                        TextButton(onClick = onToggleAutoFlip) {
+                            Icon(
+                                if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                            )
+                            Text(if (state.autoFlipping) " 停止" else " 自动")
+                        }
+                    }
                     TextButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Settings, contentDescription = null)
                         Text(" 设置")
@@ -165,13 +200,30 @@ fun ReaderMenu(
     }
 
     if (showToc) {
+        var tab by remember { mutableStateOf(0) }
         ModalBottomSheet(onDismissRequest = { showToc = false }) {
-            TocList(
-                toc = state.toc,
-                current = state.chapterIndex,
-                // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
-                onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
-            )
+            TabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("目录") })
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = { Text("书签 ${state.bookmarks.size}") },
+                )
+            }
+            if (tab == 0) {
+                TocList(
+                    toc = state.toc,
+                    current = state.chapterIndex,
+                    // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
+                    onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
+                )
+            } else {
+                BookmarkList(
+                    bookmarks = state.bookmarks,
+                    onSelect = { showToc = false; onGotoBookmark(it) },
+                    onDelete = onDeleteBookmark,
+                )
+            }
         }
     }
 
@@ -318,6 +370,22 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
             onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
         )
 
+        // 简繁转换
+        SectionLabel("简繁转换")
+        ChipRow(
+            options = ChineseConvert.entries.map { it.label },
+            selectedIndex = ChineseConvert.entries.indexOf(settings.chineseConvert),
+            onSelect = { onUpdate(settings.copy(chineseConvert = ChineseConvert.entries[it])) },
+        )
+
+        // 自动翻页间隔
+        SectionLabel("自动翻页间隔")
+        ChipRow(
+            options = AUTO_FLIP_OPTIONS.map { "${it}s" },
+            selectedIndex = AUTO_FLIP_OPTIONS.indexOf(settings.autoFlipSeconds),
+            onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
+        )
+
         // 字体
         SectionLabel("字体")
         ChipRow(
@@ -390,4 +458,60 @@ private fun ChipRow(options: List<String>, selectedIndex: Int, onSelect: (Int) -
 @Composable
 private fun Spacer(width: Int) {
     androidx.compose.foundation.layout.Spacer(Modifier.width(width.dp))
+}
+
+/** 自动翻页可选间隔（秒）。太快来不及读，太慢不如自己翻 */
+private val AUTO_FLIP_OPTIONS = listOf(5, 10, 15, 20, 30, 45, 60)
+
+@Composable
+private fun BookmarkList(
+    bookmarks: List<BookmarkEntity>,
+    onSelect: (BookmarkEntity) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    if (bookmarks.isEmpty()) {
+        Text(
+            "还没有书签。在阅读页顶栏点书签图标，把当前这一页记下来。",
+            Modifier.padding(Dimens.rowHorizontal),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    LazyColumn(Modifier.heightIn(max = 400.dp)) {
+        items(bookmarks, key = { it.id }) { bm ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(bm) }
+                    .padding(start = Dimens.rowHorizontal, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        bm.chapterTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (bm.excerpt.isNotBlank()) {
+                        Text(
+                            bm.excerpt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                IconButton(onClick = { onDelete(bm.id) }) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除书签",
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+        }
+    }
 }

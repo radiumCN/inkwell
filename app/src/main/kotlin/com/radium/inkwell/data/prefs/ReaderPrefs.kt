@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.radium.inkwell.reader.api.ChineseConvert
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -30,6 +32,8 @@ class ReaderPrefs(private val context: Context) {
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
+        val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
+        val CHINESE_CONVERT = stringPreferencesKey("chinese_convert")
         val FONT_ID = stringPreferencesKey("font_id")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("updated_at")
@@ -49,6 +53,10 @@ class ReaderPrefs(private val context: Context) {
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
             keepScreenOn = p[Keys.KEEP_SCREEN_ON] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
+            autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
+            chineseConvert = p[Keys.CHINESE_CONVERT]
+                ?.let { runCatching { ChineseConvert.valueOf(it) }.getOrNull() }
+                ?: ChineseConvert.NONE,
         )
     }
 
@@ -66,6 +74,8 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
+            p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
+            p[Keys.CHINESE_CONVERT] = settings.chineseConvert.name
         }
     }
 
@@ -96,6 +106,8 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "brightness" to (s.brightnessOverride ?: -1f).toString(),
             "keep_screen_on" to s.keepScreenOn.toString(),
             "volume_key_flip" to s.volumeKeyFlip.toString(),
+            "auto_flip_seconds" to s.autoFlipSeconds.toString(),
+            "chinese_convert" to s.chineseConvert.name,
         ),
     )
 }
@@ -117,6 +129,10 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             brightnessOverride = v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f },
             keepScreenOn = v["keep_screen_on"]?.toBooleanStrictOrNull() ?: base.keepScreenOn,
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
+            autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
+            chineseConvert = v["chinese_convert"]
+                ?.let { runCatching { ChineseConvert.valueOf(it) }.getOrNull() }
+                ?: base.chineseConvert,
         )
     )
     // update() 会把时间戳刷成"现在"，但这份设置其实是远端的 —— 保留远端的时间戳，
