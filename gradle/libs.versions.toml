@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.1.0-beta.14"
+inkwell = "0.1.0-beta.15"
 agp = "8.13.0"
 kotlin = "2.2.20"
 ksp = "2.2.20-2.0.2"
