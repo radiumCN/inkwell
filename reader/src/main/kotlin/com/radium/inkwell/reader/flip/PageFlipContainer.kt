@@ -249,7 +249,10 @@ fun PageFlipContainer(
             },
     ) {
         when (effectiveAnim) {
-            FlipAnimation.NONE -> PageCanvas(current, layout, theme, selection = selection)
+            // 滚动模式根本不该走到这里 —— 它是另一条渲染路径，由 ReaderScreen 分流。
+            // 万一走到了（比如设置迁移遗漏），静态画当前页，总好过崩溃或白屏。
+            FlipAnimation.NONE, FlipAnimation.SCROLL ->
+                PageCanvas(current, layout, theme, selection = selection)
             FlipAnimation.SLIDE -> SlideLayers(
                 selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
             )

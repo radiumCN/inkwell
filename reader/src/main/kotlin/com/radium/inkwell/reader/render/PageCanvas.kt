@@ -175,7 +175,7 @@ private fun DrawScope.drawTextSlice(
     }
 }
 
-private fun DrawScope.drawFittedImage(bitmap: ImageBitmap, dst: Rect) {
+internal fun DrawScope.drawFittedImage(bitmap: ImageBitmap, dst: Rect) {
     val scale = minOf(dst.width / bitmap.width, dst.height / bitmap.height)
     val w = (bitmap.width * scale).toInt().coerceAtLeast(1)
     val h = (bitmap.height * scale).toInt().coerceAtLeast(1)
