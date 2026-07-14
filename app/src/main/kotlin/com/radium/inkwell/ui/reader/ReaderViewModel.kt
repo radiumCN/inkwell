@@ -36,6 +36,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class TocItem(val index: Int, val title: String)
 
@@ -63,6 +64,9 @@ data class ReaderUiState(
     val sourceCandidates: List<SearchResult>? = null,
     val searchingSources: Boolean = false,
     val changingSource: Boolean = false,
+    /** 换源搜索进度：已回来的书源数 / 总数 */
+    val sourcesDone: Int = 0,
+    val sourcesTotal: Int = 0,
 )
 
 /**
@@ -209,28 +213,58 @@ class ReaderViewModel(
 
     // ---------- 换源 ----------
 
-    /** 用书名(+作者)在其他启用书源中并发搜索 */
+    private var sourceSearchJob: Job? = null
+
+    /**
+     * 用书名(+作者)在其他启用书源中并发搜索，结果**边搜边出**。
+     *
+     * 从前是 awaitAll 等所有书源跑完才一次性出结果：几百个源里只要有一个站点吊着不回，
+     * 整个换源面板就一直转圈；而且没有超时，那个源可能永远不回。
+     */
     fun searchOtherSources() {
         val b = book ?: return
-        viewModelScope.launch {
-            _state.value = _state.value.copy(sourceCandidates = emptyList(), searchingSources = true)
-            val rules = sourceRepo.getEnabledRules()
+        sourceSearchJob?.cancel()
+        sourceSearchJob = viewModelScope.launch {
+            val all = sourceRepo.getEnabledRules()
                 .filter { it.search != null && it.id != b.sourceId }
+            _state.value = _state.value.copy(
+                sourceCandidates = emptyList(),
+                searchingSources = true,
+                sourcesDone = 0,
+                sourcesTotal = all.size,
+            )
             // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
             val limiter = Semaphore(8)
-            val candidates = rules.map { rule ->
+            all.map { rule ->
                 async {
                     limiter.withPermit {
-                        runCatching { engine.search(rule, b.title).items }
-                            .getOrDefault(emptyList())
-                            .filter { it.title == b.title || it.title.contains(b.title) }
-                            .filter { b.author.isBlank() || it.author.isNullOrBlank() || it.author == b.author }
-                            .take(3)
+                        val hit = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
+                            runCatching { engine.search(rule, b.title).items }
+                                .getOrDefault(emptyList())
+                                .firstOrNull { matches(it, b.title, b.author) }
+                        }
+                        val s = _state.value
+                        _state.value = s.copy(
+                            sourceCandidates = s.sourceCandidates.orEmpty() + listOfNotNull(hit),
+                            sourcesDone = s.sourcesDone + 1,
+                        )
                     }
                 }
-            }.awaitAll().flatten()
-            _state.value = _state.value.copy(sourceCandidates = candidates, searchingSources = false)
+            }.awaitAll()
+            _state.value = _state.value.copy(searchingSources = false)
         }
+    }
+
+    /**
+     * 与 Legado 的换源判定对齐：书名必须命中，作者用**包含**而非相等 ——
+     * 书源返回的作者常带前缀（"作者：天蚕土豆"）或多个作者，一律要求相等会把绝大多数源判死。
+     * 任一边作者为空时不拿作者卡人。
+     */
+    private fun matches(r: SearchResult, title: String, author: String): Boolean {
+        if (r.title != title && !r.title.contains(title)) return false
+        val a = r.author?.trim().orEmpty()
+        if (author.isBlank() || a.isBlank()) return true
+        return a.contains(author) || author.contains(a)
     }
 
     fun applyChangeSource(candidate: SearchResult) {
@@ -262,7 +296,8 @@ class ReaderViewModel(
     }
 
     fun dismissSourcePanel() {
-        _state.value = _state.value.copy(sourceCandidates = null)
+        sourceSearchJob?.cancel()
+        _state.value = _state.value.copy(sourceCandidates = null, searchingSources = false)
     }
 
     // ---------- 内部 ----------
@@ -388,5 +423,10 @@ class ReaderViewModel(
 
     override fun onCleared() {
         (source as? AutoCloseable)?.close()
+    }
+
+    private companion object {
+        /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
+        const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
     }
 }

@@ -136,7 +136,7 @@ fun ReaderScreen(
             ReaderMenu(
                 state = state,
                 onExit = onExit,
-                onGotoChapter = { viewModel.gotoChapter(it); viewModel.toggleMenu() },
+                onGotoChapter = { viewModel.gotoChapter(it) },
                 onSeekPercent = { viewModel.seekToPercent(it) },
                 onUpdateSettings = { viewModel.updateSettings(it) },
                 onSearchSources = { viewModel.searchOtherSources() },

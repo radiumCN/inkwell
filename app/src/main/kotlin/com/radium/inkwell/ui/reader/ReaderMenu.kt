@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -168,7 +169,8 @@ fun ReaderMenu(
             TocList(
                 toc = state.toc,
                 current = state.chapterIndex,
-                onSelect = { showToc = false; onGotoChapter(it) },
+                // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
+                onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
             )
         }
     }
@@ -182,11 +184,21 @@ fun ReaderMenu(
     state.sourceCandidates?.let { candidates ->
         ModalBottomSheet(onDismissRequest = onDismissSourcePanel) {
             Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Text(
-                    "换源",
-                    Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("换源", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.weight(1f))
+                    // 边搜边出，让用户看得见还在搜、搜了多少，而不是干等一个转圈
+                    if (state.searchingSources) {
+                        Text(
+                            "搜索中 ${state.sourcesDone}/${state.sourcesTotal}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 when {
                     state.changingSource -> Box(
                         Modifier.fillMaxWidth().padding(24.dp),
@@ -197,7 +209,7 @@ fun ReaderMenu(
                         contentAlignment = Alignment.Center,
                     ) { CircularProgressIndicator() }
                     candidates.isEmpty() -> Text(
-                        "其他书源没有找到这本书",
+                        "其他 ${state.sourcesTotal} 个书源都没有找到这本书",
                         Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                     )
                     else -> LazyColumn(Modifier.heightIn(max = 400.dp)) {
