@@ -15,8 +15,6 @@ data class LayoutSpec(
     val paragraphSpacingPx: Float,
     val titleFontScale: Float = 1.4f,
     val titleTopSpacingPx: Float = 0f,
-    /** 顶部小标题（页眉章节名）离屏幕上边的距离 = 挖孔 + 用户设的头部留白。只给页眉定位用 */
-    val headerTopPaddingPx: Float = 0f,
     val firstLineIndentEm: Float = 2f,
     val fontId: String = "system",
     val justify: Boolean = true,

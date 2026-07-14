@@ -380,14 +380,14 @@ private val TITLE_TOP_OPTIONS = listOf(
     "大" to 48f,
 )
 
-/** 顶部小标题（页眉章节名）离屏幕上边的留白（dp），独立于正文边距 */
+/** 头部留白（dp）= 正文上边距：页眉小标题落在这，正文从它下面开始。缩小 → 正文多出空间 */
 private val HEADER_TOP_OPTIONS = listOf(
     "紧凑" to 8f,
     "标准" to 24f,
     "宽松" to 48f,
 )
 
-/** 正文上下边距（dp）—— 每页正文离屏幕上/下的距离 */
+/** 正文下边距（dp）—— 每页正文离屏幕下边的距离。上边距由「头部留白」管 */
 private val MARGIN_V_OPTIONS = listOf(
     "紧凑" to 12f,
     "标准" to 28f,
@@ -493,7 +493,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
         onSelect = { onUpdate(settings.copy(headerTopSpacingDp = HEADER_TOP_OPTIONS[it].second)) },
     )
 
-    SectionLabel("上下边距")
+    SectionLabel("下边距")
     ChipRow(
         options = MARGIN_V_OPTIONS.map { it.first },
         selectedIndex = MARGIN_V_OPTIONS.indexOfFirst {

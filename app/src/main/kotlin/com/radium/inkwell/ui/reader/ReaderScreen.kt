@@ -461,7 +461,9 @@ private fun buildLayoutSpec(
         viewportHeightPx = viewport.height,
         marginLeftPx = settings.marginHorizontalDp.dp.toPx() + cutout.left,
         marginRightPx = settings.marginHorizontalDp.dp.toPx() + cutout.right,
-        marginTopPx = settings.marginVerticalDp.dp.toPx() + cutout.top,
+        // 上边距 = 头部留白：它就是正文顶端的位置（页眉小标题落在这条带里）。缩小它，
+        // 正文顶跟着上移、多出显示空间。下边距用 marginVerticalDp。
+        marginTopPx = settings.headerTopSpacingDp.dp.toPx() + cutout.top,
         marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom,
         headerHeightPx = 18.dp.toPx(),
         footerHeightPx = 18.dp.toPx(),
@@ -469,7 +471,6 @@ private fun buildLayoutSpec(
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,
         titleFontScale = settings.titleScale,
-        headerTopPaddingPx = cutout.top + settings.headerTopSpacingDp.dp.toPx(),
         titleTopSpacingPx = settings.titleTopSpacingDp.dp.toPx(),
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,
