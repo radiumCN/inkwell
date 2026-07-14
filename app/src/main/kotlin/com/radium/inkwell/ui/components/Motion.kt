@@ -1,5 +1,8 @@
 package com.radium.inkwell.ui.components
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
@@ -10,7 +13,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -36,6 +43,13 @@ object Motion {
 
     fun <T> enterSpec(): FiniteAnimationSpec<T> = tween(ENTER_MS, easing = EnterEasing)
     fun <T> exitSpec(): FiniteAnimationSpec<T> = tween(EXIT_MS, easing = ExitEasing)
+
+    /** 页面转场。比浮层慢一点（跨的距离更远），但仍然遵守「退场更快」 */
+    const val NAV_ENTER_MS = 260
+    const val NAV_EXIT_MS = 180
+
+    fun <T> navEnterSpec(): FiniteAnimationSpec<T> = tween(NAV_ENTER_MS, easing = EnterEasing)
+    fun <T> navExitSpec(): FiniteAnimationSpec<T> = tween(NAV_EXIT_MS, easing = ExitEasing)
 }
 
 /**
@@ -43,17 +57,31 @@ object Motion {
  *
  * 翻页容器早就尊重这个设置了，别处却没有 —— 一个 App 里一半动画能关一半关不掉，
  * 对需要它的人来说等于没关。
+ *
+ * 用 ContentObserver 监听而不是 `remember {}` 读一次：读一次的话，用户在系统设置里
+ * 关掉动画再切回来，旧值还生效 —— 得杀进程才认。而「关掉动画」恰恰是那种关掉了
+ * 就希望立刻生效的设置。
  */
 @Composable
 fun animationsEnabled(): Boolean {
     val context = LocalContext.current
-    return remember {
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) != 0f
+    val resolver = context.contentResolver
+
+    fun read(): Boolean =
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+
+    var enabled by remember { mutableStateOf(read()) }
+    DisposableEffect(resolver) {
+        val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                enabled = read()
+            }
+        }
+        resolver.registerContentObserver(uri, false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
     }
+    return enabled
 }
 
 /** 顶栏：从上方滑入 + 淡入 */

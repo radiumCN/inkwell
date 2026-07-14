@@ -16,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -148,10 +150,22 @@ fun BookListRow(
                 )
             }
         }
-        if (trailingLoading) {
-            CircularProgressIndicator(Modifier.size(24.dp))
-        } else {
-            TextButton(onClick = onTrailing) { Text(trailingLabel) }
+        // 转圈叠在按钮上，而不是替换它 —— 24dp 的转圈换掉 48dp 的按钮，整行高度会跳一下。
+        // 这正是 AppButtons 里已经修好的那个坑，这里又犯了一遍
+        Box(contentAlignment = Alignment.Center) {
+            TextButton(onClick = onTrailing, enabled = !trailingLoading) {
+                Text(
+                    trailingLabel,
+                    color = if (trailingLoading) Color.Transparent else LocalContentColor.current,
+                )
+            }
+            if (trailingLoading) {
+                CircularProgressIndicator(
+                    Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }

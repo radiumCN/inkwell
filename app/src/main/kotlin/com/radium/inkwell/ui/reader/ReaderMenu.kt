@@ -65,12 +65,15 @@ import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -160,7 +163,13 @@ fun ReaderMenu(
                     .weight(1f)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.18f))
-                    .clickable(onClick = onDismiss)
+                    // 无涟漪：这是块半屏的空白，点它只是"关掉菜单"。带 ripple 的话
+                    // 一点下去整个屏幕中央泛起一道全屏涟漪，非常吓人
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onDismiss,
+                    )
             )
 
             // 底栏
@@ -436,8 +445,11 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
                 val selected = theme.id == settings.theme.id
                 Box(
                     Modifier
-                        .size(44.dp)
-                        .background(Color(theme.background), CircleShape)
+                        // 触控目标 48dp（原来 44dp，差一点点）；clip 必须在 clickable 之前 ——
+                        // 否则涟漪是方的，会溢出这个圆形色块的边界
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(theme.background))
                         .border(
                             width = if (selected) 2.dp else 1.dp,
                             color = if (selected) MaterialTheme.colorScheme.primary
@@ -469,24 +481,6 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-}
-
-@Composable
-private fun ChipRow(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
-    // 必须可横向滚动。从前是个固定宽度的 Row：选项一多（自动翻页有 7 档）就塞不下，
-    // Row 把剩余宽度硬分给最后一个 chip，它的文字被压成竖排单字 —— 「45s」变成三行。
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEachIndexed { i, label ->
-            FilterChip(
-                selected = i == selectedIndex,
-                onClick = { onSelect(i) },
-                label = { Text(label, maxLines = 1) },
-            )
-        }
-    }
 }
 
 @Composable

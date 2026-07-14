@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.ErrorState
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -92,12 +93,11 @@ fun RssArticlesScreen(
                 state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                state.error != null -> Box(
-                    Modifier.fillMaxSize().padding(32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(state.error!!, style = MaterialTheme.typography.bodyMedium)
-                }
+                // 从前这里只甩一行字，连重试都没有 —— 用户唯一能做的是退出去再进来
+                state.error != null -> ErrorState(
+                    message = state.error!!,
+                    onRetry = viewModel::refresh,
+                )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(state.articles, key = { it.key }) { article ->
                         ArticleRow(article, onClick = { onOpenArticle(article) })

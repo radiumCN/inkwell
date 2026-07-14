@@ -1,6 +1,13 @@
 package com.radium.inkwell.ui.nav
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
+import com.radium.inkwell.ui.components.Motion
+import com.radium.inkwell.ui.components.animationsEnabled
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -24,7 +31,34 @@ import com.radium.inkwell.ui.webdav.WebDavSettingsScreen
 @Composable
 fun InkwellNavHost() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = BookshelfRoute) {
+    // 从前没配转场，走的是 navigation-compose 的默认淡入淡出（约 700ms，且进出同速）——
+    // 与翻页的 180~320ms 完全脱节，而且违反「退场比入场快」。
+    // 改成 shared-axis X：前进从右侧滑入，返回向右滑出，方向就说明了"进"和"退"。
+    val animate = animationsEnabled()
+    NavHost(
+        navController = navController,
+        startDestination = BookshelfRoute,
+        enterTransition = {
+            if (!animate) fadeIn(tween(0))
+            else fadeIn(Motion.navEnterSpec()) +
+                slideInHorizontally(Motion.navEnterSpec()) { it / 8 }
+        },
+        exitTransition = {
+            if (!animate) fadeOut(tween(0))
+            else fadeOut(Motion.navExitSpec()) +
+                slideOutHorizontally(Motion.navExitSpec()) { -it / 8 }
+        },
+        popEnterTransition = {
+            if (!animate) fadeIn(tween(0))
+            else fadeIn(Motion.navEnterSpec()) +
+                slideInHorizontally(Motion.navEnterSpec()) { -it / 8 }
+        },
+        popExitTransition = {
+            if (!animate) fadeOut(tween(0))
+            else fadeOut(Motion.navExitSpec()) +
+                slideOutHorizontally(Motion.navExitSpec()) { it / 8 }
+        },
+    ) {
         composable<BookshelfRoute> {
             BookshelfScreen(
                 onOpenBook = { navController.navigate(ReaderRoute(it)) },

@@ -34,6 +34,8 @@ fun SlimSlider(
     enabled: Boolean = true,
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     steps: Int = 0,
+    /** 松手时回调（主题设置靠它在拖完之后才落库，而不是每一帧都写） */
+    onValueChangeFinished: (() -> Unit)? = null,
     activeColor: Color? = null,
     inactiveColor: Color? = null,
 ) {
@@ -47,6 +49,7 @@ fun SlimSlider(
         enabled = enabled,
         valueRange = valueRange,
         steps = steps,
+        onValueChangeFinished = onValueChangeFinished,
         thumb = {
             Box(
                 Modifier

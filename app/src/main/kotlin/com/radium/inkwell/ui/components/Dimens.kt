@@ -13,4 +13,15 @@ object Dimens {
     val rowHorizontal = 20.dp
     /** 列表行上下内边距 */
     val rowVertical = 14.dp
+
+    /** 间距 */
+    val gapS = 8.dp
+    val gapM = 12.dp
+    val gapL = 16.dp
+
+    /** 触控目标下限（Material：48dp） */
+    val touchTarget = 48.dp
+
+    /** 底部面板里可滚动列表的高度上限。从前四处各写各的（400/420/440），面板高度参差不齐 */
+    val sheetListMaxHeight = 420.dp
 }
