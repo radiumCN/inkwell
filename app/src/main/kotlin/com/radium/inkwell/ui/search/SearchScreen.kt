@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.search
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,13 +37,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.SearchField
+import com.radium.inkwell.ui.components.expandEnter
+import com.radium.inkwell.ui.components.expandExit
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,7 +96,7 @@ fun SearchScreen(
                         onValueChange = viewModel::setQuery,
                         placeholder = "书名 / 作者",
                         onSearch = { viewModel.search() },
-                        modifier = Modifier.padding(end = 8.dp),
+                        modifier = Modifier.padding(end = Dimens.gapS),
                     )
                 },
                 navigationIcon = {
@@ -110,7 +114,11 @@ fun SearchScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (state.searching) {
+            AnimatedVisibility(
+                visible = state.searching,
+                enter = expandEnter(),
+                exit = expandExit(),
+            ) {
                 LinearProgressIndicator(
                     progress = {
                         if (state.sourceCount == 0) 0f
@@ -129,6 +137,7 @@ fun SearchScreen(
                 LazyColumn(state = listState) {
                     items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
                         val result = hit.result
+                        val inShelf = bookKey(result.title, result.author) in state.shelfKeys
                         BookListRow(
                             title = result.title,
                             subtitle = listOfNotNull(result.author, result.latestChapter)
@@ -140,16 +149,18 @@ fun SearchScreen(
                                 "来源: ${result.sourceId}"
                             },
                             coverModel = result.coverUrl,
-                            trailingLabel = "加入",
+                            // 已在书架就显示"已加入"且不可点，不再让人重复加
+                            trailingLabel = if (inShelf) "已加入" else "加入",
                             trailingLoading = state.addingUrl == result.bookUrl,
+                            trailingEnabled = !inShelf,
                             onTrailing = { viewModel.addToShelf(result) },
                             onClick = { onOpenPreview(hit.results) },
                         )
                     }
                     if (state.loadingMore) {
                         item {
-                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.size(24.dp))
+                            Box(Modifier.fillMaxWidth().padding(Dimens.gapL), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(Dimens.iconMd))
                             }
                         }
                     }

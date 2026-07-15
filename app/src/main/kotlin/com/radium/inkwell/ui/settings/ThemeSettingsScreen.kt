@@ -20,7 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -42,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SectionHeader
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.theme.AppThemes
@@ -78,7 +78,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = Dimens.screenPadding)
                 .verticalScroll(rememberScrollState()),
         ) {
             SectionLabel("模式")
@@ -145,19 +145,15 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                 )
             }
 
-            Box(Modifier.height(32.dp))
+            Box(Modifier.height(Dimens.gapXXL))
         }
     }
 }
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(
-        text,
-        Modifier.padding(top = 20.dp, bottom = 10.dp),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    // 收敛到共享 SectionHeader（本页内容 Column 已整体内缩，故不再让它自带左右留白）
+    SectionHeader(text, horizontalInset = false)
 }
 
 /** 预设色板行 + 「自定义」入口 */
@@ -172,7 +168,7 @@ private fun PresetRow(
     // 横向可滚：5 个预设 + 自定义 = 6 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         presets.forEach { preset ->
             ThemeSwatch(
@@ -204,7 +200,7 @@ private fun ThemeSwatch(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
-                .size(52.dp)
+                .size(Dimens.swatch)
                 .background(bg, CircleShape)
                 .border(
                     width = if (selected) 2.dp else 1.dp,
@@ -231,7 +227,7 @@ private fun ThemeSwatch(
         }
         Text(
             label,
-            Modifier.padding(top = 4.dp),
+            Modifier.padding(top = Dimens.gapXS),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -272,11 +268,11 @@ private fun CustomThemeEditor(
     val previewScheme = AppThemes.schemeFrom(currentSeed(), currentBg(), dark)
 
     Surface(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
+        Modifier.fillMaxWidth().padding(top = Dimens.gapM),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(Dimens.gapL)) {
             // 实时预览
             Surface(
                 Modifier.fillMaxWidth(),
@@ -287,7 +283,7 @@ private fun CustomThemeEditor(
                 ),
             ) {
                 Row(
-                    Modifier.padding(12.dp),
+                    Modifier.padding(Dimens.gapM),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {

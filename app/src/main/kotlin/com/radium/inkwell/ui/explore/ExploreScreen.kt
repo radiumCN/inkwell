@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.explore
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,9 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -22,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,12 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.BookListRow
+import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.CollectMessages
@@ -115,27 +113,21 @@ fun ExploreScreen(
                 return@Column
             }
 
-            // 分类 chips
+            // 分类 chips —— 走共享 ChipRow（自带横向滚动），不再手搓 LazyRow + FilterChip
             if (state.categories.size > 1) {
-                LazyRow(
-                    Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                ) {
-                    itemsIndexed(state.categories) { i, name ->
-                        FilterChip(
-                            selected = i == state.categoryIndex,
-                            onClick = { viewModel.selectCategory(i) },
-                            label = { Text(name) },
-                        )
-                    }
-                }
+                ChipRow(
+                    options = state.categories,
+                    selectedIndex = state.categoryIndex,
+                    onSelect = { viewModel.selectCategory(it) },
+                    contentPadding = PaddingValues(
+                        horizontal = Dimens.listHorizontal,
+                        vertical = Dimens.gapXS,
+                    ),
+                )
             }
 
             when {
-                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+                state.loading -> LoadingState()
                 state.books.isEmpty() -> EmptyState(
                     icon = Icons.Default.Explore,
                     title = "这个分类没有内容",
@@ -144,14 +136,16 @@ fun ExploreScreen(
                 )
                 else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(state.books, key = { "${it.sourceId}|${it.bookUrl}" }) { book ->
+                        val inShelf = bookKey(book.title, book.author) in state.shelfKeys
                         BookListRow(
                             title = book.title,
                             subtitle = listOfNotNull(book.author, book.latestChapter)
                                 .joinToString(" · "),
                             caption = book.intro,
                             coverModel = book.coverUrl,
-                            trailingLabel = "加入",
+                            trailingLabel = if (inShelf) "已加入" else "加入",
                             trailingLoading = state.addingUrl == book.bookUrl,
+                            trailingEnabled = !inShelf,
                             onTrailing = { viewModel.addToShelf(book) },
                             onClick = { onOpenPreview(listOf(book)) },
                         )
@@ -159,9 +153,9 @@ fun ExploreScreen(
                     if (state.loadingMore) {
                         item {
                             Box(
-                                Modifier.fillMaxWidth().padding(16.dp),
+                                Modifier.fillMaxWidth().padding(Dimens.gapL),
                                 contentAlignment = Alignment.Center,
-                            ) { CircularProgressIndicator(Modifier.size(24.dp)) }
+                            ) { CircularProgressIndicator(Modifier.size(Dimens.iconMd)) }
                         }
                     }
                 }

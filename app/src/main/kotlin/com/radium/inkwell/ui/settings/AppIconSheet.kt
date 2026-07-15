@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -44,17 +46,25 @@ fun AppIconSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        Column(Modifier.padding(bottom = 24.dp)) {
+        Column(Modifier.padding(bottom = Dimens.gapXL)) {
             Text(
                 "应用图标",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 4.dp),
+                modifier = Modifier.padding(
+                    start = Dimens.screenPadding,
+                    end = Dimens.screenPadding,
+                    bottom = Dimens.gapXS,
+                ),
             )
             Text(
                 "换完之后桌面上的图标可能要等几秒才刷新；个别启动器得重启桌面才认。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
+                modifier = Modifier.padding(
+                    start = Dimens.screenPadding,
+                    end = Dimens.screenPadding,
+                    bottom = Dimens.gapM,
+                ),
             )
 
             AppIcon.entries.forEach { icon ->
@@ -75,13 +85,13 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 10.dp),
+            .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapM),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Box(
             Modifier
-                .size(52.dp)
+                .size(Dimens.swatch)
                 .clip(CircleShape)
                 // 选中的那个描一圈主色。只靠"某一项颜色深一点"是分不出来的
                 .then(
@@ -98,7 +108,7 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(Dimens.swatch)
                     .clip(CircleShape),
             )
         }
@@ -111,11 +121,12 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
             )
         }
         if (selected) {
-            Box(
-                Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(50))
-                    .border(5.dp, accent, CircleShape)
+            // 选中态与 OptionPicker / 主题色板一致：主色勾选图标，不再是自成一套的描边小圆点
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "已选中",
+                Modifier.size(Dimens.iconMd),
+                tint = accent,
             )
         }
     }

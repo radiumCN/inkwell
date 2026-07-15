@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.MessageBus
@@ -42,12 +43,15 @@ data class SearchUiState(
     val loadingMore: Boolean = false,
     /** 每次新搜索 +1；界面靠它把列表滚回顶部 */
     val searchId: Int = 0,
+    /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入" */
+    val shelfKeys: Set<Pair<String, String>> = emptySet(),
 )
 
 class SearchViewModel(
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
+    private val bookRepo: BookRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
@@ -56,6 +60,13 @@ class SearchViewModel(
     val messages = MessageBus()
 
     private var searchJob: Job? = null
+
+    init {
+        // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）
+        viewModelScope.launch {
+            bookRepo.shelfKeys.collect { keys -> _state.value = _state.value.copy(shelfKeys = keys) }
+        }
+    }
 
     fun setQuery(q: String) {
         _state.value = _state.value.copy(query = q)

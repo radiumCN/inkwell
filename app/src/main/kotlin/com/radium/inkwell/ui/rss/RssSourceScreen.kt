@@ -20,7 +20,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.ui.components.CollectMessages
@@ -126,7 +124,7 @@ fun RssSourceScreen(
                         Modifier
                             .fillMaxWidth()
                             .clickable(enabled = source.enabled) { onOpenSource(source.id) }
-                            .padding(start = Dimens.rowHorizontal, top = 8.dp, bottom = 8.dp),
+                            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
@@ -156,7 +154,6 @@ fun RssSourceScreen(
                             onCheckedChange = { viewModel.setEnabled(source.id, it) },
                         )
                     }
-                    HorizontalDivider()
                 }
             }
         }
@@ -177,7 +174,7 @@ fun RssSourceScreen(
                     )
                     Text(
                         "直接粘一个 RSS/Atom 地址即可 —— 不必先去找一份 Legado 格式的订阅源。",
-                        Modifier.padding(top = 8.dp),
+                        Modifier.padding(top = Dimens.gapS),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

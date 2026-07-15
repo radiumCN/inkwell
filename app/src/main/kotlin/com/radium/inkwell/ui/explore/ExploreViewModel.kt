@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.MessageBus
@@ -26,6 +27,8 @@ data class ExploreUiState(
     val loading: Boolean = false,
     val loadingMore: Boolean = false,
     val addingUrl: String? = null,
+    /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入" */
+    val shelfKeys: Set<Pair<String, String>> = emptySet(),
 ) {
     val currentSource: ExploreSource? get() = sources.getOrNull(sourceIndex)
     val categories: List<String> get() = currentSource?.categories.orEmpty()
@@ -36,6 +39,7 @@ class ExploreViewModel(
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
+    private val bookRepo: BookRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ExploreUiState())
@@ -47,6 +51,10 @@ class ExploreViewModel(
     private val ruleCache = mutableMapOf<String, BookSourceRule>()
 
     init {
+        // 书架变动时刷新"已加入"标记
+        viewModelScope.launch {
+            bookRepo.shelfKeys.collect { keys -> _state.value = _state.value.copy(shelfKeys = keys) }
+        }
         viewModelScope.launch {
             val rules = sourceRepo.getEnabledRules().filter { it.explore.isNotEmpty() }
             rules.forEach { ruleCache[it.id] = it }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +21,6 @@ data class SourceDetailUiState(
     val testKeyword: String = "剑",
     val testing: Boolean = false,
     val testReport: String = "",
-    val message: String? = null,
 )
 
 class SourceDetailViewModel(
@@ -32,6 +32,9 @@ class SourceDetailViewModel(
 
     private val _state = MutableStateFlow(SourceDetailUiState())
     val state: StateFlow<SourceDetailUiState> = _state.asStateFlow()
+
+    /** 一次性提示：与其他管理页一样走共享 MessageBus + CollectMessages */
+    val messages = MessageBus()
 
     init {
         viewModelScope.launch {
@@ -52,7 +55,7 @@ class SourceDetailViewModel(
     /** 搜索→取第1本→详情→目录→第1章正文，一键冒烟 */
     fun testSearchChain() {
         val rule = sourceRepo.parseRule(_state.value.jsonText).getOrElse {
-            _state.value = _state.value.copy(message = "规则解析失败: ${it.message?.take(120)}")
+            messages.emit("规则解析失败: ${it.message?.take(120)}")
             return
         }
         viewModelScope.launch {
@@ -85,9 +88,5 @@ class SourceDetailViewModel(
             }
             _state.value = _state.value.copy(testing = false, testReport = report.toString())
         }
-    }
-
-    fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
     }
 }

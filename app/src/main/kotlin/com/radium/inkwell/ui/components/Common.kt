@@ -73,6 +73,33 @@ fun EmptyState(
 }
 
 /**
+ * 加载态。与 [EmptyState]/[ErrorState] 三态对称，全应用统一形态。
+ *
+ * 从前每个页面各写各的 `Box(center){ CircularProgressIndicator() }`：有的裸 40dp、有的 24dp，
+ * 有的配一行说明、有的没有 —— 同样是"正在加载"，跨页面长得不一样。收敛成一处。
+ */
+@Composable
+fun LoadingState(
+    modifier: Modifier = Modifier,
+    label: String? = null,
+) {
+    Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            if (label != null) {
+                Text(
+                    label,
+                    Modifier.padding(top = Dimens.gapM),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
  * 书封缩略图。
  *
  * 默认封面**永远垫在底层**，图片加载成功就把它盖住。从前只有 `coverModel == null` 才画占位，
@@ -168,6 +195,8 @@ fun BookListRow(
     trailingLabel: String,
     trailingLoading: Boolean,
     onTrailing: () -> Unit,
+    /** false 时尾部按钮置灰不可点（如"已加入"）—— 书已在架就不该再让人点"加入" */
+    trailingEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {
@@ -208,7 +237,7 @@ fun BookListRow(
         // 转圈叠在按钮上，而不是替换它 —— 24dp 的转圈换掉 48dp 的按钮，整行高度会跳一下。
         // 这正是 AppButtons 里已经修好的那个坑，这里又犯了一遍
         Box(contentAlignment = Alignment.Center) {
-            TextButton(onClick = onTrailing, enabled = !trailingLoading) {
+            TextButton(onClick = onTrailing, enabled = trailingEnabled && !trailingLoading) {
                 Text(
                     trailingLabel,
                     color = if (trailingLoading) Color.Transparent else LocalContentColor.current,

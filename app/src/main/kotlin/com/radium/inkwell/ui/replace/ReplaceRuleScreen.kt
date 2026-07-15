@@ -46,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.ui.components.CollectMessages
@@ -101,7 +100,6 @@ fun ReplaceRuleScreen(
                         onToggle = { viewModel.setEnabled(rule, it) },
                         onDelete = { pendingDelete = rule },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -150,7 +148,7 @@ private fun RuleRow(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = Dimens.rowHorizontal, top = 8.dp, bottom = 8.dp),
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -171,14 +169,16 @@ private fun RuleRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Switch(checked = rule.enabled, onCheckedChange = onToggle)
+        // 删除在前、开关在后、删除图标用 outline 灰：与书源/订阅列表的行尾一致
+        // （error 红此处过重 —— 真正的销毁确认在弹窗里）
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Default.Delete,
                 contentDescription = "删除",
-                tint = MaterialTheme.colorScheme.error,
+                tint = MaterialTheme.colorScheme.outline,
             )
         }
+        Switch(checked = rule.enabled, onCheckedChange = onToggle)
     }
 }
 
@@ -198,7 +198,7 @@ private fun Editor(
             .heightIn(max = Dimens.sheetEditorMaxHeight)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Dimens.screenPadding)
-            .padding(bottom = 32.dp),
+            .padding(bottom = Dimens.gapXXL),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         Text(

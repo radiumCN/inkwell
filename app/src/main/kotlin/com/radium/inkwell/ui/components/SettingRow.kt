@@ -15,17 +15,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** 分组小标题。从前 ReaderMenu 与 ThemeSettings 各定义了一份一模一样的 */
+/**
+ * 分组小标题。从前 ReaderMenu 与 ThemeSettings 各定义了一份一模一样的 —— 现在它俩的
+ * 私有 SectionLabel 都改成薄薄地转调这里，全 App 的分组标题一套字号/颜色。
+ */
 @Composable
-fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+fun SectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    /** 调用方的内容 Column 已整体内缩时设 false，避免左右留白叠加两次 */
+    horizontalInset: Boolean = true,
+) {
+    val h = if (horizontalInset) Dimens.rowHorizontal else 0.dp
     Text(
         text,
-        modifier.padding(
-            start = Dimens.rowHorizontal,
-            end = Dimens.rowHorizontal,
-            top = 20.dp,
-            bottom = 6.dp,
-        ),
+        modifier.padding(start = h, end = h, top = 20.dp, bottom = 6.dp),
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
     )

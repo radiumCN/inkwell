@@ -32,7 +32,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
@@ -72,6 +71,12 @@ fun PageFlipContainer(
     layout: LayoutSpec,
     theme: ReaderTheme,
     animation: FlipAnimation,
+    /**
+     * 是否允许播放动画（系统「移除动画」的取反）。由 ReaderScreen 透传 ——
+     * 它用 ContentObserver 实时监听，用户在系统设置里一改立刻生效；
+     * 本模块（:reader）看不到 :app 的 animationsEnabled()，故上提为参数。
+     */
+    animationsEnabled: Boolean,
     /** 翻页落定时震一下。默认关；见 ReaderSettings.flipHaptic */
     hapticOnFlip: Boolean = false,
     gesturesEnabled: Boolean,
@@ -86,15 +91,8 @@ fun PageFlipContainer(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
-    val context = LocalContext.current
     // 系统「移除动画」开启时降级为无动画直切（无障碍）
-    val animationsOff = remember {
-        android.provider.Settings.Global.getFloat(
-            context.contentResolver,
-            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
-        ) == 0f
-    }
-    val effectiveAnim = if (animationsOff) FlipAnimation.NONE else animation
+    val effectiveAnim = if (!animationsEnabled) FlipAnimation.NONE else animation
     // offset：拖拽累计位移，FORWARD ∈ [-w,0]，BACKWARD ∈ [0,w]；驱动 COVER/SLIDE 与松手裁决
     var offset by remember { mutableFloatStateOf(0f) }
     // CURL 的真实触点（跟手）

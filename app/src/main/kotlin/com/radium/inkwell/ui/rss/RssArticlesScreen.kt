@@ -3,7 +3,6 @@ package com.radium.inkwell.ui.rss
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,10 +15,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,12 +28,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil3.compose.AsyncImage
 import com.radium.inkwell.core.source.rss.RssArticle
+import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.LoadingState
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -76,7 +73,7 @@ fun RssArticlesScreen(
                     Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = Dimens.listHorizontal),
                     horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 ) {
                     state.sorts.forEachIndexed { i, sort ->
@@ -90,18 +87,16 @@ fun RssArticlesScreen(
             }
 
             when {
-                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+                state.loading -> LoadingState()
                 // 从前这里只甩一行字，连重试都没有 —— 用户唯一能做的是退出去再进来
                 state.error != null -> ErrorState(
                     message = state.error!!,
                     onRetry = viewModel::refresh,
                 )
+                // 不画分割线：与书架/搜索/书源列表一致，靠行内边距分隔
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(state.articles, key = { it.key }) { article ->
                         ArticleRow(article, onClick = { onOpenArticle(article) })
-                        HorizontalDivider()
                     }
                 }
             }
@@ -115,7 +110,7 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = Dimens.rowHorizontal, vertical = 12.dp),
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -144,13 +139,16 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
                 )
             }
         }
+        // 走 BookCover：与书架/搜索的封面一套形态（圆角、占位、抓图失败优雅降级），
+        // 而不是裸 AsyncImage 方图 —— 图挂了不再是一块空白
         article.image?.takeIf { it.isNotBlank() }?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
+            BookCover(
+                title = article.title,
+                coverModel = url,
                 modifier = Modifier
-                    .padding(start = 12.dp)
-                    .size(72.dp),
+                    .padding(start = Dimens.gapM)
+                    .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight),
+                placeholderChars = 2,
             )
         }
     }

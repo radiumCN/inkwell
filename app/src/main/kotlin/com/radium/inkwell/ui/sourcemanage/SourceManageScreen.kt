@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.AlertDialog
@@ -280,13 +282,14 @@ fun SourceManageScreen(
                 value = query,
                 onValueChange = viewModel::setQuery,
                 placeholder = "搜索书源名称或网址",
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
             )
             Row(
                 Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = Dimens.listHorizontal),
                 horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -318,7 +321,7 @@ fun SourceManageScreen(
                         )
                         LinearProgressIndicator(
                             progress = { if (p.total == 0) 0f else p.done.toFloat() / p.total },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = Dimens.gapXS),
                         )
                     }
                     TextButton(onClick = viewModel::cancelCheck) { Text("停止") }
@@ -328,7 +331,7 @@ fun SourceManageScreen(
             // 都会造成一次性的"失效"，禁用了还能改天再校验一次
             if (checkProgress == null && failedCount > 0) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -396,14 +399,25 @@ fun SourceManageScreen(
                             )
                             if (source.checkStatus != CheckStatus.UNCHECKED) {
                                 val ok = source.checkStatus == CheckStatus.OK
-                                Text(
-                                    (if (ok) "✓ " else "✗ ") + source.checkMessage,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (ok) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.error,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                val statusColor = if (ok) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error
+                                // 用真图标而非 "✓/✗" 字符：字符当图标是全 App 已弃的写法（见 OptionPicker）
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        if (ok) Icons.Default.Check else Icons.Default.Close,
+                                        contentDescription = null,
+                                        Modifier.size(Dimens.iconSm),
+                                        tint = statusColor,
+                                    )
+                                    Text(
+                                        source.checkMessage,
+                                        Modifier.padding(start = Dimens.gapXS),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = statusColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
                         if (!selectionMode) {
@@ -444,11 +458,11 @@ fun SourceManageScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(Dimens.gapS))
                     CheckItemRow("校验详情页", draft.checkDetail) { draft = draft.copy(checkDetail = it) }
                     CheckItemRow("校验目录", draft.checkToc) { draft = draft.copy(checkToc = it) }
                     CheckItemRow("校验正文", draft.checkContent) { draft = draft.copy(checkContent = it) }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(Dimens.gapS))
                     Text(
                         "单源超时 ${draft.timeoutMs / 1000} 秒",
                         style = MaterialTheme.typography.labelMedium,
@@ -557,7 +571,7 @@ fun SourceManageScreen(
                         value = importUrl,
                         onValueChange = { importUrl = it },
                         placeholder = "https://…/sources.json",
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = Dimens.gapS),
                     )
                 }
             },

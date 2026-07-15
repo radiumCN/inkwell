@@ -11,6 +11,7 @@ import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -24,7 +25,21 @@ class BookRepository(
 
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
+    /** 书架上已有书的 (书名, 作者) 键集合，用来判断某本网络书是否已在书架 */
+    val shelfKeys: Flow<Set<Pair<String, String>>> =
+        books.map { list -> list.mapTo(HashSet()) { bookKey(it.title, it.author) } }
+
     suspend fun getBook(id: String): BookEntity? = bookDao.getById(id)
+
+    /**
+     * 书架上与该「书名+作者」匹配的书 id。网络书按 (sourceId,bookUrl) 存，但同一本书跨书源
+     * 合并靠 (书名,作者) —— 判断"已在书架"、以及直达已存在的那本，都得按这个键，否则换个
+     * 代表书源就认不出是同一本，于是要么重复显示"加入"、要么再入库一份重复的。
+     */
+    suspend fun shelfBookIdByKey(title: String, author: String?): String? {
+        val key = bookKey(title, author)
+        return bookDao.getAll().firstOrNull { bookKey(it.title, it.author) == key }?.id
+    }
 
     private fun booksDir(): File = File(context.filesDir, "books").apply { mkdirs() }
 
@@ -129,3 +144,7 @@ class BookRepository(
             if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
         }
 }
+
+/** 「同一本书」的判定键：书名 + 作者（去空白）。与搜索结果的合并键（SearchViewModel.merge）一致 */
+fun bookKey(title: String, author: String?): Pair<String, String> =
+    title.trim() to author?.trim().orEmpty()

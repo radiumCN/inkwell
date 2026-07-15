@@ -8,8 +8,10 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
@@ -120,3 +122,21 @@ fun scrimEnter() = if (animationsEnabled()) fadeIn(Motion.enterSpec()) else fade
 
 @Composable
 fun scrimExit() = if (animationsEnabled()) fadeOut(Motion.exitSpec()) else fadeOut(tween(0))
+
+/**
+ * 会撑高/收起、把周围内容顶开的一块面板（书架隐藏区、搜索进度条之类）。
+ * 高度展开 + 淡入，而不是硬生生冒出来把下面的内容顶一下。
+ */
+@Composable
+fun expandEnter() = if (animationsEnabled()) {
+    expandVertically(Motion.enterSpec()) + fadeIn(Motion.enterSpec())
+} else {
+    fadeIn(tween(0))
+}
+
+@Composable
+fun expandExit() = if (animationsEnabled()) {
+    shrinkVertically(Motion.exitSpec()) + fadeOut(Motion.exitSpec())
+} else {
+    fadeOut(tween(0))
+}

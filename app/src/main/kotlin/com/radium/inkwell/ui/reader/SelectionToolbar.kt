@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -22,9 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.ui.components.PrimaryButton
 
 /**
@@ -35,7 +34,6 @@ import com.radium.inkwell.ui.components.PrimaryButton
 @Composable
 fun SelectionToolbar(
     selectedText: String,
-    theme: ReaderTheme,
     onCopy: () -> Unit,
     onPurify: () -> Unit,
     onReplace: (String) -> Unit,
@@ -47,10 +45,13 @@ fun SelectionToolbar(
 
     Surface(
         modifier.fillMaxWidth(),
-        color = androidx.compose.ui.graphics.Color(theme.background),
-        contentColor = androidx.compose.ui.graphics.Color(theme.textColor),
-        shadowElevation = 8.dp,
+        // 渲染在 ReaderThemeScope 内，直接吃语义色。靠顶部一道发丝线与正文分层，不投影 ——
+        // 同色纸上的投影会糊成一道脏灰线（与阅读菜单顶/底栏同一处理）。
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
+        Column {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Column(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)) {
             Text(
                 "「$selectedText」",
@@ -65,10 +66,10 @@ fun SelectionToolbar(
                     label = { Text("替换成") },
                     placeholder = { Text("留空即删除") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = Dimens.gapS),
                 )
                 Row(
-                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    Modifier.fillMaxWidth().padding(top = Dimens.gapS),
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = { replacing = false }) { Text("取消") }
@@ -98,6 +99,7 @@ fun SelectionToolbar(
                     TextButton(onClick = onDismiss) { Text("取消") }
                 }
             }
+        }
         }
     }
 }

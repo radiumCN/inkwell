@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.repo.WebDavRepository
+import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +19,6 @@ data class WebDavUiState(
     val busy: Boolean = false,
     val lastSyncAt: Long = 0,
     val autoSync: Boolean = true,
-    val message: String? = null,
 )
 
 class WebDavViewModel(
@@ -28,6 +28,9 @@ class WebDavViewModel(
 
     private val _state = MutableStateFlow(WebDavUiState())
     val state: StateFlow<WebDavUiState> = _state.asStateFlow()
+
+    /** 一次性提示：与其他管理页一样走共享 MessageBus + CollectMessages */
+    val messages = MessageBus()
 
     init {
         viewModelScope.launch {
@@ -56,12 +59,11 @@ class WebDavViewModel(
             val result = repo.testConnection(s.url, s.username, s.password)
             if (result.isSuccess) {
                 prefs.save(s.url, s.username, s.password)
-                _state.value = _state.value.copy(busy = false, configured = true, message = "连接成功，已保存")
+                _state.value = _state.value.copy(busy = false, configured = true)
+                messages.emit("连接成功，已保存")
             } else {
-                _state.value = _state.value.copy(
-                    busy = false,
-                    message = "连接失败: ${result.exceptionOrNull()?.message}",
-                )
+                _state.value = _state.value.copy(busy = false)
+                messages.emit("连接失败: ${result.exceptionOrNull()?.message}")
             }
         }
     }
@@ -73,12 +75,8 @@ class WebDavViewModel(
             _state.value = _state.value.copy(
                 busy = false,
                 lastSyncAt = if (result.isSuccess) System.currentTimeMillis() else _state.value.lastSyncAt,
-                message = result.getOrElse { "同步失败: ${it.message}" },
             )
+            messages.emit(result.getOrElse { "同步失败: ${it.message}" })
         }
-    }
-
-    fun clearMessage() {
-        _state.value = _state.value.copy(message = null)
     }
 }

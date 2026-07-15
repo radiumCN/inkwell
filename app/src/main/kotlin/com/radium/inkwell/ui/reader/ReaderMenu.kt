@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -149,7 +150,7 @@ fun ReaderMenu(
                                 strokeWidth = 1.dp.toPx(),
                             )
                         }
-                        .padding(horizontal = 4.dp),
+                        .padding(horizontal = Dimens.gapXS),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onExit) {
@@ -218,17 +219,17 @@ fun ReaderMenu(
                             )
                         }
                         .navigationBarsPadding()
-                        .padding(vertical = 8.dp)
+                        .padding(vertical = Dimens.gapS)
                 ) {
                     // 章节进度
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = Dimens.gapL),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         TextButton(
                             onClick = { onGotoChapter(state.chapterIndex - 1) },
                             enabled = state.chapterIndex > 0,
-                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            contentPadding = PaddingValues(horizontal = Dimens.gapS),
                         ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
 
                         // 细滑块 + 页码。M3 默认的 Slider thumb 是一根竖条，把这条本该最不起眼的
@@ -240,7 +241,7 @@ fun ReaderMenu(
                             enabled = state.pageCount > 1,
                             activeColor = barContent,
                             inactiveColor = barContent.copy(alpha = 0.2f),
-                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
                         )
                         Text(
                             "${state.pageInChapter + 1}/${state.pageCount.coerceAtLeast(1)}",
@@ -251,12 +252,12 @@ fun ReaderMenu(
                         TextButton(
                             onClick = { onGotoChapter(state.chapterIndex + 1) },
                             enabled = state.chapterIndex + 1 < state.chapterCount,
-                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            contentPadding = PaddingValues(horizontal = Dimens.gapS),
                         ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
                     }
                     HorizontalDivider()
                     Row(
-                        Modifier.fillMaxWidth().padding(top = 4.dp),
+                        Modifier.fillMaxWidth().padding(top = Dimens.gapXS),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         TextButton(onClick = { showToc = true }) {
@@ -325,11 +326,11 @@ private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
             value = query,
             onValueChange = { query = it },
             placeholder = "搜索章节",
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapXS),
         )
         if (filtered.isEmpty()) {
             Box(
-                Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                Modifier.fillMaxWidth().padding(vertical = Dimens.gapXXL),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -538,7 +539,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(
             Icons.Default.DarkMode, contentDescription = null,
-            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         SlimSlider(
             value = settings.brightnessOverride ?: 0.5f,
@@ -546,11 +547,11 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
                 onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
             },
             enabled = settings.brightnessOverride != null,
-            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
         )
         Icon(
             Icons.Default.LightMode, contentDescription = null,
-            Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(12)
         FilterChip(
@@ -662,7 +663,7 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
         style = MaterialTheme.typography.labelSmall,
         color = if (ratio >= 7.0) MaterialTheme.colorScheme.onSurfaceVariant
         else MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(top = 4.dp),
+        modifier = Modifier.padding(top = Dimens.gapXS),
     )
 }
 
@@ -721,9 +722,9 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
     ) {
         Box(
             Modifier
-                // 触控目标 48dp；clip 必须在 clickable 之前 ——
-                // 否则涟漪是方的，会溢出这个圆形色块的边界
-                .size(Dimens.touchTarget)
+                // 色块 52dp（Dimens.swatch，与设置页色板同尺寸），仍 ≥48dp 触控下限；
+                // clip 必须在 clickable 之前 —— 否则涟漪是方的，会溢出这个圆形色块的边界
+                .size(Dimens.swatch)
                 .clip(CircleShape)
                 .background(Color(theme.background))
                 .border(
@@ -765,12 +766,8 @@ private val SETTINGS_TABS = listOf("排版", "翻页", "更多")
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(
-        text,
-        Modifier.padding(top = 16.dp, bottom = 8.dp),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    // 收敛到共享 SectionHeader（面板内容 Column 已整体内缩，故不自带左右留白）
+    SectionHeader(text, horizontalInset = false)
 }
 
 @Composable

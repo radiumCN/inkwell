@@ -10,12 +10,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -24,7 +23,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -36,13 +34,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
-import coil3.compose.AsyncImage
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.repo.BookRepository
@@ -63,8 +60,11 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
     // 刷新完要把新的章节数显示出来，所以 book 得能被重新赋值
     var reloadKey by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    // 区分"还在查库"和"查完了没这本书"：前者转圈，后者给空态 —— 不再是加载中一片空白
+    var loaded by remember(bookId, reloadKey) { mutableStateOf(false) }
     val book by produceState<BookEntity?>(initialValue = null, bookId, reloadKey) {
         value = bookRepo.getBook(bookId)
+        loaded = true
     }
 
     /**
@@ -125,12 +125,27 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        val b = book ?: return@Scaffold
+        val b = book
+        if (b == null) {
+            if (loaded) {
+                EmptyState(
+                    icon = Icons.Default.Warning,
+                    title = "书籍不存在",
+                    hint = "它可能已被删除",
+                    actionLabel = "返回",
+                    onAction = onBack,
+                    modifier = Modifier.padding(padding),
+                )
+            } else {
+                LoadingState(Modifier.padding(padding))
+            }
+            return@Scaffold
+        }
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp)
+                .padding(Dimens.screenPadding)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
         ) {
@@ -143,7 +158,7 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                     modifier = Modifier.size(width = 96.dp, height = 128.dp),
                     placeholderChars = 4,
                 )
-                Column(Modifier.padding(start = 16.dp).align(Alignment.CenterVertically)) {
+                Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                     Text(b.title, style = MaterialTheme.typography.titleLarge)
                     if (b.author.isNotBlank()) {
                         Text(
@@ -168,7 +183,7 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                 Text("简介", style = MaterialTheme.typography.titleMedium)
                 Text(b.intro, style = MaterialTheme.typography.bodyMedium)
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Dimens.gapXL))
         }
     }
 }

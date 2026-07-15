@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +50,7 @@ class BookPreviewViewModel(
     private val candidates: List<SearchResult>,
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
+    private val bookRepo: BookRepository,
 ) : ViewModel() {
 
     /** 当前用的是第几个书源 */
@@ -76,6 +79,15 @@ class BookPreviewViewModel(
 
     init {
         load()
+        // 书架变动时实时刷新"已在书架"（本页刚加、别处加删、跨书源加了同名书都算）
+        viewModelScope.launch {
+            bookRepo.shelfKeys.collect { keys ->
+                val onShelf = bookKey(_state.value.title, _state.value.author) in keys
+                if (onShelf != _state.value.inShelf) {
+                    _state.value = _state.value.copy(inShelf = onShelf)
+                }
+            }
+        }
     }
 
     fun load() {
@@ -101,16 +113,20 @@ class BookPreviewViewModel(
                 netBookRepo.fetchDetailAndToc(rule, result.bookUrl)
             }.onSuccess { (d, toc) ->
                 detail = d
+                val title = d.title.ifBlank { result.title }
+                val author = d.author ?: result.author.orEmpty()
                 _state.value = _state.value.copy(
                     loading = false,
                     error = null,
                     sourceName = rule.name,
-                    title = d.title.ifBlank { result.title },
-                    author = d.author ?: result.author.orEmpty(),
+                    title = title,
+                    author = author,
                     coverUrl = d.coverUrl ?: result.coverUrl,
                     intro = d.intro ?: result.intro,
                     chapters = toc,
-                    inShelf = netBookRepo.shelfBookId(result.sourceId, result.bookUrl) != null,
+                    // 按 书名+作者 判断，而不是只认当前书源的 (sourceId,bookUrl)：同一本书跨书源
+                    // 合并、代表书源每次搜索可能不同，只认当前源会漏判成"未加入"
+                    inShelf = bookRepo.shelfBookIdByKey(title, author) != null,
                 )
             }.onFailure { e ->
                 _state.value = _state.value.copy(
@@ -124,6 +140,12 @@ class BookPreviewViewModel(
 
     fun addToShelf() {
         viewModelScope.launch {
+            // 同名书已在架（哪怕是别的书源加的）就别再加一份
+            if (bookRepo.shelfBookIdByKey(_state.value.title, _state.value.author) != null) {
+                _state.value = _state.value.copy(inShelf = true)
+                messages.emit("已在书架")
+                return@launch
+            }
             if (ensureInShelf() != null) messages.emit("已加入书架")
         }
     }
@@ -131,7 +153,9 @@ class BookPreviewViewModel(
     /** chapterIndex < 0 表示接着上次读（新书即第一章） */
     fun read(chapterIndex: Int = -1) {
         viewModelScope.launch {
-            val bookId = ensureInShelf() ?: return@launch
+            val s = _state.value
+            // 已在书架（可能是别的书源加的）就直接开那本，不再入库一份重复的
+            val bookId = bookRepo.shelfBookIdByKey(s.title, s.author) ?: ensureInShelf() ?: return@launch
             if (chapterIndex >= 0) netBookRepo.setReadPosition(bookId, chapterIndex)
             _openReader.emit(bookId)
         }

@@ -14,15 +14,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SwitchRow
 
 /**
  * 换源面板。
@@ -40,9 +39,9 @@ fun ChangeSourceSheet(
     onDismiss: () -> Unit,
 ) {
         ModalBottomSheet(onDismissRequest = onDismiss) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("换源", style = MaterialTheme.typography.titleMedium)
@@ -57,31 +56,16 @@ fun ChangeSourceSheet(
                     }
                 }
                 // 作者匹配开关：书源返回的作者字段太脏，卡死了就一个源都换不到；
-                // 拨一下就地重筛已搜到的结果，不重新发请求
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onToggleCheckAuthor(!state.checkAuthor) }
-                        .padding(horizontal = 24.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("匹配作者", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            if (state.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(checked = state.checkAuthor, onCheckedChange = onToggleCheckAuthor)
-                }
+                // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式
+                SwitchRow(
+                    title = "匹配作者",
+                    subtitle = if (state.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
+                    checked = state.checkAuthor,
+                    onCheckedChange = onToggleCheckAuthor,
+                )
                 when {
-                    state.changingSource -> Box(
-                        Modifier.fillMaxWidth().padding(24.dp),
-                        contentAlignment = Alignment.Center,
-                    ) { CircularProgressIndicator() }
-                    state.searchingSources && candidates.isEmpty() -> Box(
-                        Modifier.fillMaxWidth().padding(24.dp),
+                    state.changingSource || (state.searchingSources && candidates.isEmpty()) -> Box(
+                        Modifier.fillMaxWidth().padding(Dimens.gapXL),
                         contentAlignment = Alignment.Center,
                     ) { CircularProgressIndicator() }
                     candidates.isEmpty() -> Text(
@@ -91,7 +75,7 @@ fun ChangeSourceSheet(
                         } else {
                             "其他 ${state.sourcesTotal} 个书源都没有找到这本书"
                         },
-                        Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                        Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     else -> LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {

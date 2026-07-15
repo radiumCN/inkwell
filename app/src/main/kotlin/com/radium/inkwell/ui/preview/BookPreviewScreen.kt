@@ -13,10 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,6 +42,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
@@ -85,47 +83,28 @@ fun BookPreviewScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         when {
-            state.loading -> Column(
-                Modifier.fillMaxSize().padding(padding),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                CircularProgressIndicator()
-                Spacer(Modifier.height(12.dp))
-                Text("正在获取详情与目录…", style = MaterialTheme.typography.bodySmall)
-            }
+            state.loading -> LoadingState(
+                Modifier.padding(padding),
+                label = "正在获取详情与目录…",
+            )
 
-            state.error != null -> Column(
-                Modifier.fillMaxSize().padding(padding).padding(horizontal = 32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("加载失败", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    state.error.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(16.dp))
-                PrimaryButton(text = "重试", onClick = viewModel::load)
-
-                // 这本书还有别的书源 —— 一个源挂了不该让人卡死在这
-                if (state.sources.size > 1) {
-                    Spacer(Modifier.height(24.dp))
-                    SecondaryButton(
-                        text = "换个书源试试（共 ${state.sources.size} 个）",
-                        onClick = { sourcePickerOpen = true },
-                    )
-                }
-            }
+            // 从前这里手搓了一份错误屏（还漏掉了图标）；收敛到共享 ErrorState。
+            // 一个源挂了不该让人卡死 —— 有别的书源就给出「换个书源」的出口。
+            state.error != null -> ErrorState(
+                message = state.error.orEmpty(),
+                modifier = Modifier.padding(padding),
+                onRetry = viewModel::load,
+                secondaryLabel = "换个书源试试（共 ${state.sources.size} 个）"
+                    .takeIf { state.sources.size > 1 },
+                onSecondary = if (state.sources.size > 1) ({ sourcePickerOpen = true }) else null,
+            )
 
             else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 item { Header(state, viewModel, onOpenSourcePicker = { sourcePickerOpen = true }) }
                 item {
                     Text(
                         "目录 · 共 ${state.chapters.size} 章",
-                        Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     HorizontalDivider()
@@ -136,6 +115,7 @@ fun BookPreviewScreen(
                         Modifier
                             .fillMaxWidth()
                             .clickable(enabled = !state.busy) { viewModel.read(chapter.index) }
+                            // 纯文字可点行保留 rowVertical(14)：list*(8) 会让行高跌破 48dp 触控下限
                             .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
@@ -143,7 +123,7 @@ fun BookPreviewScreen(
                     )
                     HorizontalDivider()
                 }
-                item { Spacer(Modifier.height(24.dp)) }
+                item { Spacer(Modifier.height(Dimens.gapXL)) }
             }
         }
     }
@@ -176,7 +156,7 @@ private fun Header(
     var introExpanded by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.padding(20.dp),
+        Modifier.padding(Dimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Row {
@@ -186,7 +166,7 @@ private fun Header(
                 modifier = Modifier.size(width = 96.dp, height = 128.dp),
                 placeholderChars = 4,
             )
-            Column(Modifier.padding(start = 16.dp).align(Alignment.CenterVertically)) {
+            Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                 Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 2)
                 if (state.author.isNotBlank()) {
                     Text(
@@ -227,7 +207,7 @@ private fun Header(
         if (!state.intro.isNullOrBlank()) {
             Column {
                 Text("简介", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Dimens.gapXS))
                 Text(
                     state.intro,
                     style = MaterialTheme.typography.bodyMedium,

@@ -2,7 +2,6 @@ package com.radium.inkwell.ui.rss
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -83,9 +81,7 @@ fun RssArticleScreen(
         },
     ) { padding ->
         if (state.loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            LoadingState(Modifier.padding(padding))
             return@Scaffold
         }
 
@@ -94,28 +90,28 @@ fun RssArticleScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = Dimens.rowHorizontal),
+                .padding(horizontal = Dimens.screenPadding),
         ) {
             Text(
                 state.title,
-                Modifier.padding(top = 8.dp),
+                Modifier.padding(top = Dimens.gapS),
                 style = MaterialTheme.typography.headlineSmall,
             )
             state.pubDate?.let {
                 Text(
                     it,
-                    Modifier.padding(top = 4.dp),
+                    Modifier.padding(top = Dimens.gapXS),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Dimens.gapL))
 
             state.elements.forEach { el ->
                 when (el) {
                     is ContentElement.Heading -> Text(
                         el.text,
-                        Modifier.padding(vertical = 8.dp),
+                        Modifier.padding(vertical = Dimens.gapS),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     is ContentElement.Paragraph -> Text(
@@ -126,9 +122,9 @@ fun RssArticleScreen(
                     is ContentElement.Image -> AsyncImage(
                         model = el.resourceId,
                         contentDescription = el.alt,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = Dimens.gapS),
                     )
-                    ContentElement.Divider -> Spacer(Modifier.height(12.dp))
+                    ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
                 }
             }
 
@@ -145,7 +141,7 @@ fun RssArticleScreen(
             // 拿真实 feed 试过：BBC、少数派、HN 的摘要就是**一句话**，不是全文 ——
             // 正文"解析成功"了，用户却只看到孤零零一行，然后无处可去。
             if (state.link.isNotBlank()) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(Dimens.gapXL))
                 PrimaryButton(
                     text = "在浏览器中打开原文",
                     onClick = ::openInBrowser,

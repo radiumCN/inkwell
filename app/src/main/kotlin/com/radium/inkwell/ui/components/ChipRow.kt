@@ -2,13 +2,16 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 /**
  * 一排单选 chip。
@@ -24,11 +27,14 @@ fun ChipRow(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /** 首尾边距，随内容滚动 —— 让发现页/订阅页的分类条也能收敛到这个组件 */
+    contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     Row(
         modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+            .horizontalScroll(rememberScrollState())
+            .padding(contentPadding),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
     ) {
         options.forEachIndexed { i, label ->

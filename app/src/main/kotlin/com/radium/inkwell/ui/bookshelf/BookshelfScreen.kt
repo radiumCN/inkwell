@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.bookshelf
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +76,8 @@ import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.expandEnter
+import com.radium.inkwell.ui.components.expandExit
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -253,7 +256,11 @@ fun BookshelfScreen(
             Column(Modifier.fillMaxSize().padding(padding)) {
                 // 隐藏区的"控制台"。**只在已经展开时出现** —— 这个开关的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
-                if (panelOpen) {
+                AnimatedVisibility(
+                    visible = panelOpen,
+                    enter = expandEnter(),
+                    exit = expandExit(),
+                ) {
                     HiddenAreaBar(
                         requireAuth = requireAuth,
                         biometricAvailable = biometricAvailable,
@@ -272,7 +279,7 @@ fun BookshelfScreen(
                         Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp),
+                            .padding(horizontal = Dimens.gapM),
                         horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                     ) {
                         FilterChip(
@@ -302,7 +309,7 @@ fun BookshelfScreen(
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
+                    contentPadding = PaddingValues(Dimens.gapM),
                     horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
                     verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                 ) {
@@ -322,10 +329,10 @@ fun BookshelfScreen(
 
     actionTarget?.let { book ->
         ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
                 Text(
                     book.title,
-                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = 8.dp),
+                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -389,7 +396,7 @@ fun BookshelfScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
-                                .padding(top = 8.dp),
+                                .padding(top = Dimens.gapS),
                             horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                         ) {
                             // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
@@ -461,7 +468,7 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
                     contentDescription = "已隐藏",
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(4.dp)
+                        .padding(Dimens.gapXS)
                         .size(Dimens.iconSm),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -470,7 +477,7 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
             // 画在封面右上角而不是占一行 —— 网格里每多一行文字，一屏就少一排书
             if (book.newChapterCount > 0) {
                 Badge(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(Dimens.gapXS),
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
                 ) {
@@ -525,11 +532,18 @@ private fun HiddenAreaBar(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
+        Column(
+            Modifier.padding(
+                start = Dimens.gapL,
+                end = Dimens.gapS,
+                top = Dimens.gapM,
+                bottom = Dimens.gapS,
+            )
+        ) {
             Text(
                 "隐藏的书",
                 style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = 6.dp),
+                modifier = Modifier.padding(bottom = Dimens.gapS),
             )
 
             // 这一条才是「书现在显不显」。从前它没有开关 —— 显隐跟面板绑死，
@@ -589,10 +603,10 @@ private fun SwitchLine(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(vertical = Dimens.gapXS),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+        Column(Modifier.weight(1f).padding(end = Dimens.gapS)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)
             Text(
                 subtitle,

@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.reader
 import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -40,6 +41,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.animationsEnabled
+import com.radium.inkwell.ui.components.scrimEnter
+import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.reader.api.FlipAnimation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -192,18 +196,18 @@ fun ReaderScreen(
             // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
             // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
             state.autoChanging -> Column(
-                Modifier.align(Alignment.Center).padding(32.dp),
+                Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 CircularProgressIndicator(color = Color(state.settings.theme.textColor))
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(Dimens.gapXL))
                 Text(
                     "正在自动换源…",
                     color = Color(state.settings.theme.textColor),
                     textAlign = TextAlign.Center,
                 )
                 if (state.autoChangeTotal > 0) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(Dimens.gapS))
                     Text(
                         "已试 ${state.autoChangeDone}/${state.autoChangeTotal} 个书源",
                         color = Color(state.settings.theme.footerColor),
@@ -212,30 +216,34 @@ fun ReaderScreen(
                 }
             }
 
-            state.error != null -> Column(
-                Modifier.align(Alignment.Center).padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    state.error!!,
-                    color = Color(state.settings.theme.textColor),
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(20.dp))
-                // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
-                // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                    SecondaryButton(text = "重试", onClick = { viewModel.retry() })
-                    if (state.isNetBook) {
-                        PrimaryButton(
-                            text = "换源",
-                            onClick = { viewModel.searchOtherSources() },
-                        )
+            // 包在 ReaderThemeScope 里：重试/换源按钮跟着**纸张主题**走，
+            // 不再是米色纸面上浮着两颗 App 主题色的按钮（阅读主题与 App 主题常不一致）。
+            state.error != null -> ReaderThemeScope(state.settings.theme) {
+                Column(
+                    Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        state.error!!,
+                        color = Color(state.settings.theme.textColor),
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(Dimens.gapXL))
+                    // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
+                    // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
+                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                        SecondaryButton(text = "重试", onClick = { viewModel.retry() })
+                        if (state.isNetBook) {
+                            PrimaryButton(
+                                text = "换源",
+                                onClick = { viewModel.searchOtherSources() },
+                            )
+                        }
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                TextButton(onClick = onExit) {
-                    Text("返回书架", color = Color(state.settings.theme.footerColor))
+                    Spacer(Modifier.height(Dimens.gapS))
+                    TextButton(onClick = onExit) {
+                        Text("返回书架", color = Color(state.settings.theme.footerColor))
+                    }
                 }
             }
             state.loading || layout == null -> CircularProgressIndicator(
@@ -297,6 +305,7 @@ fun ReaderScreen(
                         layout = layout,
                         theme = state.settings.theme,
                         animation = state.settings.flipAnimation,
+                        animationsEnabled = animationsEnabled(),
                         hapticOnFlip = state.settings.flipHaptic,
                         // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
                         gesturesEnabled = !state.menuVisible && selection == null,
@@ -316,26 +325,40 @@ fun ReaderScreen(
         // 自动换源之后的提示条。换到的可能是删减版/另一个译本，正文跟原来不是一回事 ——
         // 不说的话用户只会觉得"这书怎么突然变了"，压根想不到是 App 换的源。
         // 停留一段时间给用户留出撤销窗口，随后自动消失，不长期挡视线（撤销/知道了 仍可手动触发）。
+        // 提示条淡入淡出，跟阅读菜单浮层同一套动效（scrimEnter/Exit，均尊重系统"关闭动画"）。
+        // 留住最后一次的源名：退场动画播放期间 state 已清空，也得有内容可显示。
+        val lastAutoChanged = remember { mutableStateOf("") }
         state.autoChangedTo?.let { sourceName ->
+            lastAutoChanged.value = sourceName
             LaunchedEffect(sourceName) {
                 delay(AUTO_CHANGED_HINT_MS)
                 viewModel.dismissAutoChanged()
             }
+        }
+        AnimatedVisibility(
+            visible = state.autoChangedTo != null,
+            enter = scrimEnter(),
+            exit = scrimExit(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             ReaderThemeScope(state.settings.theme) {
                 Surface(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                    Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 3.dp,
                 ) {
                     Row(
-                        Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        Modifier.padding(
+                            start = Dimens.gapM,
+                            end = Dimens.gapXS,
+                            top = Dimens.gapXS,
+                            bottom = Dimens.gapXS,
+                        ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "已自动换到「$sourceName」",
+                            "已自动换到「${lastAutoChanged.value}」",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
@@ -351,9 +374,15 @@ fun ReaderScreen(
                 kotlinx.coroutines.delay(1500)
                 viewModel.clearBookEnd()
             }
+        }
+        AnimatedVisibility(
+            visible = state.atBookEnd,
+            enter = scrimEnter(),
+            exit = scrimExit(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
             Text(
                 "已经是最后一页了",
-                Modifier.align(Alignment.BottomCenter),
                 color = Color(state.settings.theme.footerColor),
             )
         }
@@ -387,7 +416,6 @@ fun ReaderScreen(
         selection?.let { sel ->
             SelectionToolbar(
                 selectedText = sel.text,
-                theme = state.settings.theme,
                 onCopy = {
                     clipboard.setText(AnnotatedString(sel.text))
                     selection = null; anchor = null
@@ -405,14 +433,22 @@ fun ReaderScreen(
             )
         }
 
+        val lastToast = remember { mutableStateOf("") }
         state.toast?.let { msg ->
+            lastToast.value = msg
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(1800)
                 viewModel.clearToast()
             }
+        }
+        AnimatedVisibility(
+            visible = state.toast != null,
+            enter = scrimEnter(),
+            exit = scrimExit(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
+        ) {
             Text(
-                msg,
-                Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
+                lastToast.value,
                 color = Color(state.settings.theme.footerColor),
             )
         }
