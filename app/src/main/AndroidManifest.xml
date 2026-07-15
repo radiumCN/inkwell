@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 应用内下载更新包后拉起系统安装器（中转服务器源） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--
       application 的 android:icon 只出现在「设置 → 应用」「最近任务」这类地方，且**不随

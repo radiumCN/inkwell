@@ -2,4 +2,6 @@
 <paths>
     <!-- 导出的书源 JSON 写在 cacheDir 里，只把这一个子目录暴露给分享目标 -->
     <cache-path name="export" path="." />
+    <!-- 应用内下载的更新 APK（cacheDir/updates/），交给系统安装器 -->
+    <cache-path name="updates" path="updates/" />
 </paths>

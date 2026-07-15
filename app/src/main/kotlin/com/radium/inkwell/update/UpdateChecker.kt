@@ -18,7 +18,7 @@ enum class UpdateChannel(val label: String) {
 class UpdateChecker(
     private val http: OkHttpClient = OkHttpClient(),
     private val repo: String = REPO,
-) {
+) : UpdateProvider {
 
     @Serializable
     private data class GithubRelease(
@@ -36,26 +36,11 @@ class UpdateChecker(
         @SerialName("browser_download_url") val downloadUrl: String,
     )
 
-    data class UpdateInfo(
-        val latestVersion: String,
-        val notes: String,
-        val htmlUrl: String,
-        val isPrerelease: Boolean,
-        /** Release 附件里的 APK 直链；无附件时为 null（跳 Release 页面） */
-        val apkUrl: String?,
-    )
-
-    sealed interface CheckResult {
-        data object UpToDate : CheckResult
-        data class Available(val info: UpdateInfo) : CheckResult
-        data class Failed(val message: String) : CheckResult
-    }
-
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun check(
-        currentVersion: String,
-        channel: UpdateChannel = UpdateChannel.STABLE,
+    override suspend fun check(
+        channel: UpdateChannel,
+        versionName: String,
     ): CheckResult = withContext(Dispatchers.IO) {
         try {
             val candidate = when (channel) {
@@ -72,16 +57,17 @@ class UpdateChecker(
                 } ?: return@withContext CheckResult.UpToDate
 
             val latestVersion = latest.tagName.removePrefix("v")
-            if (isNewer(latestVersion, currentVersion)) {
+            if (isNewer(latestVersion, versionName)) {
+                // GitHub 不给 sha256，无法应用内校验安装 —— 走浏览器：有 APK 附件直链就下 APK，否则跳 Release 页
+                val apkUrl = latest.assets.firstOrNull { it.name.endsWith(".apk") }?.downloadUrl
                 CheckResult.Available(
                     UpdateInfo(
                         latestVersion = latestVersion,
                         notes = latest.body?.trim().orEmpty(),
-                        htmlUrl = latest.htmlUrl,
                         isPrerelease = latest.prerelease,
-                        apkUrl = latest.assets
-                            .firstOrNull { it.name.endsWith(".apk") }
-                            ?.downloadUrl,
+                        directInstall = null,
+                        browserUrl = apkUrl ?: latest.htmlUrl,
+                        browserIsApk = apkUrl != null,
                     )
                 )
             } else {

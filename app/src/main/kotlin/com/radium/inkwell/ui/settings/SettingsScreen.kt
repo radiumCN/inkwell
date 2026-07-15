@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -27,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,8 +47,12 @@ import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.util.AppIcon
 import com.radium.inkwell.util.AppIconManager
+import com.radium.inkwell.update.CheckResult
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateChecker
+import com.radium.inkwell.update.UpdateInfo
+import com.radium.inkwell.update.UpdateManager
+import com.radium.inkwell.update.UpdateSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,7 +69,7 @@ fun SettingsScreen(
     onOpenRss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val updateChecker = koinInject<UpdateChecker>()
+    val updateManager = koinInject<UpdateManager>()
     val appPrefs = koinInject<AppPrefs>()
     val cache = koinInject<ChapterContentCache>()
     val scope = rememberCoroutineScope()
@@ -74,14 +81,19 @@ fun SettingsScreen(
         }.getOrNull() ?: "?"
     }
     val channel by appPrefs.updateChannel.collectAsState(initial = UpdateChannel.STABLE)
+    val source by appPrefs.updateSource.collectAsState(initial = UpdateSource.GITHUB)
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
     val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
 
     var checking by remember { mutableStateOf(false) }
-    var update by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
     var showChannelPicker by remember { mutableStateOf(false) }
+    var showSourcePicker by remember { mutableStateOf(false) }
+    // 中转服务器源的应用内下载进度
+    var downloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
     // 以 PackageManager 的组件状态为准，不另存偏好 —— 两边一旦不同步，界面就会勾着一个
     // 桌面上根本没显示的图标
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
@@ -99,11 +111,11 @@ fun SettingsScreen(
         if (checking) return
         checking = true
         scope.launch {
-            when (val result = updateChecker.check(currentVersion, channel)) {
-                is UpdateChecker.CheckResult.Available -> update = result.info
-                UpdateChecker.CheckResult.UpToDate ->
-                    snackbar.showSnackbar("已是最新版本 v$currentVersion（${channel.label}渠道）")
-                is UpdateChecker.CheckResult.Failed ->
+            when (val result = updateManager.check(source, channel, currentVersion)) {
+                is CheckResult.Available -> update = result.info
+                CheckResult.UpToDate ->
+                    snackbar.showSnackbar("已是最新版本 v$currentVersion（${source.label} · ${channel.label}）")
+                is CheckResult.Failed ->
                     snackbar.showSnackbar("检查失败: ${result.message}")
             }
             checking = false
@@ -235,6 +247,14 @@ fun SettingsScreen(
                 onClick = ::checkUpdate,
             )
             SettingRow(
+                title = "更新源",
+                subtitle = when (source) {
+                    UpdateSource.GITHUB -> "GitHub（需能访问 GitHub）"
+                    UpdateSource.SERVER -> "中转服务器（GitHub 受限时用，应用内直接安装）"
+                },
+                onClick = { showSourcePicker = true },
+            )
+            SettingRow(
                 title = "更新渠道",
                 subtitle = channel.label +
                     if (channel == UpdateChannel.BETA) "（包含预发布版本，可能不稳定）" else "",
@@ -279,6 +299,30 @@ fun SettingsScreen(
         )
     }
 
+    if (showSourcePicker) {
+        OptionPickerSheet(
+            title = "更新源",
+            options = UpdateSource.entries.map {
+                PickerOption(
+                    id = it.name,
+                    label = it.label,
+                    subtitle = when (it) {
+                        UpdateSource.GITHUB -> "直接从 GitHub Releases 检查（需能访问 GitHub）"
+                        UpdateSource.SERVER -> "中转服务器镜像，GitHub 受限时用；应用内下载校验后直接安装"
+                    },
+                )
+            },
+            selectedId = source.name,
+            onSelect = { opt ->
+                showSourcePicker = false
+                runCatching { UpdateSource.valueOf(opt.id) }.getOrNull()?.let { picked ->
+                    scope.launch { appPrefs.setUpdateSource(picked) }
+                }
+            },
+            onDismiss = { showSourcePicker = false },
+        )
+    }
+
     if (showIconPicker) {
         AppIconSheet(
             selected = appIcon,
@@ -318,8 +362,10 @@ fun SettingsScreen(
     }
 
     update?.let { info ->
+        val direct = info.directInstall
         AlertDialog(
-            onDismissRequest = { update = null },
+            // 下载中不允许点外面关掉
+            onDismissRequest = { if (!downloading) update = null },
             title = {
                 Text("发现新版本 v${info.latestVersion}" + if (info.isPrerelease) "（测试版）" else "")
             },
@@ -331,17 +377,58 @@ fun SettingsScreen(
                         info.notes.ifBlank { "暂无更新说明" },
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (downloading) {
+                        Spacer(Modifier.height(Dimens.gapM))
+                        LinearProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "正在下载并校验… ${(downloadProgress * 100).toInt()}%",
+                            Modifier.padding(top = Dimens.gapXS),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val url = info.apkUrl ?: info.htmlUrl
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    update = null
-                }) { Text(if (info.apkUrl != null) "下载 APK" else "查看 Release") }
+                if (direct != null) {
+                    // 中转服务器源：应用内下载 → 校验 sha256 → 拉起系统安装器
+                    TextButton(
+                        enabled = !downloading,
+                        onClick = {
+                            downloading = true
+                            downloadProgress = 0f
+                            scope.launch {
+                                runCatching {
+                                    val apk = updateManager.downloadAndVerify(
+                                        direct, context.cacheDir,
+                                    ) { downloadProgress = it }
+                                    if (updateManager.install(context, apk)) {
+                                        update = null
+                                    } else {
+                                        snackbar.showSnackbar("请先在系统里授予「安装未知应用」权限，再重试")
+                                    }
+                                }.onFailure {
+                                    snackbar.showSnackbar("下载失败: ${it.message?.take(80)}")
+                                }
+                                downloading = false
+                            }
+                        },
+                    ) { Text(if (downloading) "下载中…" else "下载并安装") }
+                } else {
+                    // GitHub 源：浏览器下载 APK / 查看 Release
+                    TextButton(onClick = {
+                        info.browserUrl?.let {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                        }
+                        update = null
+                    }) { Text(if (info.browserIsApk) "下载 APK" else "查看 Release") }
+                }
             },
             dismissButton = {
-                TextButton(onClick = { update = null }) { Text("以后再说") }
+                TextButton(enabled = !downloading, onClick = { update = null }) { Text("以后再说") }
             },
         )
     }

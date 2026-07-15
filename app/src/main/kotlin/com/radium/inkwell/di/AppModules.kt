@@ -81,7 +81,12 @@ val appModule = module {
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
-    single { com.radium.inkwell.update.UpdateChecker() }
+    // 更新用的通用 HTTP 客户端（检查 + 下载安装包）
+    single { okhttp3.OkHttpClient() }
+    single { com.radium.inkwell.update.UpdateChecker(get()) }
+    single { com.radium.inkwell.update.ServerUpdateChecker(get()) }
+    single { com.radium.inkwell.update.UpdateInstaller(get()) }
+    single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
 
     single { BookRepository(androidContext(), get(), get(), get()) }
     single { BookSourceRepository(get()) }

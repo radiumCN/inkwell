@@ -102,6 +102,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
 
     // WebView 渲染只能在真机/模拟器上验证，JVM 单测覆盖不到
     androidTestImplementation(libs.androidx.test.runner)

@@ -10,6 +10,7 @@ import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
 import com.radium.inkwell.update.UpdateChannel
+import com.radium.inkwell.update.UpdateSource
 import com.radium.inkwell.core.webdav.BackupSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -21,6 +22,7 @@ class AppPrefs(private val context: Context) {
 
     private object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
+        val UPDATE_SOURCE = stringPreferencesKey("update_source")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_LIGHT = stringPreferencesKey("theme_light")
         val THEME_DARK = stringPreferencesKey("theme_dark")
@@ -58,6 +60,7 @@ class AppPrefs(private val context: Context) {
             updatedAt = p[Keys.UPDATED_AT] ?: 0L,
             values = mapOf(
                 "update_channel" to (p[Keys.UPDATE_CHANNEL] ?: UpdateChannel.STABLE.name),
+                "update_source" to (p[Keys.UPDATE_SOURCE] ?: UpdateSource.GITHUB.name),
                 "change_source_check_author" to (p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] ?: true).toString(),
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
@@ -81,6 +84,9 @@ class AppPrefs(private val context: Context) {
             v["update_channel"]
                 ?.takeIf { name -> UpdateChannel.entries.any { it.name == name } }
                 ?.let { p[Keys.UPDATE_CHANNEL] = it }
+            v["update_source"]
+                ?.takeIf { name -> UpdateSource.entries.any { it.name == name } }
+                ?.let { p[Keys.UPDATE_SOURCE] = it }
             v["change_source_check_author"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = it }
             v["text_selection_enabled"]?.toBooleanStrictOrNull()
@@ -192,6 +198,18 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setUpdateChannel(channel: UpdateChannel) {
         context.appDataStore.edit { it[Keys.UPDATE_CHANNEL] = channel.name }
+        touch()
+    }
+
+    /** 更新源：GitHub（默认）或中转服务器 */
+    val updateSource: Flow<UpdateSource> = context.appDataStore.data.map { p ->
+        p[Keys.UPDATE_SOURCE]
+            ?.let { runCatching { UpdateSource.valueOf(it) }.getOrNull() }
+            ?: UpdateSource.GITHUB
+    }
+
+    suspend fun setUpdateSource(source: UpdateSource) {
+        context.appDataStore.edit { it[Keys.UPDATE_SOURCE] = source.name }
         touch()
     }
 
