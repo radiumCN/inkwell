@@ -111,10 +111,11 @@ class SourceHttpClient(
         var hasUa = false
         var contentType: String? = null
         headers.forEach { (k, v) ->
-            // OkHttp 只接受 ASCII 头值，非法值会抛 IllegalArgumentException 打死整次抓取。
-            // 书源常把 Referer 写成 {{baseUrl}}，而书源 URL 里可能带 emoji 后缀 —— 丢掉该头即可，
+            // OkHttp 只接受 ASCII 的头名与头值，非法值会抛 IllegalArgumentException 打死整次抓取。
+            // 头名若含中文（书源里偶有手误写成中文键）同样会抛 —— 直接跳过这条头。
+            // 头值：书源常把 Referer 写成 {{baseUrl}}，而书源 URL 里可能带 emoji 后缀 —— 丢掉该头即可，
             // 不该让整个书源不可用。
-            if (!isValidHeaderValue(v)) return@forEach
+            if (!isValidHeaderName(k) || !isValidHeaderValue(v)) return@forEach
             if (k.equals("User-Agent", ignoreCase = true)) hasUa = true
             if (k.equals("Content-Type", ignoreCase = true)) contentType = v
             b.header(k, v)
@@ -135,7 +136,11 @@ class SourceHttpClient(
     private fun isValidHeaderValue(v: String): Boolean =
         v.all { it == '\t' || it in ' '..'~' }
 
-    /** 三级字符集探测 */
+    /** OkHttp 允许的头名字符：非空、可见 ASCII，且不含分隔符 `:`/空白 */
+    private fun isValidHeaderName(k: String): Boolean =
+        k.isNotEmpty() && k.all { it in '!'..'~' && it != ':' }
+
+    /** 字符集探测：override > BOM > Content-Type > 前 8KB 嗅探（meta / XML prolog） */
     private fun detectCharset(override: String?, contentTypeHeader: String?, bytes: ByteArray): Charset {
         if (override != null) {
             try {
@@ -144,6 +149,8 @@ class SourceHttpClient(
                 // 非法声明，继续向下探测
             }
         }
+        // BOM 是权威声明，早于内容嗅探：带 BOM 的 UTF-8/UTF-16 若按 meta 里的 GBK 解会整页乱码
+        detectBom(bytes)?.let { return it }
         contentTypeHeader?.let { header ->
             CHARSET_PARAM.find(header)?.groupValues?.get(1)?.let { name ->
                 try {
@@ -152,15 +159,25 @@ class SourceHttpClient(
                 }
             }
         }
-        // 前 8KB 按 latin1 解码后嗅探 <meta charset=...> / <meta ... content="...charset=...">
+        // 前 8KB 按 latin1 解码后嗅探：HTML 的 <meta charset=...>，以及 RSS/XML 的 <?xml encoding="…"?>
+        // （GBK/GB2312 的 RSS 源只在 prolog 里声明编码，不嗅 prolog 就整篇乱码）
         val head = String(bytes, 0, minOf(bytes.size, 8192), Charsets.ISO_8859_1)
-        META_CHARSET.find(head)?.groupValues?.get(1)?.let { name ->
+        (META_CHARSET.find(head) ?: XML_ENCODING.find(head))?.groupValues?.get(1)?.let { name ->
             try {
                 return charsetOf(name)
             } catch (_: Exception) {
             }
         }
         return Charsets.UTF_8
+    }
+
+    /** UTF-8 / UTF-16 的字节序标记（BOM）→ 对应字符集；无 BOM 返回 null */
+    private fun detectBom(b: ByteArray): Charset? = when {
+        b.size >= 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte() ->
+            Charsets.UTF_8
+        b.size >= 2 && b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte() -> Charsets.UTF_16BE
+        b.size >= 2 && b[0] == 0xFF.toByte() && b[1] == 0xFE.toByte() -> Charsets.UTF_16LE
+        else -> null
     }
 
     companion object {
@@ -176,6 +193,7 @@ class SourceHttpClient(
         private const val MAX_RETRIES = 2
         private val CHARSET_PARAM = Regex("charset\\s*=\\s*\"?([\\w-]+)", RegexOption.IGNORE_CASE)
         private val META_CHARSET = Regex("<meta[^>]+charset\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)
+        private val XML_ENCODING = Regex("<\\?xml[^>]+encoding\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)
     }
 }
 

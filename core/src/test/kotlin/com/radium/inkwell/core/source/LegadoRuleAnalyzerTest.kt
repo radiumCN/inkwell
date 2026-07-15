@@ -129,4 +129,40 @@ class LegadoRuleAnalyzerTest {
     @Test fun `unknown selector degrades to empty not throw`() {
         assertNull(str("class.doesNotExist@text"))
     }
+
+    // ---- 回归：## 剥离先于 <js> 切分曾把脚本体腰斩 ----
+
+    @Test fun `hashes inside js body are not truncated`() {
+        assertEquals("a##b", str("<js>var s=\"a##b\"; s</js>"))
+    }
+
+    // ---- 回归：列表规则 头<js>过滤</js> 的管道曾被 evalToNodes 静默丢弃 ----
+
+    @Test fun `list rule with head and js pipe is not dropped`() {
+        val nodes = ev.evalToNodes(LegadoRuleAnalyzer.analyze("class.book@html<js>result</js>"), ctx())
+        assertEquals(2, nodes.size)
+        assertEquals("斗破星空", ev.evalToString(LegadoRuleAnalyzer.analyze("tag.a@text"), nodes[0]))
+    }
+
+    // ---- ### 结尾 = replaceFirst（抽取语义），未匹配则空串 ----
+
+    @Test fun `triple hash is replaceFirst extraction`() {
+        // 仅在首个匹配区间内替换（其余文本被丢弃）
+        assertEquals("<星空>", str("class.book.0@tag.a@text##(星空)##<\$1>###"))
+        // 未匹配 → 空串（不是原文）
+        assertNull(str("class.book.0@tag.a@text##(无此串)##x###"))
+        // 对照：无 ### 是全局替换，保留其余文本
+        assertEquals("斗破<星空>", str("class.book.0@tag.a@text##(星空)##<\$1>"))
+    }
+
+    // ---- @put spec 含嵌套花括号（{{page}}）不被截断 ----
+
+    @Test fun `put spec with nested braces is not truncated`() {
+        val item = EvalContext(
+            Jsoup.parse(html, "https://ex.com/").selectFirst("div.book")!!, null, "https://ex.com/",
+            vars = mapOf("page" to "3"), js = JsContext())
+        ev.evalToString(
+            LegadoRuleAnalyzer.analyze("class.book@data-id@put:{\"p\":\"{{page}}\"}"), item)
+        assertEquals("3", item.js.scriptVars["p"])
+    }
 }

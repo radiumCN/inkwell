@@ -100,7 +100,9 @@ class SourceManageViewModel(
     }
 
     fun selectAll() {
-        _selected.value = sources.value.map { it.id }.toSet()
+        // 只全选**当前可见**的（搜索/筛选/分组之后）—— 否则「失效」筛选下点全选再删除，
+        // 会连看不见的正常源一起删掉
+        _selected.value = visibleSources.value.map { it.id }.toSet()
     }
 
     fun clearSelection() {

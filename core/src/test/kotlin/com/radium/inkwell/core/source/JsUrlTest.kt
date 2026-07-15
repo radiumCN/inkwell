@@ -50,6 +50,19 @@ class JsUrlTest {
         assertEquals("https://x.com/s?k=武动乾坤", evaluator.evalUrlJs(url, ctx()))
     }
 
+    /** 头片段 + <js>：Legado 语义是头片段取代 result 喂给脚本，不是把整条原始 URL 拼进去 */
+    @Test
+    fun `头片段 js 取代 result 而非拼接原始 URL`() {
+        assertEquals("https://a.com/s", evaluator.evalUrlJs("https://a.com/s<js>result</js>", ctx()))
+    }
+
+    /** 中缀 @js：`头@js:脚本` 从前入口只认 trimStart().startsWith，返回 null；应按 JS 地址处理 */
+    @Test
+    fun `中缀 @js 也识别为 JS 地址`() {
+        val url = "https://a.com/s@js:result+'&p='+page"
+        assertEquals("https://a.com/s&p=1", evaluator.evalUrlJs(url, ctx()))
+    }
+
     // ---- ,{options} 的切分 ----
 
     @Test

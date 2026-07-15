@@ -3,6 +3,10 @@ package com.radium.inkwell.ui.reader
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import com.radium.inkwell.reader.api.ChineseConvert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.horizontalScroll
@@ -412,7 +415,7 @@ private val MARGIN_H_OPTIONS = listOf(
  * 分法按「改的频率」而不是按「技术类别」：
  * - 排版：字号、行距、字体、背景、亮度 —— 最常调的
  * - 翻页：翻页方式、自动翻页间隔、音量键翻页
- * - 更多：设一次基本不再动的（简繁、预加载、屏幕常亮）
+ * - 更多：设一次基本不再动的（预加载、屏幕常亮）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -602,13 +605,6 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
 
 @Composable
 private fun MoreTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    SectionLabel("简繁转换")
-    ChipRow(
-        options = ChineseConvert.entries.map { it.label },
-        selectedIndex = ChineseConvert.entries.indexOf(settings.chineseConvert),
-        onSelect = { onUpdate(settings.copy(chineseConvert = ChineseConvert.entries[it])) },
-    )
-
     SectionLabel("预加载章节")
     ChipRow(
         options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
@@ -733,7 +729,9 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
                     else MaterialTheme.colorScheme.outlineVariant,
                     shape = CircleShape,
                 )
-                .clickable(onClick = onClick),
+                // 整块作为单选目标带上纸张名与选中态：否则读屏聚焦未选中色块只会念"文"，分不清是哪款
+                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                .semantics { contentDescription = theme.label },
             contentAlignment = Alignment.Center,
         ) {
             // 选中的打勾；没选中的放一个"文"字，直接把这款纸的正文对比度演示出来 ——
@@ -741,8 +739,8 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
             if (selected) {
                 Icon(
                     Icons.Default.Check,
-                    contentDescription = "已选择${theme.label}",
-                    Modifier.size(20.dp),
+                    contentDescription = null,
+                    Modifier.size(Dimens.iconSm),
                     tint = Color(theme.textColor),
                 )
             } else {

@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.sourcemanage
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -70,7 +71,8 @@ import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceEntity
-import com.radium.inkwell.ui.components.CompactTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import org.koin.androidx.compose.koinViewModel
@@ -117,7 +119,10 @@ fun SourceManageScreen(
         }
     }
     val selectionMode = selected.isNotEmpty()
+    // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
+    BackHandler(selectionMode) { viewModel.clearSelection() }
     var confirmBatchDelete by remember { mutableStateOf(false) }
+    var confirmDeleteInvalid by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
@@ -342,7 +347,7 @@ fun SourceManageScreen(
                     )
                     TextButton(onClick = { viewModel.setFilter(SourceFilter.FAILED) }) { Text("只看失效") }
                     TextButton(onClick = viewModel::disableInvalid) { Text("禁用") }
-                    TextButton(onClick = viewModel::deleteInvalid) {
+                    TextButton(onClick = { confirmDeleteInvalid = true }) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -557,6 +562,23 @@ fun SourceManageScreen(
         )
     }
 
+    if (confirmDeleteInvalid) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteInvalid = false },
+            title = { Text("删除失效书源") },
+            text = { Text("确定删除全部 $failedCount 个失效书源吗？此操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteInvalid = false
+                    viewModel.deleteInvalid()
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteInvalid = false }) { Text("取消") }
+            },
+        )
+    }
+
     if (showUrlImport) {
         AlertDialog(
             onDismissRequest = { showUrlImport = false },
@@ -567,11 +589,16 @@ fun SourceManageScreen(
                         "支持 Inkwell 与 Legado（阅读）格式的书源 JSON 链接",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    CompactTextField(
+                    OutlinedTextField(
                         value = importUrl,
                         onValueChange = { importUrl = it },
-                        placeholder = "https://…/sources.json",
-                        modifier = Modifier.padding(top = Dimens.gapS),
+                        label = { Text("书源 JSON 链接") },
+                        placeholder = { Text("https://…/sources.json") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = Dimens.gapS),
                     )
                 }
             },

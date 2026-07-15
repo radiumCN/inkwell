@@ -16,10 +16,16 @@ data class WebDavUiState(
     val username: String = "",
     val password: String = "",
     val configured: Boolean = false,
-    val busy: Boolean = false,
+    /** 「测试并保存」进行中 */
+    val testing: Boolean = false,
+    /** 「立即同步」进行中 */
+    val syncing: Boolean = false,
     val lastSyncAt: Long = 0,
     val autoSync: Boolean = true,
-)
+) {
+    /** 任一操作进行中，两个按钮都该禁用 */
+    val busy: Boolean get() = testing || syncing
+}
 
 class WebDavViewModel(
     private val prefs: WebDavPrefs,
@@ -54,26 +60,28 @@ class WebDavViewModel(
 
     fun testAndSave() {
         val s = _state.value
+        if (s.busy) return
         viewModelScope.launch {
-            _state.value = s.copy(busy = true)
+            _state.value = s.copy(testing = true)
             val result = repo.testConnection(s.url, s.username, s.password)
             if (result.isSuccess) {
                 prefs.save(s.url, s.username, s.password)
-                _state.value = _state.value.copy(busy = false, configured = true)
+                _state.value = _state.value.copy(testing = false, configured = true)
                 messages.emit("连接成功，已保存")
             } else {
-                _state.value = _state.value.copy(busy = false)
+                _state.value = _state.value.copy(testing = false)
                 messages.emit("连接失败: ${result.exceptionOrNull()?.message}")
             }
         }
     }
 
     fun syncNow() {
+        if (_state.value.busy) return
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true)
+            _state.value = _state.value.copy(syncing = true)
             val result = repo.sync()
             _state.value = _state.value.copy(
-                busy = false,
+                syncing = false,
                 lastSyncAt = if (result.isSuccess) System.currentTimeMillis() else _state.value.lastSyncAt,
             )
             messages.emit(result.getOrElse { "同步失败: ${it.message}" })

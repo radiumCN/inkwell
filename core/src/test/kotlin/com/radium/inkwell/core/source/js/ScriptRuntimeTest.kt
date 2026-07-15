@@ -41,6 +41,20 @@ class ScriptRuntimeTest {
     }
 
     @Test
+    fun `native array result is serialized as json not object Object`() {
+        // 从前 Context.toString 会压成 "[object Object],[object Object]"，后续 JSONPath 全落空
+        assertEquals(
+            """[{"id":1},{"id":2}]""",
+            runtime.eval("JSON.parse(result)", mapOf("result" to """[{"id":1},{"id":2}]""")),
+        )
+    }
+
+    @Test
+    fun `native object result is serialized as json`() {
+        assertEquals("""{"a":1,"b":"x"}""", runtime.eval("var o={a:1,b:'x'}; o", emptyMap()))
+    }
+
+    @Test
     fun `infinite loop is aborted by instruction limit`() {
         val fast = RhinoScriptRuntime(maxInstructions = 500_000)
         assertFailsWith<IllegalStateException> {

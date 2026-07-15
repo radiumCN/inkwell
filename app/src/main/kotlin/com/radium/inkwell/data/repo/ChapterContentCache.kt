@@ -34,10 +34,15 @@ class ChapterContentCache(private val root: File) {
         if (!f.isFile) return null
         val elements = f.readLines().mapNotNull { line ->
             when {
+                // 转义过的普通段落：它本来长得像标记行（H1:/IMG:/---），存时加了前缀，这里先剥掉。
+                // 必须排在其它分支之前，否则又会被当成标记。
+                line.startsWith(ESCAPE) -> ContentElement.Paragraph(line.substring(ESCAPE.length))
                 line.isBlank() -> null
                 line == DIVIDER -> ContentElement.Divider
                 line.startsWith(IMG_PREFIX) -> ContentElement.Image(line.removePrefix(IMG_PREFIX))
-                line.startsWith(HEAD_PREFIX) && line.contains(':') -> ContentElement.Heading(
+                // 标题只认 `H<数字>:`。从前是「H 开头且含冒号」，会把 "He said: ..." 这类
+                // 英文段落误判成标题、冒号前整段丢失。
+                HEAD_REGEX.matchAt(line, 0) != null -> ContentElement.Heading(
                     level = line.getOrNull(HEAD_PREFIX.length)?.digitToIntOrNull() ?: 1,
                     text = line.substringAfter(':'),
                 )
@@ -47,16 +52,37 @@ class ChapterContentCache(private val root: File) {
         return ChapterContent(elements)
     }
 
+    /** 段落文本恰好长得像标记行时要转义，否则读回会被误解析 */
+    private fun escapeIfAmbiguous(text: String): String {
+        val ambiguous = text == DIVIDER ||
+            text.startsWith(IMG_PREFIX) ||
+            text.startsWith(ESCAPE) ||
+            HEAD_REGEX.matchAt(text, 0) != null
+        return if (ambiguous) ESCAPE + text else text
+    }
+
     fun write(bookId: String, chapterUrl: String, content: ChapterContent) {
         val text = content.elements.joinToString("\n") { el ->
             when (el) {
-                is ContentElement.Paragraph -> el.text.replace('\n', ' ')
+                is ContentElement.Paragraph -> escapeIfAmbiguous(el.text.replace('\n', ' '))
                 is ContentElement.Heading -> "$HEAD_PREFIX${el.level}:${el.text.replace('\n', ' ')}"
                 is ContentElement.Image -> IMG_PREFIX + el.resourceId
                 ContentElement.Divider -> DIVIDER
             }
         }
-        file(bookId, chapterUrl).writeText(text)
+        // 先写临时文件再原子改名：进程被杀留下的半截文件不会被 has()/read() 当成有效缓存，
+        // 两个协程（前台加载 + 后台预取）同抓同章时也是「整文件替换」，不会交错出半截内容。
+        val target = file(bookId, chapterUrl)
+        val tmp = File.createTempFile("tmp", ".part", target.parentFile)
+        try {
+            tmp.writeText(text)
+            if (!tmp.renameTo(target)) {
+                target.delete()
+                if (!tmp.renameTo(target)) target.writeText(text)
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
     }
 
     /** 全部正文缓存占用的字节数（设置页要显示，用户得知道清的是多少东西） */
@@ -83,5 +109,9 @@ class ChapterContentCache(private val root: File) {
         const val IMG_PREFIX = "IMG:"
         const val HEAD_PREFIX = "H"
         const val DIVIDER = "---"
+        /** 转义前缀：正常正文里不会出现的控制字符，老缓存里也没有，兼容旧文件 */
+        const val ESCAPE = "\u0001"
+        /** 标题行：`H` + 一或多位数字 + `:` */
+        val HEAD_REGEX = Regex("H\\d+:")
     }
 }

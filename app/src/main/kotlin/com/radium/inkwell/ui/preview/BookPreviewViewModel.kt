@@ -76,6 +76,7 @@ class BookPreviewViewModel(
     val openReader: SharedFlow<String> = _openReader
 
     private var detail: RemoteBookDetail? = null
+    private var loadJob: kotlinx.coroutines.Job? = null
 
     init {
         load()
@@ -91,7 +92,9 @@ class BookPreviewViewModel(
     }
 
     fun load() {
-        viewModelScope.launch {
+        // 快速换源时掐掉上一个源的慢请求：否则它后到会把旧源详情盖在新源标签下
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             // 详情还没到手时先用搜索结果占位，页面不至于空着
             _state.value = BookPreviewUiState(
                 loading = true,

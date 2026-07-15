@@ -24,6 +24,22 @@ data class RssArticleArgs(
     val pubDate: String? = null,
 )
 
+/**
+ * 文章正文（description，不少源就是全文）的**进程内**暂存。
+ *
+ * 从前 description 连同其它字段一起 Base64 塞进导航参数 —— 而导航返回栈会被 onSaveInstanceState
+ * 序列化进 Bundle，全文正文（几十 KB）叠上几层就撑爆 Binder 事务上限（~1MB），直接
+ * TransactionTooLargeException 崩溃。改为只在内存里按链接暂存，导航参数只带短字段（标题/链接/日期）。
+ * 进程被杀后暂存丢失也无妨：正文会按链接重新抓，或退化为「用浏览器打开原文」。
+ */
+object RssArticleContent {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun put(link: String, description: String?) {
+        if (!description.isNullOrEmpty()) map[link] = description
+    }
+    fun get(link: String): String? = map[link]
+}
+
 data class RssArticleUiState(
     val title: String = "",
     val link: String = "",

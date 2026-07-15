@@ -39,12 +39,12 @@ fun ErrorState(
     tertiaryLabel: String? = null,
     onTertiary: (() -> Unit)? = null,
 ) {
-    Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 Icons.Default.ErrorOutline,
                 contentDescription = null,
-                Modifier.size(48.dp),
+                Modifier.size(Dimens.iconXL),
                 tint = MaterialTheme.colorScheme.outlineVariant,
             )
             Text(
@@ -58,12 +58,13 @@ fun ErrorState(
                 message,
                 Modifier.padding(top = Dimens.gapS),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
+                // 正文性文字用 onSurfaceVariant（对比度达标）而非 outline（浅色下仅约 3.9:1）
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
 
             if (onRetry != null || onSecondary != null) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(Dimens.gapXL))
                 Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                     if (onRetry != null) {
                         SecondaryButton(text = "重试", onClick = onRetry)

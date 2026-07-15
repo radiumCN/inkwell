@@ -56,32 +56,33 @@ fun SearchField(
             .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
         decorationBox = { innerTextField ->
             Row(
-                Modifier.padding(start = 12.dp, end = 4.dp),
+                Modifier.padding(start = Dimens.gapM, end = Dimens.gapXS),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     Icons.Default.Search,
                     contentDescription = null,
-                    Modifier.size(18.dp),
+                    Modifier.size(Dimens.iconSm),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                Box(Modifier.weight(1f).padding(horizontal = Dimens.gapS)) {
                     if (value.isEmpty()) {
                         Text(
                             placeholder,
                             style = textStyle,
-                            color = MaterialTheme.colorScheme.outline,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
                     }
                     innerTextField()
                 }
                 if (value.isNotEmpty()) {
-                    IconButton(onClick = { onValueChange("") }, Modifier.size(32.dp)) {
+                    // 不再钉死 32dp —— 让 IconButton 保持默认可点区，图标本身缩到 16dp 即可
+                    IconButton(onClick = { onValueChange("") }) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "清空",
-                            Modifier.size(16.dp),
+                            Modifier.size(Dimens.iconSm),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -114,14 +115,14 @@ fun CompactTextField(
             .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small),
         decorationBox = { innerTextField ->
             Box(
-                Modifier.padding(horizontal = 12.dp),
+                Modifier.padding(horizontal = Dimens.gapM),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (value.isEmpty()) {
                     Text(
                         placeholder,
                         style = textStyle,
-                        color = MaterialTheme.colorScheme.outline,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
                 }

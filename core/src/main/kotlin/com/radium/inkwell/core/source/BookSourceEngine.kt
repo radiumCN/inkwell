@@ -2,6 +2,8 @@ package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -99,17 +101,22 @@ class BookSourceEngine(
     /** 已确认需要 JS 渲染的书源；后续请求直接走渲染器，省掉每次先静态空跑一遍 */
     private val needsRender = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage {
-        val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
-            ?: throw SourceException("书源「${source.name}」未配置搜索规则")
-        val rule = source.ruleSearch ?: throw SourceException("书源「${source.name}」未配置搜索规则")
-        val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
-        val fetched = fetchByRequest(source, searchUrl, vars, "search")
-        return parseListPage(
-            source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-            pageable = pageable(searchUrl),
-        )
-    }
+    // 公开入口一律在 IO 线程自我确权（withContext(Dispatchers.IO)）：底层脚本 HTTP 出口
+    // （EngineJsHttp）用 runBlocking 同步等网络，若调用方恰好在主线程发起就会 ANR。这样无论
+    // 调用方在不在主线程都安全，且不必改 app/reader 的调用点。withContext(IO) 内再 runBlocking
+    // 阻塞的是 IO 线程池里的工作线程、而非同一线程，不会自锁。
+    suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
+        withContext(Dispatchers.IO) {
+            val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
+                ?: throw SourceException("书源「${source.name}」未配置搜索规则")
+            val rule = source.ruleSearch ?: throw SourceException("书源「${source.name}」未配置搜索规则")
+            val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
+            val fetched = fetchByRequest(source, searchUrl, vars, "search")
+            parseListPage(
+                source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+                pageable = pageable(searchUrl),
+            )
+        }
 
     /**
      * 地址模板里有 page 变量才谈得上翻页 —— 没有它，请求「第 2 页」拿回来的还是第 1 页。
@@ -118,19 +125,20 @@ class BookSourceEngine(
     private fun pageable(vararg templates: String?): Boolean =
         templates.any { it != null && PAGE_VAR.containsMatchIn(it) }
 
-    suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage {
-        val item = source.explore.getOrNull(exploreIndex)
-            ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
-        // Legado：发现页列表/字段规则缺省时复用搜索规则
-        val rule = source.ruleExplore ?: source.ruleSearch
-            ?: throw SourceException("书源「${source.name}」未配置发现规则")
-        val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
-        val fetched = fetchByRequest(source, item.url, vars, "explore")
-        return parseListPage(
-            source, "explore", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-            pageable = pageable(item.url),
-        )
-    }
+    suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage =
+        withContext(Dispatchers.IO) {
+            val item = source.explore.getOrNull(exploreIndex)
+                ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
+            // Legado：发现页列表/字段规则缺省时复用搜索规则
+            val rule = source.ruleExplore ?: source.ruleSearch
+                ?: throw SourceException("书源「${source.name}」未配置发现规则")
+            val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
+            val fetched = fetchByRequest(source, item.url, vars, "explore")
+            parseListPage(
+                source, "explore", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+                pageable = pageable(item.url),
+            )
+        }
 
     /** 搜索/发现列表项的字段规则 → 引擎内部字段名 */
     private fun listFieldMap(r: SearchRuleSet): Map<String, String> = buildMap {
@@ -142,14 +150,15 @@ class BookSourceEngine(
         r.lastChapter?.let { put("latestChapter", it) }
     }
 
-    suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail {
-        val url = resolveUrl(source.baseUrl, bookUrl)
-        // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
-        // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
-        // Legado 里 ruleBookInfo 可缺省（详情页即目录页），缺省时直接用详情页地址当目录地址。
-        return withRenderFallback(source) { render -> parseDetail(source, url, render) }
-            ?: RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
-    }
+    suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail =
+        withContext(Dispatchers.IO) {
+            val url = resolveUrl(source.baseUrl, bookUrl)
+            // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
+            // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
+            // Legado 里 ruleBookInfo 可缺省（详情页即目录页），缺省时直接用详情页地址当目录地址。
+            withRenderFallback(source) { render -> parseDetail(source, url, render) }
+                ?: RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
+        }
 
     private suspend fun parseDetail(
         source: BookSourceRule,
@@ -192,11 +201,12 @@ class BookSourceEngine(
         )
     }
 
-    suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> {
-        val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
-        return withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
-            ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
-    }
+    suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> =
+        withContext(Dispatchers.IO) {
+            val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
+            withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
+                ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
+        }
 
     private suspend fun collectToc(
         source: BookSourceRule,
@@ -252,9 +262,9 @@ class BookSourceEngine(
         chapterUrl: String,
         otherChapterUrls: Set<String> = emptySet(),
         chapterVariable: String = "",
-    ): RemoteChapterContent {
+    ): RemoteChapterContent = withContext(Dispatchers.IO) {
         val rule = source.ruleContent ?: throw SourceException("书源「${source.name}」未配置正文规则")
-        return withRenderFallback(source) { render ->
+        withRenderFallback(source) { render ->
             collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
         } ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
     }
@@ -341,7 +351,8 @@ class BookSourceEngine(
         render: Boolean,
     ): FetchedPage {
         if (render && renderer != null) {
-            val headers = mergeHeaders(source.headers, emptyMap(), emptyMap())
+            // 源级 header 模板（{{baseUrl}} 等）要用真实变量展开，否则防盗链站拿到空 Referer 会 403
+            val headers = mergeHeaders(source.headers, emptyMap(), varsOf(source))
             // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
             val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
                 ?: SourceHttpClient.DEFAULT_UA
@@ -403,9 +414,36 @@ class BookSourceEngine(
         )
     }
 
-    private suspend fun fetchUrl(source: BookSourceRule, url: String, stage: String): FetchedPage =
-        doFetch(stage, url, "GET", null, mergeHeaders(source.headers, emptyMap(), emptyMap()),
-            source.charset, source.rateLimit)
+    /**
+     * detail/toc/content 阶段的抓取。从前恒 GET、且把 header 模板用 emptyMap() 展开：
+     * - 规则/JS 拼出的地址常自带 `,{method/body/charset/headers}` 选项（尤其翻页、POST 目录接口），
+     *   要用 [splitUrlOptions] 解析并透传，否则 method/body/charset 全丢、请求方式错到底。
+     * - 源级 header 里的 `{{baseUrl}}` 在这三级要展开成真实值（fix：传 varsOf(source)），否则 403。
+     */
+    private suspend fun fetchUrl(source: BookSourceRule, url: String, stage: String): FetchedPage {
+        var target = url
+        var method = "GET"
+        var body: String? = null
+        var charset: String? = source.charset
+        var headers: Map<String, String> = emptyMap()
+        splitUrlOptions(url)?.let { (bare, opt) ->
+            target = bare
+            opt.method?.let { method = it }
+            opt.body?.let { body = it }
+            opt.charset?.let { charset = it }
+            if (opt.headers.isNotEmpty()) headers = opt.headers
+        }
+        val vars = varsOf(source)
+        return doFetch(
+            stage = stage,
+            url = target,
+            method = method,
+            body = body?.let { expandTemplate(it, vars) },
+            headers = mergeHeaders(source.headers, headers, vars),
+            charset = charset,
+            rateLimit = source.rateLimit,
+        )
+    }
 
     private suspend fun doFetch(
         stage: String,
@@ -579,22 +617,25 @@ internal fun parseReplaceRegex(raw: String?): List<PurifyRule> {
     }
 }
 
-/** 相对 → 绝对 URL 解析；base 非法或无法解析时原样返回 */
-internal fun resolveUrl(base: String, ref: String): String {
-    val r = stripUrlOptions(ref.trim())
-    if (r.isEmpty()) return r
-    if (r.startsWith("http://") || r.startsWith("https://")) return r
-    return base.toHttpUrlOrNull()?.resolve(r)?.toString() ?: r
-}
-
 /**
- * Legado 的「地址,{选项}」写法（选项含 method/body/headers 等），规则产出的地址可能带这条尾巴，
- * 常见于用 JS 拼目录页地址的书源。抓取前剥掉，否则整条尾巴会被当成 URL 的一部分。
- * 选项里的 headers 暂不生效——需要时书源可在源级 header 里配。
+ * 相对 → 绝对 URL 解析；base 非法或无法解析时原样返回。
+ *
+ * 地址尾部的 `,{…}` 选项后缀（method/body/charset/headers）**原样保留**：这里只解析地址主体，
+ * 解析完把后缀接回去，留到 detail/toc/content 抓取时才由 [splitUrlOptions] 解析。从前在这里直接
+ * 剥掉，于是这三级拿不到 POST/body/charset，用 JS 拼目录地址、POST 目录接口的书源全默默降级成 GET。
  */
-private fun stripUrlOptions(url: String): String {
-    val i = url.indexOf(",{")
-    return if (i > 0) url.substring(0, i).trim() else url
+internal fun resolveUrl(base: String, ref: String): String {
+    val trimmed = ref.trim()
+    if (trimmed.isEmpty()) return trimmed
+    val optAt = optionsIndex(trimmed)
+    val bare = (if (optAt >= 0) trimmed.substring(0, optAt) else trimmed).trim()
+    val suffix = if (optAt >= 0) trimmed.substring(optAt) else ""
+    val resolved = when {
+        bare.isEmpty() -> bare
+        bare.startsWith("http://") || bare.startsWith("https://") -> bare
+        else -> base.toHttpUrlOrNull()?.resolve(bare)?.toString() ?: bare
+    }
+    return resolved + suffix
 }
 
 /** Legado 的地址选项后缀：`url,{"method":"POST","body":"…"}`（常用单引号） */
@@ -608,33 +649,42 @@ internal data class UrlOptions(
 private val optionsJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
 
 /**
- * 切出地址尾部的 `,{…}` 选项。
+ * 找到地址里真正开启 `,{…}` 选项块的下标，找不到返回 -1。
  *
- * 不能见到第一个 `,{` 就切 —— 那个 `,{` 可能在 JS 字符串**里面**：
- * `@js:url="https://m.wcxsw.org/search.php,{'body':'…'}"`。所以逐个候选位置试着解析成
- * JSON，能解析出来的才是真选项。从前一刀切在第一个 `,{`，把地址从中间截断成
- * `@js:url="https://m.wcxsw.o`，请求直接 403。
+ * 不能见到第一个 `,{` 就认 —— 那个 `,{` 可能在 JS 字符串**里面**：
+ * `@js:url="https://m.wcxsw.org/search.php,{'body':'…'}"`。所以逐个候选位置试着把 `{…}` 解析成
+ * JSON（含单引号→双引号回退），能解析出来的才是真选项。从前 stripUrlOptions 用裸 `indexOf(",{")`
+ * 不验证，把地址从中间截断成 `@js:url="https://m.wcxsw.o`，请求直接 403。
  */
-internal fun splitUrlOptions(url: String): Pair<String, UrlOptions>? {
+private fun optionsIndex(url: String): Int {
     var i = url.indexOf(",{")
     while (i > 0) {
         val text = url.substring(i + 1)
-        val obj = runCatching { optionsJson.parseToJsonElement(text).jsonObject }.getOrNull()
-            ?: runCatching { optionsJson.parseToJsonElement(text.replace('\'', '"')).jsonObject }.getOrNull()
-        if (obj != null) {
-            fun str(k: String) = (obj[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-            val hdr = (obj["headers"] as? kotlinx.serialization.json.JsonObject)
-                ?.mapValues { (_, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.orEmpty() }
-                ?.filterValues { it.isNotBlank() }
-                .orEmpty()
-            return url.substring(0, i).trim() to UrlOptions(
-                method = str("method")?.uppercase(),
-                body = str("body"),
-                charset = str("charset"),
-                headers = hdr,
-            )
-        }
+        val ok = runCatching { optionsJson.parseToJsonElement(text).jsonObject }.getOrNull() != null ||
+            runCatching { optionsJson.parseToJsonElement(text.replace('\'', '"')).jsonObject }.getOrNull() != null
+        if (ok) return i
         i = url.indexOf(",{", i + 1)
     }
-    return null
+    return -1
+}
+
+/** 切出地址尾部的 `,{…}` 选项；无有效选项返回 null。 */
+internal fun splitUrlOptions(url: String): Pair<String, UrlOptions>? {
+    val i = optionsIndex(url)
+    if (i < 0) return null
+    val text = url.substring(i + 1)
+    val obj = (runCatching { optionsJson.parseToJsonElement(text).jsonObject }.getOrNull()
+        ?: runCatching { optionsJson.parseToJsonElement(text.replace('\'', '"')).jsonObject }.getOrNull())
+        ?: return null
+    fun str(k: String) = (obj[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    val hdr = (obj["headers"] as? kotlinx.serialization.json.JsonObject)
+        ?.mapValues { (_, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.orEmpty() }
+        ?.filterValues { it.isNotBlank() }
+        .orEmpty()
+    return url.substring(0, i).trim() to UrlOptions(
+        method = str("method")?.uppercase(),
+        body = str("body"),
+        charset = str("charset"),
+        headers = hdr,
+    )
 }

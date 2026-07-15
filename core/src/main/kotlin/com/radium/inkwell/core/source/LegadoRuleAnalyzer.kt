@@ -30,7 +30,11 @@ object LegadoRuleAnalyzer {
     private fun build(raw: String): RuleNode {
         if (raw.isEmpty()) return RuleNode.Literal("")
         val (afterPut, putSpecs) = peelPut(raw)
-        val (core, replace) = peelHashReplace(afterPut)
+        // Legado 的 Regex 模式（前导 `:`）不把 `##` 当替换指令 —— 那是正则本身的内容，不能剥。
+        val afterPutTrimmed = afterPut.trim()
+        val (core, replace) =
+            if (afterPutTrimmed.startsWith(":")) afterPutTrimmed to null
+            else peelHashReplace(afterPutTrimmed)
         val node = buildCore(core.trim())
         val ops = buildList {
             replace?.let { add(it) }
@@ -122,31 +126,104 @@ object LegadoRuleAnalyzer {
 
     // ---------- @put / ## 剥离 ----------
 
-    private val PUT_RULE = Regex("@put:(\\{[^}]+\\})")
-
-    /** 剥出所有 `@put:{...}`，返回去掉后的规则与各段 spec（原文 JSON，applyPut 再解析）。 */
+    /**
+     * 剥出所有 `@put:{...}`，返回去掉后的规则与各段 spec（原文 JSON，applyPut 再解析）。
+     *
+     * 不用正则 `@put:(\{[^}]+\})`：JSON 值里含 `{{page}}` 这类嵌套花括号时 `[^}]+` 会在第一个
+     * `}` 处截断，把 spec 切坏。改成花括号配对扫描（Legado splitPutRule 同思路）。并且**跳过
+     * `<js>…</js>` 段** —— 脚本体里出现的 `@put:` 是脚本内容，不是规则语法。
+     */
     private fun peelPut(rule: String): Pair<String, List<String>> {
-        if (!rule.contains("@put:")) return rule to emptyList()
+        if (!rule.contains("@put:", ignoreCase = true)) return rule to emptyList()
         val specs = mutableListOf<String>()
-        var stripped = rule
-        for (m in PUT_RULE.findAll(rule)) {
-            stripped = stripped.replace(m.value, "")
-            specs += m.groupValues[1]
+        val sb = StringBuilder()
+        var i = 0
+        while (i < rule.length) {
+            // <js>…</js> 原样保留：脚本体内的 @put: / 花括号不参与规则解析
+            if (rule.startsWith("<js>", i, ignoreCase = true)) {
+                val end = rule.indexOf("</js>", i + 4, ignoreCase = true)
+                val stop = if (end < 0) rule.length else end + 5
+                sb.append(rule, i, stop)
+                i = stop
+                continue
+            }
+            if (rule.startsWith("@put:", i, ignoreCase = true) && rule.getOrNull(i + 5) == '{') {
+                val close = matchBrace(rule, i + 5)
+                if (close >= 0) {
+                    specs += rule.substring(i + 5, close + 1)
+                    i = close + 1
+                    continue
+                }
+            }
+            sb.append(rule[i])
+            i++
         }
-        return stripped.trim() to specs
+        return sb.toString().trim() to specs
     }
 
-    /** `规则##正则##替换###` → (规则, RegexReplace)。仅取首个 `##` 段；`###` 尾标记去掉。 */
-    private fun peelHashReplace(rule: String): Pair<String, PipeOp.RegexReplace?> {
-        val idx = topLevelIndexOf(rule, "##")
-        if (idx < 0) return rule to null
-        val base = rule.substring(0, idx)
-        val rest = rule.substring(idx + 2).removeSuffix("###")
-        val sep = rest.indexOf("##")
-        val pattern = if (sep < 0) rest else rest.substring(0, sep)
-        val replacement = if (sep < 0) "" else rest.substring(sep + 2)
+    /** 从 `{`（下标 open）起按花括号配对找到匹配的 `}`；`{{page}}` 这类嵌套一并计入。找不到返回 -1。 */
+    private fun matchBrace(s: String, open: Int): Int {
+        var depth = 0
+        var i = open
+        while (i < s.length) {
+            when (s[i]) {
+                '{' -> depth++
+                '}' -> { depth--; if (depth == 0) return i }
+            }
+            i++
+        }
+        return -1
+    }
+
+    /**
+     * `规则##正则##替换###` → (规则, RegexReplace / RegexReplaceFirst)。
+     *
+     * 与 Legado 一致，按顶层 `##` 切出的段数决定语义（`###` = 末尾 `##` + 空段 `#`）：
+     * - `规则##正则`          → 全局删除匹配（替换为空）
+     * - `规则##正则##替换`     → 全局替换
+     * - `规则##正则##替换###`  → 取**首个**匹配、在其内 replaceFirst；无匹配则结果为空串（抽取用）
+     *
+     * 切分跳过 `<js>…</js>`（脚本体内的 `##` 不是替换指令，否则脚本会被腰斩）与 `[]`/`()`。
+     */
+    private fun peelHashReplace(rule: String): Pair<String, PipeOp?> {
+        val parts = splitTopHash(rule)
+        if (parts.size < 2) return rule to null
+        val base = parts[0]
+        val pattern = parts[1]
         if (pattern.isBlank()) return base to null
-        return base to PipeOp.RegexReplace(pattern, replacement)
+        val replacement = parts.getOrNull(2).orEmpty()
+        val op = if (parts.size > 3) PipeOp.RegexReplaceFirst(pattern, replacement)
+        else PipeOp.RegexReplace(pattern, replacement)
+        return base to op
+    }
+
+    /** 顶层（`[]`/`()` 外、非 `<js>` 段）按 `##` 切分，**保留空段** —— 段数决定 replace 语义。 */
+    private fun splitTopHash(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var depth = 0
+        var start = 0
+        var i = 0
+        while (i < text.length) {
+            if (text.startsWith("<js>", i, ignoreCase = true)) {
+                val end = text.indexOf("</js>", i + 4, ignoreCase = true)
+                i = if (end < 0) text.length else end + 5
+                continue
+            }
+            val c = text[i]
+            when {
+                c == '\\' -> { i += 2; continue }
+                c == '[' || c == '(' -> { depth++; i++ }
+                c == ']' || c == ')' -> { if (depth > 0) depth--; i++ }
+                depth == 0 && text.startsWith("##", i) -> {
+                    out += text.substring(start, i)
+                    i += 2
+                    start = i
+                }
+                else -> i++
+            }
+        }
+        out += text.substring(start)
+        return out
     }
 
     // ---------- 判定与切分 ----------
@@ -187,11 +264,17 @@ object LegadoRuleAnalyzer {
         return out.filter { it.isNotBlank() }
     }
 
-    /** 顶层（括号外）首次出现 token 的下标，找不到返回 -1。 */
+    /** 顶层（括号外、非 `<js>` 段）首次出现 token 的下标，找不到返回 -1。 */
     private fun topLevelIndexOf(text: String, token: String): Int {
         var depth = 0
         var i = 0
         while (i < text.length) {
+            // <js>…</js> 段整体跳过：脚本体内出现的 token（如 @js:）不是顶层规则语法
+            if (text.startsWith("<js>", i, ignoreCase = true)) {
+                val end = text.indexOf("</js>", i + 4, ignoreCase = true)
+                i = if (end < 0) text.length else end + 5
+                continue
+            }
             val c = text[i]
             when {
                 c == '\\' -> { i += 2; continue }

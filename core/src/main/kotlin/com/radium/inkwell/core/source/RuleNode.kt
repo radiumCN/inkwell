@@ -40,6 +40,13 @@ sealed interface PipeOp {
     /** `##正则##替换`（Legado replaceRegex）；replacement 为空表示删除匹配 */
     data class RegexReplace(val pattern: String, val replacement: String) : PipeOp
 
+    /**
+     * `##正则##替换###`（Legado replaceFirst）：取**首个**匹配、在其匹配区间内 replaceFirst。
+     * 无匹配时结果为空串 —— 这是「抽取」语义（Legado：`matcher.group(0).replaceFirst(...)`，
+     * 未命中则整个结果清空），与全局 [RegexReplace]「保留其余文本」截然不同。
+     */
+    data class RegexReplaceFirst(val pattern: String, val replacement: String) : PipeOp
+
     /** 对每个结果执行 JS（绑定 result），返回值替换该结果 */
     data class Js(val script: String) : PipeOp
 

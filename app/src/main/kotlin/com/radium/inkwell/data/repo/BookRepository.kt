@@ -99,7 +99,10 @@ class BookRepository(
                 }
                 bookId
             } catch (e: Exception) {
+                // 书行可能已插入、章节写失败 —— 回滚掉，别留一条指向已删文件的幽灵书
                 dest.delete()
+                bookDao.getById(bookId)?.let { bookDao.delete(it) }
+                chapterDao.deleteByBook(bookId)
                 throw e
             }
         }

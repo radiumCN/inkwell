@@ -59,11 +59,24 @@ data class RssArticlesRoute(val sourceId: String)
 @Serializable
 data class RssArticleRoute(val argsArg: String) {
     val args: com.radium.inkwell.ui.rss.RssArticleArgs
-        get() = ROUTE_JSON.decodeFromString(decodeArg(argsArg))
+        get() {
+            val base: com.radium.inkwell.ui.rss.RssArticleArgs =
+                ROUTE_JSON.decodeFromString(decodeArg(argsArg))
+            // 正文（description）不进导航参数，从进程内暂存按链接取回；取不到（进程被杀）就为 null
+            return base.copy(
+                description = base.description
+                    ?: com.radium.inkwell.ui.rss.RssArticleContent.get(base.link),
+            )
+        }
 
     companion object {
-        fun of(args: com.radium.inkwell.ui.rss.RssArticleArgs) =
-            RssArticleRoute(encodeArg(ROUTE_JSON.encodeToString(args)))
+        fun of(args: com.radium.inkwell.ui.rss.RssArticleArgs): RssArticleRoute {
+            // 全文正文放进程内暂存，导航参数只带短字段，避免撑爆 Binder 事务上限
+            com.radium.inkwell.ui.rss.RssArticleContent.put(args.link, args.description)
+            return RssArticleRoute(
+                encodeArg(ROUTE_JSON.encodeToString(args.copy(description = null))),
+            )
+        }
     }
 }
 

@@ -48,6 +48,20 @@ class WebDavClient(
         }
     }
 
+    /** 移动/改名（覆盖目标）。备份用「先 PUT 临时名再 MOVE」保证远端不出现半截文件 */
+    suspend fun move(from: String, to: String) {
+        val dest = if (to.isBlank()) base else "$base/${to.trimStart('/')}"
+        val resp = execute(
+            request(from).method("MOVE", null)
+                .header("Destination", dest)
+                .header("Overwrite", "T")
+                .build()
+        )
+        resp.use {
+            if (!it.isSuccessful) throw WebDavException(it.code, "MOVE 失败: ${it.code}")
+        }
+    }
+
     /**
      * 取文件；不存在返回 null。
      *
@@ -91,7 +105,8 @@ class WebDavClient(
         val url = if (path.isBlank()) base else "$base/${path.trimStart('/')}"
         return Request.Builder()
             .url(url)
-            .header("Authorization", Credentials.basic(username, password))
+            // UTF-8 而非默认 ISO-8859-1：中文用户名/密码在默认编码下会被替换成 ?，恒 401
+            .header("Authorization", Credentials.basic(username, password, Charsets.UTF_8))
     }
 
     private suspend fun execute(request: Request): Response =

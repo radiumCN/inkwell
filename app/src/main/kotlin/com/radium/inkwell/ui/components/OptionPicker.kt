@@ -1,6 +1,6 @@
 package com.radium.inkwell.ui.components
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,8 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 
 /**
  * 「从 N 项里选一个」的统一形态。
@@ -49,10 +49,10 @@ fun OptionPickerSheet(
     header: @Composable (() -> Unit)? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
             Text(
                 title,
-                Modifier.padding(horizontal = Dimens.screenPadding, vertical = 8.dp),
+                Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
                 style = MaterialTheme.typography.titleMedium,
             )
             header?.invoke()
@@ -70,7 +70,8 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            // 单选语义：读屏会念「单选按钮，已选中/未选中」，而不是当成普通可点文字
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = Dimens.screenPadding, vertical = Dimens.rowVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -78,14 +79,14 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
         if (selected) {
             Icon(
                 Icons.Default.Check,
-                contentDescription = "已选中",
-                Modifier.size(20.dp),
+                contentDescription = null, // 选中态已由 selectable 语义表达，图标不再重复播报
+                Modifier.size(Dimens.iconSm),
                 tint = MaterialTheme.colorScheme.primary,
             )
         } else {
-            Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.size(Dimens.iconSm))
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Dimens.gapM))
         Column(Modifier.weight(1f)) {
             Text(
                 option.label,

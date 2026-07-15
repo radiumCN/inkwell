@@ -2,6 +2,9 @@ package com.radium.inkwell.core.source.js
 
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
+import org.mozilla.javascript.NativeArray
+import org.mozilla.javascript.NativeJSON
+import org.mozilla.javascript.NativeObject
 import org.mozilla.javascript.Scriptable
 
 /** JS 规则执行器抽象；不注入时含 js: 规则的求值会明确报不支持 */
@@ -51,12 +54,23 @@ class RhinoScriptRuntime(
             val result = cx.evaluateString(scope, script, "rule.js", 1, null)
             return when {
                 result == null || result === Context.getUndefinedValue() -> null
+                // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，
+                // 后续 JSONPath 全落空（JSON API 书源 `<js>JSON.parse(result).list</js>` 就死在这）。
+                // 用 NativeJSON.stringify 序列化成合法 JSON，求值器再据 `[`/`{` 前缀接上 JSONPath。
+                result is NativeArray || result is NativeObject ->
+                    stringifyJson(cx, scope, result) ?: Context.toString(result)
                 else -> Context.toString(result)
             }
         } finally {
             Context.exit()
         }
     }
+
+    /** 用 Rhino 内置的 JSON.stringify 序列化原生数组/对象；失败返回 null 交调用方兜底。 */
+    private fun stringifyJson(cx: Context, scope: Scriptable, value: Any): String? =
+        runCatching { NativeJSON.stringify(cx, scope, value, null, "") }
+            .getOrNull()
+            ?.let { if (it is String) it else Context.toString(it) }
 
     private companion object {
         val KEY_COUNT = Any()

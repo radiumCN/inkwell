@@ -33,6 +33,8 @@ class WebDavRepository(
     private companion object {
         const val DIR = "inkwell"
         const val BACKUP = "inkwell/backup.json.gz"
+        /** 上传先写这个临时名，成功后 MOVE 到正式名 —— 远端不会出现半截的 backup.json.gz */
+        const val BACKUP_TMP = "inkwell/backup.json.gz.tmp"
     }
 
     suspend fun testConnection(url: String, username: String, password: String): Result<Unit> =
@@ -50,7 +52,10 @@ class WebDavRepository(
         client.mkcol(DIR)
 
         val local = buildLocalPayload()
-        val remote = client.get(BACKUP)?.let { BackupCodec.decode(it) }
+        // 远端文件损坏（上传中断留半截、被别的客户端写坏）时 decode 会抛异常。若让它把整个 sync
+        // 拖垮，PUT 永远执行不到 → 损坏文件永远修不好、同步永久瘫痪。这里把损坏视作「远端没有可用备份」，
+        // 照常用本地覆盖上去，下一次同步就自愈了。
+        val remote = client.get(BACKUP)?.let { runCatching { BackupCodec.decode(it) }.getOrNull() }
 
         val toUpload: BackupPayload
         var applied = 0
@@ -74,7 +79,10 @@ class WebDavRepository(
             )
         }
 
-        client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
+        // 先写临时名再 MOVE 覆盖正式名：上传中断只会留下 .tmp，正式备份要么是旧的完整版、
+        // 要么是新的完整版，绝不出现半截文件让下次 decode 挂掉。
+        client.put(BACKUP_TMP, BackupCodec.encode(toUpload), contentType = "application/gzip")
+        client.move(BACKUP_TMP, BACKUP)
         prefs.markSynced(System.currentTimeMillis())
         if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"
     }
@@ -98,6 +106,7 @@ class WebDavRepository(
                 id = s.id, name = s.name, enabled = s.enabled, json = s.json,
                 updatedAt = s.updatedAt,
                 sortOrder = s.sortOrder,
+                groupName = s.groupName,
             )
         },
         replaceRules = replaceRules.getAll().map { r ->
@@ -149,11 +158,15 @@ class WebDavRepository(
             }
         }
         merged.changedSources.forEach { s ->
+            // 校验结果（checkStatus/checkMessage/respondTime/checkedAt）是本地专属、不跨设备同步的列 ——
+            // 整行 REPLACE 会把它们清空。读旧行、只覆盖同步字段（含分组），本地校验结果原样保留。
+            val existing = sourceDao.getById(s.id)
             sourceDao.upsert(
-                BookSourceEntity(
-                    id = s.id, name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
-                    json = s.json, updatedAt = s.updatedAt,
-                )
+                (existing ?: BookSourceEntity(id = s.id, name = s.name, json = s.json, updatedAt = s.updatedAt))
+                    .copy(
+                        name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
+                        json = s.json, updatedAt = s.updatedAt, groupName = s.groupName,
+                    )
             )
         }
         replaceRules.upsertAll(

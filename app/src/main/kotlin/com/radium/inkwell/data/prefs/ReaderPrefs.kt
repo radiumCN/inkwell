@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import com.radium.inkwell.reader.api.ChineseConvert
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -58,7 +57,6 @@ class ReaderPrefs(private val context: Context) {
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
-        val CHINESE_CONVERT = stringPreferencesKey("chinese_convert")
         val FONT_ID = stringPreferencesKey("font_id")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("updated_at")
@@ -102,9 +100,6 @@ class ReaderPrefs(private val context: Context) {
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
-            chineseConvert = p[Keys.CHINESE_CONVERT]
-                ?.let { runCatching { ChineseConvert.valueOf(it) }.getOrNull() }
-                ?: ChineseConvert.NONE,
         )
     }.stateIn(
         scope,
@@ -146,7 +141,6 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
-            p[Keys.CHINESE_CONVERT] = settings.chineseConvert.name
         }
     }
 
@@ -226,7 +220,6 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "flip_haptic" to s.flipHaptic.toString(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
-            "chinese_convert" to s.chineseConvert.name,
         ),
     )
 }
@@ -262,15 +255,14 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             // 主题不走 copy —— 它现在是日/夜双槽，由下面的 importThemeSlots 单独写回
             flipAnimation = v["flip"]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: base.flipAnimation,
-            brightnessOverride = v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f },
+            // 键缺失 → 保留本地值；键存在（含 -1=跟随系统）→ 用远端值
+            brightnessOverride = if ("brightness" in v) v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f }
+            else base.brightnessOverride,
             keepScreenOn = v["keep_screen_on"]?.toBooleanStrictOrNull() ?: base.keepScreenOn,
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
             flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
             preloadChapters = v["preload_chapters"]?.toIntOrNull() ?: base.preloadChapters,
-            chineseConvert = v["chinese_convert"]
-                ?.let { runCatching { ChineseConvert.valueOf(it) }.getOrNull() }
-                ?: base.chineseConvert,
         )
     )
     importThemeSlots(v)

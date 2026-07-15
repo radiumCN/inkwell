@@ -68,7 +68,7 @@ private fun ButtonContent(text: String, loading: Boolean) {
         Text(text, color = if (loading) androidx.compose.ui.graphics.Color.Transparent else LocalContentColor.current)
         if (loading) {
             CircularProgressIndicator(
-                Modifier.size(18.dp),
+                Modifier.size(Dimens.buttonSpinner),
                 strokeWidth = 2.dp,
                 color = LocalContentColor.current,
             )

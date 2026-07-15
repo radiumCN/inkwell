@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -134,7 +135,8 @@ fun SearchScreen(
                     hint = "输入书名或作者，从启用的书源中并发搜索",
                 )
             } else {
-                LazyColumn(state = listState) {
+                // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来
+                LazyColumn(state = listState, modifier = Modifier.imePadding()) {
                     items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
                         val result = hit.result
                         val inShelf = bookKey(result.title, result.author) in state.shelfKeys

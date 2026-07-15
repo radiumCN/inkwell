@@ -34,8 +34,9 @@ class NetReaderBookSource(
     override suspend fun loadChapter(index: Int): ChapterContent {
         val chapter = chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
-        // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节
-        cache.read(bookId, url)?.let { return it }
+        // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节。
+        // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
+        withContext(Dispatchers.IO) { cache.read(bookId, url) }?.let { return it }
         // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
         val remote = engine.getContent(rule, url, chapterUrls, chapterVariable = chapter.variable)
         val content = ChapterContent(remote.elements)

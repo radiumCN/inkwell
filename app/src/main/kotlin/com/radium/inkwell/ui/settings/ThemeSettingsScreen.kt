@@ -3,7 +3,10 @@ package com.radium.inkwell.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -208,14 +211,17 @@ private fun ThemeSwatch(
                     else MaterialTheme.colorScheme.outlineVariant,
                     shape = CircleShape,
                 )
-                .clickable(onClick = onClick),
+                // 整块色板作为单选目标带上名字与选中态：否则读屏聚焦未选中的色块什么都念不出，
+                // 十个色块无从区分（名字 Text 在可点区之外）
+                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(18.dp).background(accent, CircleShape))
+            Box(Modifier.size(Dimens.iconSm).background(accent, CircleShape))
             if (selected) {
                 Icon(
                     Icons.Default.Check,
-                    contentDescription = label,
+                    contentDescription = null,
                     Modifier
                         .align(Alignment.BottomEnd)
                         .size(16.dp)

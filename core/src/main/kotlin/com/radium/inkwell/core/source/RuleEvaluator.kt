@@ -78,26 +78,44 @@ class RuleEvaluator(
                 .takeIf { it.isNotBlank() }
                 ?.let { listOf(ctx.copy(element = null, json = it)) }
                 ?: emptyList()
-        is RuleNode.Js -> evalJs(node.script, ctx)?.let { out ->
-            // list 规则的 JS 结果：JSON 形态进 json 上下文，HTML 形态解析后取子元素
-            val t = out.trim()
-            when {
-                t.isEmpty() -> emptyList()
-                t.startsWith("[") || t.startsWith("{") ->
-                    listOf(ctx.copy(element = null, json = t))
-                t.startsWith("<") -> Jsoup.parse(t).body().children()
-                    .map { ctx.copy(element = it, json = null) }
-                else -> listOf(ctx.copy(element = null, json = t))
-            }
-        } ?: emptyList()
+        is RuleNode.Js -> evalJs(node.script, ctx)?.let { stringToNodes(it, ctx) } ?: emptyList()
         is RuleNode.Fallback ->
             node.options.firstNotNullOfOrNull { o ->
                 evalToNodes(o, ctx).takeIf { it.isNotEmpty() }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToNodes(it, ctx) }
-        // 管道里剩下的都是字符串后处理（正则替换/js/put/rule），对节点列表无意义，取源即可
-        is RuleNode.Pipe -> evalToNodes(node.source, ctx)
+        // 列表规则也可能带管道：`div@html<js>过滤</js>`（Js 段）、`<js>…</js>尾规则`（Rule 段）、
+        // `##广告##`（正则替换）。从前这里直接 evalToNodes(source) 把 ops 全丢了 —— bookList/
+        // chapterList 写成这类形态就得空列表。改为先走字符串管道求值（ops 在里面执行），
+        // 再把每个产物按 Js 分支同样的逻辑转回节点（HTML→子元素 / JSON→条目 / 其余→标量）。
+        is RuleNode.Pipe -> evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
     }
+
+    /**
+     * 把一段字符串产物（JS/管道输出）转成节点列表：
+     * - `<…` 当 HTML 解析，取顶层子元素（列表规则常靠 JS 生成一段 HTML 再逐项抽取）
+     * - `[…` 当 JSON 数组，**展开成逐条目节点**（Legado 对 NativeArray 同样展开；否则 `$.name`
+     *   之类字段规则会落在整个数组上而非各条目）
+     * - `{…` 当 JSON 对象整体进 json 上下文
+     * - 其余当标量文本
+     */
+    private fun stringToNodes(out: String, ctx: EvalContext): List<EvalContext> {
+        val t = out.trim()
+        return when {
+            t.isEmpty() -> emptyList()
+            t.startsWith("[") -> expandJsonArray(t, ctx)
+            t.startsWith("{") -> listOf(ctx.copy(element = null, json = t))
+            t.startsWith("<") -> Jsoup.parse(t).body().children().map { ctx.copy(element = it, json = null) }
+            else -> listOf(ctx.copy(element = null, json = t))
+        }
+    }
+
+    /** 把 JSON 数组文本解析后展开成逐条目节点；解析失败则整段作单个 json 上下文兜底。 */
+    private fun expandJsonArray(jsonArrayText: String, ctx: EvalContext): List<EvalContext> =
+        when (val parsed = runCatching { jsonConf.jsonProvider().parse(jsonArrayText) }.getOrNull()) {
+            is List<*> -> parsed.filterNotNull().map { ctx.copy(element = null, json = it) }
+            else -> listOf(ctx.copy(element = null, json = jsonArrayText))
+        }
 
     /** 求值为字符串列表；空串结果被丢弃 */
     fun evalToStrings(node: RuleNode, ctx: EvalContext): List<String> = when (node) {
@@ -207,7 +225,9 @@ class RuleEvaluator(
      * 返回 null 表示这条地址不含 JS。
      */
     fun evalUrlJs(url: String, ctx: EvalContext): String? {
-        if (!url.contains("<js>", ignoreCase = true) && !url.trimStart().startsWith("@js:", ignoreCase = true)) {
+        // 入口判据用 contains("@js:") 而非仅 trimStart().startsWith：`头@js:脚本` 的中缀写法
+        // （如 `https://a.com/s@js:result+'&p=1'`）同样是 JS 地址，Legado 里 @js: 可出现在任意位置。
+        if (!url.contains("<js>", ignoreCase = true) && !url.contains("@js:", ignoreCase = true)) {
             return null
         }
         var result = url
@@ -215,14 +235,24 @@ class RuleEvaluator(
         var found = false
         for (m in URL_JS.findAll(url)) {
             found = true
-            if (m.range.first > start) result += url.substring(start, m.range.first).trim()
+            if (m.range.first > start) {
+                // 头片段（两段 JS 之间或首段 JS 之前的文本）：把其中的 @result 替换成当前结果后，
+                // 整体**取代** result，作为下一段脚本的输入 —— 这是 Legado analyzeJs 的语义。
+                // 从前这里是 `result += 头片段`，等于把整条原始 URL 连同头一起喂给脚本再拼接，
+                // 于是 `https://a.com/s<js>result</js>` 会把整串塞回去，得到一堆垃圾地址。
+                val head = url.substring(start, m.range.first).trim()
+                if (head.isNotEmpty()) result = head.replace("@result", result)
+            }
             val script = m.groupValues[1].ifEmpty { m.groupValues[2] }
             result = runJs(script, ctx, result)
                 ?: throw SourceException("地址脚本执行失败")
             start = m.range.last + 1
         }
         if (!found) return null
-        if (url.length > start) result += url.substring(start)
+        if (url.length > start) {
+            val tail = url.substring(start).trim()
+            if (tail.isNotEmpty()) result = tail.replace("@result", result)
+        }
         return result
     }
 
@@ -332,7 +362,16 @@ class RuleEvaluator(
     // ---- 管道 ----
 
     private fun applyOp(op: PipeOp, list: List<String>, ctx: EvalContext): List<String> = when (op) {
-        is PipeOp.RegexReplace -> list.map { regexOf(op.pattern).replace(it, op.replacement) }
+        is PipeOp.RegexReplace -> list.map {
+            // 替换串里的 `$` 可能是非法组引用（Legado 书源里屡见），别让它打死整条链路
+            runCatching { regexOf(op.pattern).replace(it, op.replacement) }.getOrDefault(it)
+        }
+        is PipeOp.RegexReplaceFirst -> list.map { s ->
+            // Legado replaceFirst：取首个匹配、在其匹配区间内替换；未命中则清空（抽取语义）
+            val re = regexOf(op.pattern)
+            runCatching { re.find(s)?.let { re.replaceFirst(it.value, op.replacement) } ?: "" }
+                .getOrDefault("")
+        }
         is PipeOp.Put -> {
             applyPut(op.spec, ctx)
             list // 只有副作用

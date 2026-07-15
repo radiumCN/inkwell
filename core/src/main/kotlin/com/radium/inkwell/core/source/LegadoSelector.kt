@@ -284,7 +284,8 @@ object LegadoSelector {
                 .let { if (it.isEmpty()) emptyList() else listOf(it) }
             "all" -> els.joinToString("") { it.outerHtml() }
                 .let { if (it.isEmpty()) emptyList() else listOf(it) }
-            // 其余当属性名；属性常在上下两处导航里重复，去重
+            // 其余当属性名；属性常在上下两处导航里重复，去重。
+            // （列表规则按条目逐项求值，每次 els 只含单个条目元素，去重不会跨条目丢合法重复值。）
             else -> els.map { it.attr(name) }.filter { it.isNotBlank() }.distinct()
         }
 }

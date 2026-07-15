@@ -28,11 +28,10 @@ import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.reader.render.ScrollChapter
-import com.radium.inkwell.core.text.ChineseConverter
-import com.radium.inkwell.reader.api.ChineseConvert
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.radium.inkwell.core.model.ContentElement
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -168,19 +167,8 @@ class ReaderViewModel(
     init {
         viewModelScope.launch {
             loadSession()
-            var lastConvert: ChineseConvert? = null
             readerPrefs.settings.collect { s ->
                 _state.value = _state.value.copy(settings = s)
-                // 简繁一改，已排好的页全部作废（字变了，断行也变了）
-                if (lastConvert != null && lastConvert != s.chineseConvert) {
-                    engineMutex.withLock {
-                        paginated.clear()
-                        scrollCache.clear()
-                        _scrollChapters.value = emptyList()
-                        showPosition(position)
-                    }
-                }
-                lastConvert = s.chineseConvert
             }
         }
         viewModelScope.launch {
@@ -199,10 +187,16 @@ class ReaderViewModel(
             // 打开即已知晓：书架上那个"有 N 章新的"红点该灭了
             if (b.newChapterCount > 0) bookRepo.clearNewChapters(bookId)
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
-            val chapters = chapterDao.getByBook(bookId)
+            var chapters = chapterDao.getByBook(bookId)
             val src = if (b.type == BookType.NET) {
                 val rule = b.sourceId?.let { sourceRepo.getRule(it) }
                     ?: error("书源不存在，请换源后阅读")
+                // WebDAV 同步下来的网络书只有书行、没有目录行（目录不进备份）。此时不补抓的话
+                // 章节数为 0，ensurePaginated 静默返回 null，页面永远转圈。先拉一次目录落库。
+                if (chapters.isEmpty()) {
+                    netBookRepo.refreshToc(b, rule).getOrThrow()
+                    chapters = chapterDao.getByBook(bookId)
+                }
                 NetReaderBookSource(bookId, chapters, rule, engine, contentCache, chapterDao)
             } else {
                 withContext(Dispatchers.IO) { LocalReaderBookSource(bookRepo.openLocal(b)) }
@@ -530,7 +524,10 @@ class ReaderViewModel(
     fun applyChangeSource(candidate: SearchResult) {
         val b = book ?: return
         viewModelScope.launch {
-            _state.value = _state.value.copy(changingSource = true)
+            _state.value = _state.value.copy(changingSource = true, autoChanging = false)
+            // 用户亲自选了源：掐掉可能还在跑的自动换源，否则它探测成功后会把用户的选择覆盖掉
+            autoChangeJob?.cancel()
+            autoChangeUsed = true
             // 旧源的预取还在飞：清完缓存后它们回来会把旧正文写进新源的缓存目录
             prefetchJob?.cancel()
             val rule = sourceRepo.getRule(candidate.sourceId)
@@ -745,20 +742,8 @@ class ReaderViewModel(
         val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
             ?: throw ContentTimeoutException()
         val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
-        val purified = if (purifier.isEmpty) raw
+        return if (purifier.isEmpty) raw
         else raw.copy(elements = purifier.apply(raw.elements))
-
-        // 简繁转换放在净化之后：净化规则是用户按**眼前看到的字**写的，
-        // 若先转换再净化，他写的规则就对不上了
-        return when (_state.value.settings.chineseConvert) {
-            ChineseConvert.NONE -> purified
-            ChineseConvert.TO_SIMPLIFIED -> purified.copy(
-                elements = ChineseConverter.convert(purified.elements, ChineseConverter::toSimplified),
-            )
-            ChineseConvert.TO_TRADITIONAL -> purified.copy(
-                elements = ChineseConverter.convert(purified.elements, ChineseConverter::toTraditional),
-            )
-        }
     }
 
     // ---------- 滚动模式 ----------
@@ -810,6 +795,9 @@ class ReaderViewModel(
                 scrollCache[chapterIndex] = it
                 trimScrollWindow(center = position.chapterIndex, alsoKeep = chapterIndex)
             }
+        } catch (e: CancellationException) {
+            // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
+            throw e
         } catch (e: Exception) {
             if (chapterIndex == position.chapterIndex) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
@@ -948,6 +936,9 @@ class ReaderViewModel(
             // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。
             trimWindow(position.chapterIndex, alsoKeep = chapterIndex)
             result
+        } catch (e: CancellationException) {
+            // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
+            throw e
         } catch (e: Exception) {
             if (chapterIndex == position.chapterIndex) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")

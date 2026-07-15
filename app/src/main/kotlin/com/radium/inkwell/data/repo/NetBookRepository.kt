@@ -5,6 +5,8 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
+import androidx.room.withTransaction
+import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -14,6 +16,7 @@ import java.security.MessageDigest
 
 /** 网络书：加书架、刷新目录、换源 */
 class NetBookRepository(
+    private val db: InkwellDb,
     private val bookDao: BookDao,
     private val chapterDao: ChapterDao,
     private val engine: BookSourceEngine,
@@ -68,27 +71,31 @@ class NetBookRepository(
         val now = System.currentTimeMillis()
         val existing = bookDao.getById(bookId)
         val (readIndex, readOffset) = alignProgress(bookId, existing, toc)
-        bookDao.upsert(
-            BookEntity(
-                id = bookId,
-                type = BookType.NET,
-                title = detail.title.ifBlank { fallback?.title.orEmpty() },
-                author = detail.author ?: fallback?.author ?: "",
-                coverPath = detail.coverUrl ?: fallback?.coverUrl,
-                intro = detail.intro ?: fallback?.intro,
-                sourceId = sourceId,
-                bookUrl = bookUrl,
-                tocUrl = detail.tocUrl.ifBlank { bookUrl },
-                latestChapterTitle = toc.lastOrNull()?.title,
-                totalChapters = toc.size,
-                readChapterIndex = readIndex,
-                readCharOffset = readOffset,
-                readAt = existing?.readAt ?: 0,
-                addedAt = existing?.addedAt ?: now,
-                updatedAt = now,
+        val entities = buildToc(bookId, toc)
+        // 书行与目录一起落库：中途被杀不会留下「有书行没目录」的半成品
+        db.withTransaction {
+            bookDao.upsert(
+                BookEntity(
+                    id = bookId,
+                    type = BookType.NET,
+                    title = detail.title.ifBlank { fallback?.title.orEmpty() },
+                    author = detail.author ?: fallback?.author ?: "",
+                    coverPath = detail.coverUrl ?: fallback?.coverUrl,
+                    intro = detail.intro ?: fallback?.intro,
+                    sourceId = sourceId,
+                    bookUrl = bookUrl,
+                    tocUrl = detail.tocUrl.ifBlank { bookUrl },
+                    latestChapterTitle = toc.lastOrNull()?.title,
+                    totalChapters = toc.size,
+                    readChapterIndex = readIndex,
+                    readCharOffset = readOffset,
+                    readAt = existing?.readAt ?: 0,
+                    addedAt = existing?.addedAt ?: now,
+                    updatedAt = now,
+                )
             )
-        )
-        writeToc(bookId, toc)
+            replaceToc(bookId, entities)
+        }
         return bookId
     }
 
@@ -96,43 +103,55 @@ class NetBookRepository(
     suspend fun refreshToc(book: BookEntity, rule: BookSourceRule): Result<Int> = runCatching {
         val toc = engine.getToc(rule, book.tocUrl ?: book.bookUrl ?: error("缺少目录地址"))
         check(toc.isNotEmpty()) { "目录解析为空" }
+        // 网络往返可能长达数分钟，其间用户可能已经进书读了几页（进度/readAt/红点都变了）。
+        // 用传入的旧快照整行 copy 会把这些变化抹掉，所以在写库前重新读一次最新行为基准。
+        val fresh = bookDao.getById(book.id) ?: book
         // 追更同样要对齐进度：站点在前面插入公告章/防盗章后目录整体后移，
         // 沿用旧序号会直接跳章（从前只有换源做了对齐，追更没做）
-        val (readIndex, readOffset) = alignProgress(book.id, book, toc)
-        val added = (toc.size - book.totalChapters).coerceAtLeast(0)
+        val (readIndex, readOffset) = alignProgress(fresh.id, fresh, toc)
+        val added = (toc.size - fresh.totalChapters).coerceAtLeast(0)
 
-        writeToc(book.id, toc)
-        val refreshed = book.copy(
+        val entities = buildToc(book.id, toc)
+        val refreshed = fresh.copy(
             totalChapters = toc.size,
             latestChapterTitle = toc.lastOrNull()?.title,
             readChapterIndex = readIndex,
             readCharOffset = readOffset,
             // 累加而不是覆盖：连刷两次、第二次没新章，不该把第一次的 5 章抹成 0 ——
             // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
-            newChapterCount = book.newChapterCount + added,
+            newChapterCount = fresh.newChapterCount + added,
         )
-        // 一个字段都没变就别写库。否则每本书 updatedAt 一变，书架的 observeAll 就整表重发一轮 ——
-        // 下拉刷"没有新章节"时，全书架反复重组、转圈跟着掉帧。也顺带免掉一次无意义的 WebDAV 时间戳变更。
-        if (refreshed != book) {
-            bookDao.update(refreshed.copy(updatedAt = System.currentTimeMillis()))
+        db.withTransaction {
+            replaceToc(book.id, entities)
+            // 一个字段都没变就别写库。否则每本书 updatedAt 一变，书架的 observeAll 就整表重发一轮 ——
+            // 下拉刷"没有新章节"时，全书架反复重组、转圈跟着掉帧。也顺带免掉一次无意义的 WebDAV 时间戳变更。
+            if (refreshed != fresh) {
+                bookDao.update(refreshed.copy(updatedAt = System.currentTimeMillis()))
+            }
         }
         added
     }
 
-    /** isCached 按章节 URL 判定：目录变动后序号会错位，缓存得跟着章节走 */
-    private suspend fun writeToc(bookId: String, toc: List<RemoteChapter>) {
+    /**
+     * 目录条目（含 isCached 判定）。isCached 按章节 URL 而非序号：目录变动后序号会错位，缓存得跟着章节走。
+     * cache.has 会做文件 stat，**在事务外**先算好，别把一堆磁盘 IO 圈进 DB 事务里拉长锁。
+     */
+    private fun buildToc(bookId: String, toc: List<RemoteChapter>): List<ChapterEntity> {
         cache.purgeLegacy(bookId)
+        return toc.map {
+            ChapterEntity(
+                bookId, it.index, it.title,
+                url = it.url,
+                isCached = cache.has(bookId, it.url),
+                variable = it.variable,
+            )
+        }
+    }
+
+    /** 换目录 = 先清后写，务必在事务里成对执行：中途被杀不能留下空目录或半套目录 */
+    private suspend fun replaceToc(bookId: String, entities: List<ChapterEntity>) {
         chapterDao.deleteByBook(bookId)
-        chapterDao.upsertAll(
-            toc.map {
-                ChapterEntity(
-                    bookId, it.index, it.title,
-                    url = it.url,
-                    isCached = cache.has(bookId, it.url),
-                    variable = it.variable,
-                )
-            }
-        )
+        chapterDao.upsertAll(entities)
     }
 
     /**
@@ -173,24 +192,31 @@ class NetBookRepository(
     ): Result<Unit> = runCatching {
         val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl)
         check(toc.isNotEmpty()) { "新书源目录为空" }
+        // 网络往返期间用户可能已翻了很多页，进度早不是传入快照那一刻的了。写库前重读最新行，
+        // 既让 alignProgress 按**当前**章节标题对齐（否则换源后跳回进书时的章节），
+        // 也避免整行 copy 把 readAt/红点/分组等抹回旧值。
+        val fresh = bookDao.getById(book.id) ?: book
         val (newIndex, newOffset) = restore
             ?.let { it.chapterIndex.coerceIn(0, toc.lastIndex) to it.charOffset }
-            ?: alignProgress(book.id, book, toc).let { it.first to 0 }
+            ?: alignProgress(fresh.id, fresh, toc).let { it.first to 0 }
 
         cache.clear(book.id) // 旧源的正文缓存整本作废
-        writeToc(book.id, toc)
-        bookDao.update(
-            book.copy(
-                sourceId = newRule.id,
-                bookUrl = newResult.bookUrl,
-                tocUrl = detail.tocUrl.ifBlank { newResult.bookUrl },
-                totalChapters = toc.size,
-                latestChapterTitle = toc.lastOrNull()?.title,
-                readChapterIndex = newIndex,
-                readCharOffset = newOffset,
-                updatedAt = System.currentTimeMillis(),
+        val entities = buildToc(book.id, toc)
+        db.withTransaction {
+            replaceToc(book.id, entities)
+            bookDao.update(
+                fresh.copy(
+                    sourceId = newRule.id,
+                    bookUrl = newResult.bookUrl,
+                    tocUrl = detail.tocUrl.ifBlank { newResult.bookUrl },
+                    totalChapters = toc.size,
+                    latestChapterTitle = toc.lastOrNull()?.title,
+                    readChapterIndex = newIndex,
+                    readCharOffset = newOffset,
+                    updatedAt = System.currentTimeMillis(),
+                )
             )
-        )
+        }
     }
 
     /** 阅读位置的真身：第几章 + 章内第几个字 */

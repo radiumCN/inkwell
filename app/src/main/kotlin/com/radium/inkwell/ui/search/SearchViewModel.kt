@@ -60,6 +60,7 @@ class SearchViewModel(
     val messages = MessageBus()
 
     private var searchJob: Job? = null
+    private var pagingJob: Job? = null
 
     init {
         // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）
@@ -76,6 +77,9 @@ class SearchViewModel(
         val keyword = _state.value.query.trim()
         if (keyword.isEmpty()) return
         searchJob?.cancel()
+        // 上一轮的「加载更多」还在飞时开新搜索：不掐掉它，它回来会把旧关键词的结果 merge 进
+        // 刚清空的 hits，串进新搜索列表
+        pagingJob?.cancel()
         searchJob = viewModelScope.launch {
             val enabled = sourceRepo.getEnabledRules()
             val rules = enabled.filter { it.search != null }
@@ -158,7 +162,8 @@ class SearchViewModel(
         if (s.searching || s.loadingMore || !s.hasMore || pagingRules.isEmpty()) return
         val keyword = s.query.trim()
         val next = s.page + 1
-        viewModelScope.launch {
+        pagingJob?.cancel()
+        pagingJob = viewModelScope.launch {
             _state.value = _state.value.copy(loadingMore = true)
             val limiter = Semaphore(8)
             val still = pagingRules.map { rule ->

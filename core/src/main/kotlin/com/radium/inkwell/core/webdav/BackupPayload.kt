@@ -99,6 +99,8 @@ data class BackupSource(
     val json: String,
     val updatedAt: Long = 0,
     val sortOrder: Int = 0,
+    /** 书源分组；老备份没有此键 → 默认空，不影响读取 */
+    val groupName: String = "",
 )
 
 object BackupCodec {

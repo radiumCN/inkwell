@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.reader
 
 import android.app.Activity
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -167,6 +168,20 @@ fun ReaderScreen(
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
     val haptic = LocalHapticFeedback.current
     val clipboard = LocalClipboardManager.current
+
+    // 系统返回：先收起暂态浮层（选字/面板/菜单），都关着才真正退出阅读页。
+    // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
+    BackHandler(
+        state.menuVisible || selection != null ||
+            state.searchResults != null || state.sourceCandidates != null,
+    ) {
+        when {
+            selection != null -> { selection = null; anchor = null }
+            state.searchResults != null -> viewModel.dismissSearch()
+            state.sourceCandidates != null -> viewModel.dismissSourcePanel()
+            state.menuVisible -> viewModel.toggleMenu()
+        }
+    }
 
     val activity = LocalActivity.current
     BrightnessEffect(activity, state.settings.brightnessOverride)

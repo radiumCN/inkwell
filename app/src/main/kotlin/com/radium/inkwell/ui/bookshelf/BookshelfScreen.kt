@@ -58,6 +58,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
@@ -287,33 +288,32 @@ fun BookshelfScreen(
                     )
                 }
 
-                // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕
+                // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕。
+                // 收敛到共享 ChipRow（与发现页/订阅页同一形态、同一首尾边距）
                 if (groups.isNotEmpty()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = Dimens.gapM),
-                        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                    ) {
-                        FilterChip(
-                            selected = group == null,
-                            onClick = { viewModel.setGroup(null) },
-                            label = { Text("全部") },
-                        )
-                        groups.forEach { g ->
-                            FilterChip(
-                                selected = group == g,
-                                onClick = { viewModel.setGroup(g) },
-                                label = { Text(g) },
-                            )
-                        }
-                        FilterChip(
-                            selected = group == BookshelfViewModel.UNGROUPED,
-                            onClick = { viewModel.setGroup(BookshelfViewModel.UNGROUPED) },
-                            label = { Text("未分组") },
-                        )
+                    val chipOptions = listOf("全部") + groups + listOf("未分组")
+                    val selectedChip = when (group) {
+                        null -> 0
+                        BookshelfViewModel.UNGROUPED -> chipOptions.lastIndex
+                        else -> (groups.indexOf(group) + 1).coerceAtLeast(0)
                     }
+                    ChipRow(
+                        options = chipOptions,
+                        selectedIndex = selectedChip,
+                        onSelect = { i ->
+                            viewModel.setGroup(
+                                when (i) {
+                                    0 -> null
+                                    chipOptions.lastIndex -> BookshelfViewModel.UNGROUPED
+                                    else -> groups[i - 1]
+                                }
+                            )
+                        },
+                        contentPadding = PaddingValues(
+                            horizontal = Dimens.listHorizontal,
+                            vertical = Dimens.gapXS,
+                        ),
+                    )
                 }
                 PullToRefreshBox(
                     isRefreshing = refreshing,
@@ -357,6 +357,15 @@ fun BookshelfScreen(
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+                SettingRow(
+                    title = "书籍详情",
+                    subtitle = "简介、目录、刷新追更",
+                    onClick = {
+                        val id = book.id
+                        actionTarget = null
+                        onOpenDetail(id)
+                    },
                 )
                 SettingRow(
                     title = "设置分组",

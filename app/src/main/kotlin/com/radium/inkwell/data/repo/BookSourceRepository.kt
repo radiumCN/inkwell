@@ -198,10 +198,11 @@ class BookSourceRepository(private val dao: BookSourceDao) {
         )
     }
 
-    /** 置顶：排到当前最小序号之前。序号本身允许为负，不必整体重排 */
+    /** 置顶：排到当前最小序号之前。递增分配（起点 = min - 个数），保持选中项之间的相对顺序 ——
+     *  从前用 order-- 递减，会把多选置顶的顺序整体倒过来 */
     suspend fun moveToTop(ids: Collection<String>) {
-        var order = (dao.minSortOrder() ?: 0) - 1
-        ids.forEach { dao.setSortOrder(it, order--) }
+        var order = (dao.minSortOrder() ?: 0) - ids.size
+        ids.forEach { dao.setSortOrder(it, order++) }
     }
 
     suspend fun moveToBottom(ids: Collection<String>) {

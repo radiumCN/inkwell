@@ -36,6 +36,8 @@ import com.radium.inkwell.ui.webdav.WebDavSettingsScreen
 @Composable
 fun InkwellNavHost() {
     val navController = rememberNavController()
+    // 统一带 launchSingleTop：快速双击一个入口不会把同一个目的地压两次栈（返回要按两下）
+    fun go(route: Any) = navController.navigate(route) { launchSingleTop = true }
     // 从前没配转场，走的是 navigation-compose 的默认淡入淡出（约 700ms，且进出同速）——
     // 与翻页的 180~320ms 完全脱节，而且违反「退场比入场快」。
     // 改成 shared-axis X：前进从右侧滑入，返回向右滑出，方向就说明了"进"和"退"。
@@ -76,19 +78,19 @@ fun InkwellNavHost() {
     ) {
         composable<BookshelfRoute> {
             BookshelfScreen(
-                onOpenBook = { navController.navigate(ReaderRoute(it)) },
-                onOpenDetail = { navController.navigate(BookDetailRoute(it)) },
-                onOpenSearch = { navController.navigate(SearchRoute()) },
-                onOpenExplore = { navController.navigate(ExploreRoute) },
-                onOpenSourceManage = { navController.navigate(SourceManageRoute) },
-                onOpenSettings = { navController.navigate(SettingsRoute) },
+                onOpenBook = { go(ReaderRoute(it)) },
+                onOpenDetail = { go(BookDetailRoute(it)) },
+                onOpenSearch = { go(SearchRoute()) },
+                onOpenExplore = { go(ExploreRoute) },
+                onOpenSourceManage = { go(SourceManageRoute) },
+                onOpenSettings = { go(SettingsRoute) },
             )
         }
         composable<BookDetailRoute> { entry ->
             val route = entry.toRoute<BookDetailRoute>()
             BookDetailScreen(
                 bookId = route.bookId,
-                onRead = { navController.navigate(ReaderRoute(route.bookId)) },
+                onRead = { go(ReaderRoute(route.bookId)) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -99,28 +101,28 @@ fun InkwellNavHost() {
         composable<SearchRoute> {
             SearchScreen(
                 onBack = { navController.popBackStack() },
-                onOpenPreview = { navController.navigate(BookPreviewRoute.of(it)) },
+                onOpenPreview = { go(BookPreviewRoute.of(it)) },
             )
         }
         composable<ExploreRoute> {
             ExploreScreen(
                 onBack = { navController.popBackStack() },
-                onOpenSourceManage = { navController.navigate(SourceManageRoute) },
-                onOpenPreview = { navController.navigate(BookPreviewRoute.of(it)) },
+                onOpenSourceManage = { go(SourceManageRoute) },
+                onOpenPreview = { go(BookPreviewRoute.of(it)) },
             )
         }
         composable<BookPreviewRoute> { entry ->
             val route = entry.toRoute<BookPreviewRoute>()
             BookPreviewScreen(
                 results = route.results,
-                onRead = { navController.navigate(ReaderRoute(it)) },
+                onRead = { go(ReaderRoute(it)) },
                 onBack = { navController.popBackStack() },
             )
         }
         composable<SourceManageRoute> {
             SourceManageScreen(
                 onBack = { navController.popBackStack() },
-                onOpen = { navController.navigate(SourceDetailRoute(it)) },
+                onOpen = { go(SourceDetailRoute(it)) },
             )
         }
         composable<SourceDetailRoute> { entry ->
@@ -133,17 +135,17 @@ fun InkwellNavHost() {
         composable<SettingsRoute> {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onOpenWebDav = { navController.navigate(WebDavSettingsRoute) },
-                onOpenTheme = { navController.navigate(ThemeSettingsRoute) },
-                onOpenSources = { navController.navigate(SourceManageRoute) },
-                onOpenReplaceRules = { navController.navigate(ReplaceRuleRoute) },
-                onOpenRss = { navController.navigate(RssSourceRoute) },
+                onOpenWebDav = { go(WebDavSettingsRoute) },
+                onOpenTheme = { go(ThemeSettingsRoute) },
+                onOpenSources = { go(SourceManageRoute) },
+                onOpenReplaceRules = { go(ReplaceRuleRoute) },
+                onOpenRss = { go(RssSourceRoute) },
             )
         }
         composable<RssSourceRoute> {
             RssSourceScreen(
                 onBack = { navController.popBackStack() },
-                onOpenSource = { navController.navigate(RssArticlesRoute(it)) },
+                onOpenSource = { go(RssArticlesRoute(it)) },
             )
         }
         composable<RssArticlesRoute> { entry ->
@@ -152,7 +154,7 @@ fun InkwellNavHost() {
                 sourceId = route.sourceId,
                 onBack = { navController.popBackStack() },
                 onOpenArticle = { article ->
-                    navController.navigate(
+                    go(
                         RssArticleRoute.of(
                             com.radium.inkwell.ui.rss.RssArticleArgs(
                                 sourceId = article.sourceId,

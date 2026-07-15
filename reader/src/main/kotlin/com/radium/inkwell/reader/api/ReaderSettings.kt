@@ -34,8 +34,6 @@ data class ReaderSettings(
      * 翻到章末才去抓下一章，网络书必然卡一下；提前抓好放进缓存就没有这个停顿。
      */
     val preloadChapters: Int = 3,
-    /** 正文的简繁转换 */
-    val chineseConvert: ChineseConvert = ChineseConvert.NONE,
 ) {
     companion object {
         const val FONT_SYSTEM = "system"
@@ -51,16 +49,6 @@ data class ReaderSettings(
             FONT_MONO to "等宽",
         )
     }
-}
-
-/**
- * 简繁转换。只换字形，不做词汇转换（「軟體」不会变成「软件」）——
- * 词汇映射要一整套词库，而读者要的通常只是"别让我看繁体"。
- */
-enum class ChineseConvert(val label: String) {
-    NONE("不转换"),
-    TO_SIMPLIFIED("转简体"),
-    TO_TRADITIONAL("转繁体"),
 }
 
 enum class FlipAnimation(val label: String) {
