@@ -66,8 +66,6 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -317,64 +315,34 @@ fun BookshelfScreen(
                         )
                     }
                 }
-                // 顶部渐隐 + 下拉刷新。书封滚到顶栏边缘时被「雾化」淡进纸背景，
-                // 而不是一刀切地硬消失 —— 澎湃 OS / iOS 那种「从栏底下缓缓浮现」的过渡质感。
-                // 用纸背景色做遮罩渐变：不落投影、不上真模糊（同色纸面投影=脏灰线，本 App 一贯回避；
-                // 真模糊要离屏合成，在这块用户反馈过掉帧的网格上不划算），最轻也最贴暖纸风格。
-                //
-                // 只保留顶部：底部原来那条渐隐拖着导航栏一起雾化，末排书封等于被一层灰纸糊住，
-                // 廉价且突兀 —— 直接去掉，末排 edge-to-edge 滚到导航条下方即可。
-                val topFade = Dimens.gapXXL // 渐隐带高度（=顶部留白），拉长过渡跑道
-                Box(Modifier.fillMaxSize()) {
-                    PullToRefreshBox(
-                        isRefreshing = refreshing,
-                        onRefresh = { viewModel.refreshAll() },
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 96.dp),
-                            modifier = Modifier.fillMaxSize(),
-                            // 顶部留白与渐隐带同高（topFade）：首排静止时正好落在渐隐带下沿、不被雾化；
-                            // 底部多留一个导航栏的高度：书封滚到导航条下方，最后一排仍能滚清不被挡住
-                            contentPadding = PaddingValues(
-                                start = Dimens.gapM,
-                                end = Dimens.gapM,
-                                top = topFade,
-                                bottom = Dimens.gapM + padding.calculateBottomPadding(),
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                        ) {
-                            items(books, key = { it.id }) { book ->
-                                BookCard(
-                                    book = book,
-                                    onClick = { onOpenBook(book.id) },
-                                    // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
-                                    onLongClick = { actionTarget = book },
-                                )
-                            }
-                        }
+                PullToRefreshBox(
+                    isRefreshing = refreshing,
+                    onRefresh = { viewModel.refreshAll() },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 96.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
+                    // 而最后一排仍能滚清导航条不被挡住
+                    contentPadding = PaddingValues(
+                        start = Dimens.gapM,
+                        end = Dimens.gapM,
+                        top = Dimens.gapM,
+                        bottom = Dimens.gapM + padding.calculateBottomPadding(),
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                ) {
+                    items(books, key = { it.id }) { book ->
+                        BookCard(
+                            book = book,
+                            onClick = { onOpenBook(book.id) },
+                            // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
+                            onLongClick = { actionTarget = book },
+                        )
                     }
-                    // 遮罩层只画渐变、不接触摸事件（无 pointerInput），滚动/点击照穿到下面的网格。
-                    // 纸→透明，但**不是**两档线性：两档在 16dp 上等于一条硬线把书封拦腰切断，廉价。
-                    // 改用缓入的多档 alpha —— 靠栏一侧几乎全不透明（书封干净没入栏下），越往内
-                    // 透明得越慢、尾巴越长，纸面上根本看不出渐变的下边界，才有「缓缓浮现」的高级质感。
-                    val fadeColor = MaterialTheme.colorScheme.background
-                    Box(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .height(topFade)
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to fadeColor,
-                                    0.4f to fadeColor.copy(alpha = 0.9f),
-                                    0.68f to fadeColor.copy(alpha = 0.55f),
-                                    0.86f to fadeColor.copy(alpha = 0.22f),
-                                    1f to Color.Transparent,
-                                )
-                            )
-                    )
+                }
                 }
             }
         }
