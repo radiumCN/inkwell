@@ -14,6 +14,9 @@ jobs:
       HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
+        # 取全量历史与标注 tag 对象：下面要读出 tag 的注解正文当 Release 正文
+        with:
+          fetch-depth: 0
 
       - name: Verify tag matches configured version
         run: |
@@ -58,10 +61,23 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk inkwell-${{ github.ref_name }}.apk
 
+      # 把标注 tag 的注解正文取出来 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
+      # 用 heredoc 写进 GITHUB_OUTPUT，才容得下多行 + Markdown。
+      - name: Extract tag message
+        id: tag_notes
+        run: |
+          {
+            echo 'body<<INKWELL_NOTES_EOF'
+            git tag -l --format='%(contents)' "${{ github.ref_name }}"
+            echo 'INKWELL_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: inkwell-${{ github.ref_name }}.apk
+          # 自定义正文（tag 注解）在前，GitHub 自动生成的更新日志追加在后
+          body: ${{ steps.tag_notes.outputs.body }}
           generate_release_notes: true
           # 带 - 后缀的 tag（如 v0.2.0-beta.1）标记为预发布 → 只推给测试版渠道
           prerelease: ${{ contains(github.ref_name, '-') }}

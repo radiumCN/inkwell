@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.bookshelf
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -64,6 +66,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -313,34 +317,57 @@ fun BookshelfScreen(
                         )
                     }
                 }
-                PullToRefreshBox(
-                    isRefreshing = refreshing,
-                    onRefresh = { viewModel.refreshAll() },
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 96.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
-                    // 而最后一排仍能滚清导航条不被挡住
-                    contentPadding = PaddingValues(
-                        start = Dimens.gapM,
-                        end = Dimens.gapM,
-                        top = Dimens.gapM,
-                        bottom = Dimens.gapM + padding.calculateBottomPadding(),
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                    verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                ) {
-                    items(books, key = { it.id }) { book ->
-                        BookCard(
-                            book = book,
-                            onClick = { onOpenBook(book.id) },
-                            // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
-                            onLongClick = { actionTarget = book },
-                        )
+                // 顶/底渐隐 + 下拉刷新。书封滚到顶栏、导航栏边缘时被「雾化」淡进纸背景，
+                // 而不是一刀切地硬消失 —— 澎湃 OS / iOS 那种「从栏底下缓缓浮现、隐没」的过渡质感。
+                // 用纸背景色做遮罩渐变：不落投影、不上真模糊（同色纸面投影=脏灰线，本 App 一贯回避；
+                // 真模糊要离屏合成，在这块用户反馈过掉帧的网格上不划算），最轻也最贴暖纸风格。
+                Box(Modifier.fillMaxSize()) {
+                    PullToRefreshBox(
+                        isRefreshing = refreshing,
+                        onRefresh = { viewModel.refreshAll() },
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 96.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            // 顶部留白与下方顶部渐隐带同高（gapL）：首排静止时正好落在渐隐带下沿、不被雾化；
+                            // 底部多留一个导航栏的高度：书封滚到导航条下方，最后一排仍能滚清不被挡住
+                            contentPadding = PaddingValues(
+                                start = Dimens.gapM,
+                                end = Dimens.gapM,
+                                top = Dimens.gapL,
+                                bottom = Dimens.gapM + padding.calculateBottomPadding(),
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                        ) {
+                            items(books, key = { it.id }) { book ->
+                                BookCard(
+                                    book = book,
+                                    onClick = { onOpenBook(book.id) },
+                                    // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
+                                    onLongClick = { actionTarget = book },
+                                )
+                            }
+                        }
                     }
-                }
+                    // 遮罩层只画渐变、不接触摸事件（无 pointerInput），滚动/点击照穿到下面的网格。
+                    // 顶：纸→透明；底：透明→纸，并把导航栏那段高度一起吃进渐隐带，书封在两端都柔和进出。
+                    val fadeColor = MaterialTheme.colorScheme.background
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(Dimens.gapL)
+                            .background(Brush.verticalGradient(listOf(fadeColor, Color.Transparent)))
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(Dimens.gapM + padding.calculateBottomPadding())
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, fadeColor)))
+                    )
                 }
             }
         }
