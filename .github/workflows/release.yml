@@ -61,14 +61,24 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk inkwell-${{ github.ref_name }}.apk
 
-      # 把标注 tag 的注解正文取出来 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
-      # 用 heredoc 写进 GITHUB_OUTPUT，才容得下多行 + Markdown。
+      # actions/checkout 触发于 tag push 时，会把这个 annotated tag 在本地存成 lightweight
+      # （ref 指向 commit 而非 tag 对象），于是下面 %(contents) 读出来的会是 **commit message**
+      # ——里头带着 Co-Authored-By 之类 trailer，正文就脏了。这里强制把 tag 对象本身重新取回来。
+      - name: Refetch annotated tag object
+        run: git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
+
+      # 把标注 tag 的注解正文取出来当 Release 正文 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
+      # 顺手剔掉 Co-Authored-By / Signed-off-by 之类 trailer 和首尾多余空行（|| true 兜底：万一被过滤空了
+      # 也不让 pipefail 把这步判失败）。应用内更新弹窗按纯文本显示正文，所以 tag 注解请写纯文本、别用 Markdown。
       - name: Extract tag message
         id: tag_notes
         run: |
           {
             echo 'body<<INKWELL_NOTES_EOF'
-            git tag -l --format='%(contents)' "${{ github.ref_name }}"
+            git tag -l --format='%(contents)' "${{ github.ref_name }}" \
+              | { grep -viE '^(Co-Authored-By|Signed-off-by):' || true; } \
+              | sed -e 's/[[:space:]]*$//' \
+              | cat -s
             echo 'INKWELL_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -76,8 +86,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: inkwell-${{ github.ref_name }}.apk
-          # 自定义正文（tag 注解）在前，GitHub 自动生成的更新日志追加在后
+          # 正文只用 tag 注解本身。generate_release_notes 关掉：它会追加一段
+          # 「What's Changed + **Full Changelog** 链接」，在应用内纯文本弹窗里就是一堆噪声。
           body: ${{ steps.tag_notes.outputs.body }}
-          generate_release_notes: true
+          generate_release_notes: false
           # 带 - 后缀的 tag（如 v0.2.0-beta.1）标记为预发布 → 只推给测试版渠道
           prerelease: ${{ contains(github.ref_name, '-') }}
