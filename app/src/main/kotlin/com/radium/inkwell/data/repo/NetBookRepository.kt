@@ -102,18 +102,20 @@ class NetBookRepository(
         val added = (toc.size - book.totalChapters).coerceAtLeast(0)
 
         writeToc(book.id, toc)
-        bookDao.update(
-            book.copy(
-                totalChapters = toc.size,
-                latestChapterTitle = toc.lastOrNull()?.title,
-                readChapterIndex = readIndex,
-                readCharOffset = readOffset,
-                // 累加而不是覆盖：连刷两次、第二次没新章，不该把第一次的 5 章抹成 0 ——
-                // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
-                newChapterCount = book.newChapterCount + added,
-                updatedAt = System.currentTimeMillis(),
-            )
+        val refreshed = book.copy(
+            totalChapters = toc.size,
+            latestChapterTitle = toc.lastOrNull()?.title,
+            readChapterIndex = readIndex,
+            readCharOffset = readOffset,
+            // 累加而不是覆盖：连刷两次、第二次没新章，不该把第一次的 5 章抹成 0 ——
+            // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
+            newChapterCount = book.newChapterCount + added,
         )
+        // 一个字段都没变就别写库。否则每本书 updatedAt 一变，书架的 observeAll 就整表重发一轮 ——
+        // 下拉刷"没有新章节"时，全书架反复重组、转圈跟着掉帧。也顺带免掉一次无意义的 WebDAV 时间戳变更。
+        if (refreshed != book) {
+            bookDao.update(refreshed.copy(updatedAt = System.currentTimeMillis()))
+        }
         added
     }
 

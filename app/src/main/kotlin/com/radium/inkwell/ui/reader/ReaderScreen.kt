@@ -508,7 +508,10 @@ private fun buildLayoutSpec(
         // 正文顶跟着上移、多出显示空间。下边距用 marginVerticalDp。
         marginTopPx = settings.headerTopSpacingDp.dp.toPx() + cutout.top,
         marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom,
-        headerHeightPx = 18.dp.toPx(),
+        // 正文首行落在 marginTop + headerHeight，而页眉章节名画在 marginTop —— 两者的间距就是
+        // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
+        // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。
+        headerHeightPx = 26.dp.toPx(),
         footerHeightPx = 18.dp.toPx(),
         fontSizePx = fontSizePx,
         lineHeightPx = fontSizePx * settings.lineSpacingMult,

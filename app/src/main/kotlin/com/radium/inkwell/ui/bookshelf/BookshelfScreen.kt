@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,8 +37,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -64,6 +66,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import com.radium.inkwell.util.BiometricAuth
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -225,7 +228,7 @@ fun BookshelfScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         if (allBooks.isNotEmpty() && books.isEmpty() && hiddenCount > 0 && !showHidden) {
             // 书全被隐藏了。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
@@ -253,7 +256,16 @@ fun BookshelfScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            Column(Modifier.fillMaxSize().padding(padding)) {
+            // 沉浸式底部：只吃顶栏/两侧的 inset，**不吃底部导航栏的**——底部让给下面的网格，
+            // 由它用 contentPadding 把导航栏高度让出来，于是书封能滚到系统导航条下面（edge-to-edge）
+            val layoutDirection = LocalLayoutDirection.current
+            Column(
+                Modifier.fillMaxSize().padding(
+                    top = padding.calculateTopPadding(),
+                    start = padding.calculateStartPadding(layoutDirection),
+                    end = padding.calculateEndPadding(layoutDirection),
+                )
+            ) {
                 // 隐藏区的"控制台"。**只在已经展开时出现** —— 这个开关的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
                 AnimatedVisibility(
@@ -309,7 +321,14 @@ fun BookshelfScreen(
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(Dimens.gapM),
+                    // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
+                    // 而最后一排仍能滚清导航条不被挡住
+                    contentPadding = PaddingValues(
+                        start = Dimens.gapM,
+                        end = Dimens.gapM,
+                        top = Dimens.gapM,
+                        bottom = Dimens.gapM + padding.calculateBottomPadding(),
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
                     verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                 ) {
