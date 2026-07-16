@@ -116,18 +116,24 @@ class ChapterContentCache(private val root: File) {
 
     private companion object {
         /**
-         * 缓存格式 / 解析器版本。**改动 [HtmlToElements] 的输出或本文件的行格式时，必须 +1。**
+         * 缓存格式 / 解析器版本。**任何会改变正文解析结果的改动都必须 +1。**
+         *
+         * 范围是**整条解析链**，不只是某一个类：书源规则求值（LegadoSelector 的 text/textNodes/
+         * html 等提取器）、HtmlToElements 的切段、以及本文件的行格式 —— 任何一环改了输出，都得 +1。
          *
          * 缓存里躺的是解析好的段落，不是原始 HTML。不 +1 的话，用户**已经读过**的章节
          * （恰恰是最想看到修复效果的那些）会永远停在旧解析结果上，改了解析器也白改。
          *
-         * v2 正是这么来的：修好了「靠原始换行分段的源整章挤成一坨」，用户升级后一看，
-         * 一模一样 —— 因为那一章的坏结果早就缓存在磁盘上了。
+         * v2：修好「靠原始换行分段的源整章挤成一坨」时才发现这件事 —— 当时没有版本号，
+         * 用户升级后一看一模一样，因为坏结果早就缓存在磁盘上了。
+         * v3：@textNodes 从前用 text()+trim() 取文本，换行被压成空格、段首全角缩进被剥掉，
+         * 段落结构在规则求值阶段就没了。改动的是 LegadoSelector 而不是 HtmlToElements ——
+         * 正是「范围是整条链」这句话要拦住的情况。
          *
          * 用 [ESCAPE] 打头，保证撞不上任何正文：真以 ESCAPE 开头的段落会被
          * escapeIfAmbiguous 再加一层前缀。老缓存没有这一行，读时自然对不上、当没缓存。
          */
-        const val FORMAT_VERSION = "\u0001V2"
+        const val FORMAT_VERSION = "\u0001V3"
 
         const val IMG_PREFIX = "IMG:"
         const val HEAD_PREFIX = "H"

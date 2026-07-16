@@ -270,8 +270,16 @@ object LegadoSelector {
         when (val name = extractorRaw.trim()) {
             "text" -> els.map { it.text() }.filter { it.isNotEmpty() }
             "ownText" -> els.map { it.ownText() }.filter { it.isNotEmpty() }
+            // textNodes 的产物是**正文**，段落结构全靠换行与段首缩进承载，两者都不能碰：
+            //
+            // - 用 wholeText 而不是 text()：后者当场把换行归一化成空格。不少老站的正文既不用
+            //   <p> 也不用 <br>，整章就是一个文本节点、靠原始换行分段 —— 换行一没，整章塌成一坨。
+            // - trim 只剥 ASCII 空白（`it <= ' '`），**不能用 Kotlin 的 trim()**：后者按
+            //   Character.isWhitespace 判断，而全角空格 U+3000 在 Java 里算空白，会被一起剥掉。
+            //   段首那两个全角空格正是分段的唯一标记，剥了就再也认不出段落边界。
+            //   Legado 原版用的也是 `trim { it <= ' ' }`，这里与它对齐。
             "textNodes" -> els.mapNotNull { el ->
-                el.textNodes().map { it.text().trim() }
+                el.textNodes().map { node -> node.wholeText.trim { it <= ' ' } }
                     .filter { it.isNotEmpty() }
                     .takeIf { it.isNotEmpty() }
                     ?.joinToString("\n")
