@@ -29,7 +29,9 @@ import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.reader.render.ScrollChapter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
+import kotlin.coroutines.coroutineContext
 import com.radium.inkwell.core.model.ContentElement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -489,6 +491,10 @@ class ReaderViewModel(
                                 .getOrDefault(emptyList())
                                 .firstOrNull { titleMatches(it.title, b.title) }
                         }
+                        // 本轮搜索已被取代（重新点了换源）或被换源/关面板取消时，别再写状态：
+                        // 协程取消只在挂起点抛出，越过 withTimeoutOrNull 的僵尸任务会把脏结果写进
+                        // 新一轮刚清空的 rawCandidates、乱跳计数，还一起往 Main 刷 state 造成卡死。
+                        coroutineContext.ensureActive()
                         if (hit != null) rawCandidates += hit
                         _state.value = _state.value.copy(
                             sourceCandidates = filtered(),
@@ -523,8 +529,17 @@ class ReaderViewModel(
 
     fun applyChangeSource(candidate: SearchResult) {
         val b = book ?: return
+        // 正在换源就别再受理下一次点击，避免同一本书的 changeSource 交错执行
+        if (_state.value.changingSource) return
+        // 选定了源，换源搜索就该停 —— 否则它每搜完一个源就把 sourceCandidates 写回非空，
+        // 面板关不掉、还一直显示「搜索中」，直到几百个源全跑完。
+        sourceSearchJob?.cancel()
         viewModelScope.launch {
-            _state.value = _state.value.copy(changingSource = true, autoChanging = false)
+            _state.value = _state.value.copy(
+                changingSource = true,
+                autoChanging = false,
+                searchingSources = false,
+            )
             // 用户亲自选了源：掐掉可能还在跑的自动换源，否则它探测成功后会把用户的选择覆盖掉
             autoChangeJob?.cancel()
             autoChangeUsed = true
