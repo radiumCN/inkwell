@@ -33,8 +33,6 @@ class WebDavRepository(
     private companion object {
         const val DIR = "inkwell"
         const val BACKUP = "inkwell/backup.json.gz"
-        /** 上传先写这个临时名，成功后 MOVE 到正式名 —— 远端不会出现半截的 backup.json.gz */
-        const val BACKUP_TMP = "inkwell/backup.json.gz.tmp"
     }
 
     suspend fun testConnection(url: String, username: String, password: String): Result<Unit> =
@@ -79,10 +77,9 @@ class WebDavRepository(
             )
         }
 
-        // 先写临时名再 MOVE 覆盖正式名：上传中断只会留下 .tmp，正式备份要么是旧的完整版、
-        // 要么是新的完整版，绝不出现半截文件让下次 decode 挂掉。
-        client.put(BACKUP_TMP, BackupCodec.encode(toUpload), contentType = "application/gzip")
-        client.move(BACKUP_TMP, BACKUP)
+        // 直接 PUT 覆盖。半截文件的风险由上面的「decode 失败即当远端没有、直接覆盖自愈」兜底，
+        // 不再用「PUT 临时名 + MOVE」——坚果云等服务器对 MOVE 回 409，反而把同步整个搞挂。
+        client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
         prefs.markSynced(System.currentTimeMillis())
         if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"
     }
