@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -42,7 +43,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,7 +138,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
 
             if (state.lastSyncAt > 0) {
                 Text(
-                    "上次同步: " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                    "上次同步: " + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
                         .format(Date(state.lastSyncAt)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

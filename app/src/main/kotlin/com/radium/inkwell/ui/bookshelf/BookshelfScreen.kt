@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.bookshelf
 
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -124,7 +125,7 @@ fun BookshelfScreen(
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val hideBooksEnabled by viewModel.hideBooksEnabled.collectAsStateWithLifecycle()
-    val activity = LocalContext.current as? androidx.fragment.app.FragmentActivity
+    val activity = LocalActivity.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val biometricAvailable = remember { BiometricAuth.isAvailable(context) }

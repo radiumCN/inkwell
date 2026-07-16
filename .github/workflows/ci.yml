@@ -27,6 +27,9 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
+      - name: Run lint
+        run: ./gradlew :app:lintDebug
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -40,4 +43,5 @@ jobs:
           name: test-reports
           path: |
             **/build/reports/tests/
+            **/build/reports/lint-results-*.html
           retention-days: 7

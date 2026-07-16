@@ -71,8 +71,8 @@ import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.runtime.mutableIntStateOf
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
@@ -426,7 +426,7 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
         // TabRow 钉在顶不滚，只让下面的内容滚 —— 排版页项目多（字号/标题/边距/行距/字体/背景/亮度），
         // 一屏放不下。从前内容 Column 既没 verticalScroll 也没高度上限，超出的部分被 sheet 直接裁掉、
         // 还滚不动，背景/亮度全被压在屏幕外。
-        TabRow(selectedTabIndex = tab) {
+        SecondaryTabRow(selectedTabIndex = tab) {
             SETTINGS_TABS.forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
