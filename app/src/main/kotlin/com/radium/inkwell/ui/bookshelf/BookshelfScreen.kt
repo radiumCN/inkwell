@@ -60,6 +60,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.Motion
+import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
@@ -328,6 +330,9 @@ fun BookshelfScreen(
                     onRefresh = { viewModel.refreshAll() },
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
+                // 写进 items 里就是每本书挂一个
+                val motionOn = animationsEnabled()
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
@@ -348,6 +353,16 @@ fun BookshelfScreen(
                             onClick = { onOpenBook(book.id) },
                             // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
                             onLongClick = { actionTarget = book },
+                            // 切「显示隐藏的书」时整批书凭空出现/消失，从前是硬闪 —— 看不出
+                            // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
+                            // 才看得出「这几本是插进来的」。
+                            // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
+                            // 后者仍会走一遍动画机器，只是时长为零。
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = if (motionOn) Motion.enterSpec() else null,
+                                placementSpec = if (motionOn) Motion.enterSpec() else null,
+                                fadeOutSpec = if (motionOn) Motion.exitSpec() else null,
+                            ),
                         )
                     }
                 }
@@ -492,7 +507,12 @@ fun BookshelfScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun BookCard(
+    book: BookEntity,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -500,7 +520,7 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
         //
         // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
         // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
-        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         Box {
             BookCover(
