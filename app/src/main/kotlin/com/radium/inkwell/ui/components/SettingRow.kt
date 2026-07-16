@@ -87,11 +87,17 @@ fun SwitchRow(
     subtitle: String? = null,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
             .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -106,6 +112,6 @@ fun SwitchRow(
             }
         }
         Spacer(Modifier.width(Dimens.gapM))
-        Switch(checked = checked, onCheckedChange = null)
+        Switch(checked = checked, enabled = enabled, onCheckedChange = null)
     }
 }

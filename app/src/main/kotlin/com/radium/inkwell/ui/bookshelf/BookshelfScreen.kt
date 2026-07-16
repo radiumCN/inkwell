@@ -63,7 +63,12 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.layout.heightIn
+import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
@@ -113,6 +118,9 @@ fun BookshelfScreen(
     val panelOpen by viewModel.hiddenPanelOpen.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     var overflowOpen by remember { mutableStateOf(false) }
+    // 隐藏区的两个持久设置（允许隐藏 / 展开需验证）收进这个底部小 sheet，
+    // 顶部状态条只管「本次会话显不显」这一个瞬时开关
+    var hiddenSettingsOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val hideBooksEnabled by viewModel.hideBooksEnabled.collectAsStateWithLifecycle()
@@ -269,22 +277,21 @@ fun BookshelfScreen(
                     end = padding.calculateEndPadding(layoutDirection),
                 )
             ) {
-                // 隐藏区的"控制台"。**只在已经展开时出现** —— 这个开关的存在本身就是线索，
+                // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
+                // 只留「本次会话显不显」这个瞬时开关（切换时下面的书网格当场可见效果），
+                // 两个持久设置收进 ⚙ 打开的小 sheet。
                 AnimatedVisibility(
                     visible = panelOpen,
                     enter = expandEnter(),
                     exit = expandExit(),
                 ) {
-                    HiddenAreaBar(
-                        requireAuth = requireAuth,
-                        biometricAvailable = biometricAvailable,
-                        hideBooksEnabled = hideBooksEnabled,
-                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
-                        onToggleHideBooks = { viewModel.setHideBooksEnabled(it) },
+                    HiddenStatusBar(
                         showHidden = showHidden,
                         onToggleShowHidden = { viewModel.setShowHidden(it) },
-                        onCollapse = { viewModel.closeHiddenPanel() },
+                        onOpenSettings = { hiddenSettingsOpen = true },
+                        // ✕ = 退出整个隐藏区（面板收起 + 书藏回去），与长按标题一键收摊等价
+                        onCollapse = { viewModel.collapseHiddenAll() },
                     )
                 }
 
@@ -469,6 +476,17 @@ fun BookshelfScreen(
             },
         )
     }
+
+    if (hiddenSettingsOpen) {
+        HiddenSettingsSheet(
+            hideBooksEnabled = hideBooksEnabled,
+            requireAuth = requireAuth,
+            biometricAvailable = biometricAvailable,
+            onToggleHideBooks = { viewModel.setHideBooksEnabled(it) },
+            onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+            onDismiss = { hiddenSettingsOpen = false },
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -543,15 +561,20 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onLongClick: () -> U
  * 等于把「这个 App 能藏书」和暗号一起印在了任何人都能翻到的地方。一个只有你知道的东西，
  * 它的开关也只能长在你已经进去之后的地方。
  */
+/**
+ * 隐藏区状态条。一条轻量的横条，压在书网格上方：
+ * - 左侧眼睛图标 + 「本次会话显不显」的文字状态；
+ * - 中间的开关就是那个瞬时显隐（切换时下面网格当场可见效果，所以不塞进会盖住网格的弹层）；
+ * - ⚙ 打开两个持久设置的小 sheet；✕ 一键退出整个隐藏区。
+ *
+ * 从前是一张占屏三分之一的大卡把三个开关堆在一起，浏览隐藏书时一直杵在书上方；
+ * 且瞬时显隐与持久设置混在一处，概念糊。这里把两者拆开。
+ */
 @Composable
-private fun HiddenAreaBar(
-    requireAuth: Boolean,
-    biometricAvailable: Boolean,
-    hideBooksEnabled: Boolean,
+private fun HiddenStatusBar(
     showHidden: Boolean,
-    onToggleAuth: (Boolean) -> Unit,
-    onToggleHideBooks: (Boolean) -> Unit,
     onToggleShowHidden: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -562,35 +585,57 @@ private fun HiddenAreaBar(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(
-            Modifier.padding(
-                start = Dimens.gapL,
-                end = Dimens.gapS,
-                top = Dimens.gapM,
-                bottom = Dimens.gapS,
-            )
+        Row(
+            Modifier
+                .padding(start = Dimens.gapL, end = Dimens.gapXS)
+                .heightIn(min = Dimens.touchTarget),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                if (showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                contentDescription = null,
+                Modifier.size(Dimens.iconSm),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(
-                "隐藏的书",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(bottom = Dimens.gapS),
+                if (showHidden) "隐藏的书显示中" else "隐藏的书已收起",
+                Modifier
+                    .weight(1f)
+                    .padding(start = Dimens.gapS, end = Dimens.gapS),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            Switch(checked = showHidden, onCheckedChange = onToggleShowHidden)
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Default.Tune, contentDescription = "隐藏设置")
+            }
+            IconButton(onClick = onCollapse) {
+                Icon(Icons.Default.Close, contentDescription = "收起隐藏区")
+            }
+        }
+    }
+}
 
-            // 这一条才是「书现在显不显」。从前它没有开关 —— 显隐跟面板绑死，
-            // 于是「收起」一按，面板关掉的同时把书也藏回去了。你只是不想看那块面板而已。
-            SwitchLine(
-                title = "在书架上显示",
-                subtitle = if (showHidden) {
-                    "隐藏的书正混在书架里（角上有标记）"
-                } else {
-                    "隐藏的书不在书架上"
-                },
-                checked = showHidden,
-                enabled = true,
-                onCheckedChange = onToggleShowHidden,
+/** 隐藏区的两个持久设置：从状态条的 ⚙ 弹出。瞬时显隐不在这里（它在状态条上、要网格可见） */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HiddenSettingsSheet(
+    hideBooksEnabled: Boolean,
+    requireAuth: Boolean,
+    biometricAvailable: Boolean,
+    onToggleHideBooks: (Boolean) -> Unit,
+    onToggleAuth: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+            Text(
+                "隐藏设置",
+                Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
+                style = MaterialTheme.typography.titleMedium,
             )
-
-            SwitchLine(
+            SwitchRow(
                 title = "允许隐藏书籍",
                 subtitle = if (hideBooksEnabled) {
                     "长按书籍时会出现「从书架隐藏」"
@@ -598,11 +643,9 @@ private fun HiddenAreaBar(
                     "长按书籍时不出现隐藏选项 —— 别人看不出这个功能存在"
                 },
                 checked = hideBooksEnabled,
-                enabled = true,
                 onCheckedChange = onToggleHideBooks,
             )
-
-            SwitchLine(
+            SwitchRow(
                 title = "展开时需要验证",
                 subtitle = when {
                     !biometricAvailable -> "这台设备还没设过指纹/面容或锁屏密码，无法上锁"
@@ -614,36 +657,6 @@ private fun HiddenAreaBar(
                 enabled = biometricAvailable,
                 onCheckedChange = onToggleAuth,
             )
-
-            // 只关这块面板，不动书的显隐 —— 那是上面那个开关的事
-            TextButton(onClick = onCollapse, modifier = Modifier.align(Alignment.End)) {
-                Text("收起面板")
-            }
         }
-    }
-}
-
-/** 隐藏区里的开关行。用不了 SwitchRow —— 那个是给整宽设置页用的，塞进这张卡里左右会顶到边 */
-@Composable
-private fun SwitchLine(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = Dimens.gapXS),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = Dimens.gapS)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
