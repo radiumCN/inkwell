@@ -90,6 +90,8 @@ data class ReaderUiState(
     val menuVisible: Boolean = false,
     val atBookEnd: Boolean = false,
     val isNetBook: Boolean = false,
+    /** 当前书源名（换源面板顶部显示「当前」用）；本地书为空 */
+    val currentSourceName: String = "",
     /** 长按选字是否开启 */
     val textSelectionEnabled: Boolean = true,
     /** 一次性提示（建了净化规则之类） */
@@ -190,9 +192,11 @@ class ReaderViewModel(
             if (b.newChapterCount > 0) bookRepo.clearNewChapters(bookId)
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
             var chapters = chapterDao.getByBook(bookId)
+            var currentSourceName = ""
             val src = if (b.type == BookType.NET) {
                 val rule = b.sourceId?.let { sourceRepo.getRule(it) }
                     ?: error("书源不存在，请换源后阅读")
+                currentSourceName = rule.name
                 // WebDAV 同步下来的网络书只有书行、没有目录行（目录不进备份）。此时不补抓的话
                 // 章节数为 0，ensurePaginated 静默返回 null，页面永远转圈。先拉一次目录落库。
                 if (chapters.isEmpty()) {
@@ -210,6 +214,7 @@ class ReaderViewModel(
                 chapterIndex = position.chapterIndex,
                 toc = chapters.map { TocItem(it.index, it.title) },
                 isNetBook = b.type == BookType.NET,
+                currentSourceName = currentSourceName,
                 error = null,
             )
             // 排版环境已就绪（换源重载场景）→ 立即重新分页

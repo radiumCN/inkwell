@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -44,8 +43,19 @@ fun ChangeSourceSheet(
                     Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("换源", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.weight(1f))
+                    Column(Modifier.weight(1f)) {
+                        Text("换源", style = MaterialTheme.typography.titleMedium)
+                        // 告诉用户现在读的是哪个源 —— 换源列表里刻意不含当前源，不标出来就无从对比
+                        state.currentSourceName.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                "当前：$it",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     // 边搜边出，让用户看得见还在搜、搜了多少，而不是干等一个转圈
                     if (state.searchingSources) {
                         Text(
