@@ -43,6 +43,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_9_10,
                 InkwellDb.MIGRATION_10_11,
                 InkwellDb.MIGRATION_11_12,
+                InkwellDb.MIGRATION_12_13,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
@@ -52,6 +53,7 @@ val appModule = module {
     single { get<InkwellDb>().bookDao() }
     single { get<InkwellDb>().chapterDao() }
     single { get<InkwellDb>().bookSourceDao() }
+    single { get<InkwellDb>().bookSourceHitDao() }
     single { get<InkwellDb>().replaceRuleDao() }
     single { get<InkwellDb>().rssSourceDao() }
 
@@ -91,8 +93,8 @@ val appModule = module {
     single { com.radium.inkwell.update.UpdateInstaller(get()) }
     single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
 
-    single { BookRepository(androidContext(), get(), get(), get()) }
-    single { BookSourceRepository(get()) }
+    single { BookRepository(androidContext(), get(), get(), get(), get()) }
+    single { BookSourceRepository(get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
@@ -100,7 +102,7 @@ val appModule = module {
 
     viewModel { BookshelfViewModel(get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

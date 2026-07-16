@@ -43,9 +43,10 @@ class AutoSourceSwitcher(
         exclude: String?,
         target: Target,
         checkAuthor: Boolean,
+        bookHits: Map<String, Boolean> = emptyMap(),
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Probe? = coroutineScope {
-        val candidates = rankedCandidates(exclude)
+        val candidates = rankedCandidates(exclude, bookHits)
         if (candidates.isEmpty()) return@coroutineScope null
 
         val limiter = Semaphore(CONCURRENCY)
@@ -80,8 +81,10 @@ class AutoSourceSwitcher(
         winner
     }
 
-    private suspend fun rankedCandidates(exclude: String?): List<BookSourceRule> =
-        rank(sourceRepo.getEnabledForSwitch(), exclude)
+    private suspend fun rankedCandidates(
+        exclude: String?,
+        bookHits: Map<String, Boolean>,
+    ): List<BookSourceRule> = rank(sourceRepo.getEnabledForSwitch(), exclude, bookHits)
 
     /** 端到端跑一遍。任何一环没过就返回 null —— 抛异常也一样，调用方 runCatching 吞掉。 */
     private suspend fun probe(
@@ -134,11 +137,13 @@ class AutoSourceSwitcher(
         internal fun rank(
             sources: List<BookSourceRepository.EnabledSource>,
             exclude: String?,
+            bookHits: Map<String, Boolean> = emptyMap(),
         ): List<BookSourceRule> = sources
             // 没有搜索规则的源找不到书；当前源已经证明自己不行了
             .filter { it.rule.search != null && it.rule.id != exclude }
             .sortedWith(
                 compareBy(
+                    { hitRank(bookHits[it.rule.id]) },
                     { statusRank(it.checkStatus) },
                     // 没测过耗时的排在测过的后面，而不是当成 0 排最前
                     { if (it.respondTime > 0) it.respondTime else Long.MAX_VALUE },
@@ -146,6 +151,20 @@ class AutoSourceSwitcher(
                 )
             )
             .map { it.rule }
+
+        /**
+         * 按书维度的信号**压在全局健康度之前**：一个又快又健康、但根本没有这本书的源，
+         * 对这次换源毫无用处 —— checkStatus/respondTime 回答的是"源活着吗、快吗"，
+         * 回答不了"有没有**这本书**"。
+         *
+         * 搜过但没有的（false）只垫底、**不剔除**，同 [statusRank] 那套理由：站点会上新书，
+         * 而且用户点换源本就是想看全部候选，凭空少几个源只会让人纳闷。
+         */
+        private fun hitRank(hit: Boolean?) = when (hit) {
+            true -> 0
+            null -> 1 // 没搜过，居中
+            false -> 2 // 搜索跑通了、确实没这本书
+        }
 
         private fun statusRank(status: Int) = when (status) {
             CheckStatus.OK -> 0

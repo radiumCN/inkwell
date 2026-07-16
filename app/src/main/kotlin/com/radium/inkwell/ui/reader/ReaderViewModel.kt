@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.repo.BookRepository
@@ -143,6 +145,7 @@ class ReaderViewModel(
     private val bookId: String,
     private val bookRepo: BookRepository,
     private val chapterDao: ChapterDao,
+    private val hitDao: BookSourceHitDao,
     private val readerPrefs: ReaderPrefs,
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
@@ -495,8 +498,16 @@ class ReaderViewModel(
         sourceSearchJob?.cancel()
         sourceSearchJob = viewModelScope.launch {
             val checkAuthor = appPrefs.changeSourceCheckAuthor.first()
-            val all = sourceRepo.getEnabledRules()
-                .filter { it.search != null && it.id != b.sourceId }
+            // 排序而不是照库里的原顺序：面板照样要搜完所有源（用户点换源就是想看全部候选），
+            // 但让「以前有这本书的」「校验通过的」「响应快的」先占住那 8 个并发名额，
+            // 能用的结果就会更早出现在面板上，不必等到最后。
+            // 自动换源一直是这么做的（AutoSourceSwitcher.rank），手动面板从前却用
+            // getEnabledRules()，那个版本把 checkStatus/respondTime 全丢了。
+            val all = AutoSourceSwitcher.rank(
+                sourceRepo.getEnabledForSwitch(),
+                exclude = b.sourceId,
+                bookHits = bookHits(),
+            )
             rawCandidates.clear()
             _state.value = _state.value.copy(
                 sourceCandidates = emptyList(),
@@ -510,16 +521,32 @@ class ReaderViewModel(
             all.map { rule ->
                 async {
                     limiter.withPermit {
-                        val hit = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
-                            runCatching { engine.search(rule, b.title).items }
-                                .getOrDefault(emptyList())
-                                .firstOrNull { titleMatches(it.title, b.title) }
-                        }
+                        // 三种结局必须分开记：搜到了 / 搜索跑通但没这本书 / 压根没搜成。
+                        // 只有前两种是关于"这个源有没有这本书"的证据；超时和报错什么都没证明。
+                        // 从前 getOrDefault(emptyList()) 把「报错」和「真的没有」压成同一个空结果 ——
+                        // 照那样记忆的话，一次网络抖动就能把一个好源永久打入冷宫。
+                        val outcome = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
+                            runCatching { engine.search(rule, b.title).items }.fold(
+                                onSuccess = { items ->
+                                    val m = items.firstOrNull { titleMatches(it.title, b.title) }
+                                    if (m != null) SearchOutcome.Hit(m) else SearchOutcome.Miss
+                                },
+                                onFailure = { SearchOutcome.Failed },
+                            )
+                        } ?: SearchOutcome.Failed
                         // 本轮搜索已被取代（重新点了换源）或被换源/关面板取消时，别再写状态：
                         // 协程取消只在挂起点抛出，越过 withTimeoutOrNull 的僵尸任务会把脏结果写进
                         // 新一轮刚清空的 rawCandidates、乱跳计数，还一起往 Main 刷 state 造成卡死。
+                        // 也挡住了 runCatching 吞掉的 CancellationException。
                         coroutineContext.ensureActive()
-                        if (hit != null) rawCandidates += hit
+                        when (outcome) {
+                            is SearchOutcome.Hit -> {
+                                rawCandidates += outcome.result
+                                recordHit(rule.id, true, outcome.result.bookUrl)
+                            }
+                            SearchOutcome.Miss -> recordHit(rule.id, false, null)
+                            SearchOutcome.Failed -> Unit // 什么都没证明，不写库
+                        }
                         _state.value = _state.value.copy(
                             sourceCandidates = filtered(),
                             sourcesDone = _state.value.sourcesDone + 1,
@@ -528,6 +555,37 @@ class ReaderViewModel(
                 }
             }.awaitAll()
             _state.value = _state.value.copy(searchingSources = false)
+        }
+    }
+
+    /** 换源搜索单个源的三种结局。**别退化成可空类型** —— 那正是从前把「报错」和「没这本书」混为一谈的原因 */
+    private sealed interface SearchOutcome {
+        data class Hit(val result: SearchResult) : SearchOutcome
+        /** 搜索跑通了，但这个源确实没这本书 —— 可信，值得记 */
+        data object Miss : SearchOutcome
+        /** 超时/报错。什么都没证明，不记 */
+        data object Failed : SearchOutcome
+    }
+
+    /** sourceId → 这本书在该源搜到过没有；没有条目 = 没搜过 */
+    private suspend fun bookHits(): Map<String, Boolean> =
+        runCatching { hitDao.getByBook(bookId).associate { it.sourceId to it.hit } }
+            .getOrDefault(emptyMap())
+
+    private fun recordHit(sourceId: String, hit: Boolean, bookUrl: String?) {
+        // 记忆是纯粹的加速手段，写失败了不该影响换源本身 —— 顶多下次少一点先验
+        viewModelScope.launch(NonCancellable) {
+            runCatching {
+                hitDao.upsert(
+                    BookSourceHitEntity(
+                        bookId = bookId,
+                        sourceId = sourceId,
+                        hit = hit,
+                        bookUrl = bookUrl,
+                        checkedAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
         }
     }
 
@@ -646,6 +704,7 @@ class ReaderViewModel(
                 exclude = b.sourceId,
                 target = AutoSourceSwitcher.Target(position.chapterIndex, chapterTitle),
                 checkAuthor = appPrefs.changeSourceCheckAuthor.first(),
+                bookHits = bookHits(),
                 onProgress = { done, total ->
                     _state.value = _state.value.copy(autoChangeDone = done, autoChangeTotal = total)
                 },

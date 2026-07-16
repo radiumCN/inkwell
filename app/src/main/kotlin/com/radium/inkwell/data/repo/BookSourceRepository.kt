@@ -2,6 +2,7 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.data.db.dao.BookSourceDao
+import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.Flow
@@ -10,7 +11,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-class BookSourceRepository(private val dao: BookSourceDao) {
+class BookSourceRepository(
+    private val dao: BookSourceDao,
+    private val hitDao: BookSourceHitDao,
+) {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -134,11 +138,17 @@ class BookSourceRepository(private val dao: BookSourceDao) {
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 
-    suspend fun delete(id: String) = dao.deleteById(id)
+    suspend fun delete(id: String) {
+        dao.deleteById(id)
+        // 换源记忆里指向这个源的行成了孤儿
+        hitDao.deleteBySource(id)
+    }
 
     /** 批量删除/启停：书源动辄几百个，逐条走会很慢也很吵 */
     suspend fun deleteAll(ids: Collection<String>) {
-        if (ids.isNotEmpty()) dao.deleteByIds(ids.toList())
+        if (ids.isEmpty()) return
+        dao.deleteByIds(ids.toList())
+        hitDao.deleteBySources(ids.toList())
     }
 
     suspend fun setEnabledAll(ids: Collection<String>, enabled: Boolean) {

@@ -1,7 +1,9 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.data.db.dao.BookSourceDao
+import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -78,10 +80,25 @@ class BookSourceImportTest {
     }
     """.trimIndent()
 
+    /** 换源记忆的内存版：这里只关心删源时有没有把指向它的行一起清掉 */
+    private class FakeHitDao : BookSourceHitDao {
+        val store = mutableListOf<BookSourceHitEntity>()
+        override suspend fun getByBook(bookId: String) = store.filter { it.bookId == bookId }
+        override suspend fun upsert(hit: BookSourceHitEntity) {
+            store.removeAll { it.bookId == hit.bookId && it.sourceId == hit.sourceId }
+            store += hit
+        }
+        override suspend fun deleteByBook(bookId: String) { store.removeAll { it.bookId == bookId } }
+        override suspend fun deleteBySource(sourceId: String) { store.removeAll { it.sourceId == sourceId } }
+        override suspend fun deleteBySources(sourceIds: List<String>) {
+            store.removeAll { it.sourceId in sourceIds }
+        }
+    }
+
     @Test
     fun `batch import writes all sources in a single transaction`() = runTest {
         val dao = FakeDao()
-        val repo = BookSourceRepository(dao)
+        val repo = BookSourceRepository(dao, FakeHitDao())
         val report = repo.importJson(legadoArray).getOrThrow()
 
         // 4 个源，站B/站C 撞同一域名 id → 去重后 3 个
@@ -96,7 +113,7 @@ class BookSourceImportTest {
     @Test
     fun `re-import reports updates and keeps user enabled state`() = runTest {
         val dao = FakeDao()
-        val repo = BookSourceRepository(dao)
+        val repo = BookSourceRepository(dao, FakeHitDao())
         repo.importJson(legadoArray).getOrThrow()
         // 用户禁用站A（id = bookSourceUrl）
         dao.store["https://a.com"] = dao.store["https://a.com"]!!.copy(enabled = false)
@@ -113,7 +130,7 @@ class BookSourceImportTest {
     @Test
     fun `非文字书源被过滤掉`() = runTest {
         val dao = FakeDao()
-        val repo = BookSourceRepository(dao)
+        val repo = BookSourceRepository(dao, FakeHitDao())
         val audio = """
             {"bookSourceUrl":"https://audio.com","bookSourceName":"听书站","bookSourceType":1,
              "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
@@ -153,7 +170,7 @@ class BookSourceImportTest {
     @Test
     fun `批量删除与批量启停`() = runTest {
         val dao = FakeDao()
-        val repo = BookSourceRepository(dao)
+        val repo = BookSourceRepository(dao, FakeHitDao())
         repo.importJson("[" + LEGADO_SRC + "," + LEGADO_SRC2 + "]").getOrThrow()
         assertEquals(2, dao.store.size)
 
@@ -166,4 +183,33 @@ class BookSourceImportTest {
         assertEquals(ids[1], dao.store.keys.single())
     }
 
+    /**
+     * 换源记忆按 sourceId 存，源没了那些行就是孤儿：读不到、删不掉、只会越攒越多。
+     * 删源和清记忆必须成对。
+     */
+    @Test
+    fun `删源时一并清掉指向它的换源记忆`() = runTest {
+        val hits = FakeHitDao()
+        val repo = BookSourceRepository(FakeDao(), hits)
+        hits.upsert(BookSourceHitEntity("book1", "srcA", hit = true, checkedAt = 0))
+        hits.upsert(BookSourceHitEntity("book1", "srcB", hit = false, checkedAt = 0))
+
+        repo.delete("srcA")
+
+        assertEquals(listOf("srcB"), hits.store.map { it.sourceId })
+    }
+
+    /** 批量删走的是另一条 SQL，同样得清 */
+    @Test
+    fun `批量删源时一并清掉换源记忆`() = runTest {
+        val hits = FakeHitDao()
+        val repo = BookSourceRepository(FakeDao(), hits)
+        hits.upsert(BookSourceHitEntity("book1", "srcA", hit = true, checkedAt = 0))
+        hits.upsert(BookSourceHitEntity("book2", "srcB", hit = true, checkedAt = 0))
+        hits.upsert(BookSourceHitEntity("book1", "srcC", hit = true, checkedAt = 0))
+
+        repo.deleteAll(listOf("srcA", "srcB"))
+
+        assertEquals(listOf("srcC"), hits.store.map { it.sourceId })
+    }
 }

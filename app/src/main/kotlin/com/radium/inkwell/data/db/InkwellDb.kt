@@ -6,11 +6,13 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
+import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.db.entity.RssSourceEntity
@@ -20,16 +22,18 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         BookEntity::class,
         ChapterEntity::class,
         BookSourceEntity::class,
+        BookSourceHitEntity::class,
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun chapterDao(): ChapterDao
     abstract fun bookSourceDao(): BookSourceDao
+    abstract fun bookSourceHitDao(): BookSourceHitDao
     abstract fun replaceRuleDao(): ReplaceRuleDao
     abstract fun rssSourceDao(): RssSourceDao
 
@@ -117,6 +121,28 @@ abstract class InkwellDb : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book ADD COLUMN newChapterCount INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * 「这本书在这个源搜到过没有」的记忆，用于换源时把有这本书的源排到前面。
+         * 纯新增表 —— 老用户的书架、进度、书源一行不动；表是空的，
+         * 排序自然退化回原来的「全局健康度」，攒够数据才逐渐生效。
+         */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS book_source_hit (
+                        bookId TEXT NOT NULL,
+                        sourceId TEXT NOT NULL,
+                        hit INTEGER NOT NULL,
+                        bookUrl TEXT,
+                        checkedAt INTEGER NOT NULL,
+                        PRIMARY KEY(bookId, sourceId)
+                    )
+                    """.trimIndent(),
+                )
             }
         }
 

@@ -5,6 +5,7 @@ import android.net.Uri
 import com.radium.inkwell.core.model.BookHandle
 import com.radium.inkwell.core.model.BookParserRegistry
 import com.radium.inkwell.data.db.dao.BookDao
+import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
@@ -20,6 +21,7 @@ class BookRepository(
     private val context: Context,
     private val bookDao: BookDao,
     private val chapterDao: ChapterDao,
+    private val hitDao: BookSourceHitDao,
     private val parserRegistry: BookParserRegistry,
 ) {
 
@@ -114,6 +116,8 @@ class BookRepository(
             book.coverPath?.let { File(it).delete() }
             File(File(context.filesDir, "cache"), id).deleteRecursively()
             chapterDao.deleteByBook(id)
+            // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
+            hitDao.deleteByBook(id)
             bookDao.delete(book)
         }
     }
