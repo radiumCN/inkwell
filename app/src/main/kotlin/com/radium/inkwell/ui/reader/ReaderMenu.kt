@@ -298,6 +298,9 @@ fun ReaderMenu(
             TocList(
                 toc = state.toc,
                 current = state.chapterIndex,
+                // 本地书正文一直在，缓存指示对它没有意义（isCached 恒为 false，
+                // 显示出来只会让每一章都像"没预加载"）
+                showCacheState = state.isNetBook,
                 // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
                 onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
             )
@@ -313,7 +316,12 @@ fun ReaderMenu(
 }
 
 @Composable
-private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
+private fun TocList(
+    toc: List<TocItem>,
+    current: Int,
+    showCacheState: Boolean,
+    onSelect: (Int) -> Unit,
+) {
     val listState = rememberLazyListState()
     var query by remember { mutableStateOf("") }
     val filtered = remember(toc, query) {
@@ -344,17 +352,34 @@ private fun TocList(toc: List<TocItem>, current: Int, onSelect: (Int) -> Unit) {
         } else {
             LazyColumn(state = listState, modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
                 items(filtered, key = { it.index }) { item ->
-                    Text(
-                        item.title,
+                    Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(item.index) }
+                            .clickable(role = Role.Button) { onSelect(item.index) }
                             .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
-                        fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
-                        color = if (item.index == current) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            item.title,
+                            Modifier.weight(1f),
+                            fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
+                            color = if (item.index == current) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                        )
+                        // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
+                        // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
+                        if (showCacheState && item.cached) {
+                            Spacer(Modifier.width(Dimens.gapS))
+                            Box(
+                                Modifier
+                                    .size(Dimens.gapS)
+                                    // 光一个色点读屏念不出来，得显式补名字
+                                    .semantics { contentDescription = "已缓存" }
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
@@ -51,7 +52,8 @@ import kotlinx.coroutines.withContext
 import com.radium.inkwell.core.source.Purifier
 import kotlinx.coroutines.withTimeoutOrNull
 
-data class TocItem(val index: Int, val title: String)
+/** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
+data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
 
 /** 全书搜索的一条命中 */
 data class ChapterHit(
@@ -181,6 +183,23 @@ class ReaderViewModel(
             }
         }
         observeBookRules()
+        observeToc()
+    }
+
+    /**
+     * 目录跟着库走，而不是进书时拍一张快照。
+     *
+     * isCached 由 NetReaderBookSource 在正文落盘后 markCached 写库，是边读边变的；
+     * 只在 loadSession 里 map 一次的话，目录里的缓存指示永远停在进书那一刻。
+     */
+    private fun observeToc() {
+        viewModelScope.launch {
+            chapterDao.observeByBook(bookId).collect { chapters ->
+                _state.value = _state.value.copy(
+                    toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
+                )
+            }
+        }
     }
 
     private suspend fun loadSession() {
@@ -212,7 +231,7 @@ class ReaderViewModel(
                 bookTitle = b.title,
                 chapterCount = src.chapterCount,
                 chapterIndex = position.chapterIndex,
-                toc = chapters.map { TocItem(it.index, it.title) },
+                toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
                 isNetBook = b.type == BookType.NET,
                 currentSourceName = currentSourceName,
                 error = null,
@@ -739,7 +758,22 @@ class ReaderViewModel(
 
     /** 定位到指定位置：必要时加载+分页该章，并预取相邻章 */
     private suspend fun showPosition(target: ReadPosition) {
-        val result = ensurePaginated(target.chapterIndex) ?: return
+        // 这条永远是"用户在等的那一章"（进书、翻章、跳目录、重试都走这里），预取不走这里
+        val result = ensurePaginated(target.chapterIndex, userFacing = true) ?: run {
+            // ensurePaginated 的前置守卫是静默返回 null 的。其中"排版环境还没就绪"
+            // （source/facade/spec 为 null）属于正常启动时序 —— loadSession/onLayoutReady
+            // 随后会再来一次，这里报错只会闪一下假错误。
+            // 但环境已就绪却仍拿不到结果（如目录为空导致章号越界），就是真读不出来：
+            // 必须让 loading 落地，否则又是一个"永远转圈且没有出口"。
+            if (source != null && facade != null && spec != null && _state.value.error == null) {
+                Log.w(TAG, "第 ${target.chapterIndex} 章取不到分页结果，且排版环境已就绪")
+                _state.value = _state.value.copy(
+                    loading = false,
+                    error = "章节加载失败：第 ${target.chapterIndex + 1} 章读不出来",
+                )
+            }
+            return
+        }
         val pageIdx = if (target.charOffset == Int.MAX_VALUE) {
             result.chapter.pages.lastIndex
         } else {
@@ -776,7 +810,8 @@ class ReaderViewModel(
      */
     private val scrollCache = LinkedHashMap<Int, ScrollChapter>()
 
-    private suspend fun ensureScroll(chapterIndex: Int): ScrollChapter? {
+    /** [userFacing] 含义同 [ensurePaginated]：由调用方声明，别靠 position 猜 */
+    private suspend fun ensureScroll(chapterIndex: Int, userFacing: Boolean = false): ScrollChapter? {
         scrollCache[chapterIndex]?.let { return it }
         if (chapterIndex !in 0 until _state.value.chapterCount) return null
         val src = source ?: return null
@@ -819,9 +854,9 @@ class ReaderViewModel(
             // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
             throw e
         } catch (e: Exception) {
-            if (chapterIndex == position.chapterIndex) {
+            Log.w(TAG, "第 $chapterIndex 章滚动排版失败（userFacing=$userFacing）", e)
+            if (userFacing) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
-                // 邻章预加载失败不算数（上面的 if 已经挡掉）—— 只有当前章读不出来才值得换源
                 maybeAutoChangeSource("章节加载失败: ${e.message}")
             }
             null
@@ -847,7 +882,8 @@ class ReaderViewModel(
     fun prepareScroll(center: Int = position.chapterIndex) {
         viewModelScope.launch {
             engineMutex.withLock {
-                ensureScroll(center) ?: return@withLock
+                // center 是用户正在看的那一章；上下邻章只是预排，失败不该打扰用户
+                ensureScroll(center, userFacing = true) ?: return@withLock
                 _state.value = _state.value.copy(loading = false, error = null)
             }
             engineMutex.withLock { ensureScroll(center - 1) }
@@ -939,7 +975,20 @@ class ReaderViewModel(
         _state.value = s.copy(prevPage = prev, nextPage = next)
     }
 
-    private suspend fun ensurePaginated(chapterIndex: Int): Paginator.Result? {
+    /**
+     * [userFacing] 这一章是不是用户正在等的那一章 —— **由调用方声明，不要再靠 position 去猜**。
+     *
+     * 从前这里判的是 `chapterIndex == position.chapterIndex`，本意没错：邻章预取失败不该弹错误、
+     * 更不该触发自动换源。但 position 只在 showPage **成功之后**才更新，用户从第 N 章翻向 N+1 时
+     * 它还停在 N —— 于是"用户正翻向的这一章失败了"被误判成"后台预取失败"，一并吞掉：
+     * loading 停在 true、error 是 null，页面永远转圈，连「重试/换源」的出口都不会出现
+     * （ReaderScreen 的错误分支只在 error != null 时才渲染）。
+     * 这也正是"上一秒还在看，翻到下一章就一直转圈"的成因。
+     */
+    private suspend fun ensurePaginated(
+        chapterIndex: Int,
+        userFacing: Boolean = false,
+    ): Paginator.Result? {
         paginated[chapterIndex]?.let { return it }
         if (chapterIndex !in 0 until (_state.value.chapterCount)) return null
         val src = source ?: return null
@@ -960,9 +1009,11 @@ class ReaderViewModel(
             // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
             throw e
         } catch (e: Exception) {
-            if (chapterIndex == position.chapterIndex) {
+            // 预取失败（userFacing=false）不打扰用户，但**必须留痕**：从前这里把 e 整个丢掉，
+            // 结果"预加载为什么没成功"在应用内外都查不到任何线索，只能看着转圈干瞪眼。
+            Log.w(TAG, "第 $chapterIndex 章分页失败（userFacing=$userFacing）", e)
+            if (userFacing) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
-                // 邻章预加载失败不算数（上面的 if 已经挡掉）—— 只有当前章读不出来才值得换源
                 maybeAutoChangeSource("章节加载失败: ${e.message}")
             }
             null
@@ -972,6 +1023,7 @@ class ReaderViewModel(
     private fun preloadNeighbors(center: Int) {
         viewModelScope.launch {
             engineMutex.withLock {
+                // 邻章预取：失败了不弹错误、不换源，只记日志（见 ensurePaginated 的 userFacing）
                 ensurePaginated(center + 1)
                 ensurePaginated(center - 1)
             }
@@ -1029,6 +1081,8 @@ class ReaderViewModel(
     }
 
     private companion object {
+        const val TAG = "ReaderViewModel"
+
         /** 滚动模式的"无限高视口"：足够放下任何一章，分页器于是只产出一页 */
         const val SCROLL_VIEWPORT_PX = 2_000_000
 
