@@ -26,6 +26,38 @@ class ChapterContentCacheTest {
     )
 
     /**
+     * 缓存里躺的是**解析结果**，不是原始 HTML —— 解析器修好了，磁盘上那份旧结果并不会
+     * 跟着变好。所以版本对不上必须当没缓存、重抓一遍。
+     *
+     * 这是 beta.8 踩到的坑：修好了「靠原始换行分段的源整章挤成一坨」，用户升级后一看
+     * 一模一样 —— 因为那一章的坏结果早就缓存在磁盘上，cache.read 直接命中，
+     * 新解析器根本没机会跑。
+     */
+    @Test
+    fun `旧版本的缓存视为没缓存，逼它重抓`() {
+        val url = "https://ex.com/1.html"
+        // 先按当前格式写一份，借此拿到真实文件名（key 是 MD5(url)，测试不该自己复刻）
+        cache.write("b1", url, content)
+        val f = File(root, "b1").listFiles()!!.single { it.name.endsWith(".txt") }
+        // 覆写成没有版本行的旧格式
+        f.writeText("正文第一段。\n正文第二段。")
+
+        assertNull(cache.read("b1", url))
+    }
+
+    /** 重抓后覆盖同名文件，旧内容自然被替换，不留读不到又删不掉的垃圾 */
+    @Test
+    fun `重抓后覆盖同名文件，不留旧版本垃圾`() {
+        val url = "https://ex.com/1.html"
+        cache.write("b1", url, content)
+        val before = File(root, "b1").listFiles()!!.count { it.name.endsWith(".txt") }
+        cache.write("b1", url, content)
+        val after = File(root, "b1").listFiles()!!.count { it.name.endsWith(".txt") }
+        assertEquals(before, after)
+        assertEquals(1, after)
+    }
+
+    /**
      * 标题与分隔符必须原样存回。丢掉它们会让「首次分页」（走网络，含 Heading/Divider）与
      * 「二次分页」（走缓存）的页边界和 charOffset 对不上，恢复阅读位置就会漂到别的页。
      */

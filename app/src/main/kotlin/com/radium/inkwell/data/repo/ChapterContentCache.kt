@@ -32,7 +32,13 @@ class ChapterContentCache(private val root: File) {
     fun read(bookId: String, chapterUrl: String): ChapterContent? {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return null
-        val elements = f.readLines().mapNotNull { line ->
+        val lines = f.readLines()
+        // 版本对不上就当没缓存，逼它重抓一遍。
+        // 这里存的是**解析结果**而不是原始 HTML —— 解析器修好了，磁盘上那份旧结果并不会
+        // 跟着变好。没有这道校验的话，用户已经读过（也就是最想看到修复效果）的章节
+        // 会永远停在旧解析上，升级完一看一模一样。见 [FORMAT_VERSION]。
+        if (lines.firstOrNull() != FORMAT_VERSION) return null
+        val elements = lines.drop(1).mapNotNull { line ->
             when {
                 // 转义过的普通段落：它本来长得像标记行（H1:/IMG:/---），存时加了前缀，这里先剥掉。
                 // 必须排在其它分支之前，否则又会被当成标记。
@@ -62,7 +68,7 @@ class ChapterContentCache(private val root: File) {
     }
 
     fun write(bookId: String, chapterUrl: String, content: ChapterContent) {
-        val text = content.elements.joinToString("\n") { el ->
+        val body = content.elements.joinToString("\n") { el ->
             when (el) {
                 is ContentElement.Paragraph -> escapeIfAmbiguous(el.text.replace('\n', ' '))
                 is ContentElement.Heading -> "$HEAD_PREFIX${el.level}:${el.text.replace('\n', ' ')}"
@@ -70,6 +76,9 @@ class ChapterContentCache(private val root: File) {
                 ContentElement.Divider -> DIVIDER
             }
         }
+        // 文件名不变（仍是 MD5(url)），所以重抓时是**覆盖**同名文件 —— 旧版本的内容
+        // 自然被替换掉，不会在磁盘上留一份读不到又删不掉的垃圾
+        val text = FORMAT_VERSION + "\n" + body
         // 先写临时文件再原子改名：进程被杀留下的半截文件不会被 has()/read() 当成有效缓存，
         // 两个协程（前台加载 + 后台预取）同抓同章时也是「整文件替换」，不会交错出半截内容。
         val target = file(bookId, chapterUrl)
@@ -106,6 +115,20 @@ class ChapterContentCache(private val root: File) {
     }
 
     private companion object {
+        /**
+         * 缓存格式 / 解析器版本。**改动 [HtmlToElements] 的输出或本文件的行格式时，必须 +1。**
+         *
+         * 缓存里躺的是解析好的段落，不是原始 HTML。不 +1 的话，用户**已经读过**的章节
+         * （恰恰是最想看到修复效果的那些）会永远停在旧解析结果上，改了解析器也白改。
+         *
+         * v2 正是这么来的：修好了「靠原始换行分段的源整章挤成一坨」，用户升级后一看，
+         * 一模一样 —— 因为那一章的坏结果早就缓存在磁盘上了。
+         *
+         * 用 [ESCAPE] 打头，保证撞不上任何正文：真以 ESCAPE 开头的段落会被
+         * escapeIfAmbiguous 再加一层前缀。老缓存没有这一行，读时自然对不上、当没缓存。
+         */
+        const val FORMAT_VERSION = "\u0001V2"
+
         const val IMG_PREFIX = "IMG:"
         const val HEAD_PREFIX = "H"
         const val DIVIDER = "---"
