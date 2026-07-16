@@ -99,6 +99,7 @@ fun ReaderMenu(
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
+    onSetTextSelection: (Boolean) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onOpenSearch: () -> Unit,
@@ -309,7 +310,12 @@ fun ReaderMenu(
 
     if (showSettings) {
         ModalBottomSheet(onDismissRequest = { showSettings = false }) {
-            TypographyPanel(settings = state.settings, onUpdate = onUpdateSettings)
+            TypographyPanel(
+                settings = state.settings,
+                onUpdate = onUpdateSettings,
+                textSelectionEnabled = state.textSelectionEnabled,
+                onTextSelectionChange = onSetTextSelection,
+            )
         }
     }
 
@@ -444,7 +450,12 @@ private val MARGIN_H_OPTIONS = listOf(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun TypographyPanel(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    textSelectionEnabled: Boolean,
+    onTextSelectionChange: (Boolean) -> Unit,
+) {
     var tab by remember { mutableIntStateOf(0) }
 
     Column(Modifier.fillMaxWidth()) {
@@ -468,7 +479,7 @@ private fun TypographyPanel(settings: ReaderSettings, onUpdate: (ReaderSettings)
             when (tab) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
-                else -> MoreTab(settings, onUpdate)
+                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
         }
     }
@@ -629,7 +640,12 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
 }
 
 @Composable
-private fun MoreTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun MoreTab(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    textSelectionEnabled: Boolean,
+    onTextSelectionChange: (Boolean) -> Unit,
+) {
     SectionLabel("预加载章节")
     ChipRow(
         options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
@@ -642,6 +658,20 @@ private fun MoreTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
         title = "阅读时保持屏幕常亮",
         checked = settings.keepScreenOn,
         onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
+    )
+
+    // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨
+    // DataStore 迁移，弄不好会把已经关掉它的用户静默改回开。这里只是把开关挪到它该在的地方 ——
+    // 它是纯粹的阅读页设置，从前却待在全局设置的「书源」分组下。
+    SwitchRow(
+        title = "长按选字",
+        subtitle = if (textSelectionEnabled) {
+            "长按正文可选中、复制，或建一条只对这本书生效的净化规则"
+        } else {
+            "已关闭。翻页时手指停顿久了不会再误触选中"
+        },
+        checked = textSelectionEnabled,
+        onCheckedChange = onTextSelectionChange,
     )
 }
 

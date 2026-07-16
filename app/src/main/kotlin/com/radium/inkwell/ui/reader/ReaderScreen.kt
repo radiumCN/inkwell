@@ -476,6 +476,7 @@ fun ReaderScreen(
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
+            onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onOpenSearch = { viewModel.openSearchPanel() },

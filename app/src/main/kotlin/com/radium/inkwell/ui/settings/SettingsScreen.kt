@@ -84,7 +84,6 @@ fun SettingsScreen(
     val source by appPrefs.updateSource.collectAsState(initial = UpdateSource.GITHUB)
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
-    val textSelection by appPrefs.textSelectionEnabled.collectAsState(initial = true)
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
 
     var checking by remember { mutableStateOf(false) }
@@ -174,16 +173,6 @@ fun SettingsScreen(
                 title = "净化替换规则",
                 subtitle = "删掉正文里的广告、水印与防盗段落",
                 onClick = onOpenReplaceRules,
-            )
-            SwitchRow(
-                title = "阅读页长按选字",
-                subtitle = if (textSelection) {
-                    "长按正文选中文字，可复制或建一条只对这本书生效的净化规则"
-                } else {
-                    "已关闭。长按不再选字（翻页时手指停顿久了就不会误触选中）"
-                },
-                checked = textSelection,
-                onCheckedChange = { on -> scope.launch { appPrefs.setTextSelectionEnabled(on) } },
             )
             SwitchRow(
                 title = "自动换源",
