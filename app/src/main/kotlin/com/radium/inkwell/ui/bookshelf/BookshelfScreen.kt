@@ -363,7 +363,11 @@ fun BookshelfScreen(
                     items(books, key = { it.id }) { book ->
                         BookCard(
                             book = book,
-                            onClick = { onOpenBook(book.id) },
+                            onClick = {
+                                // 临时：给「点击→阅读页首帧」计时（定位入场卡顿用，完事删）
+                                com.radium.inkwell.ui.reader.OpenBookClock.tapped()
+                                onOpenBook(book.id)
+                            },
                             // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
                             onLongClick = { actionTarget = book },
                             // 切「显示隐藏的书」时整批书凭空出现/消失，从前是硬闪 —— 看不出

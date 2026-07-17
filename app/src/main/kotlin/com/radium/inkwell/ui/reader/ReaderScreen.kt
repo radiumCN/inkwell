@@ -122,6 +122,8 @@ fun ReaderScreen(
      * 两者一致时（绝大多数情况）视口从头到尾没变过，压根不会有第二次排版。
      */
     val view = LocalView.current
+    // 临时：量入场期间有没有真掉帧（定位完删）
+    val frameProbe = rememberFrameProbe()
     val windowSize = LocalWindowInfo.current.containerSize
     val seed = remember(view, windowSize) { rootDisplayCutout(view) }
 
@@ -476,6 +478,7 @@ fun ReaderScreen(
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
+            frameProbe = frameProbe.summary(),
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },

@@ -99,6 +99,7 @@ fun ReaderMenu(
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
+    frameProbe: String,
     onSetTextSelection: (Boolean) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
@@ -316,6 +317,7 @@ fun ReaderMenu(
                 textSelectionEnabled = state.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
                 layoutDiag = state.layoutDiag,
+                frameProbe = frameProbe,
             )
         }
     }
@@ -457,6 +459,7 @@ private fun TypographyPanel(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     layoutDiag: List<String>,
+    frameProbe: String,
 ) {
     var tab by remember { mutableIntStateOf(0) }
 
@@ -481,7 +484,7 @@ private fun TypographyPanel(
             when (tab) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
-                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange, layoutDiag)
+                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange, layoutDiag, frameProbe)
             }
         }
     }
@@ -648,6 +651,7 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     layoutDiag: List<String>,
+    frameProbe: String,
 ) {
     SectionLabel("预加载章节")
     ChipRow(
@@ -687,12 +691,10 @@ private fun MoreTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = Dimens.screenPadding),
         )
+        // 「卡顿」有两种，肉眼分不出但修法相反：真掉帧（主线程被占住）vs 视觉跳动
+        // （帧没掉，但内容位置突然变了）。两个都报出来，别让人自己猜。
         Text(
-            if (layoutDiag.count { it.startsWith("#") } > 1) {
-                "进一次书排了不止一遍版 —— 多出来的那遍是白做的，正好卡在入场动画里"
-            } else {
-                "只排了一遍版，符合预期"
-            },
+            frameProbe,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapXS),
