@@ -15,8 +15,8 @@ navigationCompose = "2.9.8"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
 lifecycle = "2.9.4"
-room = "2.7.2"
-datastore = "1.1.7"
+room = "2.8.4"
+datastore = "1.2.1"
 koin = "4.1.0"
 okhttp = "4.12.0"
 jsoup = "1.21.1"
