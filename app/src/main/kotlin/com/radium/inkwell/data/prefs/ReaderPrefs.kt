@@ -78,8 +78,14 @@ class ReaderPrefs(private val context: Context) {
     /** UI 层算出生效日夜后调这个；主题随之切到对应槽 */
     fun setDarkActive(dark: Boolean) { darkActive.value = dark }
 
-    // 热 StateFlow：App 启动即预热，进阅读页时 `.value` 已是真实设置，ViewModel 首帧就用它播种。
+    // 热 StateFlow：进阅读页时 `.value` 应已是真实设置，ViewModel 首帧就用它播种。
     // 初始占位也按系统日夜给出深/浅底，避免 DataStore 首次读到之前那一帧仍是浅色默认。
+    //
+    // **Eagerly 只保证"一旦有人构造了 ReaderPrefs 就立刻开读"，不保证那发生得够早。**
+    // Koin 的 single 是懒的，从前全 App 第一个注入它的就是 ReaderViewModel 自己 ——
+    // 于是预热永远赢不了自己的构造函数：VM 读到的是下面那个占位值，真实设置 ~90ms 后才到，
+    // 每本书每次点开都要按默认边距白排一遍版、再在入场动画中间推翻重排。
+    // 真正的预热在 `InkwellApp.onCreate` 的 `koin.get<ReaderPrefs>()`，别把那行删了。
     val settings: StateFlow<ReaderSettings> = combine(context.readerDataStore.data, darkActive) { p, dark ->
         ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
