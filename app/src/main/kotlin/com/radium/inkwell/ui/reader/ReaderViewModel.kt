@@ -168,6 +168,10 @@ class ReaderViewModel(
     private var facade: TextMeasureFacade? = null
     private var spec: LayoutSpec? = null
 
+    // 排查用：进书时刻与排版次数。进一次书本该只排一遍版
+    private val openedAt = System.currentTimeMillis()
+    private var layoutReadyCount = 0
+
     // 分页缓存：chapterIndex → 结果；spec 变化即整体作废
     private val paginated = LinkedHashMap<Int, Paginator.Result>()
     private var paginateJob: Job? = null
@@ -256,14 +260,28 @@ class ReaderViewModel(
     /** 视口/设置变化时由 UI 调用；重建排版环境并按 charOffset 恢复位置 */
     fun onLayoutReady(facade: TextMeasureFacade, spec: LayoutSpec) {
         if (this.spec == spec && this.facade != null) return
+        // 排查用：进一次书本该只排一遍版。若这里打出第二行、且与首行只差几十毫秒，
+        // 说明视口在入场动画期间又变了一次（挖孔 inset 迟到 / 系统栏隐藏），
+        // 第一遍排版白做，还正好跟 260ms 的入场动画抢 CPU。
+        val prev = this.spec
+        Log.i(
+            TAG,
+            "onLayoutReady #${++layoutReadyCount} " +
+                "viewport=${spec.viewportWidthPx}x${spec.viewportHeightPx} " +
+                "margins=[${spec.marginLeftPx},${spec.marginTopPx},${spec.marginRightPx},${spec.marginBottomPx}] " +
+                "sinceOpen=${System.currentTimeMillis() - openedAt}ms" +
+                if (prev != null) " ← 重排，与上次的差异: ${specDiff(prev, spec)}" else "",
+        )
         this.facade = facade
         this.spec = spec
         paginateJob?.cancel()
         paginateJob = viewModelScope.launch {
+            val startedAt = System.currentTimeMillis()
             engineMutex.withLock {
                 paginated.clear()
                 showPosition(position)
             }
+            Log.i(TAG, "分页完成 #$layoutReadyCount 耗时=${System.currentTimeMillis() - startedAt}ms")
         }
     }
 
@@ -566,6 +584,23 @@ class ReaderViewModel(
         /** 超时/报错。什么都没证明，不记 */
         data object Failed : SearchOutcome
     }
+
+    /**
+     * 排查「进书为什么排两遍版」用：只说"排了两遍"没用，得说清**两遍差在哪** ——
+     * 视口高度变了是系统栏隐藏，边距变了是挖孔 inset 迟到，两者的修法完全不同。
+     */
+    private fun specDiff(a: LayoutSpec, b: LayoutSpec): String = buildList {
+        if (a.viewportWidthPx != b.viewportWidthPx || a.viewportHeightPx != b.viewportHeightPx) {
+            add("视口 ${a.viewportWidthPx}x${a.viewportHeightPx} → ${b.viewportWidthPx}x${b.viewportHeightPx}")
+        }
+        if (a.marginTopPx != b.marginTopPx) add("上边距 ${a.marginTopPx} → ${b.marginTopPx}")
+        if (a.marginBottomPx != b.marginBottomPx) add("下边距 ${a.marginBottomPx} → ${b.marginBottomPx}")
+        if (a.marginLeftPx != b.marginLeftPx) add("左边距 ${a.marginLeftPx} → ${b.marginLeftPx}")
+        if (a.marginRightPx != b.marginRightPx) add("右边距 ${a.marginRightPx} → ${b.marginRightPx}")
+        if (a.fontSizePx != b.fontSizePx) add("字号 ${a.fontSizePx} → ${b.fontSizePx}")
+        if (a.lineHeightPx != b.lineHeightPx) add("行高 ${a.lineHeightPx} → ${b.lineHeightPx}")
+        if (a.fontId != b.fontId) add("字体 ${a.fontId} → ${b.fontId}")
+    }.ifEmpty { listOf("无字段差异(?)") }.joinToString("; ")
 
     /** sourceId → 这本书在该源搜到过没有；没有条目 = 没搜过 */
     private suspend fun bookHits(): Map<String, Boolean> =
