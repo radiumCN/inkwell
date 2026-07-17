@@ -31,4 +31,6 @@ data class ReplaceRuleEntity(
     val enabled: Boolean = true,
     val sortOrder: Int = 0,
     val updatedAt: Long = 0,
+    /** 软删除墓碑，语义见 [BookEntity.deleted] */
+    val deleted: Boolean = false,
 )

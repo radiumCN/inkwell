@@ -103,7 +103,9 @@ class BookRepository(
             } catch (e: Exception) {
                 // 书行可能已插入、章节写失败 —— 回滚掉，别留一条指向已删文件的幽灵书
                 dest.delete()
-                bookDao.getById(bookId)?.let { bookDao.delete(it) }
+                // 这是**导入失败的回滚**，不是用户删书：这行从没成功存在过，
+                // 必须真删。留墓碑会把一条凭空的「删除」同步给其它设备。
+                bookDao.hardDelete(bookId)
                 chapterDao.deleteByBook(bookId)
                 throw e
             }
@@ -118,7 +120,9 @@ class BookRepository(
             chapterDao.deleteByBook(id)
             // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
             hitDao.deleteByBook(id)
-            bookDao.delete(book)
+            // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
+            // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
+            bookDao.softDelete(id, System.currentTimeMillis())
         }
     }
 

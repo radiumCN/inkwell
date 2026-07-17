@@ -26,7 +26,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -121,6 +121,23 @@ abstract class InkwellDb : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE book ADD COLUMN newChapterCount INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * 软删除墓碑。删除改为打标记，不再真的删行。
+         *
+         * 从前删除在 WebDAV 多设备同步下**根本留不住**：合并是并集，本地删掉的东西远端
+         * 还在，下次同步就被当成「别的设备新加的」补回来 —— 用户删一次它回来一次。
+         * 行留着才有地方记「删过」这件事，合并的 LWW 才能拿它跟远端的旧副本比。
+         *
+         * 只加列、带默认值 0（= 未删除），老数据原样保留。
+         */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf("book", "book_source", "replace_rule", "rss_source").forEach { table ->
+                    db.execSQL("ALTER TABLE $table ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+                }
             }
         }
 

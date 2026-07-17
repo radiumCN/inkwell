@@ -52,4 +52,12 @@ data class BookEntity(
      * 打开这本书就清零（打开 = 已知晓），刷新时累加。
      */
     val newChapterCount: Int = 0,
+    /**
+     * 软删除墓碑。删除不真的删行，只打标记 —— 否则「删过」这件事在多设备同步里
+     * 无从表达：本地行没了，远端还在，合并就把它当成「别的设备新加的」补回来。
+     *
+     * 打标记时**必须同时更新 updatedAt** —— 合并靠它做 LWW 裁决。
+     * 所有面向用户的查询都要过滤掉 deleted = 1。
+     */
+    val deleted: Boolean = false,
 )

@@ -96,6 +96,7 @@ class WebDavRepository(
                 readAt = b.readAt, addedAt = b.addedAt, updatedAt = b.updatedAt,
                 groupName = b.groupName,
                 hidden = b.hidden,
+                deleted = b.deleted,
             )
         },
         sources = sourceDao.getAll().map { s ->
@@ -104,19 +105,20 @@ class WebDavRepository(
                 updatedAt = s.updatedAt,
                 sortOrder = s.sortOrder,
                 groupName = s.groupName,
+                deleted = s.deleted,
             )
         },
         replaceRules = replaceRules.getAll().map { r ->
             BackupReplaceRule(
                 id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
                 isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
-                sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+                sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
             )
         },
         rssSources = rssDao.getAll().map { r ->
             BackupRssSource(
                 id = r.id, name = r.name, enabled = r.enabled, json = r.json,
-                sourceJson = r.sourceJson, updatedAt = r.updatedAt,
+                sourceJson = r.sourceJson, updatedAt = r.updatedAt, deleted = r.deleted,
             )
         },
         readerSettings = readerPrefs.exportForBackup(),
@@ -135,6 +137,7 @@ class WebDavRepository(
                         readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
                         readAt = b.readAt, updatedAt = b.updatedAt,
                         groupName = b.groupName, hidden = b.hidden,
+                        deleted = b.deleted,
                     )
                 )
             } else {
@@ -150,6 +153,8 @@ class WebDavRepository(
                         addedAt = if (b.addedAt > 0) b.addedAt else System.currentTimeMillis(),
                         updatedAt = b.updatedAt,
                         groupName = b.groupName, hidden = b.hidden,
+                        // 墓碑也要落地：别把别的设备删掉的书当成新书插回来
+                        deleted = b.deleted,
                     )
                 )
             }
@@ -163,6 +168,7 @@ class WebDavRepository(
                     .copy(
                         name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
                         json = s.json, updatedAt = s.updatedAt, groupName = s.groupName,
+                        deleted = s.deleted,
                     )
             )
         }
@@ -171,7 +177,7 @@ class WebDavRepository(
                 ReplaceRuleEntity(
                     id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
                     isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
-                    sortOrder = r.sortOrder, updatedAt = r.updatedAt,
+                    sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
                 )
             }
         )
@@ -179,7 +185,7 @@ class WebDavRepository(
             merged.changedRssSources.map { r ->
                 com.radium.inkwell.data.db.entity.RssSourceEntity(
                     id = r.id, name = r.name, enabled = r.enabled, json = r.json,
-                    sourceJson = r.sourceJson, updatedAt = r.updatedAt,
+                    sourceJson = r.sourceJson, updatedAt = r.updatedAt, deleted = r.deleted,
                 )
             }
         )

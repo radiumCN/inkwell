@@ -139,7 +139,7 @@ class BookSourceRepository(
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 
     suspend fun delete(id: String) {
-        dao.deleteById(id)
+        dao.softDeleteById(id, System.currentTimeMillis())
         // 换源记忆里指向这个源的行成了孤儿
         hitDao.deleteBySource(id)
     }
@@ -147,7 +147,7 @@ class BookSourceRepository(
     /** 批量删除/启停：书源动辄几百个，逐条走会很慢也很吵 */
     suspend fun deleteAll(ids: Collection<String>) {
         if (ids.isEmpty()) return
-        dao.deleteByIds(ids.toList())
+        dao.softDeleteByIds(ids.toList(), System.currentTimeMillis())
         hitDao.deleteBySources(ids.toList())
     }
 

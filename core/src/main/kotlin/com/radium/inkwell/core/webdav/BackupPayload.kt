@@ -52,6 +52,8 @@ data class BackupRssSource(
     val json: String,
     val sourceJson: String = "",
     val updatedAt: Long = 0,
+    /** 软删除墓碑，语义见 [BackupBook.deleted] */
+    val deleted: Boolean = false,
 )
 
 @Serializable
@@ -67,6 +69,8 @@ data class BackupReplaceRule(
     val enabled: Boolean = true,
     val sortOrder: Int = 0,
     val updatedAt: Long = 0,
+    /** 软删除墓碑，语义见 [BackupBook.deleted] */
+    val deleted: Boolean = false,
 )
 
 @Serializable
@@ -89,6 +93,18 @@ data class BackupBook(
     val groupName: String = "",
     /** 从书架隐藏（不是删除） */
     val hidden: Boolean = false,
+    /**
+     * 软删除墓碑。为真表示「这条被删了」，而不是「本地没有」。
+     *
+     * 没有它的话，删除在多设备间根本留不住：合并是「并集」，本地删掉的东西远端还在，
+     * 下次同步就被当成「别的设备新加的」原样补回来。
+     *
+     * **合并逻辑不用为它开特例** —— 删除就是一次普通的 updatedAt 更新，
+     * 现有的 LWW 自然能裁决：本地 deleted@T2 vs 远端 alive@T1，T2 大就保持删除。
+     *
+     * 老备份没有这个键 → 默认 false，读起来还是活的，不影响。
+     */
+    val deleted: Boolean = false,
 )
 
 @Serializable
@@ -101,6 +117,8 @@ data class BackupSource(
     val sortOrder: Int = 0,
     /** 书源分组；老备份没有此键 → 默认空，不影响读取 */
     val groupName: String = "",
+    /** 软删除墓碑，语义见 [BackupBook.deleted] */
+    val deleted: Boolean = false,
 )
 
 object BackupCodec {
@@ -125,7 +143,15 @@ object BackupCodec {
 /**
  * 字段级 Last-Write-Wins 合并：
  * 同一本书进度取 readAt 较大者、元数据取 updatedAt 较大者；书源按 updatedAt。
- * 不做删除墓碑：远端有本地无 → 视为新增。
+ *
+ * **删除靠软删除墓碑表达**（`deleted = true` + 新的 updatedAt），而不是「从列表里消失」。
+ * 从前是纯并集、不认墓碑，于是删除在多设备间根本留不住 —— 本地删掉的书源远端还在，
+ * 下次同步就被当成「别的设备新加的」补回来，用户删一次它回来一次。
+ *
+ * 注意合并这里**没有为删除写任何特例**：删除就是一次普通的 updatedAt 更新，
+ * 现有的 LWW 自然裁决。真正要小心的是「本地无 + 远端有」这一支 ——
+ * 它仍然表示「远端新增」，因为本地压根没见过这条；已删除的东西在本地是**有行的**
+ * （带 deleted 标记），不会走到那一支。
  */
 object BackupMerger {
 

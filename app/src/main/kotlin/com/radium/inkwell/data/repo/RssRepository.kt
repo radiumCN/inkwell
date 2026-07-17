@@ -28,7 +28,7 @@ class RssRepository(
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled)
 
-    suspend fun delete(id: String) = dao.deleteById(id)
+    suspend fun delete(id: String) = dao.softDeleteById(id, System.currentTimeMillis())
 
     suspend fun importFromUrl(url: String): RssImportReport {
         val text = http.fetch(url).bodyText

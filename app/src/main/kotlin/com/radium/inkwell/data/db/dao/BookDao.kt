@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookDao {
-    @Query("SELECT * FROM book ORDER BY readAt DESC, addedAt DESC")
+    @Query("SELECT * FROM book WHERE deleted = 0 ORDER BY readAt DESC, addedAt DESC")
     fun observeAll(): Flow<List<BookEntity>>
 
     @Query("SELECT * FROM book WHERE id = :id")
@@ -26,8 +26,16 @@ interface BookDao {
     @Update
     suspend fun update(book: BookEntity)
 
-    @Delete
-    suspend fun delete(book: BookEntity)
+    /**
+     * 软删除：打标记而不是删行，并**同时更新 updatedAt** —— 合并靠它做 LWW 裁决，
+     * 不更新的话远端那份旧副本会比墓碑还"新"，删除又被覆盖回来。
+     */
+    @Query("UPDATE book SET deleted = 1, updatedAt = :now WHERE id = :id")
+    suspend fun softDelete(id: String, now: Long)
+
+    /** 真删，只给「导入失败回滚」用：那行从没成功存在过，留墓碑会同步出一条凭空的删除 */
+    @Query("DELETE FROM book WHERE id = :id")
+    suspend fun hardDelete(id: String)
 
     @Query("UPDATE book SET readChapterIndex = :chapterIndex, readCharOffset = :charOffset, readAt = :readAt WHERE id = :id")
     suspend fun updateProgress(id: String, chapterIndex: Int, charOffset: Int, readAt: Long)

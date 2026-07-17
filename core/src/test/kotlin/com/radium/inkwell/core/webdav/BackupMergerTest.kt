@@ -44,13 +44,71 @@ class BackupMergerTest {
         assertEquals(300, merged.readAt)
     }
 
+    /**
+     * 「本地无 + 远端有」仍然是**真·新增**，必须恢复 —— 本地压根没见过这条。
+     * 这跟「本地删过」是两回事：删过的东西本地是**有行的**（带 deleted 标记），走不到这一支。
+     */
     @Test
-    fun `union of both sides - no tombstones`() {
+    fun `union of both sides - remote-only is a real addition`() {
         val local = payload(book("a"), book("b"))
         val remote = payload(book("b"), book("c"))
         val result = BackupMerger.merge(local, remote)
         assertEquals(setOf("a", "b", "c"), result.books.map { it.id }.toSet())
         assertEquals(listOf("c"), result.changedBooks.map { it.id })
+    }
+
+    // ---------- 删除墓碑 ----------
+
+    /**
+     * 从前删除在多设备间根本留不住：合并是并集，本地删掉的远端还在，下次同步就被当成
+     * 「别的设备新加的」补回来，用户删一次它回来一次。删除必须能赢过远端的旧副本。
+     */
+    @Test
+    fun `本地删除胜过远端的旧副本`() {
+        val local = payload(book("a", updatedAt = 200).copy(deleted = true))
+        val remote = payload(book("a", updatedAt = 100))
+        val merged = BackupMerger.merge(local, remote).books.single()
+        assertTrue(merged.deleted, "本地删得更晚，应保持删除")
+    }
+
+    /** 反过来也要成立：另一台设备删的，同步过来本地也得删掉 */
+    @Test
+    fun `远端删除会同步到本地`() {
+        val local = payload(book("a", updatedAt = 100))
+        val remote = payload(book("a", updatedAt = 200).copy(deleted = true))
+        val result = BackupMerger.merge(local, remote)
+        assertTrue(result.books.single().deleted)
+        assertEquals(1, result.changedBooks.size, "远端的删除要写回本地")
+    }
+
+    /**
+     * 删完又重新导入（updatedAt 更新）必须能复活 —— 否则用户删过一次的书源就再也加不回来了。
+     * 这正是「删除只是一次普通的 updatedAt 更新」这个设计的好处：复活自然成立，不用写特例。
+     */
+    @Test
+    fun `删除后重新添加能复活`() {
+        val local = payload(book("a", updatedAt = 300)) // 重新导入，更新
+        val remote = payload(book("a", updatedAt = 200).copy(deleted = true))
+        assertTrue(!BackupMerger.merge(local, remote).books.single().deleted)
+    }
+
+    @Test
+    fun `书源的删除同样按 updatedAt 裁决`() {
+        val alive = BackupSource("s1", "源1", json = "{}", updatedAt = 100)
+        val tomb = BackupSource("s1", "源1", json = "{}", updatedAt = 200, deleted = true)
+        assertTrue(BackupMerger.merge(payload(sources = listOf(tomb)), payload(sources = listOf(alive)))
+            .sources.single().deleted)
+        assertTrue(BackupMerger.merge(payload(sources = listOf(alive)), payload(sources = listOf(tomb)))
+            .sources.single().deleted)
+    }
+
+    /** 老备份没有 deleted 键 → 默认 false，读起来还是活的 */
+    @Test
+    fun `老备份没有 deleted 键时默认不删`() {
+        val old = BackupCodec.decode(
+            BackupCodec.encode(payload(book("a"))),
+        )
+        assertTrue(!old.books.single().deleted)
     }
 
     @Test

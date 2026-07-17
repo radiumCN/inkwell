@@ -25,6 +25,8 @@ data class BookSourceEntity(
     /** 全链路响应耗时(ms)；-1 = 未校验或失败 */
     val respondTime: Long = -1,
     val checkedAt: Long = 0,
+    /** 软删除墓碑，语义见 [BookEntity.deleted] */
+    val deleted: Boolean = false,
 )
 
 object CheckStatus {

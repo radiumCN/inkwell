@@ -30,8 +30,13 @@ class BookSourceImportTest {
         }
         override suspend fun getAllIds() = store.keys.toList()
         override suspend fun setEnabled(id: String, enabled: Boolean) {}
-        override suspend fun deleteById(id: String) { store.remove(id) }
-        override suspend fun deleteByIds(ids: List<String>) { ids.forEach { store.remove(it) } }
+        // 软删除：打标记而不是移除 —— 墓碑得留着，否则 WebDAV 同步会把删掉的源拉回来
+        override suspend fun softDeleteById(id: String, now: Long) {
+            store[id]?.let { store[id] = it.copy(deleted = true, updatedAt = now) }
+        }
+        override suspend fun softDeleteByIds(ids: List<String>, now: Long) {
+            ids.forEach { id -> store[id]?.let { store[id] = it.copy(deleted = true, updatedAt = now) } }
+        }
         override suspend fun setEnabledForIds(ids: List<String>, enabled: Boolean) {
             ids.forEach { id -> store[id]?.let { store[id] = it.copy(enabled = enabled) } }
         }
@@ -166,9 +171,15 @@ class BookSourceImportTest {
         """
     }
 
-    /** 书源动辄几百个，逐条删会很慢；批量删除/启停走单条 SQL */
+    /**
+     * 书源动辄几百个，逐条删会很慢；批量删除/启停走单条 SQL。
+     *
+     * 删除是**软删除**：行留下、打 deleted 标记。从前是真删，于是「删过」这件事在
+     * WebDAV 同步里无从表达 —— 本地行没了、远端还在，合并就把它当成「别的设备新加的」
+     * 补回来，用户删一次它回来一次。行留着才有地方记这件事。
+     */
     @Test
-    fun `批量删除与批量启停`() = runTest {
+    fun `批量删除打墓碑而不是真删行`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
         repo.importJson("[" + LEGADO_SRC + "," + LEGADO_SRC2 + "]").getOrThrow()
@@ -179,8 +190,13 @@ class BookSourceImportTest {
         assertTrue(dao.store.values.none { it.enabled })
 
         repo.deleteAll(listOf(ids[0]))
-        assertEquals(1, dao.store.size)
-        assertEquals(ids[1], dao.store.keys.single())
+
+        // 行还在（墓碑），但被标记为已删除
+        assertEquals(2, dao.store.size, "软删除不该真的移除行")
+        assertTrue(dao.store[ids[0]]!!.deleted, "删掉的那个要有墓碑")
+        assertTrue(!dao.store[ids[1]]!!.deleted, "没删的不该被误伤")
+        // updatedAt 必须一起更新，否则远端那份旧副本会比墓碑还「新」，删除又被覆盖回来
+        assertTrue(dao.store[ids[0]]!!.updatedAt > 0, "打墓碑要同时更新 updatedAt")
     }
 
     /**
