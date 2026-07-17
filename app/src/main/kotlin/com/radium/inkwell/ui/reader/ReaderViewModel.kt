@@ -1143,11 +1143,21 @@ class ReaderViewModel(
      * 邻章（center±1）由 preloadNeighbors 顺带排好版了，这里管的是**更远**的那几章：
      * 只把正文拉进缓存，不排版（排版结果持有 TextLayoutResult，很重，攒几章就 OOM）。
      *
-     * 三条纪律：
+     * 四条纪律：
      * - **不碰 engineMutex**。预取一占锁，用户翻页就得排队等它 —— 本来是为了不卡顿，
      *   结果反而卡得更死。
      * - 顺序抓，不并发。几章同时打同一个站点只会触发限流，把好书源熬成"加载失败"。
      * - 换页就取消上一轮：用户跳到别处去了，再抓原来那几章纯属浪费流量。
+     * - **先等 [PREFETCH_LEAD_IN_MS]，让开正在播的动画**，理由见下。
+     *
+     * 那条等待不是保守，是量出来的。进书时缓存若是热的，每章十几毫秒就读完，5 章全挤在
+     * 进书后 ~100ms 内 —— 读文件、切行、建元素表，全是密集分配。GC 一来**停的是所有线程，
+     * 主线程也在内**，而这一坨正好砸在 260ms 入场动画的正中间：实测掉帧全部落在进书后
+     * 56~147ms，之后 250ms 一帧不掉；同一本书清掉缓存（预取被迫走网络、挪出这个窗口）
+     * 则一帧不掉。
+     *
+     * 预取的定义就是"**以后**可能用得上"，而动画是"用户**此刻**正在看"。让前者给后者让路，
+     * 代价是零：用户还在看当前这页，几百毫秒之后才可能翻到预取的那几章。
      */
     private fun prefetchAhead(center: Int) {
         val ahead = _state.value.settings.preloadChapters
@@ -1156,6 +1166,7 @@ class ReaderViewModel(
         val total = _state.value.chapterCount
         prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(PREFETCH_LEAD_IN_MS)
             for (i in (center + 2)..(center + 1 + ahead)) {
                 if (i >= total) break
                 if (!isActive) return@launch
@@ -1187,6 +1198,15 @@ class ReaderViewModel(
 
         /** 滚动模式的"无限高视口"：足够放下任何一章，分页器于是只产出一页 */
         const val SCROLL_VIEWPORT_PX = 2_000_000
+
+        /**
+         * 预取前先等多久，理由见 [prefetchAhead]。
+         *
+         * 比入场动画（Motion.NAV_ENTER_MS = 260）多留一截：动画结束那一帧往往还在收尾，
+         * 紧贴着开工等于没让。翻页时这条等待同样有益（让开翻页动画），而且不会饿着预取——
+         * 用户读完一页远不止 400ms。
+         */
+        const val PREFETCH_LEAD_IN_MS = 400L
 
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
