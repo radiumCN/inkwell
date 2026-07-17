@@ -1,7 +1,7 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
 inkwell = "0.1.5-beta.1"
-agp = "8.13.2"
+agp = "9.3.0"
 kotlin = "2.3.20"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
 # 它目前最高支持 Kotlin 2.3.x —— 这也是 kotlin 升不到 2.4 的原因，
@@ -14,7 +14,7 @@ activityCompose = "1.13.0"
 navigationCompose = "2.9.8"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
-lifecycle = "2.9.4"
+lifecycle = "2.11.0"
 room = "2.8.4"
 datastore = "1.2.1"
 koin = "4.2.2"
