@@ -315,6 +315,7 @@ fun ReaderMenu(
                 onUpdate = onUpdateSettings,
                 textSelectionEnabled = state.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
+                layoutDiag = state.layoutDiag,
             )
         }
     }
@@ -455,6 +456,7 @@ private fun TypographyPanel(
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
+    layoutDiag: List<String>,
 ) {
     var tab by remember { mutableIntStateOf(0) }
 
@@ -479,7 +481,7 @@ private fun TypographyPanel(
             when (tab) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
-                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange, layoutDiag)
             }
         }
     }
@@ -645,6 +647,7 @@ private fun MoreTab(
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
+    layoutDiag: List<String>,
 ) {
     SectionLabel("预加载章节")
     ChipRow(
@@ -673,6 +676,28 @@ private fun MoreTab(
         checked = textSelectionEnabled,
         onCheckedChange = onTextSelectionChange,
     )
+
+    // 临时诊断（定位「进书卡顿」）。用户在手机上装着用，看不到 logcat ——
+    // 所以放这儿，进书后打开菜单就能看到、能截图。定位完这段整块删掉。
+    if (layoutDiag.isNotEmpty()) {
+        SectionLabel("排版诊断（临时）")
+        Text(
+            layoutDiag.joinToString("\n"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Dimens.screenPadding),
+        )
+        Text(
+            if (layoutDiag.count { it.startsWith("#") } > 1) {
+                "进一次书排了不止一遍版 —— 多出来的那遍是白做的，正好卡在入场动画里"
+            } else {
+                "只排了一遍版，符合预期"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapXS),
+        )
+    }
 }
 
 /**

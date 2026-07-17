@@ -126,6 +126,11 @@ data class ReaderUiState(
      * 静默换掉的话，用户只会觉得"这书怎么突然变了"，根本想不到是 App 干的。
      */
     val autoChangedTo: String? = null,
+    /**
+     * 排版诊断（临时）。定位「进书卡顿」用：进一次书本该只排一遍版。
+     * 打日志没用 —— 用户是在手机上装着用的，看不到 logcat。放进「更多」面板里，截图即可。
+     */
+    val layoutDiag: List<String> = emptyList(),
 )
 
 /**
@@ -264,14 +269,13 @@ class ReaderViewModel(
         // 说明视口在入场动画期间又变了一次（挖孔 inset 迟到 / 系统栏隐藏），
         // 第一遍排版白做，还正好跟 260ms 的入场动画抢 CPU。
         val prev = this.spec
-        Log.i(
-            TAG,
-            "onLayoutReady #${++layoutReadyCount} " +
-                "viewport=${spec.viewportWidthPx}x${spec.viewportHeightPx} " +
-                "margins=[${spec.marginLeftPx},${spec.marginTopPx},${spec.marginRightPx},${spec.marginBottomPx}] " +
-                "sinceOpen=${System.currentTimeMillis() - openedAt}ms" +
-                if (prev != null) " ← 重排，与上次的差异: ${specDiff(prev, spec)}" else "",
-        )
+        val line = "#${++layoutReadyCount} 进书后 ${System.currentTimeMillis() - openedAt}ms · " +
+            "视口 ${spec.viewportWidthPx}×${spec.viewportHeightPx} · " +
+            "边距 ${spec.marginLeftPx.toInt()}/${spec.marginTopPx.toInt()}/" +
+            "${spec.marginRightPx.toInt()}/${spec.marginBottomPx.toInt()}" +
+            if (prev != null) "\n     ↑ 重排！差异: ${specDiff(prev, spec)}" else ""
+        Log.i(TAG, line.replace("\n", " "))
+        _state.value = _state.value.copy(layoutDiag = _state.value.layoutDiag + line)
         this.facade = facade
         this.spec = spec
         paginateJob?.cancel()
@@ -281,7 +285,11 @@ class ReaderViewModel(
                 paginated.clear()
                 showPosition(position)
             }
-            Log.i(TAG, "分页完成 #$layoutReadyCount 耗时=${System.currentTimeMillis() - startedAt}ms")
+            val took = System.currentTimeMillis() - startedAt
+            Log.i(TAG, "分页完成 #$layoutReadyCount 耗时=${took}ms")
+            _state.value = _state.value.copy(
+                layoutDiag = _state.value.layoutDiag + "     └ 第 $layoutReadyCount 遍分页耗时 ${took}ms",
+            )
         }
     }
 
