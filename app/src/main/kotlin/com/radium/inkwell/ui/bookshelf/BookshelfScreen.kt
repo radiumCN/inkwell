@@ -223,18 +223,31 @@ fun BookshelfScreen(
                             //
                             // 已经展开时才给一个「收起」—— 那时书角本来就带着标记，藏不住了，
                             // 而用户需要一条明确的路把它收回去。
+                            // 每条都配前导图标。纯文本条目没有视觉锚点，眼睛只能逐字读，
+                            // 两三条就显得又空又没做完 —— 图标让人扫一眼就能定位。
+                            // contentDescription 一律 null：旁边的文字已经是它的名字了，
+                            // 给图标再起一个，读屏会把每条念两遍。
                             if (panelOpen || showHidden) {
                                 DropdownMenuItem(
                                     text = { Text("收起隐藏的书") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.VisibilityOff, contentDescription = null)
+                                    },
                                     onClick = { overflowOpen = false; viewModel.collapseHiddenAll() },
                                 )
                             }
                             DropdownMenuItem(
                                 text = { Text("书源管理") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Source, contentDescription = null)
+                                },
                                 onClick = { overflowOpen = false; onOpenSourceManage() },
                             )
                             DropdownMenuItem(
                                 text = { Text("设置") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Settings, contentDescription = null)
+                                },
                                 onClick = { overflowOpen = false; onOpenSettings() },
                             )
                         }
