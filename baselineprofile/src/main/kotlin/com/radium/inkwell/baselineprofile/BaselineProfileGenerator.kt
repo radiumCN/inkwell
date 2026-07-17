@@ -52,6 +52,20 @@ import org.junit.runner.RunWith
  * 产物落在 `app/src/release/generated/baselineProfiles/`，**要提交进仓库** —— 发版只用提交
  * 好的那份，不现场生成，所以生成器飘了也不会连累发版。代价是它会随代码漂移：改动大了记得
  * 重跑一次，不重跑不会报错，只会悄悄退回"第一次进书很卡"。
+ *
+ * ### 装上不等于生效 —— 实机验证必读
+ *
+ * profile 进了包只是第一步。实测一整条链：
+ * ```
+ * adb install app-release.apk        → [status=verify]        没有 AOT
+ * 启动一次（ProfileInstaller 写入）   → [status=verify]        还是没有
+ * adb shell cmd package bg-dexopt-job → [status=speed-profile] 这时才生效
+ * ```
+ * 中间隔着 ART 的后台 dexopt 任务，真机上它要"息屏 + 充电 + 空闲"才跑，通常是夜里。
+ * 所以**装上 beta 立刻测是测不出 Baseline Profile 的**，只会测到别的改动 —— 想当场验证
+ * 就手动敲上面那行 bg-dexopt-job 把它逼出来，或者充一夜电第二天再测。
+ *
+ * 查当前状态：`adb shell dumpsys package dexopt | grep -A3 com.radium.inkwell`
  */
 @RunWith(AndroidJUnit4::class)
 class BaselineProfileGenerator {
