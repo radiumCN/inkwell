@@ -1,5 +1,6 @@
 package com.radium.inkwell.update
 
+import com.radium.inkwell.data.net.InkwellServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -17,7 +18,7 @@ import okhttp3.Request
  */
 class ServerUpdateChecker(
     private val http: OkHttpClient,
-    private val baseUrl: String = BASE,
+    private val baseUrl: String = InkwellServer.BASE,
 ) : UpdateProvider {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -86,6 +87,8 @@ class ServerUpdateChecker(
     )
 
     companion object {
-        const val BASE = "https://book-server.skylark.run"
+        /** @deprecated 用 [InkwellServer.BASE] —— 中转服务器不只服务于更新，反馈也走它 */
+        @Deprecated("改用 InkwellServer.BASE", ReplaceWith("InkwellServer.BASE"))
+        const val BASE = InkwellServer.BASE
     }
 }

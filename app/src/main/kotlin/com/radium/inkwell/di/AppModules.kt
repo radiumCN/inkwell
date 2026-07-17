@@ -90,6 +90,7 @@ val appModule = module {
     single { okhttp3.OkHttpClient() }
     single { com.radium.inkwell.update.UpdateChecker(get()) }
     single { com.radium.inkwell.update.ServerUpdateChecker(get()) }
+    single { com.radium.inkwell.data.repo.FeedbackRepository(get()) }
     single { com.radium.inkwell.update.UpdateInstaller(get()) }
     single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
 
@@ -112,6 +113,7 @@ val appModule = module {
     viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
     viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
+    viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }

@@ -98,3 +98,6 @@ object ThemeSettingsRoute
 
 @Serializable
 object WebDavSettingsRoute
+
+@Serializable
+object FeedbackRoute

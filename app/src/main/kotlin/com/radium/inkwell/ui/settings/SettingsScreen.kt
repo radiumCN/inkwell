@@ -62,6 +62,7 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenFeedback: () -> Unit,
     onOpenWebDav: () -> Unit,
     onOpenTheme: () -> Unit,
     onOpenSources: () -> Unit,
@@ -251,6 +252,11 @@ fun SettingsScreen(
             )
 
             SectionHeader("关于")
+            SettingRow(
+                title = "意见反馈",
+                subtitle = "问题与建议直接提给开发者",
+                onClick = onOpenFeedback,
+            )
             SettingRow(title = "版本", subtitle = "v$currentVersion")
             SettingRow(title = "开源许可", subtitle = "MIT License")
             SettingRow(

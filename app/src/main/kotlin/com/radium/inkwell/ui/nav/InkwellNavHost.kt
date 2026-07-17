@@ -140,6 +140,7 @@ fun InkwellNavHost() {
                 onOpenSources = { go(SourceManageRoute) },
                 onOpenReplaceRules = { go(ReplaceRuleRoute) },
                 onOpenRss = { go(RssSourceRoute) },
+                onOpenFeedback = { go(FeedbackRoute) },
             )
         }
         composable<RssSourceRoute> {
@@ -180,6 +181,9 @@ fun InkwellNavHost() {
         }
         composable<WebDavSettingsRoute> {
             WebDavSettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable<FeedbackRoute> {
+            com.radium.inkwell.ui.feedback.FeedbackScreen(onBack = { navController.popBackStack() })
         }
     }
 }
