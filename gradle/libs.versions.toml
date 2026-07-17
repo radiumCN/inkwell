@@ -2,8 +2,11 @@
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
 inkwell = "0.1.5-beta.1"
 agp = "8.13.2"
-kotlin = "2.2.20"
-ksp = "2.2.20-2.0.2"
+kotlin = "2.3.20"
+# KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
+# 它目前最高支持 Kotlin 2.3.x —— 这也是 kotlin 升不到 2.4 的原因，
+# lint 会建议 2.4.x，别信：Kotlin 2.4 名下一个 KSP 都没有，Room 的注解处理会崩。
+ksp = "2.3.10"
 coroutines = "1.10.2"
 serialization = "1.9.0"
 composeBom = "2026.06.01"
