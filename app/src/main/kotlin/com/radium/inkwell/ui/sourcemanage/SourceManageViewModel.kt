@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.sourcemanage
 
-import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -396,16 +395,6 @@ class SourceManageViewModel(
 
     /** 一次性提示：用事件流而非 StateFlow，避免相同内容的连续提示被去重吞掉 */
     val messages = MessageBus()
-
-    fun importFromClipboard() {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-        if (text.isNullOrBlank()) {
-            messages.emit("剪贴板为空")
-            return
-        }
-        importText(text)
-    }
 
     fun importFromFile(uri: Uri) {
         viewModelScope.launch {

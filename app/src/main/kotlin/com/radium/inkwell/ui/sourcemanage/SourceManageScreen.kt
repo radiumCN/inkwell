@@ -247,13 +247,6 @@ fun SourceManageScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("从剪贴板导入") },
-                            onClick = {
-                                showImportMenu = false
-                                viewModel.importFromClipboard()
-                            },
-                        )
-                        DropdownMenuItem(
                             text = { Text("从网络链接导入") },
                             onClick = {
                                 showImportMenu = false
