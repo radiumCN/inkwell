@@ -99,7 +99,6 @@ fun ReaderMenu(
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
-    frameProbe: String,
     onSetTextSelection: (Boolean) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
@@ -316,8 +315,6 @@ fun ReaderMenu(
                 onUpdate = onUpdateSettings,
                 textSelectionEnabled = state.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
-                layoutDiag = state.layoutDiag,
-                frameProbe = frameProbe,
             )
         }
     }
@@ -458,8 +455,6 @@ private fun TypographyPanel(
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
-    layoutDiag: List<String>,
-    frameProbe: String,
 ) {
     var tab by remember { mutableIntStateOf(0) }
 
@@ -484,7 +479,7 @@ private fun TypographyPanel(
             when (tab) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
-                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange, layoutDiag, frameProbe)
+                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
         }
     }
@@ -650,8 +645,6 @@ private fun MoreTab(
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
-    layoutDiag: List<String>,
-    frameProbe: String,
 ) {
     SectionLabel("预加载章节")
     ChipRow(
@@ -681,25 +674,6 @@ private fun MoreTab(
         onCheckedChange = onTextSelectionChange,
     )
 
-    // 临时诊断（定位「进书卡顿」）。用户在手机上装着用，看不到 logcat ——
-    // 所以放这儿，进书后打开菜单就能看到、能截图。定位完这段整块删掉。
-    if (layoutDiag.isNotEmpty()) {
-        SectionLabel("排版诊断（临时）")
-        Text(
-            layoutDiag.joinToString("\n"),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = Dimens.screenPadding),
-        )
-        // 「卡顿」有两种，肉眼分不出但修法相反：真掉帧（主线程被占住）vs 视觉跳动
-        // （帧没掉，但内容位置突然变了）。两个都报出来，别让人自己猜。
-        Text(
-            frameProbe,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapXS),
-        )
-    }
 }
 
 /**
