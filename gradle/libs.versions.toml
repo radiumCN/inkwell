@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.1.5-beta.7"
+inkwell = "0.1.5-beta.8"
 agp = "9.3.0"
 kotlin = "2.3.20"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
@@ -26,6 +26,16 @@ jsonPath = "3.0.0"
 xpath = "2.5.5"
 biometric = "1.1.0"
 coil = "3.5.0"
+# Baseline Profile：把热方法在**安装时**就 AOT 编译好。没有它，全新安装后 ART 先解释执行、
+# 边跑边 JIT —— 实测同一台机器反复进书，卡顿从 65ms 一路降到 16ms，那条下降曲线就是 JIT
+# 在热身。而真实用户每次都是"第一次"，永远吃不到热身后的那个数。
+#
+# 用 alpha 不是图新：稳定版 1.4.1 不认 AGP 9，配置期就炸
+# （"Module `:app` is not a supported android module"），1.5.0-alpha07 才支持。
+# 别"顺手降回稳定版"。它只跑在构建期和 :baselineprofile 模块里，**不进包**，风险到此为止。
+benchmark = "1.5.0-alpha07"
+profileinstaller = "1.4.1"
+uiautomator = "2.4.0"
 junit = "4.13.2"
 androidxTest = "1.7.0"
 androidxTestJunit = "1.3.0"
@@ -78,12 +88,20 @@ androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "b
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
+
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+# com.android.test：Baseline Profile 的生成器模块用它（测试代码与被测 App 分属两个进程，
+# 这是 macrobenchmark 能测"冷启动"的前提 —— 同进程里测不了自己的冷启动）
+android-test = { id = "com.android.test", version.ref = "agp" }
+androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "benchmark" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

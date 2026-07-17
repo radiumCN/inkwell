@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 android {
@@ -65,6 +66,12 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":reader"))
+
+    // 装包时把 Baseline Profile 交给 ART 去 AOT 编译。**没有它 profile 进了包也不生效**
+    // （Play 会自己装，但我们走的是 GitHub Release + 自建中转，只能自己装）
+    implementation(libs.androidx.profileinstaller)
+    // 生成器模块的产物由此并进 :app 的包
+    baselineProfile(project(":baselineprofile"))
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
