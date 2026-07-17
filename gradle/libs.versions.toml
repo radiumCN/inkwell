@@ -7,10 +7,10 @@ kotlin = "2.3.20"
 # 它目前最高支持 Kotlin 2.3.x —— 这也是 kotlin 升不到 2.4 的原因，
 # lint 会建议 2.4.x，别信：Kotlin 2.4 名下一个 KSP 都没有，Room 的注解处理会崩。
 ksp = "2.3.10"
-coroutines = "1.10.2"
-serialization = "1.9.0"
+coroutines = "1.11.0"
+serialization = "1.11.0"
 composeBom = "2026.06.01"
-activityCompose = "1.10.1"
+activityCompose = "1.13.0"
 navigationCompose = "2.9.8"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
