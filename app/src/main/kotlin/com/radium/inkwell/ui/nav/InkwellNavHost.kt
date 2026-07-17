@@ -6,7 +6,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
@@ -46,32 +48,34 @@ fun InkwellNavHost() {
         // 整屏转场用「不透明方向滑动」而非交叉淡入。进入的页面若带 alpha 淡入会在过渡中半透明，
         // 跨主题时（亮色书架 → 深色阅读页）底层会透上来，正文里透出书封，观感割裂。
         // 常规页：新页不透明地从右整幅推入，旧页做 1/4 视差左移；全程无 alpha，任何主题组合都干净。
-        // 阅读页：不做转场，点书即入、返回即出（None）。对齐阅读3的思路 —— 进书的顺滑靠「预加载正文」
-        //   而非动画掩盖：入场再花哨，第一帧排版没就位一样是卡。之前走垂直轴「翻开/合上」，但那条上滑
-        //   恰好和进书首帧的排版+GC 抢同一段时间（见 ReaderViewModel.PREFETCH_LEAD_IN_MS 的让位注释），
-        //   与其让动画和首帧互相拖累，不如直接瞬切、把预算全给首帧。旧页在阅读页盖住/露出时原地不动。
+        // 阅读页：不整屏、不透明淡入，只做「小幅上抬」——从屏高 1/8 处快速抬入，用 M3「强调减速」曲线
+        //   收尾（见 Motion.readerEnterSpec），落定像被接住，给一点「翻开」的方向暗示但不喧宾夺主。
+        //   为什么不整屏上滑：那条整幅位移恰好和进书首帧的排版+GC 抢同一段时间（见
+        //   ReaderViewModel.PREFETCH_LEAD_IN_MS 的让位注释），动画和首帧互相拖累；小幅+短时长把预算让给首帧。
+        //   为什么不淡入/不缩放：过渡中带 alpha 或缩放<1 会从边缘/半透明透出底层书架的书封，跨主题割裂。
+        //   旧页在阅读页盖住/露出时原地不动（None）。返回走小幅下滑，与入场对称。
         enterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                EnterTransition.None // 点书即入，不做上滑；顺滑交给正文预加载
+                slideInVertically(Motion.readerEnterSpec()) { it / 8 } // 小幅上抬，不整屏、不透明
             else slideInHorizontally(Motion.navEnterSpec()) { it }
         },
         exitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                ExitTransition.None // 旧页原地保持，被瞬切上来的阅读页盖住
+                ExitTransition.None // 旧页原地保持，被抬上来的阅读页盖住
             else slideOutHorizontally(Motion.navExitSpec()) { -it / 4 }
         },
         popEnterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                EnterTransition.None // 阅读页瞬切离开，底下的页原样露出
+                EnterTransition.None // 阅读页下滑离开，底下的页原样露出
             else slideInHorizontally(Motion.navEnterSpec()) { -it / 4 }
         },
         popExitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                ExitTransition.None // 返回即出，与入场对称，不做下滑
+                slideOutVertically(Motion.navExitSpec()) { it / 8 } // 小幅下滑退出，与入场对称
             else slideOutHorizontally(Motion.navExitSpec()) { it }
         },
     ) {

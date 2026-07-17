@@ -52,6 +52,19 @@ object Motion {
 
     fun <T> navEnterSpec(): FiniteAnimationSpec<T> = tween(NAV_ENTER_MS, easing = EnterEasing)
     fun <T> navExitSpec(): FiniteAnimationSpec<T> = tween(NAV_EXIT_MS, easing = ExitEasing)
+
+    /**
+     * 进阅读器专用：小幅上抬（NavHost 里用屏高 1/8 的位移），不整屏、不透明淡入。
+     *
+     * 曲线用 M3「强调减速」而非普通减速 [EnterEasing]：起步更快、收尾更缓，落定那一下像被接住，
+     * 消掉线性 tween 那种匀速划过的机械感。时长压到比常规页转场 [NAV_ENTER_MS] 更短 —— 进书首帧
+     * 排版本就抢手（见 NavHost 的转场注释 / ReaderViewModel.PREFETCH_LEAD_IN_MS），转场只做点到为止的
+     * 方向暗示，别跟首帧抢时间。返回仍走常规 [navExitSpec]（无需强调，退场只求快）。
+     */
+    const val READER_ENTER_MS = 200
+    val ReaderEnterEasing: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+
+    fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
 }
 
 /**
