@@ -591,10 +591,3 @@ private fun KeepScreenOnEffect(activity: Activity?, keepOn: Boolean) {
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 }
-
-/**
- * 视口安静多久才算稳定。
- *
- * 一帧 16ms；insets 通常在首次 layout 之后紧接着派发。给两帧的余量 ——
- * 太短会漏掉那次变化（抖动照旧），太长则进书时会多闪一下转圈。
- */
