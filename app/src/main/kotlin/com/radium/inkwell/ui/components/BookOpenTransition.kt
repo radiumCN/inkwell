@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.components
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
@@ -56,11 +57,16 @@ fun Modifier.bookOpenContainer(bookId: String): Modifier {
         this@bookOpenContainer.sharedBounds(
             rememberSharedContentState(key = bookOpenKey(bookId)),
             animatedVisibilityScope = animated,
-            // 容器内部两端内容做短交叉淡入：封面淡出、正文淡入。这里的 alpha 只发生在
-            // **正在放大的容器内部**（外面还是书架），不是整屏半透明，所以不会出现
-            // 「正文里透出书封」那种跨主题穿帮 —— 封面化成书页本来就是这个效果要的。
-            enter = fadeIn(Motion.bookOpenSpec()),
-            exit = fadeOut(Motion.bookOpenSpec()),
+            // 交叉淡入**只占开头一小段**，不能摊在整段飞行上。
+            //
+            // 0.1.6-beta.4 就是把这两个 spec 写成了和 boundsTransform 一样长（整段 320ms），
+            // 结果容器全程半透明：底下的书架一直透上来，看到的不是「封面展开成书页」，而是一团
+            // 虚影盖在书架上，还带着被放大到满屏的半透明封面标题。
+            //
+            // M3 容器变换的做法是「开头快速 fade through」：封面在头 ~1/4 就淡没，书页在头 ~1/3
+            // 就到全不透明，之后剩下的行程是一张**实心页**在长大 —— 这才读得出「翻开」。
+            enter = fadeIn(tween(Motion.BOOK_OPEN_MS / 3)),
+            exit = fadeOut(tween(Motion.BOOK_OPEN_MS / 4)),
             boundsTransform = { _, _ -> Motion.bookOpenSpec() },
             resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
                 contentScale = ContentScale.Crop,
