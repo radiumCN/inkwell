@@ -4,6 +4,8 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -65,6 +67,24 @@ object Motion {
     val ReaderEnterEasing: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
     fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
+
+    /** 开书容器变换要跑多久。比 [READER_ENTER_MS] 长一点：跨越的距离从一张封面到整屏，太快会看不清"展开"这件事 */
+    const val BOOK_OPEN_MS = 320
+
+    fun <T> bookOpenSpec(): FiniteAnimationSpec<T> = tween(BOOK_OPEN_MS, easing = ReaderEnterEasing)
+
+    /**
+     * 「空转」转场：alpha 恒为 1，视觉上什么都不做，只为给这段转场**占住一个真实时长**。
+     *
+     * 为什么需要它：共享元素（开书容器变换）是挂在路由转场那个 transition 上的 —— 转场时长为零，
+     * 两端就只共存一帧，变换根本来不及播；更糟的是离场那一屏当帧就被回收，连可放大的"源"（书架上
+     * 那张封面）都没了。`EnterTransition.None` / `ExitTransition.None` 恰恰就是零时长。
+     *
+     * 所以「让位给共享元素」不能写成 None —— 那是把它掐死，不是让位。要用这两个占住窗口，
+     * 让两端在这 [BOOK_OPEN_MS] 里同时活着，变换才播得出来。
+     */
+    fun holdEnter(): EnterTransition = fadeIn(tween(BOOK_OPEN_MS), initialAlpha = 1f)
+    fun holdExit(): ExitTransition = fadeOut(tween(BOOK_OPEN_MS), targetAlpha = 1f)
 }
 
 /**

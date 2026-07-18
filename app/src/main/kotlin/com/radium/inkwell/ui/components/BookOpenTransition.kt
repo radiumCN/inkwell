@@ -59,9 +59,9 @@ fun Modifier.bookOpenContainer(bookId: String): Modifier {
             // 容器内部两端内容做短交叉淡入：封面淡出、正文淡入。这里的 alpha 只发生在
             // **正在放大的容器内部**（外面还是书架），不是整屏半透明，所以不会出现
             // 「正文里透出书封」那种跨主题穿帮 —— 封面化成书页本来就是这个效果要的。
-            enter = fadeIn(Motion.readerEnterSpec()),
-            exit = fadeOut(Motion.readerEnterSpec()),
-            boundsTransform = { _, _ -> Motion.readerEnterSpec() },
+            enter = fadeIn(Motion.bookOpenSpec()),
+            exit = fadeOut(Motion.bookOpenSpec()),
+            boundsTransform = { _, _ -> Motion.bookOpenSpec() },
             resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
                 contentScale = ContentScale.Crop,
                 alignment = Alignment.Center,

@@ -13,6 +13,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import com.radium.inkwell.ui.components.LocalNavAnimatedScope
 import com.radium.inkwell.ui.components.LocalSharedTransitionScope
 import com.radium.inkwell.ui.components.Motion
@@ -58,6 +60,16 @@ private fun InkwellNavGraph() {
     val navController = rememberNavController()
     // 统一带 launchSingleTop：快速双击一个入口不会把同一个目的地压两次栈（返回要按两下）
     fun go(route: Any) = navController.navigate(route) { launchSingleTop = true }
+    // 这次进书是不是「从书架点封面」进来的 —— 决定走开书容器变换还是小幅上抬兜底。
+    //
+    // 从前是在转场里用 hasRoute<BookshelfRoute>() 嗅探"上一个目的地是谁"，但那个判据没如预期命中
+    // （0.1.6-beta.3 的开书动画不播，一半就栽在这），而且它推断的本来就是调用点**已经确知**的事。
+    // 与其在转场里反推，不如让真正知道答案的入口直接说：书架点书置 true，详情页/搜索预览置 false。
+    val openViaCover = remember { mutableStateOf(false) }
+    fun openBook(bookId: String, viaCover: Boolean) {
+        openViaCover.value = viaCover
+        go(ReaderRoute(bookId))
+    }
     // 从前没配转场，走的是 navigation-compose 的默认淡入淡出（约 700ms，且进出同速）——
     // 与翻页的 180~320ms 完全脱节，而且违反「退场比入场快」。
     // 改成 shared-axis X：前进从右侧滑入，返回向右滑出，方向就说明了"进"和"退"。
@@ -70,8 +82,10 @@ private fun InkwellNavGraph() {
         // 常规页：新页不透明地从右整幅推入，旧页做 1/4 视差左移；全程无 alpha，任何主题组合都干净。
         // 阅读页分两种情况：
         //   a) 书架 → 阅读页：走「开书」容器变换（见 Modifier.bookOpenContainer）—— 被点的那本书封面
-        //      就地放大成整页阅读器，返回收回原格子。此时整页转场必须让位（None），否则「整页在上抬」
-        //      和「封面在放大」两套位移会打架。
+        //      就地放大成整页阅读器，返回收回原格子。此时整页自己不能再做位移（否则「整页在上抬」和
+        //      「封面在放大」两套位移打架），但**也不能写 None** —— 零时长会把共享元素直接掐死。
+        //      要用 Motion.holdEnter/holdExit 这种"空转"转场：视觉上什么都不做，只占住时间窗。
+        //      （0.1.6-beta.3 的开书动画完全不播，就是栽在这里写了 None。）
         //   b) 详情页 / 搜索预览 → 阅读页：没有可放大的源封面，退回「小幅上抬」——从屏高 1/8 处快速
         //      抬入，用 M3「强调减速」曲线收尾（见 Motion.readerEnterSpec），落定像被接住。
         //   为什么不整屏上滑：那条整幅位移恰好和进书首帧的排版+GC 抢同一段时间（见
@@ -81,28 +95,30 @@ private fun InkwellNavGraph() {
         enterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                // 从书架来 → 让位给开书变换；从别处来 → 小幅上抬兜底
-                if (initialState.destination.hasRoute<BookshelfRoute>()) EnterTransition.None
+                // 走开书变换时用「空转」占住时间窗，**不能用 None**（零时长会把变换掐死，见 Motion.holdEnter）
+                if (openViaCover.value) Motion.holdEnter()
                 else slideInVertically(Motion.readerEnterSpec()) { it / 8 }
             else slideInHorizontally(Motion.navEnterSpec()) { it }
         },
         exitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                ExitTransition.None // 旧页原地保持：书架要留在原处，封面才有地方"飞出去"
+                // 书架必须在整段变换里一直活着且不透明：它既是封面"飞出去"的源，
+                // 也是变换容器之外露出的背景。用 None 它当帧就被回收，源就没了。
+                if (openViaCover.value) Motion.holdExit() else ExitTransition.None
             else slideOutHorizontally(Motion.navExitSpec()) { -it / 4 }
         },
         popEnterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                EnterTransition.None // 书架原样露出，等封面收回它的格子
+                // 书架原样露出，等封面收回它的格子 —— 同样要占住窗口
+                if (openViaCover.value) Motion.holdEnter() else EnterTransition.None
             else slideInHorizontally(Motion.navEnterSpec()) { -it / 4 }
         },
         popExitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                // 回书架 → 让位给收回封面的变换；回别处 → 小幅下滑，与入场对称
-                if (targetState.destination.hasRoute<BookshelfRoute>()) ExitTransition.None
+                if (openViaCover.value) Motion.holdExit()
                 else slideOutVertically(Motion.navExitSpec()) { it / 8 }
             else slideOutHorizontally(Motion.navExitSpec()) { it }
         },
@@ -111,7 +127,8 @@ private fun InkwellNavGraph() {
             // 只有书架和阅读页参与开书变换，所以只给这两个路由下发入退场作用域
             CompositionLocalProvider(LocalNavAnimatedScope provides this) {
                 BookshelfScreen(
-                    onOpenBook = { go(ReaderRoute(it)) },
+                    // 书架点书 —— 唯一有源封面可放大的入口，走开书变换
+                    onOpenBook = { openBook(it, viaCover = true) },
                     onOpenDetail = { go(BookDetailRoute(it)) },
                     onOpenSearch = { go(SearchRoute()) },
                     onOpenExplore = { go(ExploreRoute) },
@@ -124,7 +141,8 @@ private fun InkwellNavGraph() {
             val route = entry.toRoute<BookDetailRoute>()
             BookDetailScreen(
                 bookId = route.bookId,
-                onRead = { go(ReaderRoute(route.bookId)) },
+                // 详情页没有可放大的源封面，退回小幅上抬
+                onRead = { openBook(route.bookId, viaCover = false) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -151,7 +169,8 @@ private fun InkwellNavGraph() {
             val route = entry.toRoute<BookPreviewRoute>()
             BookPreviewScreen(
                 results = route.results,
-                onRead = { go(ReaderRoute(it)) },
+                // 搜索预览同理，没有源封面
+                onRead = { openBook(it, viaCover = false) },
                 onBack = { navController.popBackStack() },
             )
         }
