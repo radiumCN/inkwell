@@ -127,9 +127,6 @@ class BookshelfViewModel(
         _showHidden.value = true
     }
 
-    /** 只关面板。书显不显，看 [setShowHidden] —— 关灯不用钥匙，但也不该顺手把书收走 */
-    fun closeHiddenPanel() { _hiddenPanelOpen.value = false }
-
     fun setShowHidden(on: Boolean) { _showHidden.value = on }
 
     /** 两个开关都只在隐藏区内部露面，所以设置这件事归书架管，而不是设置页 */

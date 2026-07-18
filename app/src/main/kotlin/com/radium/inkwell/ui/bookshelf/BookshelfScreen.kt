@@ -224,15 +224,12 @@ fun BookshelfScreen(
                     // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
                     // 改为长按顶栏的「书架」标题。
                     //
-                    // 但「收起」得看得见：展开之后书角带着标记、本来就藏不住了，
-                    // 而用户需要一条明确的路把它收回去。长按标题虽然也能收（见上面的
-                    // onLongClick），却只在 panelOpen 时成立 —— showHidden 单独为真时
-                    // 长按是「展开」，那条路够不着。所以这里给一个只在该状态出现的按钮。
-                    if (panelOpen || showHidden) {
-                        IconButton(onClick = { viewModel.collapseHiddenAll() }) {
-                            Icon(Icons.Default.VisibilityOff, contentDescription = "收起隐藏的书")
-                        }
-                    }
+                    // 这里也**不放**「收起隐藏的书」：收起的出口是隐藏状态条上的 ✕，
+                    // 而状态条恰恰在 panelOpen 时才出现 —— 与这个按钮的出现时机完全重合，
+                    // 两个按钮干同一件事。曾经短暂加过一个，随即因重复删掉。
+                    // （唯一能让二者错开的是 showHidden 真而 panelOpen 假，
+                    //   但造出这个状态的 closeHiddenPanel 没有任何调用点，够不到。）
+                    //
                     // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
                     // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
                     // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
