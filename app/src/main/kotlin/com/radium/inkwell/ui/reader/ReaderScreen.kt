@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,6 +43,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import androidx.compose.runtime.snapshotFlow
+import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
@@ -70,6 +74,7 @@ import com.radium.inkwell.reader.measure.SystemFontRegistry
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
@@ -199,6 +204,34 @@ fun ReaderScreen(
     ) {
         val layout = spec
 
+        /*
+         * 进书 splash：正文还没就位时，在纸面上居中显示这本书的封面。
+         *
+         * 时机是这套东西的全部难点，三条约束缺一不可：
+         *   1) 热开书不能变慢 —— 所以先等 READER_SPLASH_DELAY_MS，这段时间内就绪就**永不出场**。
+         *      绝大多数进书走的是这条，用户根本见不到它，一毫秒都没多花。
+         *   2) 出场了就不能一闪而过 —— 露面即保底停留 READER_SPLASH_MIN_MS，否则正文在第 210ms
+         *      就绪时封面只闪 10ms，比不显示更难看。
+         *   3) **只属于「这本书正在打开」这一刻** —— 章节切换/换源时 loading 同样会为 true，
+         *      那时候再蹦出封面就是打断阅读。firstContentShown 一旦为 true 永不复位，闸住这种情况。
+         *
+         * 整段生命周期用一个协程串起来，而不是几个 effect 互相触发 —— 后者在「内容早于保底时间
+         * 就绪」时会互相打架，要么提前隐藏要么再也不隐藏。
+         */
+        var firstContentShown by remember { mutableStateOf(false) }
+        var splashVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(state.loading, layout) {
+            if (!state.loading && layout != null) firstContentShown = true
+        }
+        LaunchedEffect(Unit) {
+            delay(Motion.READER_SPLASH_DELAY_MS)
+            if (firstContentShown) return@LaunchedEffect // 热开书：这段窗口内已就绪，不出场
+            splashVisible = true
+            delay(Motion.READER_SPLASH_MIN_MS)           // 露了面就待满，杜绝一闪
+            snapshotFlow { firstContentShown }.first { it }
+            splashVisible = false
+        }
+
         // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
         // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
         if (state.settings.flipAnimation == FlipAnimation.SCROLL) {
@@ -261,10 +294,35 @@ fun ReaderScreen(
                     }
                 }
             }
-            state.loading || layout == null -> CircularProgressIndicator(
-                Modifier.align(Alignment.Center),
-                color = Color(state.settings.theme.textColor),
-            )
+            // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
+            // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
+            // 主题走，不然浅色书封压在深色纸上会打架。
+            state.loading || layout == null -> ReaderThemeScope(state.settings.theme) {
+                AnimatedVisibility(
+                    visible = splashVisible,
+                    modifier = Modifier.align(Alignment.Center),
+                    enter = scrimEnter(),
+                    exit = scrimExit(),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // 自然尺寸居中，**不铺满** —— 书封是 3:4 缩略图，撑到全屏必糊
+                        // （0.1.6-beta.3~6 那条失败路线就栽在这）。
+                        BookCover(
+                            title = state.bookTitle,
+                            coverModel = state.coverPath,
+                            modifier = Modifier.size(
+                                Dimens.readerSplashCoverWidth,
+                                Dimens.readerSplashCoverHeight,
+                            ),
+                            placeholderChars = 14,
+                        )
+                        Spacer(Modifier.height(Dimens.gapXL))
+                        // 封面只交代"在开哪本书"，还得有个东西说明"仍在工作中"，
+                        // 否则慢网络下一张静止的封面像卡死了
+                        CircularProgressIndicator(color = Color(state.settings.theme.textColor))
+                    }
+                }
+            }
             // 滚动模式：另一条渲染路径，不走翻页容器
             state.settings.flipAnimation == FlipAnimation.SCROLL -> {
                 ScrollReader(

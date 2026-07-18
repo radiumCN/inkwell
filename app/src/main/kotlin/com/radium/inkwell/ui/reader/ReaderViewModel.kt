@@ -76,6 +76,8 @@ private fun String.snippetAround(at: Int, length: Int, radius: Int = 18): String
 
 data class ReaderUiState(
     val bookTitle: String = "",
+    /** 进书 splash 用：正文还没就位时，在纸面上显示这本书的封面（见 ReaderScreen 的 BookOpenSplash） */
+    val coverPath: String? = null,
     val chapterTitle: String = "",
     val chapterIndex: Int = 0,
     val chapterCount: Int = 0,
@@ -232,6 +234,7 @@ class ReaderViewModel(
             source = src
             _state.value = _state.value.copy(
                 bookTitle = b.title,
+                coverPath = b.coverPath,
                 chapterCount = src.chapterCount,
                 chapterIndex = position.chapterIndex,
                 toc = chapters.map { TocItem(it.index, it.title, it.isCached) },

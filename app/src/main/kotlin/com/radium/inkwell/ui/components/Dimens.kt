@@ -77,6 +77,9 @@ object Dimens {
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
     val coverThumbHeight = 64.dp
+    /** 进书 splash 居中显示的书封。3:4，比列表缩略图大一档，但**远不到铺满**（铺满会被拉糊） */
+    val readerSplashCoverWidth = 120.dp
+    val readerSplashCoverHeight = 160.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
 }
