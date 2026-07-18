@@ -67,6 +67,21 @@ object Motion {
     fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
 
     /**
+     * 阅读页退场。**必须比入场快**，曲线也要和入场配成一对。
+     *
+     * 从前这里直接借 [navExitSpec]（180ms），与 [READER_ENTER_MS]（200）之比高达 90% ——
+     * 既违反本文件开头就立下的「退场比入场快、约取 65%」，也违反 M3 motion 的同一条；
+     * 而且入场用 M3 强调减速、退场用通用加速，两条曲线根本不是一套。
+     *
+     * 130ms ≈ 200 的 65%。曲线取 M3「强调加速」（emphasized accelerate）：慢起快走，
+     * 与入场的强调减速（快进慢停）正好互为镜像 —— 进来时被稳稳接住，离开时干脆抽走。
+     */
+    const val READER_EXIT_MS = 130
+    val ReaderExitEasing: Easing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+
+    fun <T> readerExitSpec(): FiniteAnimationSpec<T> = tween(READER_EXIT_MS, easing = ReaderExitEasing)
+
+    /**
      * 进阅读页放大展开的起始缩放（返回时缩回同一值）。
      *
      * 取 0.85 而不是更小：这段动画里阅读页四周会露出书架，缩得越小露得越多、越像"从一个小方块弹出来"，

@@ -58,7 +58,22 @@ fun InkwellNavHost() {
         // 整屏转场用「不透明方向滑动」而非交叉淡入。进入的页面若带 alpha 淡入会在过渡中半透明，
         // 跨主题时（亮色书架 → 深色阅读页）底层会透上来，正文里透出书封，观感割裂。
         // 常规页：新页不透明地从右整幅推入，旧页做 1/4 视差左移；全程无 alpha，任何主题组合都干净。
-        // 阅读页：**从被点那本书的位置放大展开**，像桌面点图标、窗口从图标处长出来。
+        // 阅读页走的是 M3 motion 的 **shared axis Z**（纵深轴）—— 没有共享容器时表达「父 → 子钻入」
+        // 的标准模式：进入的页面缩放放大，离开的页面原地留在下面。相对 M3 原样有三处**有意偏离**，
+        // 每一处都在解决一个具体问题，别"顺手改回规范"：
+        //   1) 缩放原点在**被点的那本书**上，而非 M3 的屏幕中心 —— 中心展开就丢了「从这本书长出来」。
+        //   2) **只缩放、不叠 alpha**，而 M3 的 shared axis 带淡入 —— 带 alpha 会让过渡中的正文半透明，
+        //      跨主题时（亮色书架 → 深色阅读页）底层书封透进正文里。这是项目里踩过的坑。
+        //   3) 时长 200ms，短于 M3 全屏转场建议的 300ms+ —— 为的是不跟进书首帧排版抢时间
+        //      （见 ReaderViewModel.PREFETCH_LEAD_IN_MS）。
+        // 起始缩放 0.85 则是**符合**规范的：M3 shared axis Z 的入场就是从 0.8 放大到 1.0。
+        // （注意别拿 fade through 的 92% 当参照 —— 那个模式用于互不相关的目的地，比如切 tab。）
+        //
+        // 至于 M3 对「列表项 → 详情」的首选 container transform：试过四版，全部失败。
+        // 书封是 3:4 缩略图，撑到全屏必糊（默认封面的书名会成满屏巨字）；而且共享元素的 overlay
+        // 图层会吃掉元素自身的 3D 变换。历史见 0.1.6-beta.3~7 的提交。
+        //
+        // 具体到画面：**从被点那本书的位置放大展开**，像桌面点图标、窗口从图标处长出来。
         //   长大的是「阅读页本身」，不是书封被撑大 —— 这是它和之前那版容器变换的根本区别：
         //   那版把 3:4 的封面缩略图 scaleToBounds 到全屏，默认封面的书名被放成满屏巨字，越清晰越难看。
         //   这里书封原地不动（旧页 None），只有阅读页在放大，不存在任何被拉伸的素材。
@@ -93,9 +108,10 @@ fun InkwellNavHost() {
         popExitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                // 返回：缩回它当初长出来的那个位置，与入场对称
+                // 返回：缩回它当初长出来的那个位置。用 readerExitSpec 而不是通用的 navExitSpec ——
+                // 退场要比入场快、曲线要和入场配对，理由见 Motion.readerExitSpec。
                 scaleOut(
-                    Motion.navExitSpec(),
+                    Motion.readerExitSpec(),
                     targetScale = Motion.READER_OPEN_SCALE,
                     transformOrigin = openOrigin.value,
                 )
