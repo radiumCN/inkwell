@@ -52,6 +52,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import com.radium.inkwell.core.source.Purifier
+import com.radium.inkwell.core.source.PurifyTimeoutException
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
@@ -236,6 +237,16 @@ class ReaderViewModel(
                 withContext(Dispatchers.IO) { LocalReaderBookSource(bookRepo.openLocal(b)) }
             }
             source = src
+            // 零章节的书进了阅读器就是个死局：chapterCount == 0 时 ensurePaginated 的越界守卫
+            // 静默返回 null，showPosition 直接 return —— 页面永远转圈，连报错出口都不给。
+            // 网络书在上面 chapters 为空时会补抓一次目录，本地书走的是 else 分支，从前没有
+            // 任何检查：某个 txt/epub 解析出 0 章就直接卡死在转圈上。这里统一拦一道。
+            if (src.chapterCount == 0) {
+                error(
+                    if (b.type == BookType.NET) "这本书没有任何章节，换个书源试试"
+                    else "这本书解析不出任何章节，可能文件已损坏或格式不支持"
+                )
+            }
             _state.value = _state.value.copy(
                 bookTitle = b.title,
                 coverPath = b.coverPath,
@@ -862,8 +873,16 @@ class ReaderViewModel(
         val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
             ?: throw ContentTimeoutException()
         val purifier = Purifier.lenient(replaceRules.purifyForBook(bookId))
-        return if (purifier.isEmpty) raw
-        else raw.copy(elements = purifier.apply(raw.elements))
+        if (purifier.isEmpty) return raw
+        // 净化超时：正文照常显示（未净化），但**必须**告诉用户 —— 否则"我的替换规则怎么不生效了"
+        // 无从查起。这条路径以前没有任何时间上限：净化是在 engineMutex 里跑的，一旦某条规则
+        // 陷进灾难性回溯，锁死的不只是当前章，而是此后所有章节的加载。
+        return try {
+            raw.copy(elements = purifier.apply(raw.elements))
+        } catch (_: PurifyTimeoutException) {
+            _state.value = _state.value.copy(toast = "净化规则太复杂已跳过，本章未净化")
+            raw
+        }
     }
 
     // ---------- 滚动模式 ----------
