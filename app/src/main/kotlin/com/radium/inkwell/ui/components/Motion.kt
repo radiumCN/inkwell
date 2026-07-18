@@ -69,7 +69,7 @@ object Motion {
     fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
 
     /** 开书容器变换要跑多久。比 [READER_ENTER_MS] 长一点：跨越的距离从一张封面到整屏，太快会看不清"展开"这件事 */
-    const val BOOK_OPEN_MS = 320
+    const val BOOK_OPEN_MS = 380
 
     fun <T> bookOpenSpec(): FiniteAnimationSpec<T> = tween(BOOK_OPEN_MS, easing = ReaderEnterEasing)
 

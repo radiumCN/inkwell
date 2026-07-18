@@ -545,7 +545,7 @@ private fun BookCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
-                    .bookOpenContainer(book.id),
+                    .bookOpenContainer(book.id, isCover = true),
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
             )

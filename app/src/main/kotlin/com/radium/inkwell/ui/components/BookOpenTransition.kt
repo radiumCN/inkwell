@@ -1,15 +1,20 @@
 package com.radium.inkwell.ui.components
 
 import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 
 /**
@@ -45,35 +50,65 @@ private fun bookOpenKey(bookId: String) = "book-open-$bookId"
  *
  * 关了系统动画就原样返回，不进共享元素机器。
  */
+/**
+ * 封面转开的角度。必须**过 90°**：到 90° 时封面正好侧对视线、薄成一条线，再多转一点才彻底让开，
+ * 不会在书页上留一道边。
+ */
+private const val COVER_OPEN_DEGREES = 105f
+
+/**
+ * 透视强度（会再乘 density）。Compose 默认 8 透视过强，绕左边缘转时封面右侧会夸张地拉伸变形，
+ * 看着像一张软塑料片；拉远到 14 收敛成"一本书的硬封面在转开"。
+ */
+private const val COVER_CAMERA_DISTANCE = 14f
+
+/**
+ * @param isCover true = 书架上那张封面（会绕书脊转开），false = 阅读页（被翻开后露出的书页）
+ */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun Modifier.bookOpenContainer(bookId: String): Modifier {
+fun Modifier.bookOpenContainer(bookId: String, isCover: Boolean = false): Modifier {
     // animationsEnabled() 会注册 ContentObserver，先无条件调用再判断，别让它落在提前 return 后面
     val enabled = animationsEnabled()
     val shared = LocalSharedTransitionScope.current
     val animated = LocalNavAnimatedScope.current
     if (!enabled || shared == null || animated == null) return this
+
+    // 转开进度 0→1。书架离场时 Visible→PostExit（封面转开）；返回时 PreEnter→Visible，
+    // 同一个值反过来跑，封面自己就转回去合上了 —— 不必为"关书"再写一套。
+    val opened by animated.transition.animateFloat(
+        transitionSpec = { tween(Motion.BOOK_OPEN_MS, easing = Motion.ReaderEnterEasing) },
+        label = "bookOpen",
+    ) { state -> if (state == EnterExitState.Visible) 0f else 1f }
+
     return with(shared) {
-        this@bookOpenContainer.sharedBounds(
-            rememberSharedContentState(key = bookOpenKey(bookId)),
-            animatedVisibilityScope = animated,
-            // 交叉淡入**只占开头一小段**，不能摊在整段飞行上。
-            //
-            // 0.1.6-beta.4 就是把这两个 spec 写成了和 boundsTransform 一样长（整段 320ms），
-            // 结果容器全程半透明：底下的书架一直透上来，看到的不是「封面展开成书页」，而是一团
-            // 虚影盖在书架上，还带着被放大到满屏的半透明封面标题。
-            //
-            // M3 容器变换的做法是「开头快速 fade through」：封面在头 ~1/4 就淡没，书页在头 ~1/3
-            // 就到全不透明，之后剩下的行程是一张**实心页**在长大 —— 这才读得出「翻开」。
-            enter = fadeIn(tween(Motion.BOOK_OPEN_MS / 3)),
-            exit = fadeOut(tween(Motion.BOOK_OPEN_MS / 4)),
-            boundsTransform = { _, _ -> Motion.bookOpenSpec() },
-            resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.Center,
-            ),
-            // 变换中的容器要盖在书架之上，否则会被网格里其它书压住
-            zIndexInOverlay = 1f,
-        )
+        this@bookOpenContainer
+            .sharedBounds(
+                rememberSharedContentState(key = bookOpenKey(bookId)),
+                animatedVisibilityScope = animated,
+                // 两端的淡入淡出节奏**故意不同**：
+                //   书页要尽快变成实心（头 1/3 就不透明），否则整段飞行半透明、书架一直透上来，
+                //     看着像一团虚影盖在书架上（0.1.6-beta.4 就栽在这，把淡入摊到了全程）。
+                //   封面则要**全程看得见**，因为它得让你看见它在转 —— 它的消失靠转过 90° 自然侧隐，
+                //     而不是靠淡出。若沿用书页那套快淡出，封面会在还没转起来时就没了，等于没有"翻开"。
+                enter = fadeIn(tween(if (isCover) Motion.BOOK_OPEN_MS else Motion.BOOK_OPEN_MS / 3)),
+                exit = fadeOut(tween(if (isCover) Motion.BOOK_OPEN_MS else Motion.BOOK_OPEN_MS / 3)),
+                boundsTransform = { _, _ -> Motion.bookOpenSpec() },
+                resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.Center,
+                ),
+                // 封面压在书页之上 —— 物理上它就是"盖着"书页的那一面，转开才露出底下的页。
+                // 两者都要盖在书架之上，否则会被网格里其它书压住。
+                zIndexInOverlay = if (isCover) 2f else 1f,
+            )
+            .then(
+                if (!isCover) Modifier else Modifier.graphicsLayer {
+                    // 转轴钉在**左边缘** = 书脊。默认转轴在中心，那是"卡片翻面"不是"开书"。
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                    rotationY = -COVER_OPEN_DEGREES * opened
+                    cameraDistance = COVER_CAMERA_DISTANCE * density
+                }
+            )
     }
 }
