@@ -88,7 +88,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.ui.components.BookCover
-import com.radium.inkwell.ui.components.bookOpenContainer
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.expandEnter
@@ -540,12 +539,7 @@ private fun BookCard(
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
-                // 开书变换的「源」：点下去时这张封面就地放大、morph 成整页阅读器（另一端在
-                // ReaderScreen 的根布局）。书被滚出屏幕没参与组合时自然配不上对，转场退回兜底，不会出错。
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 4f)
-                    .bookOpenContainer(book.id, isCover = true),
+                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
             )
