@@ -10,9 +10,11 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -43,11 +45,22 @@ fun InkwellNavHost() {
     fun go(route: Any) = navController.navigate(route) { launchSingleTop = true }
     // 进书放大动画的原点：点哪本书，阅读页就从哪儿长出来。
     // 由调用点直接给出（书架量到封面位置，别处给 Center），不在转场里反推 —— 转场只管播。
+    // 已知的将就：书架按「最近阅读」排序，返回时这本书多半已挪去第一格，退场仍缩向进书时的
+    // 旧格子。可接受的原因是退场只从 1.0 缩到 0.85 —— origin 只是「往哪边收」的方向暗示，
+    // 不是精确落进某个格子，偏一格肉眼几乎无感；不为此建一套「回查当前位置」的机器。
     val openOrigin = remember { mutableStateOf(TransformOrigin.Center) }
     fun openBook(bookId: String, origin: TransformOrigin) {
+        // 阅读页已在栈顶时整个忽略：入场动画那 200ms 里四周还露着书架，能点中第二本。
+        // 放行的话 launchSingleTop 会吞掉导航（页面还是第一本），origin 却已被改写 ——
+        // 看着 A 进来、返回却缩向 B。origin 与导航必须同生共死。
+        if (navController.currentDestination?.hasRoute<ReaderRoute>() == true) return
         openOrigin.value = origin
         go(ReaderRoute(bookId))
     }
+    // 旋屏/折叠后窗口尺寸一变，记下的「窗口比例坐标」就对不上原书位置（书架也已回流）——
+    // 退场会缩向一个不相干的地方。尺寸变了就退化为中心缩回：宁可平淡，不可指错。
+    val containerSize = LocalWindowInfo.current.containerSize
+    LaunchedEffect(containerSize) { openOrigin.value = TransformOrigin.Center }
     // 从前没配转场，走的是 navigation-compose 的默认淡入淡出（约 700ms，且进出同速）——
     // 与翻页的 180~320ms 完全脱节，而且违反「退场比入场快」。
     // 改成 shared-axis X：前进从右侧滑入，返回向右滑出，方向就说明了"进"和"退"。
