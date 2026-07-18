@@ -321,7 +321,14 @@ class BookSourceEngine(
                 ?.let { resolveUrl(fetched.finalUrl, it) }
                 ?.takeIf { it !in stopAt } // 翻到别的章节了 → 本章结束
         }
-        return userPurifier.apply(sourcePurifier.apply(elements)).takeIf { it.isNotEmpty() }?.let { RemoteChapterContent(it) }
+        // 净化超时（某条规则陷进灾难性回溯）就按未净化返回：净化只是清广告，
+        // 不能让它把"这章有广告"升级成"这章打不开"。
+        val purified = try {
+            userPurifier.apply(sourcePurifier.apply(elements))
+        } catch (_: PurifyTimeoutException) {
+            elements
+        }
+        return purified.takeIf { it.isNotEmpty() }?.let { RemoteChapterContent(it) }
     }
 
     // ---- JS 渲染回退 ----
