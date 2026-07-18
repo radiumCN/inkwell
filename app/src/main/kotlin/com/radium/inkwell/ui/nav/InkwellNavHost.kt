@@ -137,7 +137,7 @@ fun InkwellNavHost() {
                 onOpenDetail = { go(BookDetailRoute(it)) },
                 onOpenSearch = { go(SearchRoute()) },
                 onOpenExplore = { go(ExploreRoute) },
-                onOpenSourceManage = { go(SourceManageRoute) },
+                // 书源管理不再从书架直达：设置里已经有一份，重复入口只是让人多绕一圈
                 onOpenSettings = { go(SettingsRoute) },
             )
         }

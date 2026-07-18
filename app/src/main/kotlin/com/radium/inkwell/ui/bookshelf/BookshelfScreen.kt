@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -65,15 +64,12 @@ import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.heightIn
 import com.radium.inkwell.ui.components.SwitchRow
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
@@ -119,7 +115,6 @@ fun BookshelfScreen(
     onOpenDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
-    onOpenSourceManage: () -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: BookshelfViewModel = koinViewModel(),
 ) {
@@ -140,7 +135,6 @@ fun BookshelfScreen(
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val panelOpen by viewModel.hiddenPanelOpen.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
-    var overflowOpen by remember { mutableStateOf(false) }
     // 隐藏区的两个持久设置（允许隐藏 / 展开需验证）收进这个底部小 sheet，
     // 顶部状态条只管「本次会话显不显」这一个瞬时开关
     var hiddenSettingsOpen by remember { mutableStateOf(false) }
@@ -224,53 +218,26 @@ fun BookshelfScreen(
                             Icon(Icons.Default.Add, contentDescription = "导入本地书")
                         }
                     }
-                    // IconButton 与菜单必须包在同一个 Box 里：DropdownMenu 锚定的是**它自己**
-                    // 在布局里的位置，而它直接摆在 Row 里时占的是零宽的一格 ——
-                    // 于是菜单飘到按钮左边老远的地方去了。包一层，它才贴着按钮下方弹出。
-                    Box {
-                        IconButton(onClick = { overflowOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    // 这里**没有**「显示隐藏的书」。
+                    //
+                    // 从前它就明晃晃写着「显示隐藏的书（1）」—— 等于把「我藏了 1 本书」
+                    // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
+                    // 改为长按顶栏的「书架」标题。
+                    //
+                    // 但「收起」得看得见：展开之后书角带着标记、本来就藏不住了，
+                    // 而用户需要一条明确的路把它收回去。长按标题虽然也能收（见上面的
+                    // onLongClick），却只在 panelOpen 时成立 —— showHidden 单独为真时
+                    // 长按是「展开」，那条路够不着。所以这里给一个只在该状态出现的按钮。
+                    if (panelOpen || showHidden) {
+                        IconButton(onClick = { viewModel.collapseHiddenAll() }) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = "收起隐藏的书")
                         }
-                        DropdownMenu(
-                            expanded = overflowOpen,
-                            onDismissRequest = { overflowOpen = false },
-                        ) {
-                            // 这里**不放**「显示隐藏的书」。
-                            //
-                            // 从前它就明晃晃写着「显示隐藏的书（1）」—— 等于把「我藏了 1 本书」
-                            // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
-                            // 改为长按顶栏的「书架」标题。
-                            //
-                            // 已经展开时才给一个「收起」—— 那时书角本来就带着标记，藏不住了，
-                            // 而用户需要一条明确的路把它收回去。
-                            // 每条都配前导图标。纯文本条目没有视觉锚点，眼睛只能逐字读，
-                            // 两三条就显得又空又没做完 —— 图标让人扫一眼就能定位。
-                            // contentDescription 一律 null：旁边的文字已经是它的名字了，
-                            // 给图标再起一个，读屏会把每条念两遍。
-                            if (panelOpen || showHidden) {
-                                DropdownMenuItem(
-                                    text = { Text("收起隐藏的书") },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.VisibilityOff, contentDescription = null)
-                                    },
-                                    onClick = { overflowOpen = false; viewModel.collapseHiddenAll() },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("书源管理") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Source, contentDescription = null)
-                                },
-                                onClick = { overflowOpen = false; onOpenSourceManage() },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("设置") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Settings, contentDescription = null)
-                                },
-                                onClick = { overflowOpen = false; onOpenSettings() },
-                            )
-                        }
+                    }
+                    // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
+                    // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
+                    // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
             )
