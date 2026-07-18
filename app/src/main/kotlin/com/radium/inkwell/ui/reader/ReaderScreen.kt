@@ -298,7 +298,15 @@ fun ReaderScreen(
             // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
             // 主题走，不然浅色书封压在深色纸上会打架。
             state.loading || layout == null -> ReaderThemeScope(state.settings.theme) {
-                AnimatedVisibility(
+                // 首屏之后的再加载（跳章、失败重试、换源重载）：splash 的一次性协程早已收场、
+                // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
+                // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
+                if (firstContentShown) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = Color(state.settings.theme.textColor),
+                    )
+                } else AnimatedVisibility(
                     visible = splashVisible,
                     modifier = Modifier.align(Alignment.Center),
                     enter = scrimEnter(),
