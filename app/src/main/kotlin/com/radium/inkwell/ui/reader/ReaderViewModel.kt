@@ -76,7 +76,7 @@ private fun String.snippetAround(at: Int, length: Int, radius: Int = 18): String
 
 data class ReaderUiState(
     val bookTitle: String = "",
-    /** 进书 splash 用：正文还没就位时，在纸面上显示这本书的封面（见 ReaderScreen 的 BookOpenSplash） */
+    /** 进书 splash 用：正文还没就位时，在纸面上显示这本书的封面（见 ReaderScreen 加载分支的 splash） */
     val coverPath: String? = null,
     val chapterTitle: String = "",
     val chapterIndex: Int = 0,
@@ -215,6 +215,10 @@ class ReaderViewModel(
             // 打开即已知晓：书架上那个"有 N 章新的"红点该灭了
             if (b.newChapterCount > 0) bookRepo.clearNewChapters(bookId)
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
+            // splash 的书名/封面第一时间交出去：下面 WebDAV 无目录的冷路径要先抓一次目录
+            // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
+            // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
+            _state.value = _state.value.copy(bookTitle = b.title, coverPath = b.coverPath)
             var chapters = chapterDao.getByBook(bookId)
             var currentSourceName = ""
             val src = if (b.type == BookType.NET) {
@@ -1162,7 +1166,7 @@ class ReaderViewModel(
         /**
          * 预取前先等多久，理由见 [prefetchAhead]。
          *
-         * 比入场动画（Motion.NAV_ENTER_MS = 260）多留一截：动画结束那一帧往往还在收尾，
+         * 比进书入场动画（Motion.READER_ENTER_MS = 200）多留一倍：动画结束那一帧往往还在收尾，
          * 紧贴着开工等于没让。翻页时这条等待同样有益（让开翻页动画），而且不会饿着预取——
          * 用户读完一页远不止 400ms。
          */
