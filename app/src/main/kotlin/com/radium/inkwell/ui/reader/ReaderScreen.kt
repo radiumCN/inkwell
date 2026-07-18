@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.animationsEnabled
+import com.radium.inkwell.ui.components.bookOpenContainer
 import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -192,6 +193,10 @@ fun ReaderScreen(
     Box(
         Modifier
             .fillMaxSize()
+            // 开书变换的「另一端」：从书架进来时，被点那本书的封面放大成这整页（源在 BookCard 的
+            // BookCover）。背景色在下面立刻铺满，所以放大过程中露出的是纸色而不是空洞 —— 即便正文
+            // 还没排好版，最坏也只是纸面上转个圈，不会穿帮透出底下的书架。
+            .bookOpenContainer(bookId)
             .background(Color(state.settings.theme.background))
             // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
             // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
