@@ -75,6 +75,12 @@ import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -94,10 +100,22 @@ import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
 import org.koin.androidx.compose.koinViewModel
 
+/**
+ * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
+ * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
+ */
+private fun originOf(bounds: Rect?, window: IntSize): TransformOrigin {
+    if (bounds == null || window.width <= 0 || window.height <= 0) return TransformOrigin.Center
+    return TransformOrigin(
+        (bounds.center.x / window.width).coerceIn(0f, 1f),
+        (bounds.center.y / window.height).coerceIn(0f, 1f),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookshelfScreen(
-    onOpenBook: (String) -> Unit,
+    onOpenBook: (String, TransformOrigin) -> Unit,
     onOpenDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
@@ -106,6 +124,8 @@ fun BookshelfScreen(
     viewModel: BookshelfViewModel = koinViewModel(),
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
+    // 换算进书展开原点用：把封面在窗口里的坐标除以窗口尺寸
+    val windowSize = LocalWindowInfo.current.containerSize
     val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val group by viewModel.group.collectAsStateWithLifecycle()
@@ -363,7 +383,7 @@ fun BookshelfScreen(
                     items(books, key = { it.id }) { book ->
                         BookCard(
                             book = book,
-                            onClick = { onOpenBook(book.id) },
+                            onClick = { bounds -> onOpenBook(book.id, originOf(bounds, windowSize)) },
                             // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
                             onLongClick = { actionTarget = book },
                             // 切「显示隐藏的书」时整批书凭空出现/消失，从前是硬闪 —— 看不出
@@ -518,14 +538,20 @@ fun BookshelfScreen(
     }
 }
 
+/**
+ * @param onClick 带上这张封面在窗口里的位置 —— 进书要从「这本书所在的位置」放大展开，
+ *   得知道展开的原点在哪。书还没测量出位置时给 null，调用方退回中心展开。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookCard(
     book: BookEntity,
-    onClick: () -> Unit,
+    onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 用封面（而不是整张卡片）的位置：展开动画应该从书封长出来，标题那一行不算
+    var coverBounds by remember { mutableStateOf<Rect?>(null) }
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -533,13 +559,16 @@ private fun BookCard(
         //
         // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
         // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
-        modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+        modifier.combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
     ) {
         Box {
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
-                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f / 4f)
+                    .onGloballyPositioned { coverBounds = it.boundsInWindow() },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
             )

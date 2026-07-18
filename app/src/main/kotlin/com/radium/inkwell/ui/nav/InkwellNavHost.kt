@@ -5,11 +5,14 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.TransformOrigin
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -38,6 +41,13 @@ fun InkwellNavHost() {
     val navController = rememberNavController()
     // 统一带 launchSingleTop：快速双击一个入口不会把同一个目的地压两次栈（返回要按两下）
     fun go(route: Any) = navController.navigate(route) { launchSingleTop = true }
+    // 进书放大动画的原点：点哪本书，阅读页就从哪儿长出来。
+    // 由调用点直接给出（书架量到封面位置，别处给 Center），不在转场里反推 —— 转场只管播。
+    val openOrigin = remember { mutableStateOf(TransformOrigin.Center) }
+    fun openBook(bookId: String, origin: TransformOrigin) {
+        openOrigin.value = origin
+        go(ReaderRoute(bookId))
+    }
     // 从前没配转场，走的是 navigation-compose 的默认淡入淡出（约 700ms，且进出同速）——
     // 与翻页的 180~320ms 完全脱节，而且违反「退场比入场快」。
     // 改成 shared-axis X：前进从右侧滑入，返回向右滑出，方向就说明了"进"和"退"。
@@ -48,40 +58,53 @@ fun InkwellNavHost() {
         // 整屏转场用「不透明方向滑动」而非交叉淡入。进入的页面若带 alpha 淡入会在过渡中半透明，
         // 跨主题时（亮色书架 → 深色阅读页）底层会透上来，正文里透出书封，观感割裂。
         // 常规页：新页不透明地从右整幅推入，旧页做 1/4 视差左移；全程无 alpha，任何主题组合都干净。
-        // 阅读页：不整屏、不透明淡入，只做「小幅上抬」——从屏高 1/8 处快速抬入，用 M3「强调减速」曲线
-        //   收尾（见 Motion.readerEnterSpec），落定像被接住，给一点「翻开」的方向暗示但不喧宾夺主。
-        //   为什么不整屏上滑：那条整幅位移恰好和进书首帧的排版+GC 抢同一段时间（见
-        //   ReaderViewModel.PREFETCH_LEAD_IN_MS 的让位注释），动画和首帧互相拖累；小幅+短时长把预算让给首帧。
-        //   为什么不淡入/不缩放：过渡中带 alpha 或缩放<1 会从边缘/半透明透出底层书架的书封，跨主题割裂。
-        //   旧页在阅读页盖住/露出时原地不动（None）。返回走小幅下滑，与入场对称。
+        // 阅读页：**从被点那本书的位置放大展开**，像桌面点图标、窗口从图标处长出来。
+        //   长大的是「阅读页本身」，不是书封被撑大 —— 这是它和之前那版容器变换的根本区别：
+        //   那版把 3:4 的封面缩略图 scaleToBounds 到全屏，默认封面的书名被放成满屏巨字，越清晰越难看。
+        //   这里书封原地不动（旧页 None），只有阅读页在放大，不存在任何被拉伸的素材。
+        //   原点由书架传上来（Modifier.onGloballyPositioned 量到的封面中心换算成屏幕比例）；
+        //   详情页 / 搜索预览没有源位置，退回 TransformOrigin.Center，从中间展开。
+        //
+        //   只缩放、**不叠 alpha**：带 alpha 的话过渡中正文半透明，跨主题时（亮色书架 → 深色阅读页）
+        //   底层书封会透进正文里。纯缩放时阅读页始终不透明，四周露出的书架是"窗口正在长大"的
+        //   应有观感，不是穿帮。
         enterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                slideInVertically(Motion.readerEnterSpec()) { it / 8 } // 小幅上抬，不整屏、不透明
+                scaleIn(
+                    Motion.readerEnterSpec(),
+                    initialScale = Motion.READER_OPEN_SCALE,
+                    transformOrigin = openOrigin.value,
+                )
             else slideInHorizontally(Motion.navEnterSpec()) { it }
         },
         exitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (targetState.destination.hasRoute<ReaderRoute>())
-                ExitTransition.None // 旧页原地保持，被抬上来的阅读页盖住
+                ExitTransition.None // 书架原地保持，被长大的阅读页盖住
             else slideOutHorizontally(Motion.navExitSpec()) { -it / 4 }
         },
         popEnterTransition = {
             if (!animate) fadeIn(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                EnterTransition.None // 阅读页下滑离开，底下的页原样露出
+                EnterTransition.None // 阅读页缩回去，底下的书架原样露出
             else slideInHorizontally(Motion.navEnterSpec()) { -it / 4 }
         },
         popExitTransition = {
             if (!animate) fadeOut(tween(0))
             else if (initialState.destination.hasRoute<ReaderRoute>())
-                slideOutVertically(Motion.navExitSpec()) { it / 8 } // 小幅下滑退出，与入场对称
+                // 返回：缩回它当初长出来的那个位置，与入场对称
+                scaleOut(
+                    Motion.navExitSpec(),
+                    targetScale = Motion.READER_OPEN_SCALE,
+                    transformOrigin = openOrigin.value,
+                )
             else slideOutHorizontally(Motion.navExitSpec()) { it }
         },
     ) {
         composable<BookshelfRoute> {
             BookshelfScreen(
-                onOpenBook = { go(ReaderRoute(it)) },
+                onOpenBook = { id, origin -> openBook(id, origin) },
                 onOpenDetail = { go(BookDetailRoute(it)) },
                 onOpenSearch = { go(SearchRoute()) },
                 onOpenExplore = { go(ExploreRoute) },
@@ -93,7 +116,8 @@ fun InkwellNavHost() {
             val route = entry.toRoute<BookDetailRoute>()
             BookDetailScreen(
                 bookId = route.bookId,
-                onRead = { go(ReaderRoute(route.bookId)) },
+                // 详情页没有源位置，从屏幕中间展开
+                onRead = { openBook(route.bookId, TransformOrigin.Center) },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -118,7 +142,8 @@ fun InkwellNavHost() {
             val route = entry.toRoute<BookPreviewRoute>()
             BookPreviewScreen(
                 results = route.results,
-                onRead = { go(ReaderRoute(it)) },
+                // 搜索预览同理，从中间展开
+                onRead = { openBook(it, TransformOrigin.Center) },
                 onBack = { navController.popBackStack() },
             )
         }

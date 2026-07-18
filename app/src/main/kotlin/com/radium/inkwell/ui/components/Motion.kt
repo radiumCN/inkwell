@@ -65,6 +65,14 @@ object Motion {
     val ReaderEnterEasing: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
     fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
+
+    /**
+     * 进阅读页放大展开的起始缩放（返回时缩回同一值）。
+     *
+     * 取 0.85 而不是更小：这段动画里阅读页四周会露出书架，缩得越小露得越多、越像"从一个小方块弹出来"，
+     * 而我们要的是"窗口从这本书那儿长出来"。0.85 够看出长大，又不至于让书架抢戏。
+     */
+    const val READER_OPEN_SCALE = 0.85f
 }
 
 /**
