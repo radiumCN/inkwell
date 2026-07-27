@@ -777,6 +777,10 @@ class ReaderViewModel(
     fun undoAutoChange() {
         val snap = undoSnapshot ?: return
         val b = book ?: return
+        // 与 applyChangeSource 同一道闸：换源要走一整趟网络（详情+目录+清缓存+改库），
+        // 连点两下就会有两趟 changeSource 交错写同一本书。这里的 undoSnapshot 还得等
+        // onSuccess 才置空，光靠它拦不住第二次点击。
+        if (_state.value.changingSource) return
         viewModelScope.launch {
             val rule = sourceRepo.getRule(snap.sourceId)
             if (rule == null) {

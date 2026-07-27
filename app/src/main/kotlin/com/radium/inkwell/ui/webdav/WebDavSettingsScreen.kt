@@ -84,6 +84,16 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinVi
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),
             )
+            // 书源里有三分之一的站只有 http，应用因此整体放开了明文流量（见
+            // network_security_config.xml）。可 WebDAV 走的是 Basic 认证 —— 账号口令等于明文上路。
+            // 局域网 NAS 常年只有 http，硬性禁止会把这类用户挡在门外，所以只提示、不阻断。
+            if (state.url.isNotBlank() && !state.url.trim().startsWith("https://", ignoreCase = true)) {
+                Text(
+                    "该地址不是 HTTPS，账号与密码将以明文在网络上传输。公网请务必改用 https://",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             OutlinedTextField(
                 value = state.username,
                 onValueChange = viewModel::setUsername,

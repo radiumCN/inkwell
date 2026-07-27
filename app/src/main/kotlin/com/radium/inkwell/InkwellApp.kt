@@ -47,8 +47,13 @@ class InkwellApp : Application() {
             }
         }
 
-        // 冷启动静默同步（已配置 WebDAV 时）；失败不打扰用户
-        appScope.launch { autoSync(koin) }
+        // 冷启动静默同步（已配置 WebDAV 时）；失败不打扰用户。
+        // 先把升级前留下的明文口令换成密文，再同步 —— 顺序要紧：同步会读口令，
+        // 两件事都在这一个协程里顺序做，不会撞在一起。
+        appScope.launch {
+            runCatching { koin.get<WebDavPrefs>().migrateSecrets() }
+            autoSync(koin)
+        }
 
         // 退到后台时再同步一次。
         //

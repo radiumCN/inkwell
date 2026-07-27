@@ -23,8 +23,19 @@ class WebDavClient(
     baseUrl: String,
     private val username: String,
     private val password: String,
-    private val http: OkHttpClient = OkHttpClient(),
+    http: OkHttpClient = OkHttpClient(),
 ) {
+    /**
+     * 备份体积可观（整个书架 + 全部书源的 JSON），慢网上传要时间，所以**不设 callTimeout**；
+     * 但连接和逐段读写必须有限 —— 服务器半死不活时（NAS 休眠、坚果云限流）不能让同步永远挂着，
+     * 那会把「自动同步」变成每次启动都卡一下的隐形负担。
+     */
+    private val http: OkHttpClient = http.newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(15))
+        .readTimeout(java.time.Duration.ofSeconds(30))
+        .writeTimeout(java.time.Duration.ofSeconds(30))
+        .build()
+
     private val base = baseUrl.trimEnd('/')
 
     class WebDavException(val code: Int, message: String) : IOException(message)

@@ -56,6 +56,24 @@ class RuleEvaluator(
     private val regexCache = ConcurrentHashMap<String, Regex>()
     private fun regexOf(pattern: String): Regex = regexCache.getOrPut(pattern) { Regex(pattern) }
 
+    /**
+     * 给书源正则套上和净化同一道预算关卡。
+     *
+     * 规则里的正则（`##广告##`、`:regex`）和净化规则一样来自用户导入的第三方书源，
+     * 一样能写出灾难性回溯。而回溯既不抛异常也不理会线程中断，`withTimeout` 对它无效 ——
+     * 唯一的出口是在取字符时检查预算（见 [GuardedText]）。净化侧已经这么做了，这里从前没有：
+     * 一条病态正则碰上长正文就把 IO 线程永久钉死，退出页面也停不下来。
+     */
+    private fun guarded(text: String): CharSequence = GuardedText(text, Budget())
+
+    /** 正则超预算 = 这条规则没匹配上。降级交由调用方，超时本身不该外泄成"书源坏了" */
+    private fun <T> withRegexBudget(fallback: T, block: () -> T): T =
+        try {
+            block()
+        } catch (_: RegexBudgetExceeded) {
+            fallback
+        }
+
     private val jsonConf: Configuration =
         Configuration.builder().options(Option.SUPPRESS_EXCEPTIONS).build()
 
@@ -196,10 +214,12 @@ class RuleEvaluator(
     private fun regexExtract(pattern: String, ctx: EvalContext): List<String> {
         val target = contextText(ctx)
         if (target.isEmpty()) return emptyList()
-        return regexOf(pattern).findAll(target)
-            .map { m -> if (m.groupValues.size > 1) m.groupValues[1] else m.value }
-            .filter { it.isNotEmpty() }
-            .toList()
+        return withRegexBudget(emptyList()) {
+            regexOf(pattern).findAll(guarded(target))
+                .map { m -> if (m.groupValues.size > 1) m.groupValues[1] else m.value }
+                .filter { it.isNotEmpty() }
+                .toList()
+        }
     }
 
     /**
@@ -363,13 +383,14 @@ class RuleEvaluator(
 
     private fun applyOp(op: PipeOp, list: List<String>, ctx: EvalContext): List<String> = when (op) {
         is PipeOp.RegexReplace -> list.map {
-            // 替换串里的 `$` 可能是非法组引用（Legado 书源里屡见），别让它打死整条链路
-            runCatching { regexOf(op.pattern).replace(it, op.replacement) }.getOrDefault(it)
+            // 替换串里的 `$` 可能是非法组引用（Legado 书源里屡见），别让它打死整条链路。
+            // 超预算（灾难性回溯）一并落在这里：保留原文，等同于这条替换没生效
+            runCatching { regexOf(op.pattern).replace(guarded(it), op.replacement) }.getOrDefault(it)
         }
         is PipeOp.RegexReplaceFirst -> list.map { s ->
             // Legado replaceFirst：取首个匹配、在其匹配区间内替换；未命中则清空（抽取语义）
             val re = regexOf(op.pattern)
-            runCatching { re.find(s)?.let { re.replaceFirst(it.value, op.replacement) } ?: "" }
+            runCatching { re.find(guarded(s))?.let { re.replaceFirst(it.value, op.replacement) } ?: "" }
                 .getOrDefault("")
         }
         is PipeOp.Put -> {

@@ -1,5 +1,6 @@
 package com.radium.inkwell.core.source.js
 
+import org.mozilla.javascript.ClassShutter
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
 import org.mozilla.javascript.NativeArray
@@ -31,6 +32,7 @@ class RhinoScriptRuntime(
             cx.optimizationLevel = -1 // Android 兼容：纯解释执行
             cx.languageVersion = Context.VERSION_ES6
             cx.instructionObserverThreshold = 100_000
+            cx.setClassShutter(BRIDGE_ONLY)
             return cx
         }
 
@@ -74,5 +76,49 @@ class RhinoScriptRuntime(
 
     private companion object {
         val KEY_COUNT = Any()
+
+        /**
+         * 只有桥对象所在的包对脚本可见，其余 Java 类一律拒绝。
+         *
+         * `initSafeStandardObjects()` 只是不注册顶层的 `Packages`/`java`/`getClass`，它**不拦**
+         * 「从已在作用域里的对象反射出去」—— 而我们恰恰往作用域里塞了六个 Kotlin 桥对象，
+         * Rhino 把它们包成 NativeJavaObject，公开方法全都可见，其中包括继承自 Object 的
+         * `getClass()`。于是恶意书源只要一行就能越狱：
+         *
+         *     java.getClass().forName("java.lang.Runtime")...
+         *
+         * 拿到 Class 之后整个反射面就打开了：应用私有目录（Room 库、WebDAV 明文口令）能读，
+         * 又有 INTERNET 权限能外发。书源是用户从网上导入的第三方内容，这就是不可信输入。
+         *
+         * 装上 ClassShutter 后，Rhino 在 JavaMembers.lookupClass 反射任何类之前都会问一次；
+         * `java.lang.Class` 不在白名单里，`getClass()` 的返回值就包不出来，链条断在第一步。
+         *
+         * 白名单 = 桥所在的包 + 跨桥传递的值类型。值类型这一项不能省：Rhino 默认
+         * `javaPrimitiveWrap = true`，桥方法返回的 String 也会先包成 NativeJavaObject
+         * （随后挂上 JS String 原型，脚本才能 `.match()`），这一步同样要过 shutter ——
+         * 不放行的话 `java.base64Encode(...)` 这类最普通的调用都会被自己挡死。
+         *
+         * 关键在于 `java.lang.Class` **不在**白名单里：`getClass()` 的返回值包不出来，
+         * 反射链条断在第一步，放行 String/数字并不会把它接回去。
+         */
+        val BRIDGE_ONLY = ClassShutter { name ->
+            name.startsWith(BRIDGE_PACKAGE) || name in VALUE_TYPES
+        }
+
+        const val BRIDGE_PACKAGE = "com.radium.inkwell.core.source.js."
+
+        /** 桥的入参/返回值里会出现的 JDK 值类型；都是终态数据，反射不出更多东西 */
+        val VALUE_TYPES = setOf(
+            "java.lang.String",
+            "java.lang.Boolean",
+            "java.lang.Character",
+            "java.lang.Number",
+            "java.lang.Byte",
+            "java.lang.Short",
+            "java.lang.Integer",
+            "java.lang.Long",
+            "java.lang.Float",
+            "java.lang.Double",
+        )
     }
 }

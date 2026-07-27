@@ -16,6 +16,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toJavaDuration
 
 /** 抓取结果；bodyText 已按探测到的字符集解码 */
 class FetchedPage(
@@ -37,12 +39,24 @@ class FetchedPage(
 class SourceHttpClient(
     baseClient: OkHttpClient = OkHttpClient(),
     private val retryBaseDelayMs: Long = 500,
+    /** 允许书源访问内网地址。**只该在测试里开**（MockWebServer 跑在 127.0.0.1 上） */
+    allowPrivateNetwork: Boolean = false,
 ) {
 
     private val cookieJar = MemoryCookieJar()
 
     private val client: OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
+        .dns(PrivateNetworkGuardDns(allowPrivate = allowPrivateNetwork))
+        // 超时必须显式配：OkHttp 默认 connect/read/write 各 10 秒，且**没有 callTimeout**。
+        // 没有总闸的话，一个每 9 秒吐一个字节的站能把这次调用无限期挂住 —— 而书源脚本那条路
+        // 是 runBlocking 阻塞等待的（见 EngineJsHttp），挂住的是一整根 IO 线程，
+        // 用户退出页面也放不回来。几十个源并发校验时足以把线程池坐穿。
+        .connectTimeout(CONNECT_TIMEOUT)
+        .readTimeout(READ_TIMEOUT)
+        .writeTimeout(WRITE_TIMEOUT)
+        // 总闸：一次抓取（含重定向、TLS 握手、读完整个 body）最多这么久
+        .callTimeout(CALL_TIMEOUT)
         .build()
 
     /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
@@ -191,6 +205,18 @@ class SourceHttpClient(
 
         private val RETRY_CODES = setOf(403, 429)
         private const val MAX_RETRIES = 2
+
+        /**
+         * 超时。小说站普遍慢，压太紧会把能用的源判死，所以比常规 API 客户端宽一档；
+         * 但必须有限 —— 见构造里 client 的注释。
+         *
+         * [CALL_TIMEOUT] 是一次抓取的总闸。取 45 秒：正文页最慢的那批（带 JS 挑战、
+         * 多次重定向的）实测在 20 秒内能回，留一倍余量；再长用户早已经放弃等待了。
+         */
+        private val CONNECT_TIMEOUT = 15.seconds.toJavaDuration()
+        private val READ_TIMEOUT = 20.seconds.toJavaDuration()
+        private val WRITE_TIMEOUT = 15.seconds.toJavaDuration()
+        private val CALL_TIMEOUT = 45.seconds.toJavaDuration()
         private val CHARSET_PARAM = Regex("charset\\s*=\\s*\"?([\\w-]+)", RegexOption.IGNORE_CASE)
         private val META_CHARSET = Regex("<meta[^>]+charset\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)
         private val XML_ENCODING = Regex("<\\?xml[^>]+encoding\\s*=\\s*['\"]?([\\w-]+)", RegexOption.IGNORE_CASE)

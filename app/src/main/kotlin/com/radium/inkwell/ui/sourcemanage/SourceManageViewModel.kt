@@ -11,8 +11,10 @@ import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.data.repo.NetBookRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -87,6 +89,8 @@ class SourceManageViewModel(
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
+    /** 「从网址导入书源」用；走注入的那个客户端，它配了超时（裸 OkHttpClient() 没有总闸） */
+    private val http: OkHttpClient,
 ) : ViewModel() {
 
     // ---- 多选 ----
@@ -236,6 +240,11 @@ class SourceManageViewModel(
                 ok(toc.size, best, startedAt)
             }
         }.getOrElse {
+            // 用户点「取消校验」时，在飞的这些源抛的是 CancellationException。把它当成判定结果
+            // 记下来的话，一次取消就能把几十个好书源写成"失效"，而校验一轮要好几分钟、
+            // 结果又是落库的 —— 用户得重跑一遍才能洗掉。取消不是判定结果，原样抛出去。
+            // 但 withTimeout 的 TimeoutCancellationException 是判定结果（这个源太慢），要留下。
+            if (it is CancellationException && it !is TimeoutCancellationException) throw it
             SourceCheck(false, it.message?.take(60) ?: "失败", System.currentTimeMillis() - startedAt)
         }
     }
@@ -416,7 +425,7 @@ class SourceManageViewModel(
             messages.emit("正在下载书源…")
             val text = withContext(Dispatchers.IO) {
                 runCatching {
-                    OkHttpClient().newCall(Request.Builder().url(url.trim()).build())
+                    http.newCall(Request.Builder().url(url.trim()).build())
                         .execute().use { resp ->
                             check(resp.isSuccessful) { "HTTP ${resp.code}" }
                             resp.body?.string().orEmpty()

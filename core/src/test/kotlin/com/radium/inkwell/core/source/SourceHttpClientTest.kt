@@ -28,7 +28,9 @@ class SourceHttpClientTest {
         server.shutdown()
     }
 
-    private fun client() = SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1)
+    // MockWebServer 跑在 127.0.0.1 上，正是 SSRF 防护要拦的地址段，测试里必须放行
+    private fun client() =
+        SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true)
 
     private fun gbkBody(html: String): Buffer =
         Buffer().write(html.toByteArray(charset("GBK")))

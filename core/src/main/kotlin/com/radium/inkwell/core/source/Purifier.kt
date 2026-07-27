@@ -75,7 +75,7 @@ class Purifier private constructor(
             // 超时是**整章级别的降级信号**，不能被"跳过这条坏规则"的宽松逻辑吞掉：吞了的话
             // 后面每条规则都会立刻再超时一次，最后静默返回原文 —— 用户只会看到"我的净化规则
             // 怎么不生效了"，永远查不到原因。与本项目「catch 前先 rethrow 取消」同一个道理。
-            if (e is PurifyTimeoutException) throw e
+            if (e is RegexBudgetExceeded) throw PurifyTimeoutException()
             if (lenient) acc
             else throw SourceException("净化规则执行失败: ${p.pattern}", e)
         }
@@ -134,7 +134,16 @@ class Purifier private constructor(
 class PurifyTimeoutException : RuntimeException("净化规则执行超时")
 
 /**
- * 净化的时间预算。
+ * 预算耗尽。名字是中性的：这套关卡不只净化在用 —— 书源规则里的正则（`##替换##`、`:regex`）
+ * 同样来自不可信的第三方书源，同样能写出灾难性回溯，见 [RuleEvaluator]。
+ *
+ * 各调用方自己决定怎么降级：净化翻译成 [PurifyTimeoutException]（正文按未净化返回），
+ * 规则求值按「这条规则没匹配上」处理。
+ */
+internal class RegexBudgetExceeded : RuntimeException("正则执行超出时间预算")
+
+/**
+ * 正则执行的时间预算。
  *
  * **为什么非得这么绕**：Java 正则的灾难性回溯既不抛异常、也不理会线程中断标志 —— 它就是不返回。
  * 协程取消是协作式的，`withTimeout` 对它完全无效（换个 Dispatcher 也只是换条线程一起卡死）。
@@ -144,14 +153,14 @@ class PurifyTimeoutException : RuntimeException("净化规则执行超时")
  * 每次都读时钟太贵（回溯期间取字符会被调用上亿次），按调用次数分摊：走满 [CHECK_STRIDE] 次
  * 才真读一次 `nanoTime`。
  */
-private class Budget {
-    private val deadline = System.nanoTime() + Purifier.BUDGET_MS * 1_000_000
+internal class Budget(budgetMs: Long = Purifier.BUDGET_MS) {
+    private val deadline = System.nanoTime() + budgetMs * 1_000_000
     private var countdown = CHECK_STRIDE
 
     fun check() {
         if (--countdown > 0) return
         countdown = CHECK_STRIDE
-        if (System.nanoTime() > deadline) throw PurifyTimeoutException()
+        if (System.nanoTime() > deadline) throw RegexBudgetExceeded()
     }
 
     private companion object {
@@ -160,7 +169,7 @@ private class Budget {
 }
 
 /** 取每个字符时都过一道预算关卡的输入序列；除此之外完全透明地代理原文 */
-private class GuardedText(
+internal class GuardedText(
     private val delegate: CharSequence,
     private val budget: Budget,
 ) : CharSequence {

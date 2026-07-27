@@ -102,7 +102,8 @@ fun RssArticleScreen(
                     it,
                     Modifier.padding(top = Dimens.gapXS),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.outline,
+                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.height(Dimens.gapL))

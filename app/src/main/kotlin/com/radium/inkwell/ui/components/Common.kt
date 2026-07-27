@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,9 +58,11 @@ fun EmptyState(
             if (hint != null) {
                 Text(
                     hint,
-                    Modifier.padding(top = 8.dp),
+                    Modifier.padding(top = Dimens.gapS),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    // 正文性小字用 onSurfaceVariant，不用 outline —— 后者浅色下只有约 3.9:1，
+                    // 达不到 WCAG 的 4.5:1。空态提示恰恰是最需要被读清的那句话
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -203,7 +206,8 @@ fun BookListRow(
     Row(
         modifier
             .fillMaxWidth()
-            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            // role = Button：不给角色的话读屏只念文字，用户不知道这一整行是可以点开的
+            .let { if (onClick != null) it.clickable(role = Role.Button, onClick = onClick) else it }
             .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -213,7 +217,7 @@ fun BookListRow(
             modifier = Modifier.size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight),
             placeholderChars = 2,
         )
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(Modifier.weight(1f).padding(horizontal = Dimens.gapM)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             if (!subtitle.isNullOrBlank()) {
                 Text(
@@ -228,7 +232,9 @@ fun BookListRow(
                 Text(
                     caption,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    // outline 在浅色下只有约 3.9:1，而这行（书源名/最新章节）是要读的信息，
+                    // 不是装饰。onSurfaceVariant 才达得到 WCAG 的 4.5:1
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

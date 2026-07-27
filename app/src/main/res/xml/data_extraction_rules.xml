@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  把 WebDAV 凭据挡在云备份之外。
+
+  WebDAV 的地址/账号/口令存在 DataStore Preferences 里，是**明文**（protobuf 里就是裸字符串）。
+  Auto Backup 默认会把整个 filesDir 传到用户的 Google Drive —— 口令跟着一起上云，
+  而用户在应用里完全看不出这件事发生过。
+
+  只排掉这一个文件，不是整个关掉备份（android:allowBackup="false"）：书、书源、阅读进度
+  照旧该备份，那是用户换机时真正想要的东西。
+
+  device-transfer 不排：那是换机时设备到设备的直连迁移，不经第三方，把 WebDAV 配置带过去
+  正是用户的预期；真正的暴露面是云端那份。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/webdav.preferences_pb" />
+    </cloud-backup>
+</data-extraction-rules>

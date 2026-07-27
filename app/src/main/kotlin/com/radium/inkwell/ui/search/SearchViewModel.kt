@@ -4,11 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.SearchPage
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.MessageBus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -103,7 +105,7 @@ class SearchViewModel(
             val more = rules.map { rule ->
                 async {
                     limiter.withPermit {
-                        val page = runCatching { engine.search(rule, keyword, page = 1) }.getOrNull()
+                        val page = searchPage(rule, keyword, page = 1)
                         merge(page?.items.orEmpty())
                         _state.value = _state.value.copy(
                             results = ranked(keyword),
@@ -154,6 +156,23 @@ class SearchViewModel(
         else -> 2
     }
 
+    /**
+     * 单个书源搜一页：网络/规则错误按「这个源没结果」降级，但**取消必须往外抛**。
+     *
+     * 从前这里是 `runCatching { … }.getOrNull()`，它连 CancellationException 一起吞。
+     * 后果是被取代的那一轮不会就地停下，而是带着 null 继续往下跑 merge 和写状态 ——
+     * 旧关键词的结果会串进刚 clear 过的 hits，翻页那一轮还会把过期的 page/hasMore 盖回去
+     * （新搜索刚设成 page=1，僵尸协程一句 `page = next` 就把它推到 2）。
+     */
+    private suspend fun searchPage(rule: BookSourceRule, keyword: String, page: Int): SearchPage? =
+        try {
+            engine.search(rule, keyword, page = page)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+
     /** 还能继续翻页的书源（上一页 hasMore 为真的那些） */
     private var pagingRules: List<BookSourceRule> = emptyList()
 
@@ -169,7 +188,7 @@ class SearchViewModel(
             val still = pagingRules.map { rule ->
                 async {
                     limiter.withPermit {
-                        val page = runCatching { engine.search(rule, keyword, page = next) }.getOrNull()
+                        val page = searchPage(rule, keyword, page = next)
                         val before = hits.size
                         merge(page?.items.orEmpty())
                         val gotNew = hits.size > before

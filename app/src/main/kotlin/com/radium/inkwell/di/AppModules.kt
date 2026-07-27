@@ -87,15 +87,24 @@ val appModule = module {
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
-    // 更新用的通用 HTTP 客户端（检查 + 下载安装包）
-    single { okhttp3.OkHttpClient() }
+    // 更新用的通用 HTTP 客户端（检查 + 下载安装包 + 反馈上报）
+    single {
+        okhttp3.OkHttpClient.Builder()
+            // OkHttp 默认这三项各 10 秒，显式写出来是为了把「没配」和「配成 10 秒」区分开。
+            .connectTimeout(java.time.Duration.ofSeconds(15))
+            .readTimeout(java.time.Duration.ofSeconds(20))
+            .writeTimeout(java.time.Duration.ofSeconds(15))
+            // **刻意不设 callTimeout**：这个客户端要下载几十 MB 的安装包，
+            // 慢网下整次调用超过任何合理总闸都是正常的。逐段的 readTimeout 已经能识别真卡死。
+            .build()
+    }
     single { com.radium.inkwell.update.UpdateChecker(get()) }
     single { com.radium.inkwell.update.ServerUpdateChecker(get()) }
     single { com.radium.inkwell.data.repo.FeedbackRepository(get()) }
     single { com.radium.inkwell.update.UpdateInstaller(get()) }
     single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
 
-    single { BookRepository(androidContext(), get(), get(), get(), get()) }
+    single { BookRepository(androidContext(), get(), get(), get(), get(), get()) }
     single { BookSourceRepository(get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }
@@ -111,7 +120,7 @@ val appModule = module {
         com.radium.inkwell.ui.preview.BookPreviewViewModel(results, get(), get(), get())
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get(), get()) }
-    viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
+    viewModel { SourceManageViewModel(androidContext(), get(), get(), get(), get()) }
     viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }

@@ -134,7 +134,8 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
                 Text(
                     it,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }

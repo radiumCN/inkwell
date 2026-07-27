@@ -92,6 +92,15 @@ class NetBookRepository(
                     readAt = existing?.readAt ?: 0,
                     addedAt = existing?.addedAt ?: now,
                     updatedAt = now,
+                    // upsert 是**整行**替换：这里没列出来的列会被写回默认值。下面这些是用户
+                    // 和追更攒下来的状态，跟「这本书从哪个源抓的」无关，重新入库必须原样带过来 ——
+                    // 否则分组掉回未分组、隐藏的书自己冒回书架、红点被抹平。
+                    // 兄弟方法 changeSource 用 fresh.copy 天然保住了它们，就这条路径漏了。
+                    variable = existing?.variable ?: "",
+                    groupName = existing?.groupName ?: "",
+                    hidden = existing?.hidden ?: false,
+                    newChapterCount = existing?.newChapterCount ?: 0,
+                    // deleted 刻意**不**继承：走到这一步就是用户又把它加回书架，墓碑正该被抹掉
                 )
             )
             replaceToc(bookId, entities)

@@ -69,4 +69,32 @@ class ScriptRuntimeTest {
             runtime.eval("java.lang.System.exit(0)", emptyMap())
         }
     }
+
+    // ---- 沙箱逃逸 ----
+    // 注入的桥是 NativeJavaObject，公开方法里带着继承自 Object 的 getClass()。
+    // 没有 ClassShutter 时，从它反射一步就能拿到整个 JDK —— 恶意书源即可读应用私有目录
+    // （Room 库、WebDAV 明文口令）并借 INTERNET 权限外发。这几条把那条路钉死。
+
+    private val bridge = JavaBridge(http = null, cache = JsCache(), vars = mutableMapOf())
+
+    private fun withBridge(script: String) = runtime.eval(script, mapOf("java" to bridge))
+
+    @Test
+    fun `getClass on an injected bridge is blocked`() {
+        assertFailsWith<Exception> { withBridge("java.getClass()") }
+    }
+
+    @Test
+    fun `Class forName escape through an injected bridge is blocked`() {
+        assertFailsWith<Exception> {
+            withBridge("""java.getClass().forName("java.lang.Runtime")""")
+        }
+    }
+
+    @Test
+    fun `bridge methods still work with the shutter installed`() {
+        // 白名单必须放行桥自身，否则挡住越狱的同时也把书源全打死了
+        assertEquals("YWJj", withBridge("""java.base64Encode("abc")"""))
+        assertEquals("abc", withBridge("""java.base64Decode("YWJj")"""))
+    }
 }

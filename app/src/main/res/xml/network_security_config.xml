@@ -6,8 +6,13 @@
   （实测一份 876 源的常见书源表里有 290 个，占三分之一）。targetSdk 28 起系统默认
   禁止明文流量，这些书源会在抓取时直接抛 UnknownServiceException —— 无论规则写得多对。
 
-  这是本类应用的固有取舍：不开明文就等于砍掉三分之一书源。抓取内容仅用于本地阅读，
+  这是本类应用的固有取舍：不开明文就等于砍掉三分之一书源。抓取书源内容仅用于本地阅读，
   不涉及账号与凭据。
+
+  **但它对 WebDAV 同步同样生效**，而那条路是带凭据的（Basic 认证 = Base64 的账号口令，
+  等同明文）。这里按域名收紧没用 —— WebDAV 地址是用户填的，事先不知道。
+  所以改在填地址那一步兜：URL 不是 https:// 时，设置页当场提示（见 WebDavSettingsScreen）。
+  局域网 NAS 常年只有 http，硬性禁止会把这类用户直接挡在门外，故只提示、不阻断。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">

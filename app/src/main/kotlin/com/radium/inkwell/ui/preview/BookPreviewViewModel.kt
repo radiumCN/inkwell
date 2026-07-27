@@ -10,6 +10,7 @@ import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.MessageBus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +39,38 @@ data class BookPreviewUiState(
     val sources: List<SourceOption> = emptyList(),
     val currentSource: Int = 0,
 )
+
+/**
+ * 换源候选的进程内暂存。与 RssArticleContent 同一套办法，理由也一样。
+ *
+ * 一本热门书能在几十甚至上百个书源里搜到，整份 `List<SearchResult>` 里最占地方的是每条各自的
+ * `intro`（一整段简介）。这份数据从前是塞在导航参数里的，而路由参数会随返回栈进
+ * `onSaveInstanceState` —— 那条路走 Binder，撑爆就是 TransactionTooLargeException 崩溃，
+ * 而且崩在「切后台再回来」这种用户完全无法自证的时刻。
+ *
+ * 进程被杀后这里取不到，预览页退化成「只有当前这个源」：页面照常打开、加书架照常，
+ * 只是换源列表少了别的候选。比崩溃好得多。
+ */
+object BookPreviewCandidates {
+    /** 返回栈里可能同时躺着好几个预览页，留一小窗；超出按最久未用淘汰，别让它无限涨 */
+    private const val MAX_ENTRIES = 16
+
+    private val map = object : LinkedHashMap<String, List<SearchResult>>(0, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, List<SearchResult>>) =
+            size > MAX_ENTRIES
+    }
+
+    /** 「同一本书」的键，与书架/搜索合并用的是同一套（书名+作者） */
+    fun keyOf(r: SearchResult): String = "${r.title.trim()}|${r.author?.trim().orEmpty()}"
+
+    @Synchronized
+    fun put(results: List<SearchResult>) {
+        results.firstOrNull()?.let { map[keyOf(it)] = results }
+    }
+
+    @Synchronized
+    fun get(key: String): List<SearchResult>? = map[key]
+}
 
 /**
  * 网络书籍预览页：先看简介与目录，再决定加书架或直接读。
@@ -132,6 +165,10 @@ class BookPreviewViewModel(
                     inShelf = bookRepo.shelfBookIdByKey(title, author) != null,
                 )
             }.onFailure { e ->
+                // 上面那句 cancel 的取消也会落到这里（runCatching 连 CancellationException 一起吞）。
+                // 不摘出来的话，换源时旧协程会把"加载失败"和 loading=false 写到新源头上 ——
+                // 新源明明正常，页面却停在报错上
+                if (e is CancellationException) throw e
                 _state.value = _state.value.copy(
                     loading = false,
                     sourceName = rule.name,

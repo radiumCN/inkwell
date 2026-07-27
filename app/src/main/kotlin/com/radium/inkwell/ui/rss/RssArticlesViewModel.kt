@@ -7,6 +7,7 @@ import com.radium.inkwell.core.source.rss.RssEngine
 import com.radium.inkwell.core.source.rss.RssSort
 import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.data.repo.RssRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,6 +75,9 @@ class RssArticlesViewModel(
                     _state.value = _state.value.copy(loading = false, articles = page.items)
                 }
                 .onFailure {
+                    // 切分类会 cancel 上一轮，runCatching 连 CancellationException 一起吞：
+                    // 不摘出来的话旧协程会把"加载失败"写到新分类头上，新分类的转圈也被抹掉
+                    if (it is CancellationException) throw it
                     _state.value = _state.value.copy(
                         loading = false,
                         error = it.message?.take(120) ?: "加载失败",

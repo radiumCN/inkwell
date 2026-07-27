@@ -9,6 +9,7 @@ import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.MessageBus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,6 +112,10 @@ class ExploreViewModel(
                     )
                 }
                 .onFailure { e ->
+                    // 换源/换分类会 cancel 掉上一轮，runCatching 连 CancellationException 一起吞。
+                    // 不先摘出来的话：用户每切一次分类就弹一条"加载失败"，而且这条僵尸协程还会把
+                    // loading 抹成 false —— 新一轮明明在转圈，转圈却没了。
+                    if (e is CancellationException) throw e
                     _state.value = _state.value.copy(loading = false, loadingMore = false)
                     messages.emit("加载失败: ${e.message?.take(80)}")
                 }

@@ -21,6 +21,15 @@ kotlin {
     jvmToolchain(21)
 }
 
+// 见 :app 同名块。阅读器的绘制层（PageCanvas/PageFlipContainer）是逐帧跑的，
+// 这里的不可跳过项比别处更值钱，所以两个模块都开。
+composeCompiler {
+    if (project.hasProperty("composeMetrics")) {
+        reportsDestination = layout.buildDirectory.dir("compose_metrics")
+        metricsDestination = layout.buildDirectory.dir("compose_metrics")
+    }
+}
+
 dependencies {
     api(project(":core"))
     implementation(libs.kotlinx.coroutines.android)

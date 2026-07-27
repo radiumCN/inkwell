@@ -38,7 +38,8 @@ class BookSourceEngineTest {
 
     private fun engine(trace: RuleTraceCollector? = null, globalPurify: List<PurifyRule> = emptyList()) =
         BookSourceEngine(
-            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1),
+            // MockWebServer 在 127.0.0.1 上，得放行 SSRF 防护
+            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
             { globalPurify },
             trace,
             scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
@@ -288,7 +289,7 @@ class BookSourceEngineTest {
     fun `purify rules are read per call, not snapshotted at construction`() = runBlocking {
         var rules = emptyList<PurifyRule>()
         val eng = BookSourceEngine(
-            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1),
+            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
             { rules },
         )
         val before = eng.getContent(source(), "$base/chap/1")

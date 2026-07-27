@@ -63,6 +63,17 @@ kotlin {
     jvmToolchain(21)
 }
 
+// Compose 编译器指标：哪些 composable 不可跳过（non-skippable）、哪些入参类型不稳定。
+// 默认关闭 —— 开着会给每次编译多写一批报告文件，平时不需要。要看时：
+//   ./gradlew :app:assembleRelease -PcomposeMetrics
+// 产物在 app/build/compose_metrics/，*-composables.txt 是逐函数的 skippable/restartable 结论。
+composeCompiler {
+    if (project.hasProperty("composeMetrics")) {
+        reportsDestination = layout.buildDirectory.dir("compose_metrics")
+        metricsDestination = layout.buildDirectory.dir("compose_metrics")
+    }
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(project(":reader"))

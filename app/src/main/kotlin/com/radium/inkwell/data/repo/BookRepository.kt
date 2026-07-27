@@ -2,8 +2,10 @@ package com.radium.inkwell.data.repo
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import com.radium.inkwell.core.model.BookHandle
 import com.radium.inkwell.core.model.BookParserRegistry
+import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
@@ -19,6 +21,7 @@ import java.util.UUID
 
 class BookRepository(
     private val context: Context,
+    private val db: InkwellDb,
     private val bookDao: BookDao,
     private val chapterDao: ChapterDao,
     private val hitDao: BookSourceHitDao,
@@ -37,10 +40,14 @@ class BookRepository(
      * 书架上与该「书名+作者」匹配的书 id。网络书按 (sourceId,bookUrl) 存，但同一本书跨书源
      * 合并靠 (书名,作者) —— 判断"已在书架"、以及直达已存在的那本，都得按这个键，否则换个
      * 代表书源就认不出是同一本，于是要么重复显示"加入"、要么再入库一份重复的。
+     *
+     * **必须排除墓碑**（getAllVisible 而非 getAll）：删过的书行还在库里，若把它也认成"已在书架"，
+     * 预览页会显示「已在书架」而书架上根本没有 —— 加不进去（被这里挡住）、点"读"打开的是那条
+     * 墓碑（读得了但永远不回书架）。删过的书从此再也加不回来，且没有任何应用内出路。
      */
     suspend fun shelfBookIdByKey(title: String, author: String?): String? {
         val key = bookKey(title, author)
-        return bookDao.getAll().firstOrNull { bookKey(it.title, it.author) == key }?.id
+        return bookDao.getAllVisible().firstOrNull { bookKey(it.title, it.author) == key }?.id
     }
 
     private fun booksDir(): File = File(context.filesDir, "books").apply { mkdirs() }
@@ -81,23 +88,26 @@ class BookRepository(
                         book.metadata.title.takeIf { it.isNotBlank() && it != "未命名" }
                             ?: fallbackTitle
                     }
-                    bookDao.upsert(
-                        BookEntity(
-                            id = bookId,
-                            type = type,
-                            title = title.ifBlank { "未命名" },
-                            author = book.metadata.author ?: "",
-                            coverPath = coverPath,
-                            intro = book.metadata.description,
-                            localPath = dest.absolutePath,
-                            totalChapters = book.chapters.size,
-                            addedAt = now,
-                            updatedAt = now,
-                        )
+                    val entity = BookEntity(
+                        id = bookId,
+                        type = type,
+                        title = title.ifBlank { "未命名" },
+                        author = book.metadata.author ?: "",
+                        coverPath = coverPath,
+                        intro = book.metadata.description,
+                        localPath = dest.absolutePath,
+                        totalChapters = book.chapters.size,
+                        addedAt = now,
+                        updatedAt = now,
                     )
-                    chapterDao.upsertAll(
-                        book.chapters.map { ChapterEntity(bookId, it.index, it.title) }
-                    )
+                    val chapters = book.chapters.map { ChapterEntity(bookId, it.index, it.title) }
+                    // 书行与目录成对落库。下面的 catch 只兜得住异常，兜不住进程被杀 ——
+                    // 两句之间被杀就留下一本"有书行、没目录"的书：书架上看得见，点进去空目录。
+                    // 解析和封面写盘都在事务外，别把文件 IO 圈进来拉长锁。
+                    db.withTransaction {
+                        bookDao.upsert(entity)
+                        chapterDao.upsertAll(chapters)
+                    }
                 }
                 bookId
             } catch (e: Exception) {
@@ -117,12 +127,17 @@ class BookRepository(
             book.localPath?.let { File(it).delete() }
             book.coverPath?.let { File(it).delete() }
             File(File(context.filesDir, "cache"), id).deleteRecursively()
-            chapterDao.deleteByBook(id)
-            // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
-            hitDao.deleteByBook(id)
-            // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
-            // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
-            bookDao.softDelete(id, System.currentTimeMillis())
+            // 三步写库成组提交：中途被杀会留下半套 —— 最糟的是目录已清、墓碑没打上，
+            // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
+            // 文件删除放在事务外：那是不可回滚的磁盘 IO，圈进来只会拉长锁。
+            db.withTransaction {
+                chapterDao.deleteByBook(id)
+                // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
+                hitDao.deleteByBook(id)
+                // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
+                // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
+                bookDao.softDelete(id, System.currentTimeMillis())
+            }
         }
     }
 

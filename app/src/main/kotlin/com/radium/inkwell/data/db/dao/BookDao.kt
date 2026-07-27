@@ -40,8 +40,14 @@ interface BookDao {
     @Query("UPDATE book SET readChapterIndex = :chapterIndex, readCharOffset = :charOffset, readAt = :readAt WHERE id = :id")
     suspend fun updateProgress(id: String, chapterIndex: Int, charOffset: Int, readAt: Long)
 
+    /** 含墓碑，**只给 WebDAV 备份用** —— 合并要靠 deleted 行表达「这本书被删过」。
+     *  面向用户的查询一律用 [getAllVisible]，否则删掉的书会以「已在书架」的身份复活。 */
     @Query("SELECT * FROM book")
     suspend fun getAll(): List<BookEntity>
+
+    /** 不含墓碑。与 [observeAll] 同一套过滤，供「这本书是不是已经在架上」这类判定用 */
+    @Query("SELECT * FROM book WHERE deleted = 0")
+    suspend fun getAllVisible(): List<BookEntity>
 
     @Query("UPDATE book SET groupName = :group WHERE id = :id")
     suspend fun setGroup(id: String, group: String)

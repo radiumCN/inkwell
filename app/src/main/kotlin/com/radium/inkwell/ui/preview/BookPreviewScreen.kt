@@ -178,7 +178,8 @@ private fun Header(
                 Text(
                     "共 ${state.chapters.size} 章 · 来源 ${state.sourceName}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (state.sources.size > 1) {
                     TextButton(onClick = onOpenSourcePicker, contentPadding = PaddingValues(0.dp)) {
