@@ -506,14 +506,37 @@ class ReaderViewModel(
     private val rawCandidates = mutableListOf<SearchResult>()
 
     /**
+     * 本会话内是否已经发起过换源搜索（含中途关掉的半截）。
+     *
+     * 只要发起过，再开面板就直接摊 [rawCandidates]，**不自动重搜** —— 半截结果也比空转圈有用，
+     * 要最新的由用户点面板上的「重新搜索」（[force]=true）。
+     */
+    private var sourceSearchStarted = false
+
+    /** 上一次搜索是否完整跑完。UI 用来区分「真没有」和「上次没搜完」 */
+    private var sourceSearchComplete = false
+
+    /**
      * 用书名在其他启用书源中并发搜索，结果**边搜边出**。
      *
      * 从前是 awaitAll 等所有书源跑完才一次性出结果：几百个源里只要有一个站点吊着不回，
      * 整个换源面板就一直转圈；而且没有超时，那个源可能永远不回。
+     *
+     * @param force 为 true 时忽略会话缓存，强制重搜（面板上的「重新搜索」）。
      */
-    fun searchOtherSources() {
+    fun searchOtherSources(force: Boolean = false) {
         val b = book ?: return
+        // 同一次阅读会话里搜过（含半截）→ 直接摊开；要打新请求只能点「重新搜索」
+        if (!force && sourceSearchStarted && sourceSearchJob?.isActive != true) {
+            _state.value = _state.value.copy(
+                sourceCandidates = filtered(),
+                searchingSources = false,
+            )
+            return
+        }
         sourceSearchJob?.cancel()
+        sourceSearchComplete = false
+        sourceSearchStarted = true
         sourceSearchJob = viewModelScope.launch {
             val checkAuthor = appPrefs.changeSourceCheckAuthor.first()
             // 排序而不是照库里的原顺序：面板照样要搜完所有源（用户点换源就是想看全部候选），
@@ -572,6 +595,7 @@ class ReaderViewModel(
                     }
                 }
             }.awaitAll()
+            sourceSearchComplete = true
             _state.value = _state.value.copy(searchingSources = false)
         }
     }
@@ -616,8 +640,11 @@ class ReaderViewModel(
 
     private fun filtered(): List<SearchResult> {
         val author = book?.author.orEmpty()
-        return if (!_state.value.checkAuthor) rawCandidates.toList()
-        else rawCandidates.filter { authorMatches(it.author, author) }
+        // 换源成功后 rawCandidates 里还躺着刚选上的那个源；列表里再出现「当前源」没意义，点了也是空跑
+        val currentId = book?.sourceId
+        val byAuthor = if (!_state.value.checkAuthor) rawCandidates.asSequence()
+        else rawCandidates.asSequence().filter { authorMatches(it.author, author) }
+        return byAuthor.filter { it.sourceId != currentId }.toList()
     }
 
     // 书名/作者判定见 TitleMatch —— 手动换源与自动换源必须用同一套标准，
@@ -650,8 +677,29 @@ class ReaderViewModel(
                 _state.value = _state.value.copy(changingSource = false, error = "书源不存在")
                 return@launch
             }
+            // 换源前记下旧源：会话缓存要把它塞回候选，否则再开换源面板只能在「新源之外」挑，
+            // 退回刚才那个源还得重新搜一遍 —— 正是这次优化要消掉的浪费。
+            val prevSourceId = b.sourceId
+            val prevBookUrl = b.bookUrl
+            val prevSourceName = _state.value.currentSourceName
             netBookRepo.changeSource(b, candidate, rule)
                 .onSuccess {
+                    // 选定源时搜索可能还在飞（上面已 cancel）。手里已有候选就当本轮可用，
+                    // 否则 complete 仍是 false，下次再开又会全量重搜 —— 白浪费刚搜到的那批。
+                    if (rawCandidates.isNotEmpty()) sourceSearchComplete = true
+                    if (prevSourceId != null && prevBookUrl != null &&
+                        rawCandidates.none { it.sourceId == prevSourceId }
+                    ) {
+                        rawCandidates += SearchResult(
+                            title = b.title,
+                            bookUrl = prevBookUrl,
+                            author = b.author.ifBlank { null },
+                            intro = b.intro,
+                            latestChapter = b.latestChapterTitle,
+                            sourceId = prevSourceId,
+                            sourceName = prevSourceName,
+                        )
+                    }
                     _state.value = _state.value.copy(
                         changingSource = false,
                         sourceCandidates = null,
@@ -831,7 +879,8 @@ class ReaderViewModel(
 
     fun dismissSourcePanel() {
         sourceSearchJob?.cancel()
-        rawCandidates.clear()
+        // 故意不清 rawCandidates / sourceSearchStarted：关掉面板不是放弃结果。
+        // 再开直接摊缓存（含半截）；要打新请求点「重新搜索」。
         _state.value = _state.value.copy(sourceCandidates = null, searchingSources = false)
     }
 

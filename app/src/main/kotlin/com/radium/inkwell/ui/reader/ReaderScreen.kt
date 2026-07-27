@@ -490,6 +490,7 @@ fun ReaderScreen(
                 candidates = candidates,
                 onApplySource = { viewModel.applyChangeSource(it) },
                 onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },
+                onRefresh = { viewModel.searchOtherSources(force = true) },
                 onDismiss = { viewModel.dismissSourcePanel() },
             )
         }
