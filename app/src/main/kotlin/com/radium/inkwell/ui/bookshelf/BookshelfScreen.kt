@@ -1,10 +1,12 @@
 package com.radium.inkwell.ui.bookshelf
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -25,15 +27,23 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -49,7 +59,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,16 +67,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -123,13 +128,16 @@ fun BookshelfScreen(
     val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val group by viewModel.group.collectAsStateWithLifecycle()
-    var actionTarget by remember { mutableStateOf<BookEntity?>(null) }
-    var groupTarget by remember { mutableStateOf<BookEntity?>(null) }
+    val selected by viewModel.selected.collectAsStateWithLifecycle()
+    val selectionMode = selected.isNotEmpty()
+    // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
+    BackHandler(selectionMode) { viewModel.clearSelection() }
+    var showGroupAssign by remember { mutableStateOf(false) }
     var groupInput by remember { mutableStateOf("") }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
-    var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
@@ -165,71 +173,148 @@ fun BookshelfScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    // 长按标题 = 隐藏书籍的入口。它本身不可见、不可猜 ——
-                    // 一个写在菜单里的「显示隐藏的书」，等于告诉所有人这里藏了东西。
-                    Text(
-                        "书架",
-                        Modifier.combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {},
-                            // 隐藏区开着时再长按 = 一键收摊 —— 有人走过来时你需要这一下
-                            onLongClick = { if (showHidden) viewModel.collapseHiddenAll() else revealHidden() },
-                        ),
-                    )
-                },
-                actions = {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Default.Search, contentDescription = "搜索")
-                    }
-                    // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
-                    if (exploreEnabled) {
-                        IconButton(onClick = onOpenExplore) {
-                            Icon(Icons.Default.Explore, contentDescription = "发现")
+            if (selectionMode) {
+                // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
+                var overflowOpen by remember { mutableStateOf(false) }
+                TopAppBar(
+                    title = {
+                        Text(
+                            "已选 ${selected.size} 本",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = viewModel::clearSelection) {
+                            Icon(Icons.Default.Close, contentDescription = "退出多选")
                         }
-                    }
-                    // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
-                    IconButton(
-                        onClick = {
-                            importLauncher.launch(
-                                arrayOf(
-                                    "text/plain", "application/epub+zip",
-                                    "application/octet-stream", "application/x-mobipocket-ebook",
+                    },
+                    actions = {
+                        IconButton(onClick = viewModel::selectAll) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                        }
+                        IconButton(onClick = { confirmBatchDelete = true }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除",
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        Box {
+                            IconButton(onClick = { overflowOpen = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                            }
+                            DropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = { overflowOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("设置分组") },
+                                    onClick = {
+                                        overflowOpen = false
+                                        groupInput = ""
+                                        showGroupAssign = true
+                                    },
                                 )
-                            )
-                        },
-                        enabled = !importing,
-                    ) {
-                        if (importing) {
-                            CircularProgressIndicator(
-                                Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = LocalContentColor.current,
-                            )
-                        } else {
-                            Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                                // 隐藏相关只在隐藏区露面 —— 平时菜单里出现「隐藏」等于把功能写在脸上
+                                if (showHidden) {
+                                    DropdownMenuItem(
+                                        text = { Text("从书架隐藏") },
+                                        onClick = {
+                                            overflowOpen = false
+                                            viewModel.setHiddenSelected(true)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("取消隐藏") },
+                                        onClick = {
+                                            overflowOpen = false
+                                            viewModel.setHiddenSelected(false)
+                                        },
+                                    )
+                                }
+                                // 详情只对单本有意义；多本没法同时开详情页
+                                selected.singleOrNull()?.let { onlyId ->
+                                    DropdownMenuItem(
+                                        text = { Text("书籍详情") },
+                                        onClick = {
+                                            overflowOpen = false
+                                            viewModel.clearSelection()
+                                            onOpenDetail(onlyId)
+                                        },
+                                    )
+                                }
+                            }
                         }
-                    }
-                    // 这里**没有**「显示隐藏的书」。
-                    //
-                    // 从前它就明晃晃写着「显示隐藏的书（1）」—— 等于把「我藏了 1 本书」
-                    // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
-                    // 改为长按顶栏的「书架」标题。
-                    //
-                    // 这里也**不放**「收起隐藏的书」：收起的出口是隐藏状态条上的 ✕，
-                    // 而状态条恰恰在 showHidden 时才出现 —— 与这个按钮的出现时机完全重合，
-                    // 两个按钮干同一件事。曾经短暂加过一个，随即因重复删掉。
-                    //
-                    // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
-                    // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
-                    // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
-                    }
-                },
-            )
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        // 长按标题 = 隐藏书籍的入口。它本身不可见、不可猜 ——
+                        // 一个写在菜单里的「显示隐藏的书」，等于告诉所有人这里藏了东西。
+                        Text(
+                            "书架",
+                            Modifier.combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {},
+                                // 隐藏区开着时再长按 = 一键收摊 —— 有人走过来时你需要这一下
+                                onLongClick = { if (showHidden) viewModel.collapseHiddenAll() else revealHidden() },
+                            ),
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSearch) {
+                            Icon(Icons.Default.Search, contentDescription = "搜索")
+                        }
+                        // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
+                        if (exploreEnabled) {
+                            IconButton(onClick = onOpenExplore) {
+                                Icon(Icons.Default.Explore, contentDescription = "发现")
+                            }
+                        }
+                        // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
+                        IconButton(
+                            onClick = {
+                                importLauncher.launch(
+                                    arrayOf(
+                                        "text/plain", "application/epub+zip",
+                                        "application/octet-stream", "application/x-mobipocket-ebook",
+                                    )
+                                )
+                            },
+                            enabled = !importing,
+                        ) {
+                            if (importing) {
+                                CircularProgressIndicator(
+                                    Modifier.size(Dimens.buttonSpinner),
+                                    strokeWidth = 2.dp,
+                                    color = LocalContentColor.current,
+                                )
+                            } else {
+                                Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                            }
+                        }
+                        // 这里**没有**「显示隐藏的书」。
+                        //
+                        // 从前它就明晃晃写着「显示隐藏的书（1）」—— 等于把「我藏了 1 本书」
+                        // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
+                        // 改为长按顶栏的「书架」标题。
+                        //
+                        // 这里也**不放**「收起隐藏的书」：收起的出口是隐藏状态条上的 ✕，
+                        // 而状态条恰恰在 showHidden 时才出现 —— 与这个按钮的出现时机完全重合，
+                        // 两个按钮干同一件事。曾经短暂加过一个，随即因重复删掉。
+                        //
+                        // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
+                        // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
+                        // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                        }
+                    },
+                )
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
@@ -338,9 +423,15 @@ fun BookshelfScreen(
                     items(books, key = { it.id }) { book ->
                         BookCard(
                             book = book,
-                            onClick = { bounds -> onOpenBook(book.id, originOf(bounds, windowSize)) },
-                            // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
-                            onLongClick = { actionTarget = book },
+                            selected = book.id in selected,
+                            selectionMode = selectionMode,
+                            onClick = { bounds ->
+                                if (selectionMode) viewModel.toggleSelect(book.id)
+                                else onOpenBook(book.id, originOf(bounds, windowSize))
+                            },
+                            // 长按进多选（与书源管理一致）。以前长按直接出动作面板；
+                            // 批量操作进来后，单本的分组/删除/隐藏都走多选顶栏。
+                            onLongClick = { viewModel.toggleSelect(book.id) },
                             // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
                             // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
                             // 才看得出「这几本是插进来的」。
@@ -359,68 +450,9 @@ fun BookshelfScreen(
         }
     }
 
-    actionTarget?.let { book ->
-        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
-                Text(
-                    book.title,
-                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                SettingRow(
-                    title = "书籍详情",
-                    subtitle = "简介、目录、刷新追更",
-                    onClick = {
-                        val id = book.id
-                        actionTarget = null
-                        onOpenDetail(id)
-                    },
-                )
-                SettingRow(
-                    title = "设置分组",
-                    subtitle = book.groupName.ifBlank { "未分组" },
-                    onClick = {
-                        groupInput = book.groupName
-                        groupTarget = book
-                        actionTarget = null
-                    },
-                )
-                // 「从书架隐藏」只在隐藏区打开、且正在显示隐藏书时出现。
-                // 平时长按一本书看不到这一项 —— 别人就想不到 App 能藏书。
-                // 入口是长按顶栏「书架」标题（不可见、不可猜），进了隐藏区才能藏/取消藏。
-                // 以前另有一个「允许隐藏书籍」持久开关，跟「显示隐藏的书」叠床架屋：
-                // 关着开关却开着显示、或反过来，都说不通。显隐本身就是许可。
-                if (showHidden) {
-                    SettingRow(
-                        title = if (book.hidden) "取消隐藏" else "从书架隐藏",
-                        subtitle = if (book.hidden) {
-                            "重新显示在书架上"
-                        } else {
-                            "书、进度、缓存都还在，只是列表里不显示"
-                        },
-                        onClick = {
-                            viewModel.setHidden(book.id, !book.hidden)
-                            actionTarget = null
-                        },
-                    )
-                }
-                SettingRow(
-                    title = "从书架删除",
-                    subtitle = "本地文件与缓存将一并删除",
-                    onClick = {
-                        deleteTarget = book
-                        actionTarget = null
-                    },
-                )
-            }
-        }
-    }
-
-    groupTarget?.let { book ->
+    if (showGroupAssign) {
         AlertDialog(
-            onDismissRequest = { groupTarget = null },
+            onDismissRequest = { showGroupAssign = false },
             title = { Text("设置分组") },
             text = {
                 Column {
@@ -453,29 +485,31 @@ fun BookshelfScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.assignGroup(book.id, groupInput)
-                    groupTarget = null
+                    viewModel.assignGroupSelected(groupInput)
+                    showGroupAssign = false
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { groupTarget = null }) { Text("取消") }
+                TextButton(onClick = { showGroupAssign = false }) { Text("取消") }
             },
         )
     }
 
-    deleteTarget?.let { book ->
+    if (confirmBatchDelete) {
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
+            onDismissRequest = { confirmBatchDelete = false },
             title = { Text("删除书籍") },
-            text = { Text("确定从书架删除《${book.title}》吗？本地文件与缓存将一并删除。") },
+            text = {
+                Text("确定从书架删除选中的 ${selected.size} 本吗？本地文件与缓存将一并删除。")
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.deleteBook(book.id)
-                    deleteTarget = null
+                    viewModel.deleteSelected()
+                    confirmBatchDelete = false
                 }) { Text("删除") }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                TextButton(onClick = { confirmBatchDelete = false }) { Text("取消") }
             },
         )
     }
@@ -485,11 +519,14 @@ fun BookshelfScreen(
 /**
  * @param onClick 带上这张封面在窗口里的位置 —— 进书要从「这本书所在的位置」放大展开，
  *   得知道展开的原点在哪。书还没测量出位置时给 null，调用方退回中心展开。
+ *   多选模式下调用方会忽略 bounds，只用来切换勾选。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookCard(
     book: BookEntity,
+    selected: Boolean,
+    selectionMode: Boolean,
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -512,6 +549,15 @@ private fun BookCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
+                    .then(
+                        if (selected) {
+                            Modifier.border(
+                                width = Dimens.gapXS,
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = MaterialTheme.shapes.medium,
+                            )
+                        } else Modifier
+                    )
                     .onGloballyPositioned { coverBounds = it.boundsInWindow() },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
@@ -530,7 +576,7 @@ private fun BookCard(
             }
             // 追更红点：自从你上次打开之后，新增了几章。
             // 画在封面右上角而不是占一行 —— 网格里每多一行文字，一屏就少一排书
-            if (book.newChapterCount > 0) {
+            if (book.newChapterCount > 0 && !selectionMode) {
                 Badge(
                     modifier = Modifier.align(Alignment.TopEnd).padding(Dimens.gapXS),
                     containerColor = MaterialTheme.colorScheme.error,
@@ -538,6 +584,22 @@ private fun BookCard(
                 ) {
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
+            }
+            // 多选勾选标：盖在封面角上，比整行 Checkbox 更省网格空间
+            if (selectionMode) {
+                Icon(
+                    if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = if (selected) "已选中" else "未选中",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(Dimens.gapXS)
+                        .size(Dimens.iconMd),
+                    tint = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                    },
+                )
             }
         }
         Text(

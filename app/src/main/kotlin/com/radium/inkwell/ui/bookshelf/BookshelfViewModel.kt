@@ -128,18 +128,6 @@ class BookshelfViewModel(
         _showHidden.value = false
     }
 
-    fun setHidden(bookId: String, hidden: Boolean) {
-        viewModelScope.launch {
-            bookRepo.setHidden(bookId, hidden)
-            messages.emit(
-                // 找回的路必须在这里说清楚 —— 入口是个不可见的手势，
-                // 不当场告诉他，他就再也想不起来了
-                if (hidden) "已隐藏。长按顶栏「书架」标题可以找回"
-                else "已取消隐藏"
-            )
-        }
-    }
-
     val hiddenCount: StateFlow<Int> = allBooks
         .map { list -> list.count { it.hidden } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -157,10 +145,59 @@ class BookshelfViewModel(
                 }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun assignGroup(bookId: String, group: String) {
+    // ---- 多选 ----
+
+    private val _selected = MutableStateFlow<Set<String>>(emptySet())
+    val selected: StateFlow<Set<String>> = _selected.asStateFlow()
+
+    fun toggleSelect(id: String) {
+        _selected.value = _selected.value.let { if (id in it) it - id else it + id }
+    }
+
+    fun selectAll() {
+        // 只全选**当前可见**的（分组筛选 + 隐藏区过滤之后）——
+        // 否则「未分组」下点全选再删除，会把别的分组里的书一并删掉
+        _selected.value = books.value.map { it.id }.toSet()
+    }
+
+    fun clearSelection() {
+        _selected.value = emptySet()
+    }
+
+    fun deleteSelected() {
+        val ids = _selected.value
+        if (ids.isEmpty()) return
         viewModelScope.launch {
-            bookRepo.setGroup(bookId, group.trim())
-            messages.emit(if (group.isBlank()) "已移出分组" else "已归入「${group.trim()}」")
+            ids.forEach { bookRepo.deleteBook(it) }
+            clearSelection()
+            messages.emit("已删除 ${ids.size} 本")
+        }
+    }
+
+    fun assignGroupSelected(group: String) {
+        val ids = _selected.value
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val name = group.trim()
+            ids.forEach { bookRepo.setGroup(it, name) }
+            clearSelection()
+            messages.emit(
+                if (name.isBlank()) "已移出分组 ${ids.size} 本"
+                else "已归入「$name」${ids.size} 本"
+            )
+        }
+    }
+
+    fun setHiddenSelected(hidden: Boolean) {
+        val ids = _selected.value
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { bookRepo.setHidden(it, hidden) }
+            clearSelection()
+            messages.emit(
+                if (hidden) "已隐藏 ${ids.size} 本。长按顶栏「书架」标题可以找回"
+                else "已取消隐藏 ${ids.size} 本"
+            )
         }
     }
 
@@ -201,10 +238,6 @@ class BookshelfViewModel(
                 }
             )
         }
-    }
-
-    fun deleteBook(id: String) {
-        viewModelScope.launch { bookRepo.deleteBook(id) }
     }
 
 }
