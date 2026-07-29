@@ -27,12 +27,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
@@ -544,6 +544,8 @@ private fun BookCard(
 ) {
     // 用封面（而不是整张卡片）的位置：展开动画应该从书封长出来，标题那一行不算
     var coverBounds by remember { mutableStateOf<Rect?>(null) }
+    // 与 BookCover 的 shape 对齐 —— 选中描边若用 medium，封面却是 small，就会看出「框套框」
+    val coverShape = MaterialTheme.shapes.small
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -562,25 +564,27 @@ private fun BookCard(
             }
             .combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
     ) {
-        Box {
+        // 多选态外圈留出与描边等宽的 padding：未选不画边、已选才描 primary，
+        // 占位却始终在 —— 勾选不会把封面挤小一圈。
+        // （以前给每本都画 outline，整架书像进了铁笼，也不合 MD3 媒体多选：
+        //  未选只靠角标，已选靠 tonal 遮罩 + 描边。）
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .then(if (selectionMode) Modifier.padding(Dimens.gapXS) else Modifier),
+        ) {
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 4f)
+                    .fillMaxSize()
                     .then(
-                        // 多选态下**始终**占着边框槽 —— 以前只给已选加边，勾选时封面会缩一圈「跳」一下。
-                        // 未选走 outline（知道还能点），已选走 primary。
-                        if (selectionMode) {
+                        if (selectionMode && selected) {
                             Modifier.border(
                                 width = Dimens.gapXS,
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.outline
-                                },
-                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = coverShape,
                             )
                         } else Modifier
                     )
@@ -588,6 +592,15 @@ private fun BookCard(
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
             )
+            // MD3 tonal：已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
+            if (selectionMode && selected) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(coverShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
+                )
+            }
             // 「显示隐藏的书」开着时，得看得出哪些是隐藏的 —— 否则分不清，会重复隐藏
             if (book.hidden) {
                 Icon(
@@ -611,8 +624,8 @@ private fun BookCard(
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
             }
-            // 多选勾选标：实心底托在图标下面 —— 封面深浅不一，半透明空心圈会直接融进图里。
-            // 用 Checkbox 成对图标，别混 Radio + CheckCircle。
+            // 角标用成对的圆形图标（CheckCircle / 空心圆），与相册多选一致；
+            // 未选仍垫 surface 圆底 —— 花封面上看得见空心圈。
             if (selectionMode) {
                 Box(
                     Modifier
@@ -626,8 +639,7 @@ private fun BookCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        if (selected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                        // 外层 Column 已 merge 成 Checkbox，这里装饰性
+                        if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                         contentDescription = null,
                         modifier = Modifier.size(Dimens.iconMd),
                         tint = if (selected) {
