@@ -135,12 +135,11 @@ fun BookshelfScreen(
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val panelOpen by viewModel.hiddenPanelOpen.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
-    // 隐藏区的两个持久设置（允许隐藏 / 展开需验证）收进这个底部小 sheet，
+    // 隐藏区的持久设置（展开需验证）收进这个底部小 sheet，
     // 顶部状态条只管「本次会话显不显」这一个瞬时开关
     var hiddenSettingsOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
-    val hideBooksEnabled by viewModel.hideBooksEnabled.collectAsStateWithLifecycle()
     val activity = LocalActivity.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -396,13 +395,12 @@ fun BookshelfScreen(
                         actionTarget = null
                     },
                 )
-                // 「从书架隐藏」默认**不出现**。它一旦出现在长按面板里，任何人随手长按一本书
-                // 就知道了「这个 App 能藏书」，进而知道该去找藏起来的东西 ——
-                // 而隐藏的价值恰恰在于别人想不到去找。开关在隐藏区内部（长按书架标题进去）。
-                //
-                // 「取消隐藏」不受开关管：它只在隐藏区里才可能被点到（书都藏起来了，
-                // 平时根本长按不到），而且关掉开关就再也解不开隐藏，等于把书锁死。
-                if (hideBooksEnabled || book.hidden) {
+                // 「从书架隐藏」只在隐藏区打开、且正在显示隐藏书时出现。
+                // 平时长按一本书看不到这一项 —— 别人就想不到 App 能藏书。
+                // 入口是长按顶栏「书架」标题（不可见、不可猜），进了隐藏区才能藏/取消藏。
+                // 以前另有一个「允许隐藏书籍」持久开关，跟「显示隐藏的书」叠床架屋：
+                // 关着开关却开着显示、或反过来，都说不通。显隐本身就是许可。
+                if (showHidden) {
                     SettingRow(
                         title = if (book.hidden) "取消隐藏" else "从书架隐藏",
                         subtitle = if (book.hidden) {
@@ -492,10 +490,8 @@ fun BookshelfScreen(
 
     if (hiddenSettingsOpen) {
         HiddenSettingsSheet(
-            hideBooksEnabled = hideBooksEnabled,
             requireAuth = requireAuth,
             biometricAvailable = biometricAvailable,
-            onToggleHideBooks = { viewModel.setHideBooksEnabled(it) },
             onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
             onDismiss = { hiddenSettingsOpen = false },
         )
@@ -644,14 +640,12 @@ private fun HiddenStatusBar(
     }
 }
 
-/** 隐藏区的两个持久设置：从状态条的 ⚙ 弹出。瞬时显隐不在这里（它在状态条上、要网格可见） */
+/** 隐藏区的持久设置：从状态条的 ⚙ 弹出。瞬时显隐不在这里（它在状态条上、要网格可见） */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HiddenSettingsSheet(
-    hideBooksEnabled: Boolean,
     requireAuth: Boolean,
     biometricAvailable: Boolean,
-    onToggleHideBooks: (Boolean) -> Unit,
     onToggleAuth: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -661,16 +655,6 @@ private fun HiddenSettingsSheet(
                 "隐藏设置",
                 Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
                 style = MaterialTheme.typography.titleMedium,
-            )
-            SwitchRow(
-                title = "允许隐藏书籍",
-                subtitle = if (hideBooksEnabled) {
-                    "长按书籍时会出现「从书架隐藏」"
-                } else {
-                    "长按书籍时不出现隐藏选项 —— 别人看不出这个功能存在"
-                },
-                checked = hideBooksEnabled,
-                onCheckedChange = onToggleHideBooks,
             )
             SwitchRow(
                 title = "展开时需要验证",

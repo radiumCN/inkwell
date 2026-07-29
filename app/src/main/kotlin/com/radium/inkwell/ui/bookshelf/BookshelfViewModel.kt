@@ -129,17 +129,11 @@ class BookshelfViewModel(
 
     fun setShowHidden(on: Boolean) { _showHidden.value = on }
 
-    /** 两个开关都只在隐藏区内部露面，所以设置这件事归书架管，而不是设置页 */
+    /** 验证相关开关只在隐藏区内部露面，所以设置这件事归书架管，而不是设置页 */
     fun setHiddenRequireAuth(on: Boolean) {
         viewModelScope.launch { appPrefs.setHiddenRequireAuth(on) }
     }
 
-    val hideBooksEnabled: StateFlow<Boolean> = appPrefs.hideBooksEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    fun setHideBooksEnabled(on: Boolean) {
-        viewModelScope.launch { appPrefs.setHideBooksEnabled(on) }
-    }
     /** 一键收摊：面板关掉，书也藏回去 */
     fun collapseHiddenAll() {
         _hiddenPanelOpen.value = false
