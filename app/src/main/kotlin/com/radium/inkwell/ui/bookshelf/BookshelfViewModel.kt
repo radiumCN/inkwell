@@ -98,45 +98,32 @@ class BookshelfViewModel(
     // ---- 隐藏 ----
 
     /**
-     * 是否临时显示隐藏的书。
+     * 是否处于隐藏区（显示隐藏的书 + 顶上那条状态条）。
      *
      * **进程内状态，不落库** —— 退出 App 就复位。落库的话「隐藏」就形同虚设：
      * 用户看完一次，开关一直开着，那些书就再也没被隐藏过。
+     *
+     * 打开隐藏区 = 就是要看隐藏的书，不再另设「显不显」开关。收起就整区退出。
      */
     private val _showHidden = MutableStateFlow(false)
     val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
-
-    /**
-     * 隐藏区的面板开着没有。
-     *
-     * 和 [showHidden] **分开**：从前它俩是同一个状态，于是「收起」一个按钮干了两件事 ——
-     * 关掉面板，顺手把书又藏回去。用户只是不想看那块面板，书却跟着消失了。
-     *
-     * 现在「收起」只管面板，书的显隐由面板里的开关说了算。
-     */
-    private val _hiddenPanelOpen = MutableStateFlow(false)
-    val hiddenPanelOpen: StateFlow<Boolean> = _hiddenPanelOpen.asStateFlow()
 
     /** 查看隐藏书籍要不要先验证身份 */
     val hiddenRequireAuth: StateFlow<Boolean> = appPrefs.hiddenRequireAuth
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    /** 验证过了才允许进来。进来就默认把书显出来 —— 你就是为这个来的 */
+    /** 验证过了才允许进来 */
     fun openHiddenPanel() {
-        _hiddenPanelOpen.value = true
         _showHidden.value = true
     }
 
-    fun setShowHidden(on: Boolean) { _showHidden.value = on }
-
-    /** 验证相关开关只在隐藏区内部露面，所以设置这件事归书架管，而不是设置页 */
+    /** 「展开需验证」只在隐藏区状态条上露面，所以设置这件事归书架管，而不是设置页 */
     fun setHiddenRequireAuth(on: Boolean) {
         viewModelScope.launch { appPrefs.setHiddenRequireAuth(on) }
     }
 
-    /** 一键收摊：面板关掉，书也藏回去 */
+    /** 退出隐藏区：状态条收起，隐藏的书也藏回去 */
     fun collapseHiddenAll() {
-        _hiddenPanelOpen.value = false
         _showHidden.value = false
     }
 

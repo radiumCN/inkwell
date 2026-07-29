@@ -41,10 +41,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,11 +67,8 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.heightIn
-import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
@@ -133,11 +132,7 @@ fun BookshelfScreen(
     var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
-    val panelOpen by viewModel.hiddenPanelOpen.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
-    // 隐藏区的持久设置（展开需验证）收进这个底部小 sheet，
-    // 顶部状态条只管「本次会话显不显」这一个瞬时开关
-    var hiddenSettingsOpen by remember { mutableStateOf(false) }
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val activity = LocalActivity.current as? androidx.fragment.app.FragmentActivity
@@ -180,8 +175,8 @@ fun BookshelfScreen(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = {},
-                            // 面板开着时再长按 = 一键收摊（面板关掉、书也藏回去）—— 有人走过来时你需要这一下
-                            onLongClick = { if (panelOpen) viewModel.collapseHiddenAll() else revealHidden() },
+                            // 隐藏区开着时再长按 = 一键收摊 —— 有人走过来时你需要这一下
+                            onLongClick = { if (showHidden) viewModel.collapseHiddenAll() else revealHidden() },
                         ),
                     )
                 },
@@ -224,10 +219,8 @@ fun BookshelfScreen(
                     // 改为长按顶栏的「书架」标题。
                     //
                     // 这里也**不放**「收起隐藏的书」：收起的出口是隐藏状态条上的 ✕，
-                    // 而状态条恰恰在 panelOpen 时才出现 —— 与这个按钮的出现时机完全重合，
+                    // 而状态条恰恰在 showHidden 时才出现 —— 与这个按钮的出现时机完全重合，
                     // 两个按钮干同一件事。曾经短暂加过一个，随即因重复删掉。
-                    // （唯一能让二者错开的是 showHidden 真而 panelOpen 假，
-                    //   但造出这个状态的 closeHiddenPanel 没有任何调用点，够不到。）
                     //
                     // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
                     // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
@@ -278,18 +271,17 @@ fun BookshelfScreen(
             ) {
                 // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
-                // 只留「本次会话显不显」这个瞬时开关（切换时下面的书网格当场可见效果），
-                // 两个持久设置收进 ⚙ 打开的小 sheet。
+                // 「展开需验证」直接挂在条上，不再套一层设置弹层。
                 AnimatedVisibility(
-                    visible = panelOpen,
+                    visible = showHidden,
                     enter = expandEnter(),
                     exit = expandExit(),
                 ) {
                     HiddenStatusBar(
-                        showHidden = showHidden,
-                        onToggleShowHidden = { viewModel.setShowHidden(it) },
-                        onOpenSettings = { hiddenSettingsOpen = true },
-                        // ✕ = 退出整个隐藏区（面板收起 + 书藏回去），与长按标题一键收摊等价
+                        requireAuth = requireAuth,
+                        biometricAvailable = biometricAvailable,
+                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+                        // ✕ = 退出整个隐藏区（状态条收起 + 书藏回去），与长按标题一键收摊等价
                         onCollapse = { viewModel.collapseHiddenAll() },
                     )
                 }
@@ -349,7 +341,7 @@ fun BookshelfScreen(
                             onClick = { bounds -> onOpenBook(book.id, originOf(bounds, windowSize)) },
                             // 长按从前直接弹删除 —— 一个误触就把书删了。改成先出动作面板
                             onLongClick = { actionTarget = book },
-                            // 切「显示隐藏的书」时整批书凭空出现/消失，从前是硬闪 —— 看不出
+                            // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
                             // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
                             // 才看得出「这几本是插进来的」。
                             // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
@@ -488,14 +480,6 @@ fun BookshelfScreen(
         )
     }
 
-    if (hiddenSettingsOpen) {
-        HiddenSettingsSheet(
-            requireAuth = requireAuth,
-            biometricAvailable = biometricAvailable,
-            onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
-            onDismiss = { hiddenSettingsOpen = false },
-        )
-    }
 }
 
 /**
@@ -578,29 +562,18 @@ private fun BookCard(
 }
 
 /**
- * 隐藏区的控制台。只有已经通过长按标题（并验证）进来的人才看得到。
- *
- * 「查看时需要验证」这个开关从前住在设置 → 隐私里，副标题还写着「长按书架标题后先验证指纹」——
- * 等于把「这个 App 能藏书」和暗号一起印在了任何人都能翻到的地方。一个只有你知道的东西，
- * 它的开关也只能长在你已经进去之后的地方。
- */
-/**
- * 隐藏区状态条。一条轻量的横条，压在书网格上方：
- * - 左侧眼睛图标 + 「本次会话显不显」的文字状态；
- * - 中间的开关就是那个瞬时显隐（切换时下面网格当场可见效果，所以不塞进会盖住网格的弹层）；
- * - ⚙ 打开两个持久设置的小 sheet；✕ 一键退出整个隐藏区。
- *
- * 从前是一张占屏三分之一的大卡把三个开关堆在一起，浏览隐藏书时一直杵在书上方；
- * 且瞬时显隐与持久设置混在一处，概念糊。这里把两者拆开。
+ * 隐藏区状态条。打开隐藏区 = 就是在看隐藏书。
+ * 「下次展开需验证」直接挂在条上（进了隐藏区才能改，外人翻设置看不到）；✕ 退出。
  */
 @Composable
 private fun HiddenStatusBar(
-    showHidden: Boolean,
-    onToggleShowHidden: (Boolean) -> Unit,
-    onOpenSettings: () -> Unit,
+    requireAuth: Boolean,
+    biometricAvailable: Boolean,
+    onToggleAuth: (Boolean) -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val authOn = requireAuth && biometricAvailable
     Surface(
         modifier
             .fillMaxWidth()
@@ -614,60 +587,43 @@ private fun HiddenStatusBar(
                 .heightIn(min = Dimens.touchTarget),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                if (showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                contentDescription = null,
-                Modifier.size(Dimens.iconSm),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                if (showHidden) "隐藏的书显示中" else "隐藏的书已收起",
+            // 整行可点切换；Switch 只作展示，避免「行 + 开关」两个焦点
+            Row(
                 Modifier
                     .weight(1f)
-                    .padding(start = Dimens.gapS, end = Dimens.gapS),
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Switch(checked = showHidden, onCheckedChange = onToggleShowHidden)
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Default.Tune, contentDescription = "隐藏设置")
+                    .then(
+                        if (biometricAvailable) {
+                            Modifier.toggleable(
+                                value = authOn,
+                                role = Role.Switch,
+                                onValueChange = onToggleAuth,
+                            )
+                        } else Modifier
+                    )
+                    .padding(end = Dimens.gapS),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (biometricAvailable) "展开需验证" else "无法上锁",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (biometricAvailable) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Switch(
+                    checked = authOn,
+                    onCheckedChange = null,
+                    enabled = biometricAvailable,
+                )
             }
             IconButton(onClick = onCollapse) {
                 Icon(Icons.Default.Close, contentDescription = "收起隐藏区")
             }
-        }
-    }
-}
-
-/** 隐藏区的持久设置：从状态条的 ⚙ 弹出。瞬时显隐不在这里（它在状态条上、要网格可见） */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HiddenSettingsSheet(
-    requireAuth: Boolean,
-    biometricAvailable: Boolean,
-    onToggleAuth: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
-            Text(
-                "隐藏设置",
-                Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            SwitchRow(
-                title = "展开时需要验证",
-                subtitle = when {
-                    !biometricAvailable -> "这台设备还没设过指纹/面容或锁屏密码，无法上锁"
-                    requireAuth -> "下次长按书架标题时，先验证指纹/面容"
-                    else -> "任何人长按书架标题都能展开"
-                },
-                checked = requireAuth && biometricAvailable,
-                // 设备上一把锁都没有时开了它，就是把自己锁在门外 —— 这道锁没有找回途径
-                enabled = biometricAvailable,
-                onCheckedChange = onToggleAuth,
-            )
         }
     }
 }
