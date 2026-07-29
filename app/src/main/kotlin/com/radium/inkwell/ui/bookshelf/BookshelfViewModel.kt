@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.repo.BookRepository
+import com.radium.inkwell.data.repo.LocalImportResult
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -176,19 +177,27 @@ class BookshelfViewModel(
         viewModelScope.launch {
             _importing.value = true
             var ok = 0
+            var skipped = 0
             var failed = 0
             var lastError: String? = null
             uris.forEach { uri ->
                 bookRepo.importLocalBook(uri)
-                    .onSuccess { ok++ }
+                    .onSuccess {
+                        when (it) {
+                            is LocalImportResult.Added -> ok++
+                            is LocalImportResult.AlreadyOnShelf -> skipped++
+                        }
+                    }
                     .onFailure { failed++; lastError = it.message }
             }
             _importing.value = false
             messages.emit(
                 when {
-                    failed == 0 -> "已导入 $ok 本"
-                    ok == 0 -> "导入失败: $lastError"
-                    else -> "导入 $ok 本，失败 $failed 本"
+                    failed == 0 && skipped == 0 -> "已导入 $ok 本"
+                    failed == 0 && ok == 0 -> if (skipped == 1) "这本书已在书架" else "这些书已在书架"
+                    failed == 0 -> "已导入 $ok 本，跳过 $skipped 本（已在书架）"
+                    ok == 0 && skipped == 0 -> "导入失败: $lastError"
+                    else -> "导入 $ok 本，跳过 $skipped 本，失败 $failed 本"
                 }
             )
         }

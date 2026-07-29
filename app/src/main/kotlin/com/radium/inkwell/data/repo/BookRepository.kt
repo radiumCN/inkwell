@@ -50,12 +50,30 @@ class BookRepository(
         return bookDao.getAllVisible().firstOrNull { bookKey(it.title, it.author) == key }?.id
     }
 
+    /**
+     * 书架上与该「书名+作者」匹配的**本地书** id。
+     *
+     * 只认本地：同名网络书不挡导入 —— 用户完全可能先从书源加过一本，再导一份本地备份。
+     * 墓碑同样排除（见 [shelfBookIdByKey]）。
+     */
+    suspend fun shelfLocalBookIdByKey(title: String, author: String?): String? {
+        val key = bookKey(title, author)
+        return bookDao.getAllVisible().firstOrNull {
+            it.type != BookType.NET && bookKey(it.title, it.author) == key
+        }?.id
+    }
+
     private fun booksDir(): File = File(context.filesDir, "books").apply { mkdirs() }
 
     private fun coversDir(): File = File(context.filesDir, "covers").apply { mkdirs() }
 
-    /** SAF 导入：复制到私有目录 → 解析元数据与目录 → 入库。返回 bookId 或错误。 */
-    suspend fun importLocalBook(uri: Uri): Result<String> = withContext(Dispatchers.IO) {
+    /**
+     * SAF 导入：复制到私有目录 → 解析元数据与目录 → 入库。
+     *
+     * 同一本本地书（书名+作者）已在书架则跳过，不另建副本 —— 以前每次导入都 new UUID，
+     * 同一文件选两遍书架上就会出现两本一模一样的。
+     */
+    suspend fun importLocalBook(uri: Uri): Result<LocalImportResult> = withContext(Dispatchers.IO) {
         runCatching {
             val displayName = queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
             val bookId = UUID.randomUUID().toString()
@@ -68,9 +86,11 @@ class BookRepository(
             try {
                 val handle = parserRegistry.open(dest)
                 handle.use { book ->
+                    var coverFile: File? = null
                     val coverPath = book.metadata.cover?.let { cover ->
                         val f = File(coversDir(), "$bookId.img")
                         f.writeBytes(cover.data)
+                        coverFile = f
                         f.absolutePath
                     }
                     val now = System.currentTimeMillis()
@@ -87,12 +107,21 @@ class BookRepository(
                     } else {
                         book.metadata.title.takeIf { it.isNotBlank() && it != "未命名" }
                             ?: fallbackTitle
+                    }.ifBlank { "未命名" }
+                    val author = book.metadata.author ?: ""
+
+                    shelfLocalBookIdByKey(title, author)?.let { existingId ->
+                        // 副本文件和刚写的封面都没用了，别占磁盘
+                        dest.delete()
+                        coverFile?.delete()
+                        return@runCatching LocalImportResult.AlreadyOnShelf(existingId)
                     }
+
                     val entity = BookEntity(
                         id = bookId,
                         type = type,
-                        title = title.ifBlank { "未命名" },
-                        author = book.metadata.author ?: "",
+                        title = title,
+                        author = author,
                         coverPath = coverPath,
                         intro = book.metadata.description,
                         localPath = dest.absolutePath,
@@ -108,8 +137,8 @@ class BookRepository(
                         bookDao.upsert(entity)
                         chapterDao.upsertAll(chapters)
                     }
+                    LocalImportResult.Added(bookId)
                 }
-                bookId
             } catch (e: Exception) {
                 // 书行可能已插入、章节写失败 —— 回滚掉，别留一条指向已删文件的幽灵书
                 dest.delete()
@@ -174,3 +203,10 @@ class BookRepository(
 /** 「同一本书」的判定键：书名 + 作者（去空白）。与搜索结果的合并键（SearchViewModel.merge）一致 */
 fun bookKey(title: String, author: String?): Pair<String, String> =
     title.trim() to author?.trim().orEmpty()
+
+/** 本地书导入结局：新建 vs 书架上已有同名同作者的本地书 */
+sealed interface LocalImportResult {
+    val bookId: String
+    data class Added(override val bookId: String) : LocalImportResult
+    data class AlreadyOnShelf(override val bookId: String) : LocalImportResult
+}
