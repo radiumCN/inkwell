@@ -27,16 +27,17 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -57,6 +58,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -147,6 +153,7 @@ fun BookshelfScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val biometricAvailable = remember { BiometricAuth.isAvailable(context) }
+    val haptic = LocalHapticFeedback.current
 
     /**
      * 展开隐藏书籍。开了验证就先过一遍系统的指纹/面容/设备密码。
@@ -431,7 +438,11 @@ fun BookshelfScreen(
                             },
                             // 长按进多选（与书源管理一致）。以前长按直接出动作面板；
                             // 批量操作进来后，单本的分组/删除/隐藏都走多选顶栏。
-                            onLongClick = { viewModel.toggleSelect(book.id) },
+                            // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.toggleSelect(book.id)
+                            },
                             // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
                             // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
                             // 才看得出「这几本是插进来的」。
@@ -540,7 +551,16 @@ private fun BookCard(
         //
         // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
         // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
-        modifier.combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
+        modifier
+            .semantics(mergeDescendants = true) {
+                // 多选时整张卡就是一个 Checkbox：读屏报「已选中/未选中」，
+                // 而不是「封面装饰图标 + 可点击区」两个焦点。
+                if (selectionMode) {
+                    role = Role.Checkbox
+                    this.selected = selected
+                }
+            }
+            .combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
     ) {
         Box {
             BookCover(
@@ -550,10 +570,16 @@ private fun BookCard(
                     .fillMaxWidth()
                     .aspectRatio(3f / 4f)
                     .then(
-                        if (selected) {
+                        // 多选态下**始终**占着边框槽 —— 以前只给已选加边，勾选时封面会缩一圈「跳」一下。
+                        // 未选走 outline（知道还能点），已选走 primary。
+                        if (selectionMode) {
                             Modifier.border(
                                 width = Dimens.gapXS,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline
+                                },
                                 shape = MaterialTheme.shapes.medium,
                             )
                         } else Modifier
@@ -585,21 +611,32 @@ private fun BookCard(
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
             }
-            // 多选勾选标：盖在封面角上，比整行 Checkbox 更省网格空间
+            // 多选勾选标：实心底托在图标下面 —— 封面深浅不一，半透明空心圈会直接融进图里。
+            // 用 Checkbox 成对图标，别混 Radio + CheckCircle。
             if (selectionMode) {
-                Icon(
-                    if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                    contentDescription = if (selected) "已选中" else "未选中",
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .align(Alignment.TopEnd)
                         .padding(Dimens.gapXS)
-                        .size(Dimens.iconMd),
-                    tint = if (selected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    },
-                )
+                        .size(Dimens.iconMd)
+                        .background(
+                            MaterialTheme.colorScheme.surface,
+                            CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (selected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                        // 外层 Column 已 merge 成 Checkbox，这里装饰性
+                        contentDescription = null,
+                        modifier = Modifier.size(Dimens.iconMd),
+                        tint = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
         Text(
