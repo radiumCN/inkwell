@@ -154,6 +154,11 @@ class BookshelfViewModel(
         _selected.value = _selected.value.let { if (id in it) it - id else it + id }
     }
 
+    /** 从长按面板点「多选」：带着这本书进多选态 */
+    fun startSelection(id: String) {
+        _selected.value = setOf(id)
+    }
+
     fun selectAll() {
         // 只全选**当前可见**的（分组筛选 + 隐藏区过滤之后）——
         // 否则「未分组」下点全选再删除，会把别的分组里的书一并删掉
@@ -197,6 +202,31 @@ class BookshelfViewModel(
             messages.emit(
                 if (hidden) "已隐藏 ${ids.size} 本。长按顶栏「书架」标题可以找回"
                 else "已取消隐藏 ${ids.size} 本"
+            )
+        }
+    }
+
+    // ---- 单本操作（长按面板） ----
+
+    fun deleteBook(id: String) {
+        viewModelScope.launch { bookRepo.deleteBook(id) }
+    }
+
+    fun assignGroup(bookId: String, group: String) {
+        viewModelScope.launch {
+            bookRepo.setGroup(bookId, group.trim())
+            messages.emit(if (group.isBlank()) "已移出分组" else "已归入「${group.trim()}」")
+        }
+    }
+
+    fun setHidden(bookId: String, hidden: Boolean) {
+        viewModelScope.launch {
+            bookRepo.setHidden(bookId, hidden)
+            messages.emit(
+                // 找回的路必须在这里说清楚 —— 入口是个不可见的手势，
+                // 不当场告诉他，他就再也想不起来了
+                if (hidden) "已隐藏。长按顶栏「书架」标题可以找回"
+                else "已取消隐藏"
             )
         }
     }

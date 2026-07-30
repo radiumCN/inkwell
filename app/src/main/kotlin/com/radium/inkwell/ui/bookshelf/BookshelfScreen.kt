@@ -73,11 +73,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.draw.clip
@@ -138,6 +140,9 @@ fun BookshelfScreen(
     val selectionMode = selected.isNotEmpty()
     // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
     BackHandler(selectionMode) { viewModel.clearSelection() }
+    var actionTarget by remember { mutableStateOf<BookEntity?>(null) }
+    var groupTarget by remember { mutableStateOf<BookEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<BookEntity?>(null) }
     var showGroupAssign by remember { mutableStateOf(false) }
     var groupInput by remember { mutableStateOf("") }
     var confirmBatchDelete by remember { mutableStateOf(false) }
@@ -237,17 +242,6 @@ fun BookshelfScreen(
                                         onClick = {
                                             overflowOpen = false
                                             viewModel.setHiddenSelected(false)
-                                        },
-                                    )
-                                }
-                                // 详情只对单本有意义；多本没法同时开详情页
-                                selected.singleOrNull()?.let { onlyId ->
-                                    DropdownMenuItem(
-                                        text = { Text("书籍详情") },
-                                        onClick = {
-                                            overflowOpen = false
-                                            viewModel.clearSelection()
-                                            onOpenDetail(onlyId)
                                         },
                                     )
                                 }
@@ -436,12 +430,12 @@ fun BookshelfScreen(
                                 if (selectionMode) viewModel.toggleSelect(book.id)
                                 else onOpenBook(book.id, originOf(bounds, windowSize))
                             },
-                            // 长按进多选（与书源管理一致）。以前长按直接出动作面板；
-                            // 批量操作进来后，单本的分组/删除/隐藏都走多选顶栏。
+                            // 方案 A：平时长按 = 单本操作面板；已在多选里则长按继续勾选切换。
                             // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
                             onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.toggleSelect(book.id)
+                                if (selectionMode) viewModel.toggleSelect(book.id)
+                                else actionTarget = book
                             },
                             // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
                             // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
@@ -459,6 +453,130 @@ fun BookshelfScreen(
                 }
             }
         }
+    }
+
+    actionTarget?.let { book ->
+        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+                Text(
+                    book.title,
+                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                SettingRow(
+                    title = "书籍详情",
+                    subtitle = "简介、目录、刷新追更",
+                    onClick = {
+                        val id = book.id
+                        actionTarget = null
+                        onOpenDetail(id)
+                    },
+                )
+                SettingRow(
+                    title = "设置分组",
+                    subtitle = book.groupName.ifBlank { "未分组" },
+                    onClick = {
+                        groupInput = book.groupName
+                        groupTarget = book
+                        actionTarget = null
+                    },
+                )
+                SettingRow(
+                    title = "多选",
+                    subtitle = "批量删除、分组或隐藏",
+                    onClick = {
+                        viewModel.startSelection(book.id)
+                        actionTarget = null
+                    },
+                )
+                // 「从书架隐藏」只在隐藏区打开时出现 —— 平时长按看不到，别人想不到能藏书。
+                if (showHidden) {
+                    SettingRow(
+                        title = if (book.hidden) "取消隐藏" else "从书架隐藏",
+                        subtitle = if (book.hidden) {
+                            "重新显示在书架上"
+                        } else {
+                            "书、进度、缓存都还在，只是列表里不显示"
+                        },
+                        onClick = {
+                            viewModel.setHidden(book.id, !book.hidden)
+                            actionTarget = null
+                        },
+                    )
+                }
+                SettingRow(
+                    title = "从书架删除",
+                    subtitle = "本地文件与缓存将一并删除",
+                    onClick = {
+                        deleteTarget = book
+                        actionTarget = null
+                    },
+                )
+            }
+        }
+    }
+
+    groupTarget?.let { book ->
+        AlertDialog(
+            onDismissRequest = { groupTarget = null },
+            title = { Text("设置分组") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = groupInput,
+                        onValueChange = { groupInput = it },
+                        label = { Text("分组名") },
+                        placeholder = { Text("留空则移出分组") },
+                        singleLine = true,
+                    )
+                    if (groups.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = Dimens.gapS),
+                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+                        ) {
+                            groups.forEach { g ->
+                                FilterChip(
+                                    selected = groupInput == g,
+                                    onClick = { groupInput = g },
+                                    label = { Text(g) },
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.assignGroup(book.id, groupInput)
+                    groupTarget = null
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupTarget = null }) { Text("取消") }
+            },
+        )
+    }
+
+    deleteTarget?.let { book ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除书籍") },
+            text = { Text("确定从书架删除《${book.title}》吗？本地文件与缓存将一并删除。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteBook(book.id)
+                    deleteTarget = null
+                }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
     }
 
     if (showGroupAssign) {
