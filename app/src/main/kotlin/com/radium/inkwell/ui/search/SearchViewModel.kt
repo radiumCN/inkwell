@@ -11,6 +11,7 @@ import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.text.Collator
 import java.util.Calendar
 import java.util.Locale
@@ -80,6 +82,7 @@ class SearchViewModel(
 
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
+    private var sortJob: Job? = null
 
     /**
      * 列表滚动位置放 ViewModel 里 —— NavHost 离开搜索页会拆掉 Composable，
@@ -117,11 +120,6 @@ class SearchViewModel(
         return true
     }
 
-    /** 中文按拼音序（系统 Collator），不必再引拼音库 */
-    private val zhCollator: Collator = Collator.getInstance(Locale.CHINA).apply {
-        strength = Collator.PRIMARY
-    }
-
     init {
         // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）
         viewModelScope.launch {
@@ -135,18 +133,27 @@ class SearchViewModel(
 
     fun setSort(sort: SearchSort) {
         if (sort == _state.value.sort) return
+        sortJob?.cancel()
         val keyword = _state.value.query.trim()
-        _state.value = _state.value.copy(
-            sort = sort,
-            sortId = _state.value.sortId + 1,
-            results = ordered(keyword, sort),
-        )
+        val sortId = _state.value.sortId + 1
+        // 先拍快照再丢到 Default：Collator 拼音排几百上千条会卡住主线程，
+        // 底部面板关动画也会跟着一顿。标签先切过去，列表排完再换。
+        val snapshot = hits.values.toList()
+        _state.value = _state.value.copy(sort = sort, sortId = sortId)
+        sortJob = viewModelScope.launch {
+            val sorted = withContext(Dispatchers.Default) {
+                ordered(snapshot, keyword, sort)
+            }
+            if (_state.value.sortId != sortId) return@launch
+            _state.value = _state.value.copy(results = sorted)
+        }
     }
 
     fun search() {
         val keyword = _state.value.query.trim()
         if (keyword.isEmpty()) return
         searchJob?.cancel()
+        sortJob?.cancel()
         // 上一轮的「加载更多」还在飞时开新搜索：不掐掉它，它回来会把旧关键词的结果 merge 进
         // 刚清空的 hits，串进新搜索列表
         pagingJob?.cancel()
@@ -176,8 +183,11 @@ class SearchViewModel(
                     limiter.withPermit {
                         val page = searchPage(rule, keyword, page = 1)
                         merge(page?.items.orEmpty())
+                        val sorted = withContext(Dispatchers.Default) {
+                            ordered(hits.values.toList(), keyword, sort)
+                        }
                         _state.value = _state.value.copy(
-                            results = ordered(keyword, sort),
+                            results = sorted,
                             doneCount = _state.value.doneCount + 1,
                         )
                         rule.takeIf { page?.hasMore == true }
@@ -206,27 +216,40 @@ class SearchViewModel(
         }
     }
 
-    private fun ordered(keyword: String, sort: SearchSort = _state.value.sort): List<SearchHit> =
-        when (sort) {
-            SearchSort.RELEVANCE -> ranked(keyword)
-            SearchSort.WORD_COUNT -> hits.values.sortedWith(
-                compareByDescending<SearchHit> { wordCountOf(it) }
-                    .thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
-            )
-            SearchSort.TITLE_PINYIN -> hits.values.sortedWith(
-                compareBy(zhCollator) { hit: SearchHit -> hit.result.title.trim() }
+    /**
+     * 对快照排序。Collator 非线程安全，每次现场建一份；
+     * 调用方先 [Collection.toList] 再丢进 Default，避免边 merge 边排。
+     */
+    private fun ordered(
+        items: List<SearchHit>,
+        keyword: String,
+        sort: SearchSort,
+    ): List<SearchHit> {
+        val collator = Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY }
+        return when (sort) {
+            SearchSort.RELEVANCE -> items.sortedWith(
+                compareBy<SearchHit> { tier(it.result, keyword) }
                     .thenByDescending { it.origins.size },
             )
-            SearchSort.AUTHOR_PINYIN -> hits.values.sortedWith(
-                compareBy(zhCollator) { hit: SearchHit ->
-                    hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
-                }.thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
+            SearchSort.WORD_COUNT -> items.sortedWith(
+                compareByDescending<SearchHit> { wordCountOf(it) }
+                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
-            SearchSort.UPDATE_TIME -> hits.values.sortedWith(
+            SearchSort.TITLE_PINYIN -> items.sortedWith(
+                compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
+                    .thenByDescending { it.origins.size },
+            )
+            SearchSort.AUTHOR_PINYIN -> items.sortedWith(
+                compareBy(collator) { hit: SearchHit ->
+                    hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
+                }.thenBy(collator) { hit: SearchHit -> hit.result.title },
+            )
+            SearchSort.UPDATE_TIME -> items.sortedWith(
                 compareByDescending<SearchHit> { updateEpochOf(it) }
-                    .thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
+                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
         }
+    }
 
     /**
      * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
@@ -235,12 +258,6 @@ class SearchViewModel(
      * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
      * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
      */
-    private fun ranked(keyword: String): List<SearchHit> =
-        hits.values.sortedWith(
-            compareBy<SearchHit> { tier(it.result, keyword) }
-                .thenByDescending { it.origins.size }
-        )
-
     private fun tier(r: SearchResult, keyword: String): Int = when {
         r.title == keyword || r.author == keyword -> 0
         r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
@@ -292,7 +309,12 @@ class SearchViewModel(
                         val before = hits.size
                         merge(page?.items.orEmpty())
                         val gotNew = hits.size > before
-                        if (gotNew) _state.value = _state.value.copy(results = ordered(keyword, sort))
+                        if (gotNew) {
+                            val sorted = withContext(Dispatchers.Default) {
+                                ordered(hits.values.toList(), keyword, sort)
+                            }
+                            _state.value = _state.value.copy(results = sorted)
+                        }
                         // 这一页没带来新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
                         rule.takeIf { page?.hasMore == true && gotNew }
                     }
