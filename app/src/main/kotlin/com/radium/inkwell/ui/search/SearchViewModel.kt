@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.text.Collator
+import java.util.Calendar
+import java.util.Locale
 
 /**
  * 一本书；同名同作者的结果跨书源合并成一条。
@@ -27,9 +30,20 @@ import kotlinx.coroutines.sync.withPermit
  * 代表书源挂了还有别的可用，否则用户就卡死在报错页。
  */
 data class SearchHit(val results: List<SearchResult>) {
-    /** 代表条目：首个返回它的书源 */
-    val result: SearchResult get() = results.first()
+    /** 代表条目：优先带字数/分类的那条，列表副标题才有东西可看 */
+    val result: SearchResult
+        get() = results.firstOrNull { !it.wordCount.isNullOrBlank() || !it.kind.isNullOrBlank() }
+            ?: results.first()
     val origins: Set<String> get() = results.mapTo(LinkedHashSet()) { it.sourceId }
+}
+
+/** 搜索结果排序。默认相关度 —— 换别的会打乱「最像关键词」的优先顺序，所以选项里写清楚。 */
+enum class SearchSort(val label: String) {
+    RELEVANCE("相关度"),
+    WORD_COUNT("字数"),
+    TITLE_PINYIN("书名"),
+    AUTHOR_PINYIN("作者"),
+    UPDATE_TIME("更新日期"),
 }
 
 data class SearchUiState(
@@ -45,6 +59,9 @@ data class SearchUiState(
     val loadingMore: Boolean = false,
     /** 每次新搜索 +1；界面靠它把列表滚回顶部 */
     val searchId: Int = 0,
+    /** 换排序也 +1，同样滚回顶部 —— 否则人还停在旧位置，不知道列表已经重排了 */
+    val sortId: Int = 0,
+    val sort: SearchSort = SearchSort.RELEVANCE,
     /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入" */
     val shelfKeys: Set<Pair<String, String>> = emptySet(),
 )
@@ -64,6 +81,11 @@ class SearchViewModel(
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
 
+    /** 中文按拼音序（系统 Collator），不必再引拼音库 */
+    private val zhCollator: Collator = Collator.getInstance(Locale.CHINA).apply {
+        strength = Collator.PRIMARY
+    }
+
     init {
         // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）
         viewModelScope.launch {
@@ -73,6 +95,16 @@ class SearchViewModel(
 
     fun setQuery(q: String) {
         _state.value = _state.value.copy(query = q)
+    }
+
+    fun setSort(sort: SearchSort) {
+        if (sort == _state.value.sort) return
+        val keyword = _state.value.query.trim()
+        _state.value = _state.value.copy(
+            sort = sort,
+            sortId = _state.value.sortId + 1,
+            results = ordered(keyword, sort),
+        )
     }
 
     fun search() {
@@ -95,6 +127,7 @@ class SearchViewModel(
                 return@launch
             }
             hits.clear()
+            val sort = _state.value.sort
             _state.value = _state.value.copy(
                 searching = true, results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
@@ -108,7 +141,7 @@ class SearchViewModel(
                         val page = searchPage(rule, keyword, page = 1)
                         merge(page?.items.orEmpty())
                         _state.value = _state.value.copy(
-                            results = ranked(keyword),
+                            results = ordered(keyword, sort),
                             doneCount = _state.value.doneCount + 1,
                         )
                         rule.takeIf { page?.hasMore == true }
@@ -120,7 +153,7 @@ class SearchViewModel(
         }
     }
 
-    // ---- 合并与相关度排序 ----
+    // ---- 合并与排序 ----
 
     /** 同名同作者视为同一本书；键的顺序即首次出现的顺序，用于同档同源数时保持稳定 */
     private val hits = LinkedHashMap<Pair<String, String>, SearchHit>()
@@ -136,6 +169,28 @@ class SearchViewModel(
             }
         }
     }
+
+    private fun ordered(keyword: String, sort: SearchSort = _state.value.sort): List<SearchHit> =
+        when (sort) {
+            SearchSort.RELEVANCE -> ranked(keyword)
+            SearchSort.WORD_COUNT -> hits.values.sortedWith(
+                compareByDescending<SearchHit> { wordCountOf(it) }
+                    .thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
+            )
+            SearchSort.TITLE_PINYIN -> hits.values.sortedWith(
+                compareBy(zhCollator) { hit: SearchHit -> hit.result.title.trim() }
+                    .thenByDescending { it.origins.size },
+            )
+            SearchSort.AUTHOR_PINYIN -> hits.values.sortedWith(
+                compareBy(zhCollator) { hit: SearchHit ->
+                    hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
+                }.thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
+            )
+            SearchSort.UPDATE_TIME -> hits.values.sortedWith(
+                compareByDescending<SearchHit> { updateEpochOf(it) }
+                    .thenBy(zhCollator) { hit: SearchHit -> hit.result.title },
+            )
+        }
 
     /**
      * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
@@ -155,6 +210,14 @@ class SearchViewModel(
         r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
         else -> 2
     }
+
+    /** 合并条目取各源最大字数；解不出的当 -1，降序时沉底 */
+    private fun wordCountOf(hit: SearchHit): Long =
+        hit.results.maxOf { parseWordCount(it.wordCount) }
+
+    /** 合并条目取各源能解出的最新日期；解不出当 Long.MIN_VALUE，降序沉底 */
+    private fun updateEpochOf(hit: SearchHit): Long =
+        hit.results.maxOf { parseUpdateEpoch(it.kind, it.intro) }
 
     /**
      * 单个书源搜一页：网络/规则错误按「这个源没结果」降级，但**取消必须往外抛**。
@@ -181,6 +244,7 @@ class SearchViewModel(
         if (s.searching || s.loadingMore || !s.hasMore || pagingRules.isEmpty()) return
         val keyword = s.query.trim()
         val next = s.page + 1
+        val sort = s.sort
         pagingJob?.cancel()
         pagingJob = viewModelScope.launch {
             _state.value = _state.value.copy(loadingMore = true)
@@ -192,7 +256,7 @@ class SearchViewModel(
                         val before = hits.size
                         merge(page?.items.orEmpty())
                         val gotNew = hits.size > before
-                        if (gotNew) _state.value = _state.value.copy(results = ranked(keyword))
+                        if (gotNew) _state.value = _state.value.copy(results = ordered(keyword, sort))
                         // 这一页没带来新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
                         rule.takeIf { page?.hasMore == true && gotNew }
                     }
@@ -229,3 +293,42 @@ class SearchViewModel(
     }
 
 }
+
+/** 「12万字」「1.5万」「12345字」→ 字数；解不出返回 -1 */
+internal fun parseWordCount(raw: String?): Long {
+    if (raw.isNullOrBlank()) return -1L
+    val t = raw.trim().replace(",", "").replace("，", "").replace(" ", "")
+    Regex("""([\d.]+)\s*亿""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+        return (it * 100_000_000L).toLong()
+    }
+    Regex("""([\d.]+)\s*万""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+        return (it * 10_000L).toLong()
+    }
+    Regex("""(\d+)""").find(t)?.groupValues?.getOrNull(1)?.toLongOrNull()?.let { return it }
+    return -1L
+}
+
+/**
+ * 从分类/简介里抠日期。Legado 搜索规则没有独立 updateTime，
+ * 常见写法是 kind 里夹「2024-01-15」或「2024年1月15日」。
+ */
+internal fun parseUpdateEpoch(vararg blobs: String?): Long {
+    var best = Long.MIN_VALUE
+    for (blob in blobs) {
+        if (blob.isNullOrBlank()) continue
+        for (m in DATE_YMD.findAll(blob)) {
+            val y = m.groupValues[1].toIntOrNull() ?: continue
+            val mo = m.groupValues[2].toIntOrNull() ?: continue
+            val d = m.groupValues[3].toIntOrNull() ?: continue
+            if (y !in 1990..2100 || mo !in 1..12 || d !in 1..31) continue
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.MILLISECOND, 0)
+                set(y, mo - 1, d, 0, 0, 0)
+            }
+            best = maxOf(best, cal.timeInMillis)
+        }
+    }
+    return best
+}
+
+private val DATE_YMD = Regex("""(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})""")

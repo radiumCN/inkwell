@@ -1,19 +1,22 @@
 package com.radium.inkwell.ui.search
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,18 +28,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
@@ -45,6 +49,8 @@ import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
@@ -60,9 +66,12 @@ fun SearchScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
+    var showSortPicker by rememberSaveable { mutableStateOf(false) }
 
     // 滚到底部自动加载下一页（与发现页一致）
-    val listState = rememberLazyListState()
+    // rememberSaveable：进详情再返回时 NavHost 会拆掉本页再重建，普通 remember 会丢位置、
+    // 列表弹回顶部；挂在该返回栈入口的 SaveableState 上才能记住滚到哪。
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     val nearEnd by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -72,11 +81,13 @@ fun SearchScreen(
     // 结果是边搜边出、且会按相关度重排的。LazyColumn 带 key 时会把首个可见项按 key 钉住 ——
     // 更相关的书随后插到它前面，列表就等于被顶下去了，用户得手动往回滑才看得见最相关的那本。
     // 所以：新搜索滚回顶部；搜索过程中只要用户自己没滑动过，就一直粘在顶部。
-    var userScrolled by remember { mutableStateOf(false) }
+    // 同样要 saveable：否则返回时 flag 变 false，若还在搜就会再次 scrollToItem(0)。
+    var userScrolled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { if (it) userScrolled = true }
     }
-    LaunchedEffect(state.searchId) {
+    // 新搜索或换排序：都从顶看起，否则人还停在半截，以为列表没变
+    LaunchedEffect(state.searchId, state.sortId) {
         userScrolled = false
         listState.scrollToItem(0)
     }
@@ -135,6 +146,13 @@ fun SearchScreen(
                     hint = "输入书名或作者，从启用的书源中并发搜索",
                 )
             } else {
+                // 列表上方一条：左侧数量、右侧当前排序。不塞进顶栏 ——
+                // 顶栏已经是搜索框 + 搜索按钮，再加排序图标会挤成一团。
+                SearchSortBar(
+                    count = state.results.size,
+                    sort = state.sort,
+                    onOpenSort = { showSortPicker = true },
+                )
                 // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来
                 LazyColumn(state = listState, modifier = Modifier.imePadding()) {
                     items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
@@ -142,13 +160,17 @@ fun SearchScreen(
                         val inShelf = bookKey(result.title, result.author) in state.shelfKeys
                         BookListRow(
                             title = result.title,
-                            subtitle = listOfNotNull(result.author, result.latestChapter)
-                                .joinToString(" · "),
+                            subtitle = listOfNotNull(
+                                result.author,
+                                result.wordCount,
+                                result.latestChapter,
+                            ).joinToString(" · "),
                             // 同名同作者的书跨书源合并成一行；书源越多越可能就是要找的那本
-                            caption = if (hit.origins.size > 1) {
-                                "${hit.origins.size} 个书源 · ${result.sourceId}"
-                            } else {
-                                "来源: ${result.sourceId}"
+                            caption = buildString {
+                                if (hit.origins.size > 1) append("${hit.origins.size} 个书源 · ")
+                                else append("来源: ")
+                                append(result.sourceId)
+                                result.kind?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                             },
                             coverModel = result.coverUrl,
                             // 已在书架就显示"已加入"且不可点，不再让人重复加
@@ -168,6 +190,77 @@ fun SearchScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (showSortPicker) {
+        OptionPickerSheet(
+            title = "排序方式",
+            options = SearchSort.entries.map {
+                PickerOption(
+                    id = it.name,
+                    label = it.label,
+                    subtitle = when (it) {
+                        SearchSort.RELEVANCE -> "与关键词最相关的排前面"
+                        SearchSort.WORD_COUNT -> "字数多的排前面；无字数的沉底"
+                        SearchSort.TITLE_PINYIN -> "按书名拼音 A→Z"
+                        SearchSort.AUTHOR_PINYIN -> "按作者拼音 A→Z"
+                        SearchSort.UPDATE_TIME -> "能解析出日期的按新到旧；多数源写在分类里"
+                    },
+                )
+            },
+            selectedId = state.sort.name,
+            onSelect = { opt ->
+                showSortPicker = false
+                runCatching { SearchSort.valueOf(opt.id) }.getOrNull()?.let(viewModel::setSort)
+            },
+            onDismiss = { showSortPicker = false },
+        )
+    }
+}
+
+/**
+ * 搜索结果工具条：左数量、右排序入口。整行高度贴 [Dimens.touchTarget]，
+ * 点排序一侧打开底部面板（与书源管理同一套 OptionPicker）。
+ */
+@Composable
+private fun SearchSortBar(
+    count: Int,
+    sort: SearchSort,
+    onOpenSort: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            if (count == 0) "搜索中…" else "共 $count 本",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        Row(
+            Modifier
+                .clickable(role = Role.Button, onClick = onOpenSort)
+                .padding(vertical = Dimens.gapS, horizontal = Dimens.gapXS),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Sort,
+                contentDescription = null,
+                Modifier.size(Dimens.iconSm),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                sort.label,
+                Modifier.padding(start = Dimens.gapXS),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

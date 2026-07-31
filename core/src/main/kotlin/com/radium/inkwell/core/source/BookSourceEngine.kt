@@ -23,6 +23,13 @@ data class SearchResult(
     val coverUrl: String? = null,
     val intro: String? = null,
     val latestChapter: String? = null,
+    /** 字数原文（「12万字」之类）；多数书源有，没有则为 null */
+    val wordCount: String? = null,
+    /**
+     * 分类/状态原文。Legado 搜索规则没有独立「更新时间」字段，
+     * 不少源会把日期写进 kind（如「连载 · 2024-01-15」），排序「更新日期」就靠从这里抠。
+     */
+    val kind: String? = null,
     val sourceId: String,
     /** 书源名称。只有 id（其实是书源网址）的话，换源列表里满屏都是域名，没人认得出哪个是哪个 */
     val sourceName: String = "",
@@ -148,6 +155,8 @@ class BookSourceEngine(
         r.coverUrl?.let { put("coverUrl", it) }
         r.intro?.let { put("intro", it) }
         r.lastChapter?.let { put("latestChapter", it) }
+        r.wordCount?.let { put("wordCount", it) }
+        r.kind?.let { put("kind", it) }
     }
 
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail =
@@ -545,6 +554,8 @@ class BookSourceEngine(
                     ?.let { resolveUrl(fetched.finalUrl, it) },
                 intro = evalField(stage, "intro", fields["intro"], itemCtx),
                 latestChapter = evalField(stage, "latestChapter", fields["latestChapter"], itemCtx),
+                wordCount = evalField(stage, "wordCount", fields["wordCount"], itemCtx),
+                kind = evalField(stage, "kind", fields["kind"], itemCtx),
                 sourceId = source.id,
                 sourceName = source.name,
             )
