@@ -81,6 +81,42 @@ class SearchViewModel(
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
 
+    /**
+     * 列表滚动位置放 ViewModel 里 —— NavHost 离开搜索页会拆掉 Composable，
+     * remember / rememberSaveable 都不可靠；更糟的是返回时 LaunchedEffect(searchId)
+     * 会再跑一遍并 scrollToItem(0)，把刚恢复的位置冲掉。
+     */
+    var listIndex: Int = 0
+        private set
+    var listOffset: Int = 0
+        private set
+    var userScrolled: Boolean = false
+        private set
+    private var pinnedScrollKey: Pair<Int, Int>? = null
+
+    fun noteScroll(index: Int, offset: Int) {
+        listIndex = index
+        listOffset = offset
+    }
+
+    fun noteUserScrolled() {
+        userScrolled = true
+    }
+
+    /**
+     * 仅当 searchId/sortId **相对上次钉顶**变了才需要滚回顶部。
+     * 返回本页时 key 不变 → false，保留 [listIndex]/[listOffset]。
+     */
+    fun consumeScrollToTopIfNeeded(searchId: Int, sortId: Int): Boolean {
+        val key = searchId to sortId
+        if (pinnedScrollKey == key) return false
+        pinnedScrollKey = key
+        userScrolled = false
+        listIndex = 0
+        listOffset = 0
+        return true
+    }
+
     /** 中文按拼音序（系统 Collator），不必再引拼音库 */
     private val zhCollator: Collator = Collator.getInstance(Locale.CHINA).apply {
         strength = Collator.PRIMARY

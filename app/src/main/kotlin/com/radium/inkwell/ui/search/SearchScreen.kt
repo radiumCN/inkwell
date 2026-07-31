@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -68,10 +68,13 @@ fun SearchScreen(
     CollectMessages(viewModel.messages, snackbar)
     var showSortPicker by rememberSaveable { mutableStateOf(false) }
 
-    // 滚到底部自动加载下一页（与发现页一致）
-    // rememberSaveable：进详情再返回时 NavHost 会拆掉本页再重建，普通 remember 会丢位置、
-    // 列表弹回顶部；挂在该返回栈入口的 SaveableState 上才能记住滚到哪。
-    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    // 滚动位置活在 ViewModel：进详情再返回时 Composable 会重建，但 VM 还在返回栈上。
+    // 初值从 VM 读；滑动过程持续写回。只有 searchId/sortId 相对上次钉顶变了才滚回顶 ——
+    // 否则 LaunchedEffect 在「返回重建」时也会再跑一遍，把位置冲成 0。
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.listIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.listOffset,
+    )
     val nearEnd by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -81,18 +84,28 @@ fun SearchScreen(
     // 结果是边搜边出、且会按相关度重排的。LazyColumn 带 key 时会把首个可见项按 key 钉住 ——
     // 更相关的书随后插到它前面，列表就等于被顶下去了，用户得手动往回滑才看得见最相关的那本。
     // 所以：新搜索滚回顶部；搜索过程中只要用户自己没滑动过，就一直粘在顶部。
-    // 同样要 saveable：否则返回时 flag 变 false，若还在搜就会再次 scrollToItem(0)。
-    var userScrolled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { if (it) userScrolled = true }
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.isScrollInProgress,
+            )
+        }.collect { (index, offset, scrolling) ->
+            if (scrolling) viewModel.noteUserScrolled()
+            viewModel.noteScroll(index, offset)
+        }
     }
-    // 新搜索或换排序：都从顶看起，否则人还停在半截，以为列表没变
     LaunchedEffect(state.searchId, state.sortId) {
-        userScrolled = false
-        listState.scrollToItem(0)
+        if (viewModel.consumeScrollToTopIfNeeded(state.searchId, state.sortId)) {
+            listState.scrollToItem(0)
+        }
     }
     LaunchedEffect(state.results.firstOrNull()) {
-        if (state.searching && !userScrolled) listState.scrollToItem(0)
+        if (state.searching && !viewModel.userScrolled) {
+            listState.scrollToItem(0)
+            viewModel.noteScroll(0, 0)
+        }
     }
 
     LaunchedEffect(nearEnd) {
