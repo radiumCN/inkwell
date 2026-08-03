@@ -160,8 +160,12 @@ fun RssSourceScreen(
     }
 
     if (showUrlImport) {
+        fun dismissUrlImport() {
+            showUrlImport = false
+            importText = ""
+        }
         AlertDialog(
-            onDismissRequest = { showUrlImport = false },
+            onDismissRequest = { dismissUrlImport() },
             title = { Text("添加订阅源") },
             text = {
                 Column {
@@ -182,12 +186,13 @@ fun RssSourceScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    showUrlImport = false
-                    viewModel.importFromText(importText)
+                    val text = importText
+                    dismissUrlImport()
+                    viewModel.importFromText(text)
                 }) { Text("添加") }
             },
             dismissButton = {
-                TextButton(onClick = { showUrlImport = false }) { Text("取消") }
+                TextButton(onClick = { dismissUrlImport() }) { Text("取消") }
             },
         )
     }

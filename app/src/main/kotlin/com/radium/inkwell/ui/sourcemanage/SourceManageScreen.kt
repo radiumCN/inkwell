@@ -514,8 +514,12 @@ fun SourceManageScreen(
     }
 
     if (showGroupAssign) {
+        fun dismissGroupAssign() {
+            showGroupAssign = false
+            groupInput = ""
+        }
         AlertDialog(
-            onDismissRequest = { showGroupAssign = false },
+            onDismissRequest = { dismissGroupAssign() },
             title = { Text("设置分组") },
             text = {
                 OutlinedTextField(
@@ -528,12 +532,13 @@ fun SourceManageScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    showGroupAssign = false
-                    viewModel.setGroup(groupInput)
+                    val name = groupInput
+                    dismissGroupAssign()
+                    viewModel.setGroup(name)
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { showGroupAssign = false }) { Text("取消") }
+                TextButton(onClick = { dismissGroupAssign() }) { Text("取消") }
             },
         )
     }
@@ -573,8 +578,13 @@ fun SourceManageScreen(
     }
 
     if (showUrlImport) {
+        // 关掉时顺手清空：否则下次再开还躺着上次的链接，像「改不动」
+        fun dismissUrlImport() {
+            showUrlImport = false
+            importUrl = ""
+        }
         AlertDialog(
-            onDismissRequest = { showUrlImport = false },
+            onDismissRequest = { dismissUrlImport() },
             title = { Text("从 URL 导入书源") },
             text = {
                 Column {
@@ -598,11 +608,11 @@ fun SourceManageScreen(
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.importFromUrl(importUrl)
-                    showUrlImport = false
+                    dismissUrlImport()
                 }) { Text("导入") }
             },
             dismissButton = {
-                TextButton(onClick = { showUrlImport = false }) { Text("取消") }
+                TextButton(onClick = { dismissUrlImport() }) { Text("取消") }
             },
         )
     }

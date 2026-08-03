@@ -530,8 +530,12 @@ fun BookshelfScreen(
     }
 
     groupTarget?.let { book ->
+        fun dismissGroupTarget() {
+            groupTarget = null
+            groupInput = ""
+        }
         AlertDialog(
-            onDismissRequest = { groupTarget = null },
+            onDismissRequest = { dismissGroupTarget() },
             title = { Text("设置分组") },
             text = {
                 Column {
@@ -564,11 +568,11 @@ fun BookshelfScreen(
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.assignGroup(book.id, groupInput)
-                    groupTarget = null
+                    dismissGroupTarget()
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { groupTarget = null }) { Text("取消") }
+                TextButton(onClick = { dismissGroupTarget() }) { Text("取消") }
             },
         )
     }
@@ -591,8 +595,12 @@ fun BookshelfScreen(
     }
 
     if (showGroupAssign) {
+        fun dismissGroupAssign() {
+            showGroupAssign = false
+            groupInput = ""
+        }
         AlertDialog(
-            onDismissRequest = { showGroupAssign = false },
+            onDismissRequest = { dismissGroupAssign() },
             title = { Text("设置分组") },
             text = {
                 Column {
@@ -625,12 +633,13 @@ fun BookshelfScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.assignGroupSelected(groupInput)
-                    showGroupAssign = false
+                    val name = groupInput
+                    dismissGroupAssign()
+                    viewModel.assignGroupSelected(name)
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { showGroupAssign = false }) { Text("取消") }
+                TextButton(onClick = { dismissGroupAssign() }) { Text("取消") }
             },
         )
     }

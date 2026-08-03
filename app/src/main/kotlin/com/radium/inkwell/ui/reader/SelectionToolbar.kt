@@ -72,10 +72,17 @@ fun SelectionToolbar(
                     Modifier.fillMaxWidth().padding(top = Dimens.gapS),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(onClick = { replacing = false }) { Text("取消") }
+                    TextButton(onClick = {
+                        replacing = false
+                        replacement = ""
+                    }) { Text("取消") }
                     PrimaryButton(
                         text = "保存规则",
-                        onClick = { onReplace(replacement) },
+                        onClick = {
+                            onReplace(replacement)
+                            replacing = false
+                            replacement = ""
+                        },
                     )
                 }
             } else {
