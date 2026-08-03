@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
@@ -60,8 +61,8 @@ class BookSourceRepository(
     }
 
     /**
-     * 导入书源 JSON（Legado 原生格式，数组或单对象）。只收小说源（`bookSourceType == 0`）；
-     * 音频/漫画/文件源按类型过滤并计入 skipped。规则原文原样入库，运行期由引擎直接求值。
+     * 导入书源 JSON（Legado 原生格式，数组或单对象）。只收小说源（[BookSourceTypes.TEXT]）；
+     * 音频/漫画/文件/视频源按类型过滤并计入 skipped。规则原文原样入库，运行期由引擎直接求值。
      */
     suspend fun importJson(text: String): Result<ImportReport> = runCatching {
         val root = json.parseToJsonElement(text.trim())
@@ -75,14 +76,20 @@ class BookSourceRepository(
             val obj = el as? JsonObject ?: return@forEach
             val name = (obj["bookSourceName"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
                 ?: (obj["bookSourceUrl"] as? JsonPrimitive)?.content ?: "未命名"
-            val type = (obj["bookSourceType"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
-            if (type != 0) {
-                skipped += "$name: 非文字书源（type=$type）不支持"
+            // 先看原始字段：解析失败时也不要把漫画/听书源误当成默认文本灌进去
+            val rawType = BookSourceTypes.parse(obj)
+            if (!BookSourceTypes.isTextNovel(rawType)) {
+                skipped += "$name: ${BookSourceTypes.unsupportedReason(rawType)}"
                 return@forEach
             }
             val rule = runCatching { BookSourceRule.fromJson(obj.toString()) }.getOrNull()
             if (rule == null || rule.bookSourceUrl.isBlank()) {
                 skipped += "$name: 解析失败或缺少 bookSourceUrl"
+                return@forEach
+            }
+            // 解析后再挡一层：防序列化路径与手抠 JSON 不一致
+            if (!BookSourceTypes.isTextNovel(rule.bookSourceType)) {
+                skipped += "$name: ${BookSourceTypes.unsupportedReason(rule.bookSourceType)}"
                 return@forEach
             }
             rules += rule

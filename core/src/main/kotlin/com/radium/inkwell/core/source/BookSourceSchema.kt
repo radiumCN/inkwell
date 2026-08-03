@@ -17,7 +17,7 @@ val BookSourceJson: Json = Json {
  * 书源规则根对象 —— **Legado 原生形状**（字段名与开源阅读一致）。
  *
  * 规则串在运行期由 [LegadoRuleAnalyzer] 直接编译求值，不再经导入期转译。只覆盖小说源
- * （`bookSourceType == 0`）；音频/漫画/文件源在导入时被过滤。
+ * （[BookSourceTypes.TEXT]）；音频/漫画/文件/视频源在导入与 WebDAV 同步时被过滤，见 [BookSourceTypes]。
  *
  * 顶层访问器（[id]/[name]/[baseUrl]/[group]/[search]/[explore]/[headers]/[rateLimit]）是给
  * 引擎与 app 层的兼容门面：它们从原生字段派生，让上层无需了解 Legado 字段名。
@@ -27,8 +27,8 @@ data class BookSourceRule(
     val bookSourceUrl: String,
     val bookSourceName: String = "",
     val bookSourceGroup: String = "",
-    /** 0=文本(小说) 1=音频 2=图片(漫画) 3=文件；本应用只支持 0 */
-    val bookSourceType: Int = 0,
+    /** 见 [BookSourceTypes]；本应用只支持文本小说（0） */
+    val bookSourceType: Int = BookSourceTypes.TEXT,
     val bookSourceComment: String = "",
     val enabled: Boolean = true,
     val enabledExplore: Boolean = true,

@@ -154,6 +154,7 @@ fun BookshelfScreen(
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val refreshProgress by viewModel.refreshProgress.collectAsStateWithLifecycle()
     val activity = LocalActivity.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -254,8 +255,8 @@ fun BookshelfScreen(
                     title = {
                         // 长按标题 = 隐藏书籍的入口。它本身不可见、不可猜 ——
                         // 一个写在菜单里的「显示隐藏的书」，等于告诉所有人这里藏了东西。
-                        Text(
-                            "书架",
+                        // 追更时副标题显示进度：PullToRefresh 转圈早收起后靠这里知道还在刷。
+                        Column(
                             Modifier.combinedClickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -263,7 +264,17 @@ fun BookshelfScreen(
                                 // 隐藏区开着时再长按 = 一键收摊 —— 有人走过来时你需要这一下
                                 onLongClick = { if (showHidden) viewModel.collapseHiddenAll() else revealHidden() },
                             ),
-                        )
+                        ) {
+                            Text("书架", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (refreshProgress.running) {
+                                Text(
+                                    "更新中 ${refreshProgress.done}/${refreshProgress.total}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     },
                     actions = {
                         IconButton(onClick = onOpenSearch) {

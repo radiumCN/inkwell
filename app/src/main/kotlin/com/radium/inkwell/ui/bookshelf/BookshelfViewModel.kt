@@ -19,10 +19,21 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
+
+/** 书架追更进度：PullToRefresh 转圈早收起后，靠这个告诉用户还在刷 */
+data class BookshelfRefreshProgress(
+    val done: Int = 0,
+    val total: Int = 0,
+    val running: Boolean = false,
+)
 
 class BookshelfViewModel(
     private val bookRepo: BookRepository,
@@ -33,8 +44,12 @@ class BookshelfViewModel(
 
     // ---------- 追更 ----------
 
+    /** 仅驱动 PullToRefresh 指示器；很快复位，真正进度看 [refreshProgress] */
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    private val _refreshProgress = MutableStateFlow(BookshelfRefreshProgress())
+    val refreshProgress: StateFlow<BookshelfRefreshProgress> = _refreshProgress.asStateFlow()
 
     private var refreshJob: Job? = null
 
@@ -47,21 +62,37 @@ class BookshelfViewModel(
      * 限流 4 而不是全部并发：几十本书同时打同一个站点，会被限流甚至封 IP，
      * 结果是一本都刷不出来。
      *
-     * [refreshing] 必须在 finally 里复位 —— 从前任一异常/取消都会让转圈永远不消。
-     * 单本再加超时：某个源吊着不回时，别拖死整轮刷新。
+     * 按 [BookEntity.readAt] 降序：最近读过的先刷，有更新时更快看见红点。
+     * PullToRefresh 转圈只挂一小会儿 —— 整轮 await 绑死指示器时，架上书一多就像卡死。
+     * 后台继续跑，顶栏用 [refreshProgress] 显示「更新中 x/y」。
      */
     fun refreshAll() {
-        if (_refreshing.value) return
-        _refreshing.value = true
         refreshJob?.cancel()
+        _refreshing.value = true
+        _refreshProgress.value = BookshelfRefreshProgress()
         refreshJob = viewModelScope.launch {
+            val myJob = coroutineContext.job
             try {
-                val books = allBooks.value.filter { it.type == BookType.NET }
+                val books = allBooks.value
+                    .filter { it.type == BookType.NET && !it.sourceId.isNullOrBlank() }
+                    .sortedByDescending { it.readAt }
                 if (books.isEmpty()) {
                     messages.emit("书架上没有网络书")
                     return@launch
                 }
-                val limiter = Semaphore(4)
+                val total = books.size
+                _refreshProgress.value = BookshelfRefreshProgress(
+                    done = 0,
+                    total = total,
+                    running = true,
+                )
+                // 转圈早收起：下拉只是「触发追更」，不是「等到刷完」
+                launch {
+                    delay(REFRESH_INDICATOR_MS)
+                    if (refreshJob === myJob) _refreshing.value = false
+                }
+                val limiter = Semaphore(REFRESH_CONCURRENCY)
+                val done = AtomicInteger(0)
                 val added = books.map { book ->
                     async {
                         try {
@@ -77,6 +108,13 @@ class BookshelfViewModel(
                             throw e
                         } catch (_: Exception) {
                             0
+                        } finally {
+                            val d = done.incrementAndGet()
+                            if (refreshJob === myJob) {
+                                _refreshProgress.update {
+                                    it.copy(done = d, total = total, running = true)
+                                }
+                            }
                         }
                     }
                 }.awaitAll()
@@ -92,7 +130,11 @@ class BookshelfViewModel(
             } catch (e: Exception) {
                 messages.emit("刷新失败: ${e.message?.take(80)}")
             } finally {
-                _refreshing.value = false
+                // 被新一轮 cancel 时别清掉新任务刚写上的进度/转圈
+                if (refreshJob === myJob) {
+                    _refreshing.value = false
+                    _refreshProgress.value = BookshelfRefreshProgress()
+                }
             }
         }
     }
@@ -103,6 +145,11 @@ class BookshelfViewModel(
 
         /** 单本追更超时；与换源单源搜索同量级，避免一个吊源拖死整轮下拉 */
         private const val TOC_REFRESH_TIMEOUT_MS = 30_000L
+
+        /** PullToRefresh 指示器展示时长；之后靠顶栏进度条告知仍在刷 */
+        private const val REFRESH_INDICATOR_MS = 500L
+
+        private const val REFRESH_CONCURRENCY = 4
     }
 
     /** 书架顶栏是否显示「发现」入口 */

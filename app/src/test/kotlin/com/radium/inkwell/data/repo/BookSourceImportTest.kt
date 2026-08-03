@@ -131,19 +131,36 @@ class BookSourceImportTest {
         assertEquals(false, dao.store["https://a.com"]!!.enabled)
     }
 
-    /** 非文字书源（音频/漫画/文件）按 bookSourceType 过滤，计入 skipped，不入库 */
+    /** 非小说书源（音频/漫画/文件/视频）按 bookSourceType 过滤，计入 skipped，不入库 */
     @Test
-    fun `非文字书源被过滤掉`() = runTest {
+    fun `非小说书源被过滤掉`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
         val audio = """
             {"bookSourceUrl":"https://audio.com","bookSourceName":"听书站","bookSourceType":1,
              "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
         """.trimIndent()
-        val report = repo.importJson("[" + LEGADO_SRC + "," + audio + "]").getOrThrow()
+        val manga = """
+            {"bookSourceUrl":"https://manga.com","bookSourceName":"漫画站","bookSourceType":2,
+             "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
+        """.trimIndent()
+        val file = """
+            {"bookSourceUrl":"https://file.com","bookSourceName":"网盘站","bookSourceType":3,
+             "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
+        """.trimIndent()
+        val video = """
+            {"bookSourceUrl":"https://video.com","bookSourceName":"影视站","bookSourceType":"4",
+             "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
+        """.trimIndent()
+        val report = repo.importJson(
+            "[" + LEGADO_SRC + "," + audio + "," + manga + "," + file + "," + video + "]"
+        ).getOrThrow()
         assertEquals(1, report.added)
-        assertEquals(1, report.skipped.size)
-        assertTrue(report.skipped.single().contains("非文字书源"))
+        assertEquals(4, report.skipped.size)
+        assertTrue(report.skipped.any { it.contains("音频源不支持") })
+        assertTrue(report.skipped.any { it.contains("漫画源不支持") })
+        assertTrue(report.skipped.any { it.contains("文件源不支持") })
+        assertTrue(report.skipped.any { it.contains("视频源不支持") })
         assertEquals(1, dao.store.size)
     }
 

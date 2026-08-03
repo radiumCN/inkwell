@@ -1,5 +1,6 @@
 package com.radium.inkwell.data.repo
 
+import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.core.webdav.BackupBook
 import com.radium.inkwell.core.webdav.BackupCodec
 import com.radium.inkwell.core.webdav.BackupMerger
@@ -20,6 +21,9 @@ import com.radium.inkwell.data.prefs.exportForBackup
 import com.radium.inkwell.data.prefs.importFromBackup
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 
 class WebDavRepository(
     private val bookDao: BookDao,
@@ -33,6 +37,7 @@ class WebDavRepository(
     private companion object {
         const val DIR = "inkwell"
         const val BACKUP = "inkwell/backup.json.gz"
+        private val backupJson = Json { ignoreUnknownKeys = true; isLenient = true }
     }
 
     suspend fun testConnection(url: String, username: String, password: String): Result<Unit> =
@@ -160,6 +165,8 @@ class WebDavRepository(
             }
         }
         merged.changedSources.forEach { s ->
+            // 与 importJson 一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
+            if (!isTextNovelSourceJson(s.json)) return@forEach
             // 校验结果（checkStatus/checkMessage/respondTime/checkedAt）是本地专属、不跨设备同步的列 ——
             // 整行 REPLACE 会把它们清空。读旧行、只覆盖同步字段（含分组），本地校验结果原样保留。
             val existing = sourceDao.getById(s.id)
@@ -192,4 +199,11 @@ class WebDavRepository(
         merged.readerSettings?.let { readerPrefs.importFromBackup(it) }
         merged.appSettings?.let { appPrefs.importFromBackup(it) }
     }
+
+    /** 备份里的书源 JSON 是否为小说源；解析失败按「不是小说」丢掉，避免脏数据进库 */
+    private fun isTextNovelSourceJson(json: String): Boolean = runCatching {
+        val root = backupJson.parseToJsonElement(json)
+        val obj = root as? JsonObject ?: root.jsonObject
+        BookSourceTypes.isTextNovel(BookSourceTypes.parse(obj))
+    }.getOrDefault(false)
 }
