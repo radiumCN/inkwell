@@ -15,16 +15,22 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.Collator
 import java.util.Calendar
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 一本书；同名同作者的结果跨书源合并成一条。
@@ -83,6 +89,9 @@ class SearchViewModel(
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
     private var sortJob: Job? = null
+    /** 防抖发布：每个源回来就全量重排+刷 UI 会把主线程打满 */
+    private var publishJob: Job? = null
+    private val hitsMutex = Mutex()
 
     /**
      * 列表滚动位置放 ViewModel 里 —— NavHost 离开搜索页会拆掉 Composable，
@@ -134,13 +143,14 @@ class SearchViewModel(
     fun setSort(sort: SearchSort) {
         if (sort == _state.value.sort) return
         sortJob?.cancel()
+        publishJob?.cancel()
         val keyword = _state.value.query.trim()
         val sortId = _state.value.sortId + 1
         // 先拍快照再丢到 Default：Collator 拼音排几百上千条会卡住主线程，
         // 底部面板关动画也会跟着一顿。标签先切过去，列表排完再换。
-        val snapshot = hits.values.toList()
         _state.value = _state.value.copy(sort = sort, sortId = sortId)
         sortJob = viewModelScope.launch {
+            val snapshot = hitsMutex.withLock { hits.values.toList() }
             val sorted = withContext(Dispatchers.Default) {
                 ordered(snapshot, keyword, sort)
             }
@@ -154,6 +164,7 @@ class SearchViewModel(
         if (keyword.isEmpty()) return
         searchJob?.cancel()
         sortJob?.cancel()
+        publishJob?.cancel()
         // 上一轮的「加载更多」还在飞时开新搜索：不掐掉它，它回来会把旧关键词的结果 merge 进
         // 刚清空的 hits，串进新搜索列表
         pagingJob?.cancel()
@@ -169,33 +180,64 @@ class SearchViewModel(
                 )
                 return@launch
             }
-            hits.clear()
+            hitsMutex.withLock { hits.clear() }
             val sort = _state.value.sort
+            val searchId = _state.value.searchId + 1
+            val done = AtomicInteger(0)
             _state.value = _state.value.copy(
                 searching = true, results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
                 page = 1, hasMore = false, loadingMore = false,
-                searchId = _state.value.searchId + 1,
+                searchId = searchId,
             )
             val limiter = Semaphore(8) // 并发上限
             val more = rules.map { rule ->
                 async {
                     limiter.withPermit {
                         val page = searchPage(rule, keyword, page = 1)
-                        merge(page?.items.orEmpty())
-                        val sorted = withContext(Dispatchers.Default) {
-                            ordered(hits.values.toList(), keyword, sort)
-                        }
-                        _state.value = _state.value.copy(
-                            results = sorted,
-                            doneCount = _state.value.doneCount + 1,
-                        )
+                        hitsMutex.withLock { merge(page?.items.orEmpty()) }
+                        val d = done.incrementAndGet()
+                        // 进度条立刻动；列表重排防抖，避免 N 源 × 全量 Collator 打爆主线程
+                        // update 避免与 schedulePublish 并发 copy 时把 results 盖回旧快照
+                        _state.update { it.copy(doneCount = d) }
+                        schedulePublish(keyword, sort, searchId)
                         rule.takeIf { page?.hasMore == true }
                     }
                 }
             }.awaitAll().filterNotNull()
             pagingRules = more
-            _state.value = _state.value.copy(searching = false, hasMore = more.isNotEmpty())
+            // 收尾强制发一版最终排序，别停在防抖窗口里的半截
+            publishJob?.cancel()
+            val snapshot = hitsMutex.withLock { hits.values.toList() }
+            val sorted = withContext(Dispatchers.Default) {
+                ordered(snapshot, keyword, sort)
+            }
+            if (_state.value.searchId == searchId) {
+                _state.value = _state.value.copy(
+                    results = sorted,
+                    searching = false,
+                    hasMore = more.isNotEmpty(),
+                    doneCount = done.get(),
+                )
+            }
+        }
+    }
+
+    /**
+     * 把 hits 快照排序后刷到 UI。多个源几乎同时回来时合并成一次重排。
+     * 新搜索会 cancel [publishJob]，这里靠 searchId 再挡一层串台。
+     */
+    private fun schedulePublish(keyword: String, sort: SearchSort, searchId: Int) {
+        publishJob?.cancel()
+        publishJob = viewModelScope.launch {
+            delay(PUBLISH_DEBOUNCE_MS)
+            if (_state.value.searchId != searchId) return@launch
+            val snapshot = hitsMutex.withLock { hits.values.toList() }
+            val sorted = withContext(Dispatchers.Default) {
+                ordered(snapshot, keyword, sort)
+            }
+            if (_state.value.searchId != searchId) return@launch
+            _state.update { it.copy(results = sorted) }
         }
     }
 
@@ -282,7 +324,10 @@ class SearchViewModel(
      */
     private suspend fun searchPage(rule: BookSourceRule, keyword: String, page: Int): SearchPage? =
         try {
-            engine.search(rule, keyword, page = page)
+            // 与换源单源超时对齐：吊源别占着 Semaphore 名额拖整轮搜索
+            withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
+                engine.search(rule, keyword, page = page)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -299,6 +344,8 @@ class SearchViewModel(
         val next = s.page + 1
         val sort = s.sort
         pagingJob?.cancel()
+        publishJob?.cancel()
+        val searchId = s.searchId
         pagingJob = viewModelScope.launch {
             _state.value = _state.value.copy(loadingMore = true)
             val limiter = Semaphore(8)
@@ -306,26 +353,31 @@ class SearchViewModel(
                 async {
                     limiter.withPermit {
                         val page = searchPage(rule, keyword, page = next)
-                        val before = hits.size
-                        merge(page?.items.orEmpty())
-                        val gotNew = hits.size > before
-                        if (gotNew) {
-                            val sorted = withContext(Dispatchers.Default) {
-                                ordered(hits.values.toList(), keyword, sort)
-                            }
-                            _state.value = _state.value.copy(results = sorted)
+                        val gotNew = hitsMutex.withLock {
+                            val before = hits.size
+                            merge(page?.items.orEmpty())
+                            hits.size > before
                         }
+                        if (gotNew) schedulePublish(keyword, sort, searchId)
                         // 这一页没带来新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
                         rule.takeIf { page?.hasMore == true && gotNew }
                     }
                 }
             }.awaitAll().filterNotNull()
             pagingRules = still
-            _state.value = _state.value.copy(
-                loadingMore = false,
-                page = next,
-                hasMore = still.isNotEmpty(),
-            )
+            publishJob?.cancel()
+            val snapshot = hitsMutex.withLock { hits.values.toList() }
+            val sorted = withContext(Dispatchers.Default) {
+                ordered(snapshot, keyword, sort)
+            }
+            if (_state.value.searchId == searchId) {
+                _state.value = _state.value.copy(
+                    results = sorted,
+                    loadingMore = false,
+                    page = next,
+                    hasMore = still.isNotEmpty(),
+                )
+            }
         }
     }
 
@@ -350,6 +402,10 @@ class SearchViewModel(
         }
     }
 
+    companion object {
+        private const val SEARCH_TIMEOUT_MS = 30_000L
+        private const val PUBLISH_DEBOUNCE_MS = 250L
+    }
 }
 
 /** 「12万字」「1.5万」「12345字」→ 字数；解不出返回 -1 */

@@ -15,11 +15,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import com.radium.inkwell.data.db.entity.BookType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class BookshelfViewModel(
     private val bookRepo: BookRepository,
@@ -33,6 +36,8 @@ class BookshelfViewModel(
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
+    private var refreshJob: Job? = null
+
     /**
      * 下拉刷新：把书架上所有**网络书**的目录并发刷一遍。
      *
@@ -41,37 +46,63 @@ class BookshelfViewModel(
      *
      * 限流 4 而不是全部并发：几十本书同时打同一个站点，会被限流甚至封 IP，
      * 结果是一本都刷不出来。
+     *
+     * [refreshing] 必须在 finally 里复位 —— 从前任一异常/取消都会让转圈永远不消。
+     * 单本再加超时：某个源吊着不回时，别拖死整轮刷新。
      */
     fun refreshAll() {
         if (_refreshing.value) return
         _refreshing.value = true
-        viewModelScope.launch {
-            val books = allBooks.value.filter { it.type == BookType.NET }
-            if (books.isEmpty()) {
-                _refreshing.value = false
-                messages.emit("书架上没有网络书")
-                return@launch
-            }
-            val limiter = Semaphore(4)
-            val added = books.map { book ->
-                async {
-                    limiter.withPermit {
-                        val rule = book.sourceId?.let { sourceRepo.getRule(it) }
-                            ?: return@withPermit 0
-                        // 单本失败不能拖垮整轮 —— 几十本书里总有一两个源在抽风
-                        netBookRepo.refreshToc(book, rule).getOrDefault(0)
-                    }
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            try {
+                val books = allBooks.value.filter { it.type == BookType.NET }
+                if (books.isEmpty()) {
+                    messages.emit("书架上没有网络书")
+                    return@launch
                 }
-            }.awaitAll()
+                val limiter = Semaphore(4)
+                val added = books.map { book ->
+                    async {
+                        try {
+                            limiter.withPermit {
+                                val rule = book.sourceId?.let { sourceRepo.getRule(it) }
+                                    ?: return@withPermit 0
+                                // 单本失败/超时不能拖垮整轮 —— 几十本书里总有一两个源在抽风
+                                withTimeoutOrNull(TOC_REFRESH_TIMEOUT_MS) {
+                                    netBookRepo.refreshToc(book, rule).getOrDefault(0)
+                                } ?: 0
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            0
+                        }
+                    }
+                }.awaitAll()
 
-            val updatedBooks = added.count { it > 0 }
-            val totalChapters = added.sum()
-            _refreshing.value = false
-            messages.emit(
-                if (updatedBooks == 0) "没有新章节"
-                else "$updatedBooks 本书更新了，共 $totalChapters 章"
-            )
+                val updatedBooks = added.count { it > 0 }
+                val totalChapters = added.sum()
+                messages.emit(
+                    if (updatedBooks == 0) "没有新章节"
+                    else "$updatedBooks 本书更新了，共 $totalChapters 章"
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit("刷新失败: ${e.message?.take(80)}")
+            } finally {
+                _refreshing.value = false
+            }
         }
+    }
+
+    companion object {
+        /** 「未分组」这一档的哨兵值 —— 它和「全部」(null) 不是一回事 */
+        const val UNGROUPED = "\u0000ungrouped"
+
+        /** 单本追更超时；与换源单源搜索同量级，避免一个吊源拖死整轮下拉 */
+        private const val TOC_REFRESH_TIMEOUT_MS = 30_000L
     }
 
     /** 书架顶栏是否显示「发现」入口 */
@@ -229,11 +260,6 @@ class BookshelfViewModel(
                 else "已取消隐藏"
             )
         }
-    }
-
-    companion object {
-        /** 「未分组」这一档的哨兵值 —— 它和「全部」(null) 不是一回事 */
-        const val UNGROUPED = "\u0000ungrouped"
     }
 
     private val _importing = MutableStateFlow(false)

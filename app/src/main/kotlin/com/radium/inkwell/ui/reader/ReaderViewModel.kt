@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -54,6 +55,7 @@ import kotlinx.coroutines.withContext
 import com.radium.inkwell.core.source.Purifier
 import com.radium.inkwell.core.source.PurifyTimeoutException
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
 data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
@@ -501,6 +503,8 @@ class ReaderViewModel(
     // ---------- 换源 ----------
 
     private var sourceSearchJob: Job? = null
+    /** 候选列表防抖发布：每个源回来就 filtered()+写 State 会在源多时打爆重组 */
+    private var candidatePublishJob: Job? = null
 
     /** 书名已命中的全部结果（未按作者过滤）；作者开关一拨就地重筛，不必重搜 */
     private val rawCandidates = mutableListOf<SearchResult>()
@@ -535,68 +539,97 @@ class ReaderViewModel(
             return
         }
         sourceSearchJob?.cancel()
+        candidatePublishJob?.cancel()
         sourceSearchComplete = false
         sourceSearchStarted = true
         sourceSearchJob = viewModelScope.launch {
-            val checkAuthor = appPrefs.changeSourceCheckAuthor.first()
-            // 排序而不是照库里的原顺序：面板照样要搜完所有源（用户点换源就是想看全部候选），
-            // 但让「以前有这本书的」「校验通过的」「响应快的」先占住那 8 个并发名额，
-            // 能用的结果就会更早出现在面板上，不必等到最后。
-            // 自动换源一直是这么做的（AutoSourceSwitcher.rank），手动面板从前却用
-            // getEnabledRules()，那个版本把 checkStatus/respondTime 全丢了。
-            val all = AutoSourceSwitcher.rank(
-                sourceRepo.getEnabledForSwitch(),
-                exclude = b.sourceId,
-                bookHits = bookHits(),
-            )
-            rawCandidates.clear()
-            _state.value = _state.value.copy(
-                sourceCandidates = emptyList(),
-                searchingSources = true,
-                sourcesDone = 0,
-                sourcesTotal = all.size,
-                checkAuthor = checkAuthor,
-            )
-            // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
-            val limiter = Semaphore(8)
-            all.map { rule ->
-                async {
-                    limiter.withPermit {
-                        // 三种结局必须分开记：搜到了 / 搜索跑通但没这本书 / 压根没搜成。
-                        // 只有前两种是关于"这个源有没有这本书"的证据；超时和报错什么都没证明。
-                        // 从前 getOrDefault(emptyList()) 把「报错」和「真的没有」压成同一个空结果 ——
-                        // 照那样记忆的话，一次网络抖动就能把一个好源永久打入冷宫。
-                        val outcome = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
-                            runCatching { engine.search(rule, b.title).items }.fold(
-                                onSuccess = { items ->
-                                    val m = items.firstOrNull { titleMatches(it.title, b.title) }
-                                    if (m != null) SearchOutcome.Hit(m) else SearchOutcome.Miss
-                                },
-                                onFailure = { SearchOutcome.Failed },
-                            )
-                        } ?: SearchOutcome.Failed
-                        // 本轮搜索已被取代（重新点了换源）或被换源/关面板取消时，别再写状态：
-                        // 协程取消只在挂起点抛出，越过 withTimeoutOrNull 的僵尸任务会把脏结果写进
-                        // 新一轮刚清空的 rawCandidates、乱跳计数，还一起往 Main 刷 state 造成卡死。
-                        // 也挡住了 runCatching 吞掉的 CancellationException。
-                        coroutineContext.ensureActive()
-                        when (outcome) {
-                            is SearchOutcome.Hit -> {
-                                rawCandidates += outcome.result
-                                recordHit(rule.id, true, outcome.result.bookUrl)
+            try {
+                val checkAuthor = appPrefs.changeSourceCheckAuthor.first()
+                // 排序而不是照库里的原顺序：面板照样要搜完所有源（用户点换源就是想看全部候选），
+                // 但让「以前有这本书的」「校验通过的」「响应快的」先占住那 8 个并发名额，
+                // 能用的结果就会更早出现在面板上，不必等到最后。
+                // 自动换源一直是这么做的（AutoSourceSwitcher.rank），手动面板从前却用
+                // getEnabledRules()，那个版本把 checkStatus/respondTime 全丢了。
+                val all = AutoSourceSwitcher.rank(
+                    sourceRepo.getEnabledForSwitch(),
+                    exclude = b.sourceId,
+                    bookHits = bookHits(),
+                )
+                synchronized(rawCandidates) { rawCandidates.clear() }
+                val done = AtomicInteger(0)
+                _state.value = _state.value.copy(
+                    sourceCandidates = emptyList(),
+                    searchingSources = true,
+                    sourcesDone = 0,
+                    sourcesTotal = all.size,
+                    checkAuthor = checkAuthor,
+                )
+                // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
+                val limiter = Semaphore(8)
+                all.map { rule ->
+                    async {
+                        limiter.withPermit {
+                            // 三种结局必须分开记：搜到了 / 搜索跑通但没这本书 / 压根没搜成。
+                            // 只有前两种是关于"这个源有没有这本书"的证据；超时和报错什么都没证明。
+                            // 从前 getOrDefault(emptyList()) 把「报错」和「真的没有」压成同一个空结果 ——
+                            // 照那样记忆的话，一次网络抖动就能把一个好源永久打入冷宫。
+                            val outcome = withTimeoutOrNull(SOURCE_SEARCH_TIMEOUT_MS) {
+                                runCatching { engine.search(rule, b.title).items }.fold(
+                                    onSuccess = { items ->
+                                        val m = items.firstOrNull { titleMatches(it.title, b.title) }
+                                        if (m != null) SearchOutcome.Hit(m) else SearchOutcome.Miss
+                                    },
+                                    onFailure = { SearchOutcome.Failed },
+                                )
+                            } ?: SearchOutcome.Failed
+                            // 本轮搜索已被取代（重新点了换源）或被换源/关面板取消时，别再写状态：
+                            // 协程取消只在挂起点抛出，越过 withTimeoutOrNull 的僵尸任务会把脏结果写进
+                            // 新一轮刚清空的 rawCandidates、乱跳计数，还一起往 Main 刷 state 造成卡死。
+                            // 也挡住了 runCatching 吞掉的 CancellationException。
+                            coroutineContext.ensureActive()
+                            when (outcome) {
+                                is SearchOutcome.Hit -> {
+                                    synchronized(rawCandidates) { rawCandidates += outcome.result }
+                                    recordHit(rule.id, true, outcome.result.bookUrl)
+                                }
+                                SearchOutcome.Miss -> recordHit(rule.id, false, null)
+                                SearchOutcome.Failed -> Unit // 什么都没证明，不写库
                             }
-                            SearchOutcome.Miss -> recordHit(rule.id, false, null)
-                            SearchOutcome.Failed -> Unit // 什么都没证明，不写库
+                            done.incrementAndGet()
+                            scheduleCandidatePublish(done)
                         }
-                        _state.value = _state.value.copy(
-                            sourceCandidates = filtered(),
-                            sourcesDone = _state.value.sourcesDone + 1,
-                        )
                     }
-                }
-            }.awaitAll()
-            sourceSearchComplete = true
-            _state.value = _state.value.copy(searchingSources = false)
+                }.awaitAll()
+                candidatePublishJob?.cancel()
+                sourceSearchComplete = true
+                _state.value = _state.value.copy(
+                    sourceCandidates = filtered(),
+                    sourcesDone = done.get(),
+                    searchingSources = false,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                sourceSearchComplete = true
+                _state.value = _state.value.copy(
+                    sourceCandidates = filtered(),
+                    searchingSources = false,
+                )
+            }
+        }
+    }
+
+    /** 进度 + 候选列表合并刷新，避免每个源完成都 filtered() 一次 */
+    private fun scheduleCandidatePublish(done: AtomicInteger) {
+        if (candidatePublishJob?.isActive == true) return
+        candidatePublishJob = viewModelScope.launch {
+            delay(CANDIDATE_PUBLISH_DEBOUNCE_MS)
+            ensureActive()
+            val candidates = filtered()
+            val n = done.get()
+            _state.update {
+                it.copy(sourceCandidates = candidates, sourcesDone = n)
+            }
         }
     }
 
@@ -642,8 +675,9 @@ class ReaderViewModel(
         val author = book?.author.orEmpty()
         // 换源成功后 rawCandidates 里还躺着刚选上的那个源；列表里再出现「当前源」没意义，点了也是空跑
         val currentId = book?.sourceId
-        val byAuthor = if (!_state.value.checkAuthor) rawCandidates.asSequence()
-        else rawCandidates.asSequence().filter { authorMatches(it.author, author) }
+        val snap = synchronized(rawCandidates) { rawCandidates.toList() }
+        val byAuthor = if (!_state.value.checkAuthor) snap.asSequence()
+        else snap.asSequence().filter { authorMatches(it.author, author) }
         return byAuthor.filter { it.sourceId != currentId }.toList()
     }
 
@@ -661,6 +695,7 @@ class ReaderViewModel(
         // 选定了源，换源搜索就该停 —— 否则它每搜完一个源就把 sourceCandidates 写回非空，
         // 面板关不掉、还一直显示「搜索中」，直到几百个源全跑完。
         sourceSearchJob?.cancel()
+        candidatePublishJob?.cancel()
         viewModelScope.launch {
             _state.value = _state.value.copy(
                 changingSource = true,
@@ -686,19 +721,21 @@ class ReaderViewModel(
                 .onSuccess {
                     // 选定源时搜索可能还在飞（上面已 cancel）。手里已有候选就当本轮可用，
                     // 否则 complete 仍是 false，下次再开又会全量重搜 —— 白浪费刚搜到的那批。
-                    if (rawCandidates.isNotEmpty()) sourceSearchComplete = true
-                    if (prevSourceId != null && prevBookUrl != null &&
-                        rawCandidates.none { it.sourceId == prevSourceId }
-                    ) {
-                        rawCandidates += SearchResult(
-                            title = b.title,
-                            bookUrl = prevBookUrl,
-                            author = b.author.ifBlank { null },
-                            intro = b.intro,
-                            latestChapter = b.latestChapterTitle,
-                            sourceId = prevSourceId,
-                            sourceName = prevSourceName,
-                        )
+                    synchronized(rawCandidates) {
+                        if (rawCandidates.isNotEmpty()) sourceSearchComplete = true
+                        if (prevSourceId != null && prevBookUrl != null &&
+                            rawCandidates.none { it.sourceId == prevSourceId }
+                        ) {
+                            rawCandidates += SearchResult(
+                                title = b.title,
+                                bookUrl = prevBookUrl,
+                                author = b.author.ifBlank { null },
+                                intro = b.intro,
+                                latestChapter = b.latestChapterTitle,
+                                sourceId = prevSourceId,
+                                sourceName = prevSourceName,
+                            )
+                        }
                     }
                     _state.value = _state.value.copy(
                         changingSource = false,
@@ -879,6 +916,7 @@ class ReaderViewModel(
 
     fun dismissSourcePanel() {
         sourceSearchJob?.cancel()
+        candidatePublishJob?.cancel()
         // 故意不清 rawCandidates / sourceSearchStarted：关掉面板不是放弃结果。
         // 再开直接摊缓存（含半截）；要打新请求点「重新搜索」。
         _state.value = _state.value.copy(sourceCandidates = null, searchingSources = false)
@@ -1246,6 +1284,9 @@ class ReaderViewModel(
 
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L
+
+        /** 换源候选列表防抖；与搜索页同量级，避免每个源完成都刷一次 UI */
+        const val CANDIDATE_PUBLISH_DEBOUNCE_MS = 250L
 
         /**
          * 单章正文加载上限。超过就判这个源"网络很差"，触发自动换源。
