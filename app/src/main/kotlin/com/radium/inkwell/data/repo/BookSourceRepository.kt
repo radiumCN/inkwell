@@ -5,6 +5,7 @@ import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
@@ -23,7 +24,8 @@ class BookSourceRepository(
         prettyPrint = true
     }
 
-    val sources: Flow<List<BookSourceEntity>> = dao.observeAll()
+    /** 列表用投影，不含规则 JSON —— 见 [BookSourceListItem] */
+    val sources: Flow<List<BookSourceListItem>> = dao.observeAll()
 
     data class ImportReport(
         val added: Int,
@@ -107,7 +109,10 @@ class BookSourceRepository(
     ): ImportReport {
         // 同 id（= bookSourceUrl）保留最后一个，避免同事务重复主键
         val deduped = rules.associateBy { it.id }.values
-        val existingById = dao.getAll().associateBy { it.id }
+        // 只按本次涉及的 id 逐条读旧行，禁止 getAll()+json 撑爆 CursorWindow
+        val existingById = deduped.mapNotNull { rule ->
+            loadEntity(rule.id)?.let { rule.id to it }
+        }.toMap()
         val now = System.currentTimeMillis()
 
         val toWrite = ArrayList<BookSourceEntity>(deduped.size)
@@ -163,14 +168,12 @@ class BookSourceRepository(
     }
 
     suspend fun getRule(id: String): BookSourceRule? =
-        dao.getById(id)?.let { runCatching { json.decodeFromString<BookSourceRule>(it.json) }.getOrNull() }
+        loadEntity(id)?.let { runCatching { json.decodeFromString<BookSourceRule>(it.json) }.getOrNull() }
 
-    suspend fun getEntity(id: String): BookSourceEntity? = dao.getById(id)
+    suspend fun getEntity(id: String): BookSourceEntity? = loadEntity(id)
 
     suspend fun getEnabledRules(): List<BookSourceRule> =
-        dao.getEnabled().mapNotNull { entity ->
-            runCatching { json.decodeFromString<BookSourceRule>(entity.json) }.getOrNull()
-        }
+        dao.getEnabledIds().mapNotNull { id -> getRule(id) }
 
     /**
      * 启用的书源，**连校验结果一起带出来**。
@@ -179,7 +182,8 @@ class BookSourceRepository(
      * 自动换源要靠这些决定先试谁（校验通过的、响应快的优先占住并发名额）。
      */
     suspend fun getEnabledForSwitch(): List<EnabledSource> =
-        dao.getEnabled().mapNotNull { entity ->
+        dao.getEnabledIds().mapNotNull { id ->
+            val entity = loadEntity(id) ?: return@mapNotNull null
             val rule = runCatching { json.decodeFromString<BookSourceRule>(entity.json) }
                 .getOrNull() ?: return@mapNotNull null
             EnabledSource(
@@ -233,8 +237,25 @@ class BookSourceRepository(
 
     /** 导出为 Legado 原生格式（库里存的就是原生 JSON） */
     suspend fun exportJson(ids: Collection<String>): String {
-        val all = dao.getAll().filter { it.id in ids }
-        val items = all.map { it.json }
+        val idSet = ids.toSet()
+        val items = idSet.mapNotNull { id -> loadEntity(id)?.json }
         return items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
     }
+
+    /**
+     * WebDAV / 全量备份：逐条取完整行。
+     * 禁止一次性 `SELECT *` —— 源多或单源 JSON 大时 CursorWindow 直接崩。
+     */
+    suspend fun loadAllEntitiesIncludingDeleted(): List<BookSourceEntity> =
+        dao.getAllIdsIncludingDeleted().mapNotNull { loadEntity(it) }
+
+    /**
+     * 单条读取；CursorWindow 仍可能因**单行**过大失败，吞掉以免整页列表陪葬。
+     */
+    private suspend fun loadEntity(id: String): BookSourceEntity? =
+        try {
+            dao.getById(id)
+        } catch (_: IllegalStateException) {
+            null
+        }
 }

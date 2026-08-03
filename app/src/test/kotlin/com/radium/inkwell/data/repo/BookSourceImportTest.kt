@@ -4,6 +4,7 @@ import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -19,8 +20,17 @@ class BookSourceImportTest {
         var upsertAllCalls = 0
         var singleUpsertCalls = 0
 
-        override fun observeAll(): Flow<List<BookSourceEntity>> = flowOf(store.values.toList())
-        override suspend fun getEnabled() = store.values.filter { it.enabled }
+        private fun BookSourceEntity.toListItem() = BookSourceListItem(
+            id = id, name = name, enabled = enabled, sortOrder = sortOrder,
+            updatedAt = updatedAt, groupName = groupName, checkStatus = checkStatus,
+            checkMessage = checkMessage, respondTime = respondTime, checkedAt = checkedAt,
+            deleted = deleted,
+        )
+
+        override fun observeAll(): Flow<List<BookSourceListItem>> =
+            flowOf(store.values.filter { !it.deleted }.map { it.toListItem() })
+        override suspend fun getEnabledIds() =
+            store.values.filter { it.enabled && !it.deleted }.map { it.id }
         override suspend fun getById(id: String) = store[id]
         override suspend fun upsert(source: BookSourceEntity) {
             singleUpsertCalls++; store[source.id] = source
@@ -28,7 +38,8 @@ class BookSourceImportTest {
         override suspend fun upsertAll(sources: List<BookSourceEntity>) {
             upsertAllCalls++; sources.forEach { store[it.id] = it }
         }
-        override suspend fun getAllIds() = store.keys.toList()
+        override suspend fun getAllIds() = store.values.filter { !it.deleted }.map { it.id }
+        override suspend fun getAllIdsIncludingDeleted() = store.keys.toList()
         override suspend fun setEnabled(id: String, enabled: Boolean) {}
         // 软删除：打标记而不是移除 —— 墓碑得留着，否则 WebDAV 同步会把删掉的源拉回来
         override suspend fun softDeleteById(id: String, now: Long) {
@@ -40,7 +51,6 @@ class BookSourceImportTest {
         override suspend fun setEnabledForIds(ids: List<String>, enabled: Boolean) {
             ids.forEach { id -> store[id]?.let { store[id] = it.copy(enabled = enabled) } }
         }
-        override suspend fun getAll() = store.values.toList()
 
         override suspend fun saveCheck(
             id: String, status: Int, message: String, respondTime: Long, checkedAt: Long,

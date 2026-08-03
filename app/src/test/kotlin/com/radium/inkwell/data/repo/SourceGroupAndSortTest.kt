@@ -1,7 +1,7 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
-import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.ui.sourcemanage.SourceSort
 import com.radium.inkwell.ui.sourcemanage.sourceComparator
@@ -43,8 +43,8 @@ class SourceGroupAndSortTest {
         assertEquals(listOf("快源", "慢源", "失效", "未校验"), sorted.map { it.name })
     }
 
-    private fun entity(name: String, respondTime: Long, status: Int) = BookSourceEntity(
-        id = "https://$name", name = name, json = "{}", updatedAt = 0,
+    private fun entity(name: String, respondTime: Long, status: Int) = BookSourceListItem(
+        id = "https://$name", name = name, updatedAt = 0,
         respondTime = respondTime, checkStatus = status,
     )
 }

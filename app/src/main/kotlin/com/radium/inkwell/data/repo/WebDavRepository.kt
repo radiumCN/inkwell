@@ -104,7 +104,10 @@ class WebDavRepository(
                 deleted = b.deleted,
             )
         },
-        sources = sourceDao.getAll().map { s ->
+        // 逐条取完整行：SELECT * 全表会把大 JSON 塞进 CursorWindow（~2MB）直接闪退
+        sources = sourceDao.getAllIdsIncludingDeleted().mapNotNull { id ->
+            runCatching { sourceDao.getById(id) }.getOrNull()
+        }.map { s ->
             BackupSource(
                 id = s.id, name = s.name, enabled = s.enabled, json = s.json,
                 updatedAt = s.updatedAt,

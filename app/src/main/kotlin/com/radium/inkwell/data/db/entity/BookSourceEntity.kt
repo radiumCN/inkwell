@@ -9,7 +9,10 @@ data class BookSourceEntity(
     val name: String,
     val enabled: Boolean = true,
     val sortOrder: Int = 0,
-    /** 完整书源规则 JSON 原文（Legado 原生格式）；name/enabled 为列表 UI 冗余列 */
+    /**
+     * 完整书源规则 JSON 原文（Legado 原生格式）。
+     * **列表查询禁止 SELECT 本列** —— 见 [BookSourceListItem] / CursorWindow ~2MB 上限。
+     */
     val json: String,
     val updatedAt: Long,
 

@@ -5,15 +5,35 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookSourceDao {
-    @Query("SELECT * FROM book_source WHERE deleted = 0 ORDER BY sortOrder, name")
-    fun observeAll(): Flow<List<BookSourceEntity>>
+    /**
+     * 列表观察：刻意不选 [BookSourceEntity.json]。
+     * 全量带 JSON 会撑爆 CursorWindow（约 2MB），真机表现为读到某一行闪退。
+     */
+    @Query(
+        """
+        SELECT id, name, enabled, sortOrder, updatedAt, groupName,
+               checkStatus, checkMessage, respondTime, checkedAt, deleted
+          FROM book_source
+         WHERE deleted = 0
+         ORDER BY sortOrder, name
+        """,
+    )
+    fun observeAll(): Flow<List<BookSourceListItem>>
 
-    @Query("SELECT * FROM book_source WHERE enabled = 1 AND deleted = 0 ORDER BY sortOrder, name")
-    suspend fun getEnabled(): List<BookSourceEntity>
+    /** 启用源的 id；规则正文用 [getById] 逐条取，避免一次 Cursor 塞满大 JSON */
+    @Query(
+        """
+        SELECT id FROM book_source
+         WHERE enabled = 1 AND deleted = 0
+         ORDER BY sortOrder, name
+        """,
+    )
+    suspend fun getEnabledIds(): List<String>
 
     @Query("SELECT * FROM book_source WHERE id = :id")
     suspend fun getById(id: String): BookSourceEntity?
@@ -27,6 +47,10 @@ interface BookSourceDao {
 
     @Query("SELECT id FROM book_source WHERE deleted = 0")
     suspend fun getAllIds(): List<String>
+
+    /** 含墓碑，供 WebDAV LWW；同样只取 id，正文按条 [getById] */
+    @Query("SELECT id FROM book_source")
+    suspend fun getAllIdsIncludingDeleted(): List<String>
 
     @Query("UPDATE book_source SET enabled = :enabled WHERE id = :id")
     suspend fun setEnabled(id: String, enabled: Boolean)
@@ -43,9 +67,6 @@ interface BookSourceDao {
 
     @Query("UPDATE book_source SET enabled = :enabled WHERE id IN (:ids)")
     suspend fun setEnabledForIds(ids: List<String>, enabled: Boolean)
-
-    @Query("SELECT * FROM book_source")
-    suspend fun getAll(): List<BookSourceEntity>
 
     @Query(
         """

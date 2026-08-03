@@ -70,7 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.radium.inkwell.ui.components.EmptyState
@@ -125,7 +125,7 @@ fun SourceManageScreen(
     var confirmDeleteInvalid by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
-    var deleteTarget by remember { mutableStateOf<BookSourceEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<BookSourceListItem?>(null) }
     var showUrlImport by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
     var importUrl by remember { mutableStateOf("") }

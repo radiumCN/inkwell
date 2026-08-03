@@ -4,8 +4,9 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.radium.inkwell.data.db.entity.BookSourceEntity
+import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
+import kotlinx.coroutines.flow.mapLatest
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.core.model.ContentElement
@@ -74,7 +75,7 @@ enum class SourceSort(val label: String) {
  * 未校验和失效的书源 respondTime 是 -1，直接拿它排会让 -1 冒充"最快"，
  * 一堆死源排到最前面，正好排反了。
  */
-fun sourceComparator(sort: SourceSort): Comparator<BookSourceEntity> = when (sort) {
+fun sourceComparator(sort: SourceSort): Comparator<BookSourceListItem> = when (sort) {
     SourceSort.MANUAL -> compareBy({ it.sortOrder }, { it.name })
     SourceSort.NAME -> compareBy { it.name }
     SourceSort.UPDATED -> compareByDescending { it.updatedAt }
@@ -326,7 +327,7 @@ class SourceManageViewModel(
     private val _exportFile = kotlinx.coroutines.flow.MutableSharedFlow<java.io.File>(extraBufferCapacity = 1)
     val exportFile = _exportFile
 
-    val sources: StateFlow<List<BookSourceEntity>> = sourceRepo.sources
+    val sources: StateFlow<List<BookSourceListItem>> = sourceRepo.sources
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // ---- 搜索 / 筛选 / 排序 / 分组 ----
@@ -360,7 +361,7 @@ class SourceManageViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 列表实际显示的书源：搜索 + 筛选 + 分组 + 排序 */
-    val visibleSources: StateFlow<List<BookSourceEntity>> =
+    val visibleSources: StateFlow<List<BookSourceListItem>> =
         kotlinx.coroutines.flow.combine(
             sources, _query, _filter, _sort, _group,
         ) { list, q, f, o, g ->
@@ -372,13 +373,13 @@ class SourceManageViewModel(
                 .toList()
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private fun matchesQuery(s: BookSourceEntity, q: String): Boolean {
+    private fun matchesQuery(s: BookSourceListItem, q: String): Boolean {
         if (q.isBlank()) return true
         val k = q.trim()
         return s.name.contains(k, true) || s.id.contains(k, true) || s.groupName.contains(k, true)
     }
 
-    private fun matchesFilter(s: BookSourceEntity, f: SourceFilter): Boolean = when (f) {
+    private fun matchesFilter(s: BookSourceListItem, f: SourceFilter): Boolean = when (f) {
         SourceFilter.ALL -> true
         SourceFilter.ENABLED -> s.enabled
         SourceFilter.DISABLED -> !s.enabled
@@ -391,15 +392,18 @@ class SourceManageViewModel(
         .map { list -> list.count { it.checkStatus == CheckStatus.FAILED } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
-    /** 无搜索规则（仅发现页可用）的书源 id，列表上打标签避免用户误以为能搜索 */
+    /**
+     * 无搜索规则（仅发现页可用）的书源 id。
+     * 规则按 id **逐条**取 —— 不能再对列表里的 json 字段做 map（列表投影已不含 json）。
+     */
     val exploreOnlyIds: StateFlow<Set<String>> = sourceRepo.sources
-        .map { list ->
-            list.mapNotNull { entity ->
-                val rule = sourceRepo.parseRule(entity.json).getOrNull() ?: return@mapNotNull null
-                entity.id.takeIf { rule.search == null }
+        .mapLatest { list ->
+            list.mapNotNull { item ->
+                val rule = sourceRepo.getRule(item.id) ?: return@mapNotNull null
+                item.id.takeIf { rule.search == null }
             }.toSet()
         }
-        .flowOn(Dispatchers.Default)
+        .flowOn(Dispatchers.IO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** 一次性提示：用事件流而非 StateFlow，避免相同内容的连续提示被去重吞掉 */
