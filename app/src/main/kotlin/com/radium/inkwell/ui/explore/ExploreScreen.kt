@@ -105,9 +105,9 @@ fun ExploreScreen(
             if (state.sources.isEmpty()) {
                 EmptyState(
                     icon = Icons.Default.Explore,
-                    title = "没有可用的发现书源",
-                    hint = "导入带发现页规则的书源后，可在此浏览分类书单",
-                    actionLabel = "去导入书源",
+                    title = "没有可用的发现来源",
+                    hint = "导入带发现页规则后，可在此浏览分类列表",
+                    actionLabel = "去导入规则",
                     onAction = onOpenSourceManage,
                 )
                 return@Column

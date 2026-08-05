@@ -336,14 +336,14 @@ fun BookshelfScreen(
             EmptyState(
                 icon = Icons.Default.AutoStories,
                 title = "书架空空如也",
-                hint = "导入本地 txt / EPUB / MOBI，或从书源搜索添加",
+                hint = "导入本地 txt / EPUB / MOBI，或搜索已导入的规则",
                 modifier = Modifier.padding(padding),
             )
         } else if (allBooks.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.AutoStories,
                 title = "书架空空如也",
-                hint = "导入本地 txt / EPUB / MOBI，或从书源搜索添加",
+                hint = "导入本地 txt / EPUB / MOBI，或搜索已导入的规则",
                 actionLabel = "导入本地书",
                 onAction = {
                     importLauncher.launch(
@@ -478,7 +478,7 @@ fun BookshelfScreen(
                 )
                 SettingRow(
                     title = "书籍详情",
-                    subtitle = "简介、目录、刷新追更",
+                    subtitle = "简介、目录、刷新目录",
                     onClick = {
                         val id = book.id
                         actionTarget = null

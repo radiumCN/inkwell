@@ -116,7 +116,7 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
                                     strokeWidth = 2.dp,
                                 )
                             } else {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录（追更）")
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
                             }
                         }
                     }

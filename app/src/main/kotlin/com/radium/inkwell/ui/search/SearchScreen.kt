@@ -155,8 +155,8 @@ fun SearchScreen(
             if (state.results.isEmpty() && !state.searching) {
                 EmptyState(
                     icon = Icons.Default.Search,
-                    title = "搜索全网书源",
-                    hint = "输入书名或作者，从启用的书源中并发搜索",
+                    title = "按已启用的规则搜索",
+                    hint = "输入书名或作者；未导入规则时无结果",
                 )
             } else {
                 // 列表上方一条：左侧数量、右侧当前排序。不塞进顶栏 ——

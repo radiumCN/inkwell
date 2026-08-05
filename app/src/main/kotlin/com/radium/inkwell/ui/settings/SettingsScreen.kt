@@ -157,7 +157,7 @@ fun SettingsScreen(
             SwitchRow(
                 title = "显示「发现」入口",
                 subtitle = if (exploreEnabled) {
-                    "书架顶栏显示发现按钮，浏览书源的分类榜单"
+                    "书架顶栏显示发现按钮（需已导入带发现规则的来源）"
                 } else {
                     "已隐藏。仍可从搜索找书"
                 },
@@ -227,7 +227,7 @@ fun SettingsScreen(
             SectionHeader("备份")
             SettingRow(
                 title = "WebDAV 备份同步",
-                subtitle = "书架、进度与书源的多设备同步",
+                subtitle = "书架、进度与规则配置的多设备同步",
                 onClick = onOpenWebDav,
             )
 
@@ -260,7 +260,7 @@ fun SettingsScreen(
             )
             SettingRow(
                 title = "用户协议与免责声明",
-                subtitle = "软件性质、书源责任与隐私说明",
+                subtitle = "软件性质、使用责任与隐私说明",
                 onClick = onOpenDisclaimer,
             )
             SettingRow(title = "版本", subtitle = "v$currentVersion")
@@ -345,7 +345,7 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { confirmClearCache = false },
             title = { Text("清除正文缓存") },
-            text = { Text("将删除已下载的 ${formatSize(cacheBytes)} 章节正文。书架、阅读进度和书源都不受影响，下次阅读会重新联网抓取。") },
+            text = { Text("将删除已下载的 ${formatSize(cacheBytes)} 章节正文。书架、阅读进度和书源都不受影响，下次阅读时如需正文会重新加载。") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmClearCache = false
