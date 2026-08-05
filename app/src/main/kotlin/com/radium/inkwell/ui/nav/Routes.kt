@@ -112,3 +112,6 @@ object WebDavSettingsRoute
 
 @Serializable
 object FeedbackRoute
+
+@Serializable
+object DisclaimerRoute

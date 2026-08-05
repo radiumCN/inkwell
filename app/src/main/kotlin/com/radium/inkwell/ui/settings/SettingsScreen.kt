@@ -63,6 +63,7 @@ import org.koin.compose.koinInject
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenFeedback: () -> Unit,
+    onOpenDisclaimer: () -> Unit,
     onOpenWebDav: () -> Unit,
     onOpenTheme: () -> Unit,
     onOpenSources: () -> Unit,
@@ -256,6 +257,11 @@ fun SettingsScreen(
                 title = "意见反馈",
                 subtitle = "问题与建议直接提给开发者",
                 onClick = onOpenFeedback,
+            )
+            SettingRow(
+                title = "用户协议与免责声明",
+                subtitle = "软件性质、书源责任与隐私说明",
+                onClick = onOpenDisclaimer,
             )
             SettingRow(title = "版本", subtitle = "v$currentVersion")
             SettingRow(title = "开源许可", subtitle = "MIT License")

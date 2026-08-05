@@ -198,6 +198,7 @@ fun InkwellNavHost() {
                 onOpenReplaceRules = { go(ReplaceRuleRoute) },
                 onOpenRss = { go(RssSourceRoute) },
                 onOpenFeedback = { go(FeedbackRoute) },
+                onOpenDisclaimer = { go(DisclaimerRoute) },
             )
         }
         composable<RssSourceRoute> {
@@ -241,6 +242,9 @@ fun InkwellNavHost() {
         }
         composable<FeedbackRoute> {
             com.radium.inkwell.ui.feedback.FeedbackScreen(onBack = { navController.popBackStack() })
+        }
+        composable<DisclaimerRoute> {
+            com.radium.inkwell.ui.legal.DisclaimerScreen(onBack = { navController.popBackStack() })
         }
     }
 }
