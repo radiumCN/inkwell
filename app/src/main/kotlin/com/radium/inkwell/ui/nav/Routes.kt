@@ -105,6 +105,18 @@ data class SourceDetailRoute(val sourceId: String)
 object SettingsRoute
 
 @Serializable
+object AppearanceSettingsRoute
+
+@Serializable
+object ReadingSettingsRoute
+
+@Serializable
+object UpdateSettingsRoute
+
+@Serializable
+object AboutSettingsRoute
+
+@Serializable
 object ThemeSettingsRoute
 
 @Serializable

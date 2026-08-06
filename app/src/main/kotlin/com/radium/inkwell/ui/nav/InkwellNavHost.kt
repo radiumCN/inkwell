@@ -28,8 +28,12 @@ import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.preview.BookPreviewScreen
 import com.radium.inkwell.ui.reader.ReaderScreen
 import com.radium.inkwell.ui.search.SearchScreen
+import com.radium.inkwell.ui.settings.AboutSettingsScreen
+import com.radium.inkwell.ui.settings.AppearanceSettingsScreen
+import com.radium.inkwell.ui.settings.ReadingSettingsScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
 import com.radium.inkwell.ui.settings.ThemeSettingsScreen
+import com.radium.inkwell.ui.settings.UpdateSettingsScreen
 import com.radium.inkwell.ui.sourcedetail.SourceDetailScreen
 import com.radium.inkwell.ui.replace.ReplaceRuleScreen
 import com.radium.inkwell.ui.rss.RssArticleScreen
@@ -192,11 +196,33 @@ fun InkwellNavHost() {
         composable<SettingsRoute> {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                onOpenAppearance = { go(AppearanceSettingsRoute) },
+                onOpenReading = { go(ReadingSettingsRoute) },
+                onOpenRss = { go(RssSourceRoute) },
                 onOpenWebDav = { go(WebDavSettingsRoute) },
+                onOpenUpdate = { go(UpdateSettingsRoute) },
+                onOpenAbout = { go(AboutSettingsRoute) },
+            )
+        }
+        composable<AppearanceSettingsRoute> {
+            AppearanceSettingsScreen(
+                onBack = { navController.popBackStack() },
                 onOpenTheme = { go(ThemeSettingsRoute) },
+            )
+        }
+        composable<ReadingSettingsRoute> {
+            ReadingSettingsScreen(
+                onBack = { navController.popBackStack() },
                 onOpenSources = { go(SourceManageRoute) },
                 onOpenReplaceRules = { go(ReplaceRuleRoute) },
-                onOpenRss = { go(RssSourceRoute) },
+            )
+        }
+        composable<UpdateSettingsRoute> {
+            UpdateSettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable<AboutSettingsRoute> {
+            AboutSettingsScreen(
+                onBack = { navController.popBackStack() },
                 onOpenFeedback = { go(FeedbackRoute) },
                 onOpenDisclaimer = { go(DisclaimerRoute) },
             )
