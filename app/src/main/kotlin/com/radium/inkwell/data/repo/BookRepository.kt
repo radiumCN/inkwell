@@ -9,6 +9,7 @@ import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
+import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
@@ -25,6 +26,7 @@ class BookRepository(
     private val bookDao: BookDao,
     private val chapterDao: ChapterDao,
     private val hitDao: BookSourceHitDao,
+    private val replaceRuleDao: ReplaceRuleDao,
     private val parserRegistry: BookParserRegistry,
 ) {
 
@@ -159,13 +161,16 @@ class BookRepository(
             // 三步写库成组提交：中途被杀会留下半套 —— 最糟的是目录已清、墓碑没打上，
             // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
             // 文件删除放在事务外：那是不可回滚的磁盘 IO，圈进来只会拉长锁。
+            val now = System.currentTimeMillis()
             db.withTransaction {
                 chapterDao.deleteByBook(id)
                 // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
                 hitDao.deleteByBook(id)
+                // 本书专属净化规则同样挂 bookId；软删打墓碑，WebDAV 合并才能把删除同步出去
+                replaceRuleDao.softDeleteByBook(id, now)
                 // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
                 // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
-                bookDao.softDelete(id, System.currentTimeMillis())
+                bookDao.softDelete(id, now)
             }
         }
     }

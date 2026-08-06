@@ -45,6 +45,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_11_12,
                 InkwellDb.MIGRATION_12_13,
                 InkwellDb.MIGRATION_13_14,
+                InkwellDb.MIGRATION_14_15,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
@@ -104,7 +105,7 @@ val appModule = module {
     single { com.radium.inkwell.update.UpdateInstaller(get()) }
     single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
 
-    single { BookRepository(androidContext(), get(), get(), get(), get(), get()) }
+    single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get()) }
     single { BookSourceRepository(get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }

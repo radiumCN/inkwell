@@ -26,7 +26,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -138,6 +138,26 @@ abstract class InkwellDb : RoomDatabase() {
                 listOf("book", "book_source", "replace_rule", "rss_source").forEach { table ->
                     db.execSQL("ALTER TABLE $table ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
                 }
+            }
+        }
+
+        /**
+         * 补清孤儿「本书专属」净化规则：过去删书不连带软删这些行，列表里会留下
+         * 指着已删书 / 墓碑书的规则。打墓碑（并刷新 updatedAt）以便 WebDAV LWW 同步删除。
+         * 通用规则（bookId 为空）不动。
+         */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val now = System.currentTimeMillis()
+                db.execSQL(
+                    """
+                    UPDATE replace_rule
+                    SET deleted = 1, updatedAt = $now
+                    WHERE deleted = 0
+                      AND bookId != ''
+                      AND bookId NOT IN (SELECT id FROM book WHERE deleted = 0)
+                    """.trimIndent(),
+                )
             }
         }
 

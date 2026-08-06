@@ -36,6 +36,10 @@ interface ReplaceRuleDao {
     @Query("UPDATE replace_rule SET deleted = 1, updatedAt = :now WHERE id IN (:ids)")
     suspend fun softDeleteByIds(ids: List<String>, now: Long)
 
+    /** 书删了：本书专属规则一并打墓碑，否则列表里会留下指着已删书的孤儿行 */
+    @Query("UPDATE replace_rule SET deleted = 1, updatedAt = :now WHERE bookId = :bookId AND bookId != '' AND deleted = 0")
+    suspend fun softDeleteByBook(bookId: String, now: Long)
+
     @Query("UPDATE replace_rule SET enabled = :enabled WHERE id = :id")
     suspend fun setEnabled(id: String, enabled: Boolean)
 

@@ -26,6 +26,9 @@ data class ReplaceRuleEntity(
      * 与 [scope] 是两个维度：scope 限的是「哪些书源」，bookId 限的是「哪一本书」。
      * 书内规则在**渲染时**应用，而不是抓取时 —— 抓取时应用的话，用户刚建的规则对
      * 已经缓存的章节毫无反应，而他恰恰是对着眼前这一页建的。
+     *
+     * 删书时会一并软删（见 [com.radium.inkwell.data.repo.BookRepository.deleteBook]），
+     * 避免净化列表里留下指着已删书的孤儿规则。
      */
     val bookId: String = "",
     val enabled: Boolean = true,
