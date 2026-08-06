@@ -48,7 +48,7 @@ import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 
-/** 程序化翻页入口（点击区域 / 音量键共用动画路径） */
+/** 程序化翻页入口（点击区域 / 音量键 / 自动翻页共用动画路径） */
 class FlipController {
     internal val requests = MutableSharedFlow<FlipDirection>(extraBufferCapacity = 2)
     fun requestFlip(direction: FlipDirection) {

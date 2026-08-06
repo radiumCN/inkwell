@@ -35,14 +35,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
-import com.radium.inkwell.core.model.ContentElement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -59,23 +61,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
 data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
-
-/** 全书搜索的一条命中 */
-data class ChapterHit(
-    val chapterIndex: Int,
-    val chapterTitle: String,
-    val charOffset: Int,
-    val excerpt: String,
-)
-
-/** 命中处前后各截一段，给用户看上下文 */
-private fun String.snippetAround(at: Int, length: Int, radius: Int = 18): String {
-    val from = (at - radius).coerceAtLeast(0)
-    val to = (at + length + radius).coerceAtMost(this.length)
-    val prefix = if (from > 0) "…" else ""
-    val suffix = if (to < this.length) "…" else ""
-    return prefix + substring(from, to).replace('\n', ' ') + suffix
-}
 
 data class ReaderUiState(
     val bookTitle: String = "",
@@ -107,10 +92,6 @@ data class ReaderUiState(
     val toast: String? = null,
     /** 自动翻页中 */
     val autoFlipping: Boolean = false,
-    /** 全书搜索：null=面板没开 */
-    val searchResults: List<ChapterHit>? = null,
-    val searching: Boolean = false,
-    val searchProgress: Int = 0,
     /** 换源：null=未打开面板；空列表=搜索中/无结果 */
     val sourceCandidates: List<SearchResult>? = null,
     val searchingSources: Boolean = false,
@@ -345,78 +326,14 @@ class ReaderViewModel(
         viewModelScope.launch { readerPrefs.update(settings) }
     }
 
-    // ---------- 全书搜索 ----------
-
-    private var searchJob: Job? = null
+    // ---------- 自动翻页 ----------
 
     /**
-     * 全书搜索。逐章扫，命中就往外冒 —— 不等全书扫完再一次性出结果：
-     * 几千章的书要抓好几分钟，而用户想找的那句话八成就在前几章。
+     * 自动翻页的程序化翻页请求。ReaderScreen 接到 FlipController，
+     * 与点击区 / 音量键走同一套翻页动画；勿在此直接调用 [flip]（那会瞬间切页）。
      */
-    fun searchInBook(keyword: String) {
-        val key = keyword.trim()
-        if (key.isEmpty()) return
-        searchJob?.cancel()
-        val src = source ?: return
-        searchJob = viewModelScope.launch {
-            _state.value = _state.value.copy(searchResults = emptyList(), searching = true, searchProgress = 0)
-            val total = _state.value.chapterCount
-            for (i in 0 until total) {
-                if (!isActive) return@launch
-                val content = runCatching { loadPurified(src, i) }.getOrNull()
-                if (content != null) {
-                    var offset = 0
-                    for (el in content.elements) {
-                        val text = when (el) {
-                            is ContentElement.Paragraph -> el.text
-                            is ContentElement.Heading -> el.text
-                            else -> ""
-                        }
-                        var from = 0
-                        while (true) {
-                            val at = text.indexOf(key, from, ignoreCase = true)
-                            if (at < 0) break
-                            val hit = ChapterHit(
-                                chapterIndex = i,
-                                chapterTitle = src.chapterTitle(i) ?: "",
-                                charOffset = offset + at,
-                                excerpt = text.snippetAround(at, key.length),
-                            )
-                            _state.value = _state.value.copy(
-                                searchResults = (_state.value.searchResults ?: emptyList()) + hit,
-                            )
-                            from = at + key.length
-                        }
-                        offset += el.charLength
-                    }
-                }
-                _state.value = _state.value.copy(searchProgress = i + 1)
-            }
-            _state.value = _state.value.copy(searching = false)
-        }
-    }
-
-    /** 只打开面板，不搜 —— 关键词还没输呢 */
-    fun openSearchPanel() {
-        _state.value = _state.value.copy(searchResults = emptyList(), searching = false, searchProgress = 0)
-    }
-
-    fun cancelSearch() {
-        searchJob?.cancel()
-        _state.value = _state.value.copy(searching = false)
-    }
-
-    fun dismissSearch() {
-        searchJob?.cancel()
-        _state.value = _state.value.copy(searchResults = null, searching = false)
-    }
-
-    fun gotoHit(hit: ChapterHit) {
-        _state.value = _state.value.copy(searchResults = null, menuVisible = false)
-        gotoChapter(hit.chapterIndex, hit.charOffset)
-    }
-
-    // ---------- 自动翻页 ----------
+    private val _animatedFlipRequests = MutableSharedFlow<FlipDirection>(extraBufferCapacity = 2)
+    val animatedFlipRequests: SharedFlow<FlipDirection> = _animatedFlipRequests.asSharedFlow()
 
     private var autoFlipJob: Job? = null
 
@@ -435,7 +352,7 @@ class ReaderViewModel(
                     stopAutoFlip()
                     break
                 }
-                flip(FlipDirection.FORWARD)
+                _animatedFlipRequests.tryEmit(FlipDirection.FORWARD)
             }
         }
     }

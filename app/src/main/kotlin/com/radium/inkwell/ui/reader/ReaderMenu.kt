@@ -56,7 +56,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -102,7 +101,6 @@ fun ReaderMenu(
     onSetTextSelection: (Boolean) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
-    onOpenSearch: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var showToc by remember { mutableStateOf(false) }
@@ -175,9 +173,6 @@ fun ReaderMenu(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Default.Search, contentDescription = "全书搜索", tint = barContent)
                     }
                 }
             }
