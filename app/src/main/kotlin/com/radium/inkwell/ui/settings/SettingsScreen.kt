@@ -1,9 +1,8 @@
 package com.radium.inkwell.ui.settings
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +12,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -27,9 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,10 +39,12 @@ import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 /**
- * 设置入口页：只列分组入口，细节进二级页，避免一屏塞满开关。
+ * 设置入口页：高频操作留在本页，细节进二级页。
+ *
+ * - 检查更新、当前版本：主页一眼可见、一点即查
+ * - 更新源/渠道、外观细项、换源开关等：进二级，少打扰日常路径
  *
  * 这里从前有一整块「隐私」分区，写着「查看隐藏书籍需要验证 / 长按书架标题后先验证指纹」。
- * 它把秘密完整地说了两遍：既宣告「这个 App 能藏书」，又把暗号印在副标题里。
  * 开关已搬进隐藏区内部；设置页里一个字都不提隐藏书籍。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +61,7 @@ fun SettingsScreen(
     val cache = koinInject<ChapterContentCache>()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val updateCheck = rememberUpdateCheckState(snackbar)
     var confirmClearCache by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
 
@@ -113,9 +118,24 @@ fun SettingsScreen(
                 subtitle = "书架、进度与规则配置的多设备同步",
                 onClick = onOpenWebDav,
             )
+
+            SectionHeader("版本与更新")
             SettingRow(
-                title = "更新",
-                subtitle = "检查更新、更新源与渠道",
+                title = "当前版本",
+                subtitle = "v${updateCheck.currentVersion}",
+            )
+            SettingRow(
+                title = "检查更新",
+                subtitle = if (updateCheck.checking) {
+                    "正在检查…"
+                } else {
+                    "${updateCheck.source.label} · ${updateCheck.channel.label}"
+                },
+                onClick = updateCheck.check,
+            )
+            SettingRow(
+                title = "更新源与渠道",
+                subtitle = "较少改动的选项",
                 onClick = onOpenUpdate,
             )
             SettingRow(
@@ -123,9 +143,25 @@ fun SettingsScreen(
                 subtitle = "反馈、协议与开源信息",
                 onClick = onOpenAbout,
             )
-            Spacer(Modifier.height(Dimens.gapXL))
+
+            Text(
+                "Inkwell  v${updateCheck.currentVersion}",
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = Dimens.rowHorizontal,
+                        end = Dimens.rowHorizontal,
+                        top = Dimens.gapXL,
+                        bottom = Dimens.gapXL,
+                    ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
+
+    updateCheck.UpdateDialog()
 
     if (confirmClearCache) {
         AlertDialog(
