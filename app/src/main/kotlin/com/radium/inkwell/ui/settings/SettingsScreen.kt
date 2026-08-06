@@ -41,7 +41,7 @@ import org.koin.compose.koinInject
 /**
  * 设置入口页：高频操作留在本页，细节进二级页。
  *
- * - 检查更新、当前版本：主页一眼可见、一点即查
+ * - 检查更新：主页一点即查；版本号只在页脚展示，避免与列表行重复
  * - 更新源/渠道、外观细项、换源开关等：进二级，少打扰日常路径
  *
  * 这里从前有一整块「隐私」分区，写着「查看隐藏书籍需要验证 / 长按书架标题后先验证指纹」。
@@ -120,10 +120,6 @@ fun SettingsScreen(
             )
 
             SectionHeader("版本与更新")
-            SettingRow(
-                title = "当前版本",
-                subtitle = "v${updateCheck.currentVersion}",
-            )
             SettingRow(
                 title = "检查更新",
                 subtitle = if (updateCheck.checking) {
