@@ -41,8 +41,8 @@ import org.koin.compose.koinInject
 /**
  * 设置入口页：高频操作留在本页，细节进二级页。
  *
- * - 检查更新：主页一点即查；版本号只在页脚展示，避免与列表行重复
- * - 更新源/渠道、外观细项、换源开关等：进二级，少打扰日常路径
+ * 排列：使用 → 数据 → 维护 → 版本 → 关于。检查更新主页一点即查；
+ * 版本号固定页脚，不随列表长短上下漂移。
  *
  * 这里从前有一整块「隐私」分区，写着「查看隐藏书籍需要验证 / 长按书架标题后先验证指纹」。
  * 开关已搬进隐藏区内部；设置页里一个字都不提隐藏书籍。
@@ -86,59 +86,70 @@ fun SettingsScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
+                .padding(padding),
         ) {
-            SettingRow(
-                title = "外观",
-                subtitle = "主题、应用图标与发现入口",
-                onClick = onOpenAppearance,
-            )
-            SettingRow(
-                title = "阅读与规则",
-                subtitle = "书源管理、净化与换源行为",
-                onClick = onOpenReading,
-            )
-            SettingRow(
-                title = "订阅源",
-                subtitle = "RSS / Atom 订阅",
-                onClick = onOpenRss,
-            )
-            SettingRow(
-                title = "清除正文缓存",
-                subtitle = when {
-                    cacheBytes < 0 -> "正在统计…"
-                    cacheBytes == 0L -> "暂无缓存"
-                    else -> "已缓存 ${formatSize(cacheBytes)}；清除不影响书架与阅读进度"
-                },
-                onClick = { if (cacheBytes > 0) confirmClearCache = true },
-            )
-            SettingRow(
-                title = "WebDAV 备份同步",
-                subtitle = "书架、进度与规则配置的多设备同步",
-                onClick = onOpenWebDav,
-            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                // 使用：外观与阅读相关
+                SettingRow(
+                    title = "外观",
+                    subtitle = "主题、应用图标与发现入口",
+                    onClick = onOpenAppearance,
+                )
+                SettingRow(
+                    title = "阅读与规则",
+                    subtitle = "书源管理、净化与换源行为",
+                    onClick = onOpenReading,
+                )
+                SettingRow(
+                    title = "订阅源",
+                    subtitle = "RSS / Atom 订阅",
+                    onClick = onOpenRss,
+                )
+                // 数据：备份同步
+                SettingRow(
+                    title = "WebDAV 备份同步",
+                    subtitle = "书架、进度与规则配置的多设备同步",
+                    onClick = onOpenWebDav,
+                )
+                // 维护：破坏性操作靠后，减少误触
+                SettingRow(
+                    title = "清除正文缓存",
+                    subtitle = when {
+                        cacheBytes < 0 -> "正在统计…"
+                        cacheBytes == 0L -> "暂无缓存"
+                        else -> "已缓存 ${formatSize(cacheBytes)}；清除不影响书架与阅读进度"
+                    },
+                    onClick = { if (cacheBytes > 0) confirmClearCache = true },
+                )
 
-            SectionHeader("版本与更新")
-            SettingRow(
-                title = "检查更新",
-                subtitle = if (updateCheck.checking) {
-                    "正在检查…"
-                } else {
-                    "${updateCheck.source.label} · ${updateCheck.channel.label}"
-                },
-                onClick = updateCheck.check,
-            )
-            SettingRow(
-                title = "更新源与渠道",
-                subtitle = "较少改动的选项",
-                onClick = onOpenUpdate,
-            )
-            SettingRow(
-                title = "关于",
-                subtitle = "反馈、协议与开源信息",
-                onClick = onOpenAbout,
-            )
+                SectionHeader("版本与更新")
+                SettingRow(
+                    title = "检查更新",
+                    subtitle = if (updateCheck.checking) {
+                        "正在检查…"
+                    } else {
+                        "${updateCheck.source.label} · ${updateCheck.channel.label}"
+                    },
+                    onClick = updateCheck.check,
+                )
+                SettingRow(
+                    title = "更新源与渠道",
+                    subtitle = "较少改动的选项",
+                    onClick = onOpenUpdate,
+                )
+
+                // 「关于」不属于版本分区，单独垫底
+                SettingRow(
+                    title = "关于",
+                    subtitle = "反馈、协议与开源信息",
+                    onClick = onOpenAbout,
+                )
+            }
 
             Text(
                 "Inkwell  v${updateCheck.currentVersion}",
@@ -147,7 +158,7 @@ fun SettingsScreen(
                     .padding(
                         start = Dimens.rowHorizontal,
                         end = Dimens.rowHorizontal,
-                        top = Dimens.gapXL,
+                        top = Dimens.gapM,
                         bottom = Dimens.gapXL,
                     ),
                 style = MaterialTheme.typography.bodySmall,
