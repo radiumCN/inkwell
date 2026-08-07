@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.navigation.BackNavigationBehavior
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
@@ -102,7 +103,13 @@ fun InkwellNavDisplay() {
         calculatePaneScaffoldDirective(windowAdaptiveInfo)
             .copy(horizontalPartitionSpacerSize = 0.dp)
     }
-    val listDetailStrategy = rememberListDetailSceneStrategy<NavKey>(directive = directive)
+    val listDetailStrategy = rememberListDetailSceneStrategy<NavKey>(
+        directive = directive,
+        // 默认的 PopUntilScaffoldValueChange 会「跳过不改变布局的那几条」——
+        // 双栏下 关于→意见反馈 这种下钻两格都是 detail、布局不变，返回一次就会跨掉一层，
+        // 正是单栏那个 bug 的双栏版本。PopLatest = 一次只退一格，两种宽度下行为一致。
+        backNavigationBehavior = BackNavigationBehavior.PopLatest,
+    )
     val dualPane = directive.maxHorizontalPartitions > 1
 
     // shared-axis X：新页从右滑入，旧页往左让出四分之一（不是整屏，留出层次感）。

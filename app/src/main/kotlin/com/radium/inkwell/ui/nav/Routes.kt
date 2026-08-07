@@ -135,22 +135,48 @@ data object FeedbackRoute : NavKey
 @Serializable
 data object DisclaimerRoute : NavKey
 
-/** 设置树里可作为 detail pane 的二级/三级页（不含 SettingsRoute 自身）。 */
-internal fun NavKey.isSettingsDetail(): Boolean = when (this) {
+/**
+ * 设置树里可作为 detail pane 的页面在树中的**层级**（`SettingsRoute` 自身算 1，非设置页为 null）。
+ *
+ * 为什么要层级而不是一个「是不是设置详情」的布尔：`InkwellNavigator.go` 得区分两件事 ——
+ * **兄弟替换**（宽屏 list-detail 只有一格 detail，从设置列表点另一项时必须把当前那格换掉）
+ * 和**下钻**（关于 → 意见反馈）。只有布尔的话两者写法一样，下钻也被当成替换，
+ * 于是「关于」被从返回栈里抹掉：从意见反馈按返回，直接跳回设置一级页。
+ *
+ * 树形（层级即缩进深度）：
+ * ```
+ * 设置 (1)
+ * ├─ 外观 (2) ── 主题 (3)
+ * ├─ 阅读 (2) ─┬ 书源管理 (3) ── 书源详情 (4)
+ * │            └ 替换规则 (3)
+ * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4)
+ * ├─ WebDAV (2)
+ * ├─ 更新 (2)
+ * └─ 关于 (2) ─┬ 意见反馈 (3)
+ *              └ 免责声明 (3)
+ * ```
+ * 加新设置页时**记得在这里登记层级**：漏了会被当成非设置页，宽屏下拿不到 detail pane。
+ */
+internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is AppearanceSettingsRoute,
     is ReadingSettingsRoute,
     is UpdateSettingsRoute,
     is AboutSettingsRoute,
-    is ThemeSettingsRoute,
     is WebDavSettingsRoute,
+    is RssSourceRoute,
+    -> 2
+
+    is ThemeSettingsRoute,
     is FeedbackRoute,
     is DisclaimerRoute,
     is ReplaceRuleRoute,
     is SourceManageRoute,
-    is SourceDetailRoute,
-    is RssSourceRoute,
     is RssArticlesRoute,
+    -> 3
+
+    is SourceDetailRoute,
     is RssArticleRoute,
-    -> true
-    else -> false
+    -> 4
+
+    else -> null
 }
