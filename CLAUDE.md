@@ -27,6 +27,8 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 提交前至少跑通 `assembleDebug` + 三个模块单测。
 
+**动了 `:baselineprofile` 就再跑一条**：`./gradlew :baselineprofile:compileNonMinifiedReleaseKotlin`。它不在上面任何一条链里 —— 那个模块只在生成 profile 时才编译，所以连语法错都能一路溜到 CI，代价是一次起模拟器的六十分钟。（真栽过：KDoc 里写了 `androidx/navigation/` 加通配星号，那个 `/*` 序列在 Kotlin 里会开一层**嵌套**块注释，KDoc 结尾的 `*/` 只关掉内层，外层一路吃到文件末尾。）
+
 ---
 
 ## UI 统一层（硬规则）
