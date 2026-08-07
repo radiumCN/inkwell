@@ -494,7 +494,10 @@ fun BookshelfScreen(
                 )
                 SettingRow(
                     title = "多选",
-                    subtitle = "批量删除、分组或隐藏",
+                    // 「隐藏」在多选里也是隐藏区专属（顶栏 ⋮ 那两项同样裹在 showHidden 里）。
+                    // 副标题不跟着分情况写的话，平时这行就把藏书功能写在了脸上，
+                    // 而进了多选又根本找不到它 —— 既泄了底，又是句空头承诺。
+                    subtitle = if (showHidden) "批量删除、分组或隐藏" else "批量删除或分组",
                     onClick = {
                         viewModel.startSelection(book.id)
                         actionTarget = null
