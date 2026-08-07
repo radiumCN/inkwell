@@ -73,7 +73,7 @@ internal fun rememberUpdateCheckState(snackbar: SnackbarHostState): UpdateCheckS
             when (val result = updateManager.check(source, channel, currentVersion)) {
                 is CheckResult.Available -> update = result.info
                 CheckResult.UpToDate ->
-                    snackbar.showSnackbar("已是最新版本 v$currentVersion（${source.label} · ${channel.label}）")
+                    snackbar.showSnackbar("已是最新版本")
                 is CheckResult.Failed ->
                     snackbar.showSnackbar("检查失败: ${result.message}")
             }
