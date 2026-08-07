@@ -154,7 +154,9 @@ status: **pending**
 - 新增 `ui/components/AppTabs.kt`：`AppTabRow`（`PrimaryTabRow`）+ `AppTabContent`（横移 1/8 + 淡入淡出，`using(null)` 关掉 SizeTransform）。`ReaderMenu` 改用它 —— 上一轮只改了这唯一一处 Tab，但没有封装约束后来者，形态与节奏迟早再分叉。
 - `Messages.kt` 的 Snackbar 已经是全局的（14 个页面都走 `AppSnackbarHost`，无裸 `Snackbar`），本轮只在 `CLAUDE.md` 里把「居中悬浮胶囊、页面别自己写 host」写成规则。
 
-验证：`:core:test`/`:reader:test`/`:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。**实机观感仍未验** —— spring 的回弹幅度是这轮唯一的观感风险（页面转场从匀速变成带回弹，导航条边缘可能有轻微过冲）。
+验证：`:core:test`/`:reader:test`/`:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。
+
+**实机反馈把「页面转场也用 spring」这条否了**（beta.7 后修，记在这里避免有人再改回去）：用户报「三级页返回停顿一秒」。原因是 spring 没有确定时长 —— 整屏位移的尾巴要爬几百毫秒才落到阈值内，`AnimatedContent` 在那之前不认为转场结束，画面看着到位、再按返回却没反应；手势返回还要靠进度 seek，spring 只能近似。页面级转场因此改回定长 tween（`Motion.navEnterSpec/navExitSpec`，220/150ms），组件级仍走令牌。判断标准是**位移尺度**：整屏用 tween，组件内几十 dp 用 spring。
 
 ## 剩下要做的
 
