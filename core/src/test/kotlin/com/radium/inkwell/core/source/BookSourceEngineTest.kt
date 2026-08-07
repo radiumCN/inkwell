@@ -110,7 +110,8 @@ class BookSourceEngineTest {
     fun `toc reverse flips order and reindexes`() = runBlocking {
         val src = source()
         // 原生 Legado：chapterList 前导 `-` 表示整体倒序
-        val reversed = src.copy(ruleToc = src.ruleToc!!.copy(chapterList = "-" + src.ruleToc!!.chapterList))
+        val tocRule = src.ruleToc!!
+        val reversed = src.copy(ruleToc = tocRule.copy(chapterList = "-" + tocRule.chapterList))
         val toc = engine().getToc(reversed, "$base/book/1/toc")
         assertEquals("第五章 大结局", toc[0].title)
         assertEquals("第一章 山村少年", toc[4].title)

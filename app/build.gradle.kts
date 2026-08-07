@@ -14,7 +14,7 @@ android {
         applicationId = "com.radium.inkwell"
         minSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        targetSdk = 36
+        targetSdk = 37
         // 版本号单点配置在 gradle/libs.versions.toml 的 [versions] inkwell
         // versionCode 忽略预发布后缀（0.1.0-beta.1 与 0.1.0 同码，允许同码覆盖安装）
         val appVersion = libs.versions.inkwell.get()
