@@ -41,10 +41,11 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 动效 → `app/.../ui/components/Motion.kt`
 
-时长/曲线定死在此：入场 `ENTER_MS`(220)、退场更快 `EXIT_MS`(140)、导航 `NAV_*`。用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`。
-- **所有自定义动画必须尊重系统「移除动画」** —— 用 `animationsEnabled()`（ContentObserver 实时监听）包一层，关了就 `tween(0)`。别裸写 `tween(300)`、别让 `animate*AsState`/`AnimatedVisibility`/`Crossfade` 逃出这套。
-- **框架内建动画（ModalBottomSheet/DropdownMenu/PullToRefresh…）现在也归这条管**。以前放它们过是因为没有公开定制口；M3 Expressive 把 `MotionScheme` 变成主题参数后有了 —— 系统关动画时 `InkwellTheme` 整套换成 0 时长的 `InstantMotionScheme`，组件内部动画（Sheet 滑入、Switch 拇指位移、Chip 选中过渡）跟着一起静止。**别在组件外面另搭一套动画绕过它**。
-- 动效现在有两个来源，加新动画前想清楚归哪边：`Motion.kt` 的 tween 管**我们自己写的**转场（导航、顶栏底栏、遮罩、展开），`MaterialTheme.motionScheme` 的 spring 管**组件内部**。要跟 M3 组件同调就读 `MaterialTheme.motionScheme.defaultSpatialSpec()` 这类；两者观感不同（tween vs 弹性 spring），别在同一处界面上混着用。
+**全应用只有一个动效来源：`MaterialTheme.motionScheme`。** 页面里优先用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`；需要裸 spec（`animateItem`、`AnimatedContent`）时读令牌，**别裸写 `tween(300)`、别再往 `Motion.kt` 加毫秒常量**。
+- **spatial / effects 分工**（M3 约定，混了会难看）：位移与尺寸（滑入、展开、缩放）用 `defaultSpatialSpec()`，纯视觉属性（alpha、颜色）用 `defaultEffectsSpec()`。effects 做位移发木；spatial 做淡入会让透明度过冲，看着像闪一下。
+- **「退场比入场快」用档位表达**：入场 `default*`、退场 `fast*`。
+- **系统「移除动画」只在一处兜住**：`InkwellTheme` 把整套 `motionScheme` 换成 0 时长的 `InstantMotionScheme`，我们写的转场与组件内部动画（Sheet 滑入、Switch 拇指位移、Chip 选中过渡）一起静止。所以帮手里**不必**再逐个判 `animationsEnabled()`；还留着它是给两类逃在主题外的场合：reader 模块自绘的翻页动画，以及「关了就干脆别做」而非缩到 0 的判断（如 `animateItem` 直接传 `null`，省掉每帧插值）。**别在组件外面另搭一套动画绕过它。**
+- **唯一还硬编码 tween 的是阅读器开合两条**（`Motion.READER_ENTER_MS` / `READER_EXIT_MS` + 强调减速/加速曲线）：它们的时长与进书 splash 的等待窗口 `READER_SPLASH_DELAY_MS` 是咬合的，spring 给不出确定时长。别顺手把它们也改成令牌。
 
 ### 主题入口 → `MaterialExpressiveTheme`
 
@@ -78,11 +79,12 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`） |
 | 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体；对话框里也统一用它） |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距） |
+| 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`） |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
 | 整页加载态 | `LoadingState`（`Common.kt`），内部是 Expressive 的 `LoadingIndicator`。**行内 ≤24dp 的小转圈仍用 `CircularProgressIndicator`** —— 形变多边形缩小了读不出来 |
-| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`） |
+| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。是居中悬浮胶囊（`extraLarge` 圆角、`inverseSurface`、无阴影），**不是**通栏条；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 
 出现「多个页面重复相似 UI」时，抽成组件而不是复制。
 

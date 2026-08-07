@@ -76,7 +76,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
-import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
@@ -416,6 +415,8 @@ fun BookshelfScreen(
                 // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
                 // 写进 items 里就是每本书挂一个
                 val motionOn = animationsEnabled()
+                // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
+                val motion = MaterialTheme.motionScheme
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 96.dp),
                     modifier = Modifier.fillMaxSize(),
@@ -452,9 +453,9 @@ fun BookshelfScreen(
                             // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
                             // 后者仍会走一遍动画机器，只是时长为零。
                             modifier = Modifier.animateItem(
-                                fadeInSpec = if (motionOn) Motion.enterSpec() else null,
-                                placementSpec = if (motionOn) Motion.enterSpec() else null,
-                                fadeOutSpec = if (motionOn) Motion.exitSpec() else null,
+                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
                             ),
                         )
                     }

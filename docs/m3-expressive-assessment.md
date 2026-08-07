@@ -110,7 +110,7 @@ status: **pending**；verify: 深浅两款纸张主题下逐个浮层截图
 
 ### 7. 无障碍回归
 
-13 处 `animationsEnabled()` 全覆盖走查 + 触控目标 + 读屏焦点。第 1 项若选了 `MotionScheme`，这一项是它的验收关口。
+`animationsEnabled()` 全覆盖走查 + 触控目标 + 读屏焦点。第 3 阶段后调用点从 13 处收到 4 处（`Theme.kt` 那一处是总闸，另三处是 reader 自绘翻页、`BookshelfScreen` 的 `animateItem`、`InkwellNavDisplay` 的阅读器 tween），其余由主题的 `InstantMotionScheme` 统一兜住 —— 这一项现在主要是验「开了系统『移除动画』后是否真的全静止」。
 status: **pending**
 
 ### 8. 性能与体积
@@ -144,11 +144,22 @@ status: **pending**
 
 回退路径（第 9 项）：一次 revert 这四个文件即可，没有数据/持久化面的改动。BOM 退回 `androidx.compose:compose-bom:2026.06.01` 时记得把 `compose-bom-alpha` 也改回去。
 
+## 已落地（第 3 阶段：动效单一来源 + Tab/Snackbar 收进封装）
+
+前两阶段留下的是「局部对齐」：Expressive 主题开了，但我们自己写的转场还是 `Motion.kt` 里的硬编码 tween，与组件内部读的 `MotionScheme` 两套并存 —— 同一屏上 Sheet 弹性滑入、它上面的顶栏匀速划下来。这一阶段把它收成一个来源。
+
+- `ui/components/Motion.kt`：八个帮手全部改读 `MaterialTheme.motionScheme`，位移取 `*SpatialSpec`、alpha 取 `*EffectsSpec`，退场取 `fast*` 档（「退场比入场快」不再靠手写毫秒）。删掉 `ENTER_MS`/`EXIT_MS`/`NAV_*` 与两条自定义 easing。帮手里**不再判** `animationsEnabled()` —— 无障碍由 `InstantMotionScheme` 在主题那一处兜住，判两遍等于两个来源。**只保留**阅读器开合两条 tween：时长与 `READER_SPLASH_DELAY_MS` 咬合，spring 给不出确定时长。
+- `ui/nav/InkwellNavDisplay.kt`：页面 push/pop 转场接令牌（阅读器缩放那条不动）。
+- `ui/bookshelf/BookshelfScreen.kt`：`animateItem` 的三个 spec 接令牌；`motionOn` 保留，因为这个 API 的「不动画」写法是传 `null`，比 `tween(0)` 省掉每帧插值。
+- 新增 `ui/components/AppTabs.kt`：`AppTabRow`（`PrimaryTabRow`）+ `AppTabContent`（横移 1/8 + 淡入淡出，`using(null)` 关掉 SizeTransform）。`ReaderMenu` 改用它 —— 上一轮只改了这唯一一处 Tab，但没有封装约束后来者，形态与节奏迟早再分叉。
+- `Messages.kt` 的 Snackbar 已经是全局的（14 个页面都走 `AppSnackbarHost`，无裸 `Snackbar`），本轮只在 `CLAUDE.md` 里把「居中悬浮胶囊、页面别自己写 host」写成规则。
+
+验证：`:core:test`/`:reader:test`/`:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。**实机观感仍未验** —— spring 的回弹幅度是这轮唯一的观感风险（页面转场从匀速变成带回弹，导航条边缘可能有轻微过冲）。
+
 ## 剩下要做的
 
-1. **第 0 项**：实机全页面截图巡检 —— 现在是唯一的真实风险敞口，而且下面两项都卡在它后面。
+1. **第 0 项**：实机全页面截图巡检 —— 唯一的真实风险敞口，下面两项都卡在它后面；这轮换了转场物理，更该看一眼。
 2. 表里挂起的两项：`SelectionToolbar` 要不要换 `ButtonGroup`；三处 `LinearProgressIndicator` 要不要换 `WavyProgressIndicator`（先量它的实际高度）。
-3. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator` 是新类，旧 profile 规则覆盖不到）。
-4. 观感一致性（成功判据 2 的后半）：要不要让 `Motion.kt` 改读 `MaterialTheme.motionScheme`。
+3. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`AppTabs` 都是新类，旧 profile 规则覆盖不到）。
 
 每一步都要跑通：`:core:test`、`:reader:test`、`:app:testDebugUnitTest`、`:app:lintDebug`、`assembleDebug`。

@@ -62,6 +62,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.SlimSlider
 import androidx.compose.animation.AnimatedVisibility
+import com.radium.inkwell.ui.components.AppTabContent
+import com.radium.inkwell.ui.components.AppTabRow
 import com.radium.inkwell.ui.components.bottomBarEnter
 import com.radium.inkwell.ui.components.bottomBarExit
 import com.radium.inkwell.ui.components.scrimEnter
@@ -70,8 +72,6 @@ import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.runtime.mutableIntStateOf
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
@@ -123,7 +123,7 @@ fun ReaderMenu(
 
     // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
     // 中间蒙层淡入 —— 让人看得出这是「盖上来的一层」，而不是页面突然换了个样子。
-    // 退场比入场快（Motion.EXIT_MS）：用户已经决定关掉了，界面还慢悠悠淡出会像没反应。
+    // 退场比入场快（帮手里退场取 fast* 档）：用户已经决定关掉了，界面还慢悠悠淡出会像没反应。
     AnimatedVisibility(
         visible = visible,
         enter = scrimEnter(),
@@ -442,6 +442,9 @@ private val MARGIN_H_OPTIONS = listOf(
  * - 排版：字号、行距、字体、背景、亮度 —— 最常调的
  * - 翻页：翻页方式、自动翻页间隔、音量键翻页
  * - 更多：设一次基本不再动的（预加载、屏幕常亮）
+ *
+ * Tab 与切换过渡都走 [AppTabRow] / [AppTabContent]（`ui/components`）—— 全应用同一套形态
+ * 与节奏，别在这里手写 TabRow。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -452,26 +455,29 @@ private fun TypographyPanel(
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
     var tab by remember { mutableIntStateOf(0) }
+    val scroll = rememberScrollState()
+    // 换 tab 把滚动复位：否则从「排版」滚到一半切到「翻页」，人会落在空白里发愣
+    LaunchedEffect(tab) { scroll.scrollTo(0) }
 
     Column(Modifier.fillMaxWidth()) {
         // TabRow 钉在顶不滚，只让下面的内容滚 —— 排版页项目多（字号/标题/边距/行距/字体/背景/亮度），
         // 一屏放不下。从前内容 Column 既没 verticalScroll 也没高度上限，超出的部分被 sheet 直接裁掉、
         // 还滚不动，背景/亮度全被压在屏幕外。
-        SecondaryTabRow(selectedTabIndex = tab) {
-            SETTINGS_TABS.forEachIndexed { i, title ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
-            }
-        }
-        Column(
-            Modifier
+        AppTabRow(titles = SETTINGS_TABS, selectedIndex = tab, onSelect = { tab = it })
+        AppTabContent(
+            targetState = tab,
+            label = "readerSettingsTab",
+            modifier = Modifier
                 .fillMaxWidth()
-                // 上限 = 半屏多一点，太高会顶到状态栏；内容不足这个高度时 Column 自然收缩，不留空
-                .heightIn(max = Dimens.sheetEditorMaxHeight)
-                .verticalScroll(rememberScrollState())
+                // 定高，别用 heightIn(max)：那只是上限，内容矮时面板跟着缩，
+                // 切到排版页又被顶起来 —— 正是「切换时自动拉高」。定死后切 tab
+                // 只在内部滚；用户要更大视野，拖 sheet 手柄即可。
+                .height(Dimens.sheetEditorMaxHeight)
+                .verticalScroll(scroll)
                 .padding(horizontal = Dimens.screenPadding)
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
-        ) {
-            when (tab) {
+        ) { current ->
+            when (current) {
                 0 -> LayoutTab(settings, onUpdate)
                 1 -> FlipTab(settings, onUpdate)
                 else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
