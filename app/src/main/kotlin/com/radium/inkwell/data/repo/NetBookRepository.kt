@@ -13,6 +13,7 @@ import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 
 /** 网络书：加书架、刷新目录、换源 */
 class NetBookRepository(
@@ -120,12 +121,37 @@ class NetBookRepository(
         val (readIndex, readOffset) = alignProgress(fresh.id, fresh, toc)
         val added = (toc.size - fresh.totalChapters).coerceAtLeast(0)
 
+        // 旧版 WebDAV 根本不带封面，同步下来的网络书 coverPath 一直是 null；
+        // 下拉刷新只追目录、不抓详情，所以联网也永远补不回来。
+        // 追更本来就要联网 —— 封面缺了就顺手拉一次详情补上，别逼用户重新加书架。
+        // 详情失败不影响追更本身（封面可有可无，目录才是这次要的）。
+        var coverPath = fresh.coverPath
+        var intro = fresh.intro
+        if (coverPath.isNullOrBlank()) {
+            val bookUrl = fresh.bookUrl
+            if (!bookUrl.isNullOrBlank()) {
+                val detail = try {
+                    engine.getDetail(rule, bookUrl)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                if (detail != null) {
+                    if (coverPath.isNullOrBlank()) coverPath = detail.coverUrl
+                    if (intro.isNullOrBlank()) intro = detail.intro
+                }
+            }
+        }
+
         val entities = buildToc(book.id, toc)
         val refreshed = fresh.copy(
             totalChapters = toc.size,
             latestChapterTitle = toc.lastOrNull()?.title,
             readChapterIndex = readIndex,
             readCharOffset = readOffset,
+            coverPath = coverPath,
+            intro = intro,
             // 累加而不是覆盖：连刷两次、第二次没新章，不该把第一次的 5 章抹成 0 ——
             // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
             newChapterCount = fresh.newChapterCount + added,

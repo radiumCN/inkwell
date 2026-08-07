@@ -38,6 +38,9 @@ class BookRepository(
 
     suspend fun getBook(id: String): BookEntity? = bookDao.getById(id)
 
+    /** 单本书的实时流。详情页追更后封面/章数/简介会变，订阅它 UI 才跟得上。 */
+    fun observeBook(id: String): Flow<BookEntity?> = bookDao.observeById(id)
+
     /**
      * 书架上与该「书名+作者」匹配的书 id。网络书按 (sourceId,bookUrl) 存，但同一本书跨书源
      * 合并靠 (书名,作者) —— 判断"已在书架"、以及直达已存在的那本，都得按这个键，否则换个
