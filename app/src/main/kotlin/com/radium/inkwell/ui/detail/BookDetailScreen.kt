@@ -50,7 +50,13 @@ import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
+fun BookDetailScreen(
+    bookId: String,
+    onRead: () -> Unit,
+    onBack: () -> Unit,
+    /** 宽屏 list-detail 并排时隐藏返回；窄屏仍显示 */
+    showBack: Boolean = true,
+) {
     val bookRepo = koinInject<BookRepository>()
     val netBookRepo = koinInject<NetBookRepository>()
     val sourceRepo = koinInject<BookSourceRepository>()
@@ -102,8 +108,10 @@ fun BookDetailScreen(bookId: String, onRead: () -> Unit, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("书籍详情") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {

@@ -1,16 +1,23 @@
 package com.radium.inkwell.ui.nav
 
+import androidx.navigation3.runtime.NavKey
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.preview.BookPreviewCandidates
 import java.util.Base64
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-@Serializable
-object BookshelfRoute
+/** ListDetailSceneStrategy.sceneKey：书架与设置各用一组，避免宽屏下互相抢 pane。 */
+internal object NavPaneGroup {
+    const val BOOKSHELF = "bookshelf"
+    const val SETTINGS = "settings"
+}
 
 @Serializable
-data class BookDetailRoute(val bookId: String)
+data object BookshelfRoute : NavKey
+
+@Serializable
+data class BookDetailRoute(val bookId: String) : NavKey
 
 /**
  * 网络书籍预览（未入库）：看简介/目录，再决定加书架或直接读。
@@ -23,7 +30,7 @@ data class BookDetailRoute(val bookId: String)
  * 理由见 [BookPreviewCandidates] —— 全塞进路由会随返回栈进 Binder，撑爆就是崩溃。
  */
 @Serializable
-data class BookPreviewRoute(val resultsArg: String) {
+data class BookPreviewRoute(val resultsArg: String) : NavKey {
     /** 同一本书在各个书源下的搜索结果；预览页靠它换源。暂存丢了就只剩代表书源 */
     val results: List<SearchResult> get() {
         val representative: SearchResult = ROUTE_JSON.decodeFromString(decodeArg(resultsArg))
@@ -48,19 +55,19 @@ private fun decodeArg(s: String): String =
     String(Base64.getUrlDecoder().decode(s), Charsets.UTF_8)
 
 @Serializable
-data class ReaderRoute(val bookId: String)
+data class ReaderRoute(val bookId: String) : NavKey
 
 @Serializable
-data class SearchRoute(val initialQuery: String? = null)
+data class SearchRoute(val initialQuery: String? = null) : NavKey
 
 @Serializable
-object ExploreRoute
+data object ExploreRoute : NavKey
 
 @Serializable
-object RssSourceRoute
+data object RssSourceRoute : NavKey
 
 @Serializable
-data class RssArticlesRoute(val sourceId: String)
+data class RssArticlesRoute(val sourceId: String) : NavKey
 
 /**
  * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
@@ -68,7 +75,7 @@ data class RssArticlesRoute(val sourceId: String)
  * 内容含 `/ ? &`，作为 path 参数会被切断，故 Base64 传递。
  */
 @Serializable
-data class RssArticleRoute(val argsArg: String) {
+data class RssArticleRoute(val argsArg: String) : NavKey {
     val args: com.radium.inkwell.ui.rss.RssArticleArgs
         get() {
             val base: com.radium.inkwell.ui.rss.RssArticleArgs =
@@ -92,38 +99,58 @@ data class RssArticleRoute(val argsArg: String) {
 }
 
 @Serializable
-object ReplaceRuleRoute
+data object ReplaceRuleRoute : NavKey
 
 @Serializable
-object SourceManageRoute
+data object SourceManageRoute : NavKey
 
 /** 书源详情（只读）；书源不在应用内编辑，只能导入 */
 @Serializable
-data class SourceDetailRoute(val sourceId: String)
+data class SourceDetailRoute(val sourceId: String) : NavKey
 
 @Serializable
-object SettingsRoute
+data object SettingsRoute : NavKey
 
 @Serializable
-object AppearanceSettingsRoute
+data object AppearanceSettingsRoute : NavKey
 
 @Serializable
-object ReadingSettingsRoute
+data object ReadingSettingsRoute : NavKey
 
 @Serializable
-object UpdateSettingsRoute
+data object UpdateSettingsRoute : NavKey
 
 @Serializable
-object AboutSettingsRoute
+data object AboutSettingsRoute : NavKey
 
 @Serializable
-object ThemeSettingsRoute
+data object ThemeSettingsRoute : NavKey
 
 @Serializable
-object WebDavSettingsRoute
+data object WebDavSettingsRoute : NavKey
 
 @Serializable
-object FeedbackRoute
+data object FeedbackRoute : NavKey
 
 @Serializable
-object DisclaimerRoute
+data object DisclaimerRoute : NavKey
+
+/** 设置树里可作为 detail pane 的二级/三级页（不含 SettingsRoute 自身）。 */
+internal fun NavKey.isSettingsDetail(): Boolean = when (this) {
+    is AppearanceSettingsRoute,
+    is ReadingSettingsRoute,
+    is UpdateSettingsRoute,
+    is AboutSettingsRoute,
+    is ThemeSettingsRoute,
+    is WebDavSettingsRoute,
+    is FeedbackRoute,
+    is DisclaimerRoute,
+    is ReplaceRuleRoute,
+    is SourceManageRoute,
+    is SourceDetailRoute,
+    is RssSourceRoute,
+    is RssArticlesRoute,
+    is RssArticleRoute,
+    -> true
+    else -> false
+}
