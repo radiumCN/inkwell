@@ -80,6 +80,16 @@ data class BackupBook(
     val title: String,
     val author: String = "",
     val intro: String? = null,
+    /**
+     * 封面地址，**只带网络书的**。本地书的封面存的是本机绝对路径，换台设备就是条死路径，
+     * 而封面文件本身并不上传（见文件头「不含书籍文件」）。
+     *
+     * 从前整个封面信息都不进备份，于是同步过去的书架整片是灰色占位块 —— 网络书的封面
+     * 明明是个跨设备就能用的 URL，却在导出这一步被丢掉了，联网也救不回来：库里没地址可请求。
+     *
+     * 老备份没有这个键 → 默认 null，读起来就是「这条没带封面」，不影响。
+     */
+    val coverUrl: String? = null,
     val sourceId: String? = null,
     val bookUrl: String? = null,
     val tocUrl: String? = null,
@@ -263,6 +273,10 @@ object BackupMerger {
             readChapterIndex = progress.readChapterIndex,
             readCharOffset = progress.readCharOffset,
             readAt = progress.readAt,
+            // 封面不走 LWW，走「谁有算谁的」：它不是用户改得动的状态，null 只意味着
+            // 「这台机器还没拿到」。按 LWW 裁的话，接收端只要读过一次书（updatedAt 一更新），
+            // 本地那条空封面就会一直赢下去，封面永远补不回来。
+            coverUrl = meta.coverUrl ?: l.coverUrl ?: r.coverUrl,
         )
     }
 }

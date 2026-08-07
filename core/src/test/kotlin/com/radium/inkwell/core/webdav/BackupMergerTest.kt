@@ -57,6 +57,31 @@ class BackupMergerTest {
         assertEquals(listOf("c"), result.changedBooks.map { it.id })
     }
 
+    // ---------- 封面 ----------
+
+    /**
+     * 封面按 LWW 裁会永远补不回来：接收端那本书的封面是空的，可只要用户读过一次
+     * （updatedAt 一更新），本地这条空封面就赢过远端有封面的旧副本，一直空下去。
+     */
+    @Test
+    fun `本地没有封面时从远端补上`() {
+        val local = payload(book("a", updatedAt = 300))
+        val remote = payload(book("a", updatedAt = 100).copy(coverUrl = "https://x/c.jpg"))
+        val result = BackupMerger.merge(local, remote)
+        assertEquals("https://x/c.jpg", result.books.single().coverUrl)
+        assertEquals(1, result.changedBooks.size, "补到的封面要写回本地")
+    }
+
+    /** 反向也不能倒退：远端元数据更新但没带封面（比如那台是本地书），别把本地已有的抹成 null */
+    @Test
+    fun `远端没带封面时不会抹掉本地的`() {
+        val local = payload(book("a", updatedAt = 100).copy(coverUrl = "https://x/c.jpg"))
+        val remote = payload(book("a", title = "新名", updatedAt = 500))
+        val merged = BackupMerger.merge(local, remote).books.single()
+        assertEquals("新名", merged.title)
+        assertEquals("https://x/c.jpg", merged.coverUrl)
+    }
+
     // ---------- 删除墓碑 ----------
 
     /**

@@ -16,6 +16,13 @@ data class BookEntity(
     val type: Int,
     val title: String,
     val author: String = "",
+    /**
+     * 封面。同一列对两类书是两种东西：本地书存**本机绝对路径**（`filesDir/covers/xx.img`），
+     * 网络书存**远程 URL** —— Coil 两种都吃，所以 UI 侧不用分。
+     *
+     * 但凡跨设备就必须分：WebDAV 只带得走后者，前者换台机器就是条死路径
+     * （封面文件本身不上传）。见 `BackupBook.coverUrl`。
+     */
     val coverPath: String? = null,
     val intro: String? = null,
     /** 本地书：应用私有目录内的副本路径 */
@@ -39,7 +46,7 @@ data class BookEntity(
     val groupName: String = "",
     /**
      * 从书架隐藏。**不是删除** —— 书、进度、缓存都还在，只是列表里不显示。
-     * 想看回来：书架顶栏「⋮ → 显示隐藏的书」。
+     * 想看回来：长按书架顶栏的「书架」标题展开隐藏区（刻意做成暗号，菜单里平时看不到）。
      */
     val hidden: Boolean = false,
     /**

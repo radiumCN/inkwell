@@ -95,7 +95,11 @@ class WebDavRepository(
         books = bookDao.getAll().map { b ->
             BackupBook(
                 id = b.id, type = b.type, title = b.title, author = b.author,
-                intro = b.intro, sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
+                intro = b.intro,
+                // coverPath 这个列名对两类书是两种东西：网络书存的是远程 URL（跨设备可用），
+                // 本地书存的是本机绝对路径（换设备就是死路径）。只把前者带走。
+                coverUrl = b.coverPath?.takeIf { b.type == BookType.NET },
+                sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
                 totalChapters = b.totalChapters,
                 readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
                 readAt = b.readAt, addedAt = b.addedAt, updatedAt = b.updatedAt,
@@ -140,6 +144,9 @@ class WebDavRepository(
                 bookDao.update(
                     existing.copy(
                         title = b.title, author = b.author, intro = b.intro,
+                        // 只补空，不覆盖：本地书这一列是有效的本机文件路径，
+                        // 而远端对本地书永远给 null —— 拿 null 盖上去等于把封面弄丢。
+                        coverPath = existing.coverPath ?: b.coverUrl,
                         sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
                         totalChapters = maxOf(existing.totalChapters, b.totalChapters),
                         readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
@@ -153,7 +160,7 @@ class WebDavRepository(
                 bookDao.upsert(
                     BookEntity(
                         id = b.id, type = b.type, title = b.title, author = b.author,
-                        intro = b.intro, localPath = null,
+                        intro = b.intro, localPath = null, coverPath = b.coverUrl,
                         sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
                         totalChapters = b.totalChapters,
                         readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
