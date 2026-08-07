@@ -1,6 +1,6 @@
 package com.radium.inkwell.data.db.entity
 
-import androidx.room.Entity
+import androidx.room3.Entity
 
 @Entity(tableName = "chapter", primaryKeys = ["bookId", "index"])
 data class ChapterEntity(

@@ -2,7 +2,7 @@ package com.radium.inkwell.data.repo
 
 import android.content.Context
 import android.net.Uri
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import com.radium.inkwell.core.model.BookHandle
 import com.radium.inkwell.core.model.BookParserRegistry
 import com.radium.inkwell.data.db.InkwellDb
@@ -135,7 +135,7 @@ class BookRepository(
                     // 书行与目录成对落库。下面的 catch 只兜得住异常，兜不住进程被杀 ——
                     // 两句之间被杀就留下一本"有书行、没目录"的书：书架上看得见，点进去空目录。
                     // 解析和封面写盘都在事务外，别把文件 IO 圈进来拉长锁。
-                    db.withTransaction {
+                    db.withWriteTransaction {
                         bookDao.upsert(entity)
                         chapterDao.upsertAll(chapters)
                     }
@@ -162,7 +162,7 @@ class BookRepository(
             // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
             // 文件删除放在事务外：那是不可回滚的磁盘 IO，圈进来只会拉长锁。
             val now = System.currentTimeMillis()
-            db.withTransaction {
+            db.withWriteTransaction {
                 chapterDao.deleteByBook(id)
                 // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
                 hitDao.deleteByBook(id)

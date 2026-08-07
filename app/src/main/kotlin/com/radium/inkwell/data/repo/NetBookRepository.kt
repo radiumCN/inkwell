@@ -5,7 +5,7 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
-import androidx.room.withTransaction
+import androidx.room3.withWriteTransaction
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.ChapterDao
@@ -73,7 +73,7 @@ class NetBookRepository(
         val (readIndex, readOffset) = alignProgress(bookId, existing, toc)
         val entities = buildToc(bookId, toc)
         // 书行与目录一起落库：中途被杀不会留下「有书行没目录」的半成品
-        db.withTransaction {
+        db.withWriteTransaction {
             bookDao.upsert(
                 BookEntity(
                     id = bookId,
@@ -130,7 +130,7 @@ class NetBookRepository(
             // 红点记的是"自从你上次打开之后"，不是"自从上次刷新之后"
             newChapterCount = fresh.newChapterCount + added,
         )
-        db.withTransaction {
+        db.withWriteTransaction {
             replaceToc(book.id, entities)
             // 一个字段都没变就别写库。否则每本书 updatedAt 一变，书架的 observeAll 就整表重发一轮 ——
             // 下拉刷"没有新章节"时，全书架反复重组、转圈跟着掉帧。也顺带免掉一次无意义的 WebDAV 时间戳变更。
@@ -211,7 +211,7 @@ class NetBookRepository(
 
         cache.clear(book.id) // 旧源的正文缓存整本作废
         val entities = buildToc(book.id, toc)
-        db.withTransaction {
+        db.withWriteTransaction {
             replaceToc(book.id, entities)
             bookDao.update(
                 fresh.copy(

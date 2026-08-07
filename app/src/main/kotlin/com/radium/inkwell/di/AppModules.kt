@@ -1,6 +1,6 @@
 package com.radium.inkwell.di
 
-import androidx.room.Room
+import androidx.room3.Room
 import com.radium.inkwell.core.model.BookParserRegistry
 import com.radium.inkwell.core.parser.epub.EpubParser
 import com.radium.inkwell.core.parser.mobi.MobiParser

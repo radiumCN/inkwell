@@ -30,7 +30,12 @@ material3Adaptive = "1.3.0-rc01"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
 lifecycle = "2.11.0"
-room = "2.8.4"
+# Room 3 = Room 的 KMP 重构后继线，坐标整体换到 **androidx.room3**（2.x 转入维护）。
+# 不是「换个版本号」：迁移 API 换了模型 —— Migration.migrate 从
+# `fun (SupportSQLiteDatabase)` 变成 `suspend fun (SQLiteConnection)`，
+# 库内事务从 `withTransaction` 拆成 `withReadTransaction` / `withWriteTransaction`。
+# 另外没有 room3-ktx 了（并进 runtime），别照着 2.x 的依赖表加。
+room = "3.0.1"
 datastore = "1.3.0-alpha10"
 koin = "4.2.2"
 okhttp = "5.4.0"
@@ -83,9 +88,8 @@ androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-ru
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 
-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
+room-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }

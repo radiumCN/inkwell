@@ -1,9 +1,10 @@
 package com.radium.inkwell.data.db
 
-import androidx.room.Database
-import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.room3.Database
+import androidx.room3.RoomDatabase
+import androidx.room3.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
@@ -44,9 +45,9 @@ abstract class InkwellDb : RoomDatabase() {
          * 只加列、带默认值 —— 老用户的书架与阅读进度原样保留。
          */
         val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE book ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
-                db.execSQL("ALTER TABLE chapter ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
+                connection.execSQL("ALTER TABLE chapter ADD COLUMN variable TEXT NOT NULL DEFAULT ''")
             }
         }
 
@@ -58,16 +59,16 @@ abstract class InkwellDb : RoomDatabase() {
          * 老数据的 sourceJson 为空（当时没存），重转不了，只能让用户重新导入一次。
          */
         val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE book_source ADD COLUMN sourceJson TEXT NOT NULL DEFAULT ''")
-                db.execSQL("ALTER TABLE book_source ADD COLUMN converterVersion INTEGER NOT NULL DEFAULT 0")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN sourceJson TEXT NOT NULL DEFAULT ''")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN converterVersion INTEGER NOT NULL DEFAULT 0")
             }
         }
 
         /** 用户自定义的净化替换规则。纯新增表，不动任何既有数据 */
         val MIGRATION_3_4 = object : Migration(3, 4) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS replace_rule (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -87,8 +88,8 @@ abstract class InkwellDb : RoomDatabase() {
 
         /** 书签。位置存 (章, 章内字符偏移)，与阅读进度同一套坐标 —— 存页码会被改字号毁掉 */
         val MIGRATION_6_7 = object : Migration(6, 7) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS bookmark (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -101,7 +102,7 @@ abstract class InkwellDb : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_bookmark_bookId ON bookmark(bookId)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS index_bookmark_bookId ON bookmark(bookId)")
             }
         }
 
@@ -110,17 +111,17 @@ abstract class InkwellDb : RoomDatabase() {
          * 留个没人读的空表在库里只会让下一个看 schema 的人困惑。
          */
         val MIGRATION_7_8 = object : Migration(7, 8) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("DROP TABLE IF EXISTS bookmark")
-                db.execSQL("ALTER TABLE book ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("DROP TABLE IF EXISTS bookmark")
+                connection.execSQL("ALTER TABLE book ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
             }
         }
 
         /** 书籍隐藏。只加列 */
         /** 追更红点：刷新目录时新增了几章、且还没打开过 */
         val MIGRATION_10_11 = object : Migration(10, 11) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE book ADD COLUMN newChapterCount INTEGER NOT NULL DEFAULT 0")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN newChapterCount INTEGER NOT NULL DEFAULT 0")
             }
         }
 
@@ -134,9 +135,9 @@ abstract class InkwellDb : RoomDatabase() {
          * 只加列、带默认值 0（= 未删除），老数据原样保留。
          */
         val MIGRATION_13_14 = object : Migration(13, 14) {
-            override fun migrate(db: SupportSQLiteDatabase) {
+            override suspend fun migrate(connection: SQLiteConnection) {
                 listOf("book", "book_source", "replace_rule", "rss_source").forEach { table ->
-                    db.execSQL("ALTER TABLE $table ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+                    connection.execSQL("ALTER TABLE $table ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
                 }
             }
         }
@@ -147,9 +148,9 @@ abstract class InkwellDb : RoomDatabase() {
          * 通用规则（bookId 为空）不动。
          */
         val MIGRATION_14_15 = object : Migration(14, 15) {
-            override fun migrate(db: SupportSQLiteDatabase) {
+            override suspend fun migrate(connection: SQLiteConnection) {
                 val now = System.currentTimeMillis()
-                db.execSQL(
+                connection.execSQL(
                     """
                     UPDATE replace_rule
                     SET deleted = 1, updatedAt = $now
@@ -167,8 +168,8 @@ abstract class InkwellDb : RoomDatabase() {
          * 排序自然退化回原来的「全局健康度」，攒够数据才逐渐生效。
          */
         val MIGRATION_12_13 = object : Migration(12, 13) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS book_source_hit (
                         bookId TEXT NOT NULL,
@@ -189,25 +190,25 @@ abstract class InkwellDb : RoomDatabase() {
          * （订阅源 rss_source 存的本就是原生 Legado 规则，不受影响）。
          */
         val MIGRATION_11_12 = object : Migration(11, 12) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("DELETE FROM book_source")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("DELETE FROM book_source")
                 // 历史列随原生化下线（minSdk 35 的 SQLite 支持 DROP COLUMN）。
                 // 只删 book_source 的；rss_source 的同名列仍在用，不动。
-                db.execSQL("ALTER TABLE book_source DROP COLUMN sourceJson")
-                db.execSQL("ALTER TABLE book_source DROP COLUMN converterVersion")
+                connection.execSQL("ALTER TABLE book_source DROP COLUMN sourceJson")
+                connection.execSQL("ALTER TABLE book_source DROP COLUMN converterVersion")
             }
         }
 
         val MIGRATION_9_10 = object : Migration(9, 10) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE book ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
             }
         }
 
         /** 订阅源。纯新增表 */
         val MIGRATION_8_9 = object : Migration(8, 9) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS rss_source (
                         id TEXT NOT NULL PRIMARY KEY,
@@ -228,8 +229,8 @@ abstract class InkwellDb : RoomDatabase() {
 
         /** 净化规则挂到具体某本书上（阅读页长按选字建的规则）；只加列 */
         val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE replace_rule ADD COLUMN bookId TEXT NOT NULL DEFAULT ''")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE replace_rule ADD COLUMN bookId TEXT NOT NULL DEFAULT ''")
             }
         }
 
@@ -239,12 +240,12 @@ abstract class InkwellDb : RoomDatabase() {
          * 用户根本没机会拿它做后续处理（筛选失效、按响应时间排序、批量禁用）。
          */
         val MIGRATION_5_6 = object : Migration(5, 6) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE book_source ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
-                db.execSQL("ALTER TABLE book_source ADD COLUMN checkStatus INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE book_source ADD COLUMN checkMessage TEXT NOT NULL DEFAULT ''")
-                db.execSQL("ALTER TABLE book_source ADD COLUMN respondTime INTEGER NOT NULL DEFAULT -1")
-                db.execSQL("ALTER TABLE book_source ADD COLUMN checkedAt INTEGER NOT NULL DEFAULT 0")
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN groupName TEXT NOT NULL DEFAULT ''")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN checkStatus INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN checkMessage TEXT NOT NULL DEFAULT ''")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN respondTime INTEGER NOT NULL DEFAULT -1")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN checkedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

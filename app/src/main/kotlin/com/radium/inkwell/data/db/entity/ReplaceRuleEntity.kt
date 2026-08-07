@@ -1,7 +1,7 @@
 package com.radium.inkwell.data.db.entity
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
+import androidx.room3.Entity
+import androidx.room3.PrimaryKey
 
 /**
  * 净化替换规则（Legado 的「替换净化」）：把正文里的广告、水印、防盗段落替换掉。
