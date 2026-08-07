@@ -11,7 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.radium.inkwell.data.prefs.AppPrefs
-import com.radium.inkwell.ui.nav.InkwellNavHost
+import com.radium.inkwell.ui.nav.InkwellNavDisplay
 import com.radium.inkwell.ui.theme.InkwellTheme
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
@@ -48,7 +48,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             }
             InkwellTheme(config = themeConfig) {
-                InkwellNavHost()
+                InkwellNavDisplay()
             }
         }
     }

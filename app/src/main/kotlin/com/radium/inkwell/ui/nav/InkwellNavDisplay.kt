@@ -86,7 +86,7 @@ import org.koin.core.parameter.parametersOf
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun InkwellNavHost() {
+fun InkwellNavDisplay() {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
 
@@ -120,17 +120,7 @@ fun InkwellNavHost() {
     }
 
     val readerMeta = remember(animate, nav) {
-        NavDisplay.transitionSpec {
-            if (!animate) {
-                ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
-            } else {
-                scaleIn(
-                    Motion.readerEnterSpec(),
-                    initialScale = Motion.READER_OPEN_SCALE,
-                    transformOrigin = nav.openOrigin.value,
-                ) togetherWith ExitTransition.None
-            }
-        } + NavDisplay.popTransitionSpec {
+        val shrinkBack = {
             if (!animate) {
                 ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
             } else {
@@ -141,6 +131,21 @@ fun InkwellNavHost() {
                 )
             }
         }
+        NavDisplay.transitionSpec {
+            if (!animate) {
+                ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
+            } else {
+                scaleIn(
+                    Motion.readerEnterSpec(),
+                    initialScale = Motion.READER_OPEN_SCALE,
+                    transformOrigin = nav.openOrigin.value,
+                ) togetherWith ExitTransition.None
+            }
+        } +
+            NavDisplay.popTransitionSpec { shrinkBack() } +
+            // 预测性返回也得缩回书位：不显式给，NavDisplay 会退回全局的横向滑动 spec，
+            // 于是同一个「关书」动作在按返回键和拖手势下长得不一样。
+            NavDisplay.predictivePopTransitionSpec { shrinkBack() }
     }
 
     NavDisplay(

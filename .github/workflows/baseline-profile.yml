@@ -1,0 +1,89 @@
+name: Baseline Profile
+
+# 重新生成 Baseline Profile 并开 PR 回写。**手动触发**，通常在发版前跑一次。
+#
+# 为什么不塞进 release.yml、也不开 automaticGenerationDuringBuild：生成器靠 UI 自动化
+# （找「更多」「设置」「书源管理」这些 contentDescription），本来就会飘。绑上发版等于让一个
+# 会自己坏的东西卡住发版 —— 见 BaselineProfileGenerator 的 KDoc，那里已经论证过一次。
+# 发版只消费签入好的那份 profile，生成失败最多是「这次没更新」，不会连累出包。
+#
+# 什么时候该来跑一次：改了导航/转场/首屏组合这类**冷启动路径上的大改动**之后。不跑不会报错，
+# 只会悄悄退回「第一次进书很卡」—— Nav3 迁移就是这么让 profile 整份失配的（规则里全是
+# androidx/navigation/* 和已删除的 InkwellNavHostKt，ART 静默跳过不匹配的规则）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    # 起模拟器 + 装包 + 跑一遍旅程 + R8 重写 profile，整条链比普通 CI 慢一个量级
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # GitHub 的 Linux runner 有 KVM，但默认权限不让非 root 用户开 /dev/kvm。
+      # 没有这段，模拟器会退回软件模拟（慢到超时）或直接起不来。
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Generate Baseline Profile
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # :baselineprofile 的 minSdk 是 35，镜像不能更低。
+          # 顺带解决了历史上最烦的那条约束：Macrobenchmark 在 API 33+ 上生成 profile
+          # **不需要 root**，所以不必特意挑不带 Google Play 的 AOSP 镜像来换 adb root。
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          # **别关动画**（action 默认会把三档 animation scale 置 0）。App 尊重系统「移除动画」
+          # 设置（见 Motion.kt 的 animationsEnabled），关了之后转场全走 tween(0) 分支，
+          # 生成出来的 profile 就少了真实用户必然会走的那段动画代码。
+          disable-animations: false
+          script: ./gradlew :app:generateBaselineProfile
+
+      - name: Summarize diff
+        run: |
+          git --no-pager diff --stat -- app/src/release/generated/baselineProfiles/ || true
+
+      # 需要仓库 Settings → Actions → General 勾上「Allow GitHub Actions to create and
+      # approve pull requests」，否则这步 403。没有变更时它会自己跳过，不会开空 PR。
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/baseline-profile
+          # profile 一次变更动辄两万行，走 PR 才看得见规模；也不让自动任务直接改 main
+          add-paths: app/src/release/generated/baselineProfiles/
+          commit-message: |
+            perf: 重新生成 Baseline Profile
+
+            由 baseline-profile.yml 在模拟器上跑生成器产出。
+          title: "perf: 重新生成 Baseline Profile"
+          body: |
+            由 `.github/workflows/baseline-profile.yml`（手动触发）在 API 35 模拟器上跑
+            `:app:generateBaselineProfile` 产出。
+
+            合之前扫一眼：规则里应当出现当前实际在用的类（如 `androidx/navigation3/*`、
+            `InkwellNavDisplayKt`），而不是已经删掉的旧类 —— 失配的规则 ART 会静默跳过，
+            profile 看着有几万行却一条都不生效。
+
+            注意：装上包立刻测**测不出** Baseline Profile 的效果，中间隔着 ART 的后台
+            dexopt。验证方式见 `BaselineProfileGenerator` 的 KDoc。
+          delete-branch: true

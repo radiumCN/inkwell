@@ -13,7 +13,7 @@
     <!--
       预测性返回：targetSdk 36 起 Android 16 设备默认就是开的，这里显式声明是把 minSdk
       覆盖的 Android 15 设备也接上。开启后返回手势的拖拽进度会派发进应用 ——
-      navigation-compose 拿它 seek 阅读页「缩回书位」的 popExit 转场（关书跟手，
+      NavDisplay 拿它 seek 阅读页「缩回书位」的 predictivePopTransitionSpec（关书跟手，
       松手才提交、半途可反悔）。App 内返回全部走 BackHandler，无旧式 onBackPressed。
     -->
     <application

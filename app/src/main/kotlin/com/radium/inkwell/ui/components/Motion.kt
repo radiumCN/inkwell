@@ -58,7 +58,7 @@ object Motion {
      *
      * 曲线用 M3「强调减速」而非普通减速 [EnterEasing]：起步更快、收尾更缓，落定那一下像被接住，
      * 消掉线性 tween 那种匀速划过的机械感。时长压到比常规页转场 [NAV_ENTER_MS] 更短 —— 进书首帧
-     * 排版本就抢手（见 InkwellNavHost 的转场注释 / ReaderViewModel.PREFETCH_LEAD_IN_MS），转场只做点到为止的
+     * 排版本就抢手（见 InkwellNavDisplay 的转场注释 / ReaderViewModel.PREFETCH_LEAD_IN_MS），转场只做点到为止的
      * 方向暗示，别跟首帧抢时间。返回走配对的 [readerExitSpec]：镜像曲线、时长更短，理由见其注释。
      */
     const val READER_ENTER_MS = 200

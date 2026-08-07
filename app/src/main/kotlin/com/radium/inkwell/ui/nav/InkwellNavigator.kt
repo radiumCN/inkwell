@@ -10,7 +10,7 @@ import androidx.navigation3.runtime.NavKey
  * 并把进书缩放原点与导航绑在一起（同生共死）。
  */
 class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
-    /** 进书放大动画原点；旋屏后由 InkwellNavHost 清回 Center。 */
+    /** 进书放大动画原点；旋屏后由 InkwellNavDisplay 清回 Center。 */
     val openOrigin = mutableStateOf(TransformOrigin.Center)
 
     fun back() {

@@ -28,7 +28,8 @@ kotlin {
 }
 
 baselineProfile {
-    // 用已连接的设备/模拟器生成（CI 里由 baseline-profile.yml 起一台）。
+    // 用已连接的设备/模拟器生成：本地自己起一台，CI 里由
+    // .github/workflows/baseline-profile.yml（手动触发）起一台。
     // 另一条路是 Gradle Managed Device，但那样每次都要它自己下镜像、起机器，
     // 本地和 CI 各来一遍，慢且不受控 —— 我们自己起，起完复用。
     useConnectedDevices = true

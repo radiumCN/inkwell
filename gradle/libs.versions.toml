@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.2.1-beta.2"
+inkwell = "0.2.1-beta.3"
 agp = "9.3.0"
 kotlin = "2.3.20"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
@@ -77,8 +77,9 @@ room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
-koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }
-# Nav3 entry 作用域 VM：用 org.koin.compose.viewmodel.koinViewModel（勿用 android.compose 包）
+# Nav3 entry 作用域 VM：只用 org.koin.compose.viewmodel.koinViewModel。
+# koin-androidx-compose 被**故意**不引入：它的同名 koinViewModel 绑的是 Activity 的
+# ViewModelStore，在 Nav3 下退栈不清（Koin#2235）—— 依赖不在，就没人能误 import 回去。
 koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", version.ref = "koin" }
 
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

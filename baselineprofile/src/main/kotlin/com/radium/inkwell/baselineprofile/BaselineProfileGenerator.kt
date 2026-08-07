@@ -49,9 +49,14 @@ import org.junit.runner.RunWith
  * emulator -avd <avd> -no-window &      # 需 API ≥ 35 的镜像
  * ./gradlew :app:generateBaselineProfile
  * ```
+ * 手边没设备就手动触发 CI 的 **Baseline Profile** 工作流
+ * （`.github/workflows/baseline-profile.yml`），它在模拟器上跑同一条命令并开 PR 回写。
+ *
  * 产物落在 `app/src/release/generated/baselineProfiles/`，**要提交进仓库** —— 发版只用提交
  * 好的那份，不现场生成，所以生成器飘了也不会连累发版。代价是它会随代码漂移：改动大了记得
- * 重跑一次，不重跑不会报错，只会悄悄退回"第一次进书很卡"。
+ * 重跑一次，不重跑不会报错，只会悄悄退回"第一次进书很卡"。**Nav3 迁移就这么栽过一次**：
+ * profile 里 912 条规则指向 `androidx/navigation/*`、还有指向已删除的 `InkwellNavHostKt`，
+ * 全部失配 —— 而 ART 对不匹配的规则静默跳过，看着几万行、实际一条不生效。
  *
  * ### 装上不等于生效 —— 实机验证必读
  *
