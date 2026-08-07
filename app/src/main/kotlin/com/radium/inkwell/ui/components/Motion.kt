@@ -44,34 +44,10 @@ import androidx.compose.ui.platform.LocalContext
  * 用 effects 做位移会发木；用 spatial 做淡入会让透明度过冲，看着像闪了一下。
  * 「退场比入场快」这条仍然在，只是不再靠手写毫秒数，而是退场取 `fast*`、入场取 `default*`。
  *
- * **例外只有一类：页面级转场**（见 [Motion]），它们必须有确定时长，理由见 [Motion.navEnterSpec]。
+ * 仍然硬编码 tween 的只有阅读器开合那两条（见 [Motion]）：它们的时长与进书 splash 的等待
+ * 窗口是**咬合**的，换成 spring 就没有确定时长可对齐了。
  */
 object Motion {
-
-    /**
-     * 页面转场（`NavDisplay` 的 push / pop / 预测性返回）。
-     *
-     * 这里**刻意不用** `MotionScheme` 的 spring，虽然那是全局唯一动效来源。页面级转场有两条
-     * spring 满足不了的硬需求：
-     *
-     * 1. **必须有确定时长**。spring 要「落到阈值内」才算结束，整屏位移那么大的距离，尾巴上还有
-     *    几百毫秒几乎看不见的爬行；而 `AnimatedContent` 在那之前认为转场没结束 —— 画面看着已经
-     *    到位、再按返回却没反应，用户读到的就是「停顿了一秒」。组件内部那些几十 dp 的位移没这个
-     *    问题，所以那边继续用 spring。
-     * 2. **必须能被 seek**。预测性返回是拿手势进度驱动转场的，有时长的 spec 能精确对应进度，
-     *    spring 只能按算出来的时长近似，跟手不准。
-     *
-     * 220/150ms + M3 标准缓动，退场约取入场的 68%（「退场比入场快」）。改这里就是改全应用所有
-     * 页面的转场 —— 它本来就该处处一致。阅读器开合另有一对专用曲线（[readerEnterSpec]），
-     * 那是因为它还要和进书封面的等待窗口 [READER_SPLASH_DELAY_MS] 咬合。
-     */
-    const val NAV_ENTER_MS = 220
-    const val NAV_EXIT_MS = 150
-    private val NavEnterEasing: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-    private val NavExitEasing: Easing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
-
-    fun <T> navEnterSpec(): FiniteAnimationSpec<T> = tween(NAV_ENTER_MS, easing = NavEnterEasing)
-    fun <T> navExitSpec(): FiniteAnimationSpec<T> = tween(NAV_EXIT_MS, easing = NavExitEasing)
 
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。

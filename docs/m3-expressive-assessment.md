@@ -156,7 +156,7 @@ status: **pending**
 
 验证：`:core:test`/`:reader:test`/`:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。
 
-**实机反馈把「页面转场也用 spring」这条否了**（beta.7 后修，记在这里避免有人再改回去）：用户报「三级页返回停顿一秒」。原因是 spring 没有确定时长 —— 整屏位移的尾巴要爬几百毫秒才落到阈值内，`AnimatedContent` 在那之前不认为转场结束，画面看着到位、再按返回却没反应；手势返回还要靠进度 seek，spring 只能近似。页面级转场因此改回定长 tween（`Motion.navEnterSpec/navExitSpec`，220/150ms），组件级仍走令牌。判断标准是**位移尺度**：整屏用 tween，组件内几十 dp 用 spring。
+**误诊记录（beta.8，已撤）**：用户报「三级回二级干等一秒」时，曾误判成页面转场 spring 的尾巴，把 push/pop 改回定长 tween。用户当场否掉 —— 那是返回落地前的等待，不是过渡动画。根因是设置树三级页也标成了 `detailPane`，被盖住的二级页被 scaffold 卸掉组合，返回时冷启动。已改 `extraPane`；页面转场**继续走** `MotionScheme`，beta.8 的 tween 例外已撤回，别再照着那条改。
 
 ## 剩下要做的
 

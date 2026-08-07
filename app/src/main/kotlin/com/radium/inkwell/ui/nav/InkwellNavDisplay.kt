@@ -95,6 +95,9 @@ fun InkwellNavDisplay() {
     LaunchedEffect(containerSize) { nav.openOrigin.value = TransformOrigin.Center }
 
     val animate = animationsEnabled()
+    // 页面转场也走主题的动效令牌（全局唯一来源）。系统关动画时主题已换成 0 时长的一套，
+    // 所以这两条不必再自己判 animate —— 只有下面阅读器那条硬编码 tween 才需要。
+    val motion = MaterialTheme.motionScheme
     val windowAdaptiveInfo = currentWindowAdaptiveInfoV2()
     val directive = remember(windowAdaptiveInfo) {
         calculatePaneScaffoldDirective(windowAdaptiveInfo)
@@ -110,24 +113,14 @@ fun InkwellNavDisplay() {
     val dualPane = directive.maxHorizontalPartitions > 1
 
     // shared-axis X：新页从右滑入，旧页往左让出四分之一（不是整屏，留出层次感）。
-    // 必须用有确定时长的 tween，不能用主题令牌的 spring —— spring 尾巴上几百毫秒几乎
-    // 看不见位移，画面像卡住、再按返回没反应，用户读到的是「干等一秒」而不是「在播动画」。
-    // 详见 Motion.navEnterSpec。所有页面共用这一对，一级↔二级与二级↔三级手感一致。
-    val defaultPush = remember(animate) {
-        if (!animate) {
-            ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
-        } else {
-            slideInHorizontally(Motion.navEnterSpec()) { it } togetherWith
-                slideOutHorizontally(Motion.navExitSpec()) { -it / 4 }
-        }
+    // 位移走 spatial（带回弹），退场取 fast —— 「退场比入场快」这条现在由令牌档位表达。
+    val defaultPush = remember(motion) {
+        slideInHorizontally(motion.defaultSpatialSpec()) { it } togetherWith
+            slideOutHorizontally(motion.fastSpatialSpec()) { -it / 4 }
     }
-    val defaultPop = remember(animate) {
-        if (!animate) {
-            ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
-        } else {
-            slideInHorizontally(Motion.navEnterSpec()) { -it / 4 } togetherWith
-                slideOutHorizontally(Motion.navExitSpec()) { it }
-        }
+    val defaultPop = remember(motion) {
+        slideInHorizontally(motion.defaultSpatialSpec()) { -it / 4 } togetherWith
+            slideOutHorizontally(motion.fastSpatialSpec()) { it }
     }
 
     val readerMeta = remember(animate, nav) {

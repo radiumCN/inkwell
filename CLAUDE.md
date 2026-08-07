@@ -41,12 +41,11 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 动效 → `app/.../ui/components/Motion.kt`
 
-**动效来源只有两处**：组件级走 `MaterialTheme.motionScheme` 的令牌，页面级转场走 `Motion` 里那几条定长 tween（下面「例外」那条说清了为什么必须分开）。页面里优先用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`；需要裸 spec（`animateItem`、`AnimatedContent`）时读令牌，**别裸写 `tween(300)`**。
+**全应用只有一个动效来源：`MaterialTheme.motionScheme`。** 页面里优先用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`；需要裸 spec（`animateItem`、`AnimatedContent`、页面 push/pop）时读令牌，**别裸写 `tween(300)`、别再往 `Motion.kt` 加毫秒常量**。
 - **spatial / effects 分工**（M3 约定，混了会难看）：位移与尺寸（滑入、展开、缩放）用 `defaultSpatialSpec()`，纯视觉属性（alpha、颜色）用 `defaultEffectsSpec()`。effects 做位移发木；spatial 做淡入会让透明度过冲，看着像闪一下。
 - **「退场比入场快」用档位表达**：入场 `default*`、退场 `fast*`。
 - **系统「移除动画」只在一处兜住**：`InkwellTheme` 把整套 `motionScheme` 换成 0 时长的 `InstantMotionScheme`，我们写的转场与组件内部动画（Sheet 滑入、Switch 拇指位移、Chip 选中过渡）一起静止。所以帮手里**不必**再逐个判 `animationsEnabled()`；还留着它是给两类逃在主题外的场合：reader 模块自绘的翻页动画，以及「关了就干脆别做」而非缩到 0 的判断（如 `animateItem` 直接传 `null`，省掉每帧插值）。**别在组件外面另搭一套动画绕过它。**
-- **例外是页面级转场，一律用有确定时长的 tween**（`Motion.navEnterSpec/navExitSpec`，阅读器开合另有专用一对）。spring 在这儿有两个致命伤：整屏位移的尾巴要爬几百毫秒才「落到阈值内」，`AnimatedContent` 在那之前不认为转场结束 —— 画面看着到位、再按返回却没反应，用户读到的是「卡住一秒」；预测性返回靠手势进度 seek，spring 只能按算出来的时长近似，跟手不准。**判断标准是位移尺度**：整屏级的页面转场用 tween，组件内部那些几十 dp 的位移用令牌 spring。
-- 阅读器开合（`Motion.READER_*`）除了上面这条，还得和进书 splash 的等待窗口 `READER_SPLASH_DELAY_MS` 咬合，所以时长是钉死的，别顺手改。
+- **唯一还硬编码 tween 的是阅读器开合两条**（`Motion.READER_ENTER_MS` / `READER_EXIT_MS` + 强调减速/加速曲线）：它们的时长与进书 splash 的等待窗口 `READER_SPLASH_DELAY_MS` 是咬合的，spring 给不出确定时长。别顺手把它们也改成令牌。
 
 ### 主题入口 → `MaterialExpressiveTheme`
 
