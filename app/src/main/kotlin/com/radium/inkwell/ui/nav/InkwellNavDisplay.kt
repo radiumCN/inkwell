@@ -102,16 +102,17 @@ fun InkwellNavDisplay() {
     }
     val listDetailStrategy = rememberListDetailSceneStrategy<NavKey>(
         directive = directive,
-        // 默认的 PopUntilScaffoldValueChange 会「跳过不改变布局的那几条」——
-        // 双栏下 关于→意见反馈 这种下钻两格都是 detail、布局不变，返回一次就会跨掉一层，
-        // 正是单栏那个 bug 的双栏版本。PopLatest = 一次只退一格，两种宽度下行为一致。
+        // PopLatest：一次只退一格。默认的 PopUntilScaffoldValueChange 在「两级都是 detail、
+        // 布局不变」时会跨层；三级改成 extraPane 后布局会变，但四级叠在三级上（两个 extra）
+        // 时布局又不变，所以仍然必须 PopLatest，不能靠布局变化来决定退几格。
         backNavigationBehavior = BackNavigationBehavior.PopLatest,
     )
     val dualPane = directive.maxHorizontalPartitions > 1
 
     // shared-axis X：新页从右滑入，旧页往左让出四分之一（不是整屏，留出层次感）。
-    // 用有确定时长的 tween 而不是主题令牌的 spring，理由见 Motion.navEnterSpec ——
-    // 简言之：spring 的尾巴会让转场迟迟不算结束，返回键像失灵一秒；手势返回也跟不准。
+    // 必须用有确定时长的 tween，不能用主题令牌的 spring —— spring 尾巴上几百毫秒几乎
+    // 看不见位移，画面像卡住、再按返回没反应，用户读到的是「干等一秒」而不是「在播动画」。
+    // 详见 Motion.navEnterSpec。所有页面共用这一对，一级↔二级与二级↔三级手感一致。
     val defaultPush = remember(animate) {
         if (!animate) {
             ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
@@ -226,8 +227,10 @@ fun InkwellNavDisplay() {
                     viewModel = vm,
                 )
             }
+            // 三级及以上一律 extraPane：二级 detail 被盖住时仍保持组合，返回不用冷启动。
+            // 两级都标 detail 的话 scaffold 只渲染最后一个 Detail，被盖住的那层直接卸掉。
             entry<SourceManageRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
                 val vm = koinViewModel<SourceManageViewModel>()
                 SourceManageScreen(
@@ -237,7 +240,7 @@ fun InkwellNavDisplay() {
                 )
             }
             entry<SourceDetailRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
                 val vm = koinViewModel<SourceDetailViewModel> { parametersOf(route.sourceId) }
                 SourceDetailScreen(
@@ -304,7 +307,7 @@ fun InkwellNavDisplay() {
                 )
             }
             entry<RssArticlesRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
                 val vm = koinViewModel<RssArticlesViewModel> { parametersOf(route.sourceId) }
                 RssArticlesScreen(
@@ -327,19 +330,19 @@ fun InkwellNavDisplay() {
                 )
             }
             entry<RssArticleRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
                 val vm = koinViewModel<RssArticleViewModel> { parametersOf(route.args) }
                 RssArticleScreen(args = route.args, onBack = { nav.back() }, viewModel = vm)
             }
             entry<ReplaceRuleRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
                 val vm = koinViewModel<ReplaceRuleViewModel>()
                 ReplaceRuleScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<ThemeSettingsRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
                 ThemeSettingsScreen(onBack = { nav.back() })
             }
@@ -350,13 +353,13 @@ fun InkwellNavDisplay() {
                 WebDavSettingsScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<FeedbackRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
                 val vm = koinViewModel<FeedbackViewModel>()
                 FeedbackScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<DisclaimerRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
                 com.radium.inkwell.ui.legal.DisclaimerScreen(onBack = { nav.back() })
             }

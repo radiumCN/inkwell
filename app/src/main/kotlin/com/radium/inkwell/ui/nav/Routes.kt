@@ -155,7 +155,12 @@ data object DisclaimerRoute : NavKey
  * └─ 关于 (2) ─┬ 意见反馈 (3)
  *              └ 免责声明 (3)
  * ```
- * 加新设置页时**记得在这里登记层级**：漏了会被当成非设置页，宽屏下拿不到 detail pane。
+ * 加新设置页时**记得在这里登记层级**：漏了会被当成非设置页，宽屏下拿不到 pane。
+ *
+ * 层级还决定 ListDetail 的 pane 角色（见 InkwellNavDisplay）：二级 → `detailPane`，
+ * 三级及以上 → `extraPane`。两级都标成 detail 的话，被盖住的那层根本不会组合
+ * （scaffold 只渲染 `findLast { Detail }`），返回时二级页冷启动，再叠上 scaffold 的
+ * `animateTo`，看起来就像「先干等一秒才动」。
  */
 internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is AppearanceSettingsRoute,
