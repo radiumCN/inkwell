@@ -33,9 +33,6 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SecondaryButton
-import org.koin.androidx.compose.koinViewModel
-import org.koin.core.parameter.parametersOf
-
 /**
  * 书源详情：只读展示规则原文 + 一键全链路测试。书源不在应用内编辑，改规则请重新导入。
  */
@@ -44,7 +41,7 @@ import org.koin.core.parameter.parametersOf
 fun SourceDetailScreen(
     sourceId: String,
     onBack: () -> Unit,
-    viewModel: SourceDetailViewModel = koinViewModel { parametersOf(sourceId) },
+    viewModel: SourceDetailViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

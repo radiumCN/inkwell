@@ -51,13 +51,11 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReplaceRuleScreen(
     onBack: () -> Unit,
-    viewModel: ReplaceRuleViewModel = koinViewModel(),
+    viewModel: ReplaceRuleViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

@@ -40,13 +40,11 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedbackScreen(
     onBack: () -> Unit,
-    viewModel: FeedbackViewModel = koinViewModel(),
+    viewModel: FeedbackViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

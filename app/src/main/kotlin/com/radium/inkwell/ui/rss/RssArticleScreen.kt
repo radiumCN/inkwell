@@ -32,9 +32,6 @@ import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
-import org.koin.androidx.compose.koinViewModel
-import org.koin.core.parameter.parametersOf
-
 /**
  * 文章阅读。
  *
@@ -46,7 +43,7 @@ import org.koin.core.parameter.parametersOf
 fun RssArticleScreen(
     args: RssArticleArgs,
     onBack: () -> Unit,
-    viewModel: RssArticleViewModel = koinViewModel { parametersOf(args) },
+    viewModel: RssArticleViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current

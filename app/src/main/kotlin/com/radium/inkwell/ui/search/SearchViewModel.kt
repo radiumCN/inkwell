@@ -94,7 +94,7 @@ class SearchViewModel(
     private val hitsMutex = Mutex()
 
     /**
-     * 列表滚动位置放 ViewModel 里 —— NavHost 离开搜索页会拆掉 Composable，
+     * 列表滚动位置放 ViewModel 里 —— 离开搜索 entry 会拆掉 Composable，
      * remember / rememberSaveable 都不可靠；更糟的是返回时 LaunchedEffect(searchId)
      * 会再跑一遍并 scrollToItem(0)，把刚恢复的位置冲掉。
      */

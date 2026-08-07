@@ -37,18 +37,29 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.radium.inkwell.ui.bookshelf.BookshelfScreen
+import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.detail.BookDetailScreen
 import com.radium.inkwell.ui.explore.ExploreScreen
+import com.radium.inkwell.ui.explore.ExploreViewModel
+import com.radium.inkwell.ui.feedback.FeedbackScreen
+import com.radium.inkwell.ui.feedback.FeedbackViewModel
 import com.radium.inkwell.ui.preview.BookPreviewScreen
+import com.radium.inkwell.ui.preview.BookPreviewViewModel
 import com.radium.inkwell.ui.reader.ReaderScreen
+import com.radium.inkwell.ui.reader.ReaderViewModel
 import com.radium.inkwell.ui.replace.ReplaceRuleScreen
+import com.radium.inkwell.ui.replace.ReplaceRuleViewModel
 import com.radium.inkwell.ui.rss.RssArticleScreen
+import com.radium.inkwell.ui.rss.RssArticleViewModel
 import com.radium.inkwell.ui.rss.RssArticlesScreen
+import com.radium.inkwell.ui.rss.RssArticlesViewModel
 import com.radium.inkwell.ui.rss.RssSourceScreen
+import com.radium.inkwell.ui.rss.RssSourceViewModel
 import com.radium.inkwell.ui.search.SearchScreen
+import com.radium.inkwell.ui.search.SearchViewModel
 import com.radium.inkwell.ui.settings.AboutSettingsScreen
 import com.radium.inkwell.ui.settings.AppearanceSettingsScreen
 import com.radium.inkwell.ui.settings.ReadingSettingsScreen
@@ -56,14 +67,21 @@ import com.radium.inkwell.ui.settings.SettingsScreen
 import com.radium.inkwell.ui.settings.ThemeSettingsScreen
 import com.radium.inkwell.ui.settings.UpdateSettingsScreen
 import com.radium.inkwell.ui.sourcedetail.SourceDetailScreen
+import com.radium.inkwell.ui.sourcedetail.SourceDetailViewModel
 import com.radium.inkwell.ui.sourcemanage.SourceManageScreen
+import com.radium.inkwell.ui.sourcemanage.SourceManageViewModel
 import com.radium.inkwell.ui.webdav.WebDavSettingsScreen
+import com.radium.inkwell.ui.webdav.WebDavViewModel
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 /**
  * Navigation 3 + Material 3 Adaptive 入口。
  *
  * - 返回栈自持（[rememberNavBackStack]），前进/返回见 [InkwellNavigator]
- * - 宽屏：书架|详情、设置|二级 用 [ListDetailSceneStrategy]（[NavPaneGroup.sceneKey] 区分）；阅读器全屏
+ * - ViewModel 只在 `entry` 内用 [koinViewModel]（`org.koin.compose.viewmodel`）创建，绑到
+ *   [rememberViewModelStoreNavEntryDecorator] 提供的 NavEntry 作用域；退栈即清
+ * - 宽屏：书架|详情、设置|二级 用 [ListDetailSceneStrategy]；阅读器全屏
  * - 转场：常规 shared-axis X；进阅读 shared-axis Z（从书封原点缩放、不叠 alpha）
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
@@ -143,12 +161,14 @@ fun InkwellNavHost() {
                     detailPlaceholder = { PanePlaceholder("选择一本书查看详情") },
                 ),
             ) {
+                val vm = koinViewModel<BookshelfViewModel>()
                 BookshelfScreen(
                     onOpenBook = { id, origin -> nav.openBook(id, origin) },
                     onOpenDetail = { nav.go(BookDetailRoute(it)) },
                     onOpenSearch = { nav.go(SearchRoute()) },
                     onOpenExplore = { nav.go(ExploreRoute) },
                     onOpenSettings = { nav.go(SettingsRoute) },
+                    viewModel = vm,
                 )
             }
             entry<BookDetailRoute>(
@@ -162,42 +182,53 @@ fun InkwellNavHost() {
                 )
             }
             entry<ReaderRoute>(metadata = readerMeta) { route ->
-                ReaderScreen(bookId = route.bookId, onExit = { nav.back() })
+                val vm = koinViewModel<ReaderViewModel> { parametersOf(route.bookId) }
+                ReaderScreen(bookId = route.bookId, onExit = { nav.back() }, viewModel = vm)
             }
             entry<SearchRoute> {
+                val vm = koinViewModel<SearchViewModel>()
                 SearchScreen(
                     onBack = { nav.back() },
                     onOpenPreview = { nav.go(BookPreviewRoute.of(it)) },
+                    viewModel = vm,
                 )
             }
             entry<ExploreRoute> {
+                val vm = koinViewModel<ExploreViewModel>()
                 ExploreScreen(
                     onBack = { nav.back() },
                     onOpenSourceManage = { nav.go(SourceManageRoute) },
                     onOpenPreview = { nav.go(BookPreviewRoute.of(it)) },
+                    viewModel = vm,
                 )
             }
             entry<BookPreviewRoute> { route ->
+                val vm = koinViewModel<BookPreviewViewModel> { parametersOf(route.results) }
                 BookPreviewScreen(
                     results = route.results,
                     onRead = { nav.openBook(it, TransformOrigin.Center) },
                     onBack = { nav.back() },
+                    viewModel = vm,
                 )
             }
             entry<SourceManageRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
+                val vm = koinViewModel<SourceManageViewModel>()
                 SourceManageScreen(
                     onBack = { nav.back() },
                     onOpen = { nav.go(SourceDetailRoute(it)) },
+                    viewModel = vm,
                 )
             }
             entry<SourceDetailRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
+                val vm = koinViewModel<SourceDetailViewModel> { parametersOf(route.sourceId) }
                 SourceDetailScreen(
                     sourceId = route.sourceId,
                     onBack = { nav.back() },
+                    viewModel = vm,
                 )
             }
             entry<SettingsRoute>(
@@ -250,14 +281,17 @@ fun InkwellNavHost() {
             entry<RssSourceRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
+                val vm = koinViewModel<RssSourceViewModel>()
                 RssSourceScreen(
                     onBack = { nav.back() },
                     onOpenSource = { nav.go(RssArticlesRoute(it)) },
+                    viewModel = vm,
                 )
             }
             entry<RssArticlesRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
+                val vm = koinViewModel<RssArticlesViewModel> { parametersOf(route.sourceId) }
                 RssArticlesScreen(
                     sourceId = route.sourceId,
                     onBack = { nav.back() },
@@ -274,17 +308,20 @@ fun InkwellNavHost() {
                             ),
                         )
                     },
+                    viewModel = vm,
                 )
             }
             entry<RssArticleRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
-                RssArticleScreen(args = route.args, onBack = { nav.back() })
+                val vm = koinViewModel<RssArticleViewModel> { parametersOf(route.args) }
+                RssArticleScreen(args = route.args, onBack = { nav.back() }, viewModel = vm)
             }
             entry<ReplaceRuleRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
-                ReplaceRuleScreen(onBack = { nav.back() })
+                val vm = koinViewModel<ReplaceRuleViewModel>()
+                ReplaceRuleScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<ThemeSettingsRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
@@ -294,12 +331,14 @@ fun InkwellNavHost() {
             entry<WebDavSettingsRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
-                WebDavSettingsScreen(onBack = { nav.back() })
+                val vm = koinViewModel<WebDavViewModel>()
+                WebDavSettingsScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<FeedbackRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
             ) {
-                com.radium.inkwell.ui.feedback.FeedbackScreen(onBack = { nav.back() })
+                val vm = koinViewModel<FeedbackViewModel>()
+                FeedbackScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<DisclaimerRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),

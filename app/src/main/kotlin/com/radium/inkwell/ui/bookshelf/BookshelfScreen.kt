@@ -106,8 +106,6 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
-import org.koin.androidx.compose.koinViewModel
-
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -128,7 +126,7 @@ fun BookshelfScreen(
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
     onOpenSettings: () -> Unit,
-    viewModel: BookshelfViewModel = koinViewModel(),
+    viewModel: BookshelfViewModel,
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
     // 换算进书展开原点用：把封面在窗口里的坐标除以窗口尺寸

@@ -44,14 +44,12 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RssSourceScreen(
     onBack: () -> Unit,
     onOpenSource: (String) -> Unit,
-    viewModel: RssSourceViewModel = koinViewModel(),
+    viewModel: RssSourceViewModel,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

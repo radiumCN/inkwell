@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.2.1-beta.1"
+inkwell = "0.2.1-beta.2"
 agp = "9.3.0"
 kotlin = "2.3.20"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
@@ -78,6 +78,8 @@ datastore-preferences = { module = "androidx.datastore:datastore-preferences", v
 
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-androidx-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }
+# Nav3 entry 作用域 VM：用 org.koin.compose.viewmodel.koinViewModel（勿用 android.compose 包）
+koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", version.ref = "koin" }
 
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }

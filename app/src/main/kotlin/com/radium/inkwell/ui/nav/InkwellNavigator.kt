@@ -6,11 +6,11 @@ import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 
 /**
- * Nav3 返回栈上的薄封装：等价于旧 Nav2 的 `launchSingleTop` / `popBackStack`，
+ * Navigation 3 返回栈薄封装：栈顶同类替换（防双击叠栈）、详情替换保留 list pane，
  * 并把进书缩放原点与导航绑在一起（同生共死）。
  */
 class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
-    /** 进书放大动画原点；旋屏后由 NavHost 清回 Center。 */
+    /** 进书放大动画原点；旋屏后由 InkwellNavHost 清回 Center。 */
     val openOrigin = mutableStateOf(TransformOrigin.Center)
 
     fun back() {

@@ -47,16 +47,13 @@ import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
-import org.koin.androidx.compose.koinViewModel
-import org.koin.core.parameter.parametersOf
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookPreviewScreen(
     results: List<SearchResult>,
     onRead: (String) -> Unit,
     onBack: () -> Unit,
-    viewModel: BookPreviewViewModel = koinViewModel { parametersOf(results) },
+    viewModel: BookPreviewViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

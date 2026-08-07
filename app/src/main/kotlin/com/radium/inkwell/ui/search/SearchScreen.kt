@@ -54,14 +54,12 @@ import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
     onOpenPreview: (List<SearchResult>) -> Unit,
-    viewModel: SearchViewModel = koinViewModel(),
+    viewModel: SearchViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

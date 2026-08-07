@@ -51,15 +51,13 @@ import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.CollectMessages
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExploreScreen(
     onBack: () -> Unit,
     onOpenSourceManage: () -> Unit,
     onOpenPreview: (List<SearchResult>) -> Unit,
-    viewModel: ExploreViewModel = koinViewModel(),
+    viewModel: ExploreViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }

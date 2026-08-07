@@ -40,13 +40,12 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel = koinViewModel()) {
+fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 

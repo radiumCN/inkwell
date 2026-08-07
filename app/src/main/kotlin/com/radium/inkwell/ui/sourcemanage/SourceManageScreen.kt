@@ -75,14 +75,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
-import org.koin.androidx.compose.koinViewModel
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SourceManageScreen(
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
-    viewModel: SourceManageViewModel = koinViewModel(),
+    viewModel: SourceManageViewModel,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val visible by viewModel.visibleSources.collectAsStateWithLifecycle()

@@ -75,9 +75,7 @@ import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
-import org.koin.core.parameter.parametersOf
 
 /** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
 private const val AUTO_CHANGED_HINT_MS = 8_000L
@@ -86,7 +84,7 @@ private const val AUTO_CHANGED_HINT_MS = 8_000L
 fun ReaderScreen(
     bookId: String,
     onExit: () -> Unit,
-    viewModel: ReaderViewModel = koinViewModel { parametersOf(bookId) },
+    viewModel: ReaderViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scrollChapters by viewModel.scrollChapters.collectAsStateWithLifecycle()
