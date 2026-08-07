@@ -41,7 +41,16 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 时长/曲线定死在此：入场 `ENTER_MS`(220)、退场更快 `EXIT_MS`(140)、导航 `NAV_*`。用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`。
 - **所有自定义动画必须尊重系统「移除动画」** —— 用 `animationsEnabled()`（ContentObserver 实时监听）包一层，关了就 `tween(0)`。别裸写 `tween(300)`、别让 `animate*AsState`/`AnimatedVisibility`/`Crossfade` 逃出这套。
-- 框架内建动画（ModalBottomSheet/DropdownMenu/PullToRefresh）不受此约束（无公开定制口），不计。
+- **框架内建动画（ModalBottomSheet/DropdownMenu/PullToRefresh…）现在也归这条管**。以前放它们过是因为没有公开定制口；M3 Expressive 把 `MotionScheme` 变成主题参数后有了 —— 系统关动画时 `InkwellTheme` 整套换成 0 时长的 `InstantMotionScheme`，组件内部动画（Sheet 滑入、Switch 拇指位移、Chip 选中过渡）跟着一起静止。**别在组件外面另搭一套动画绕过它**。
+- 动效现在有两个来源，加新动画前想清楚归哪边：`Motion.kt` 的 tween 管**我们自己写的**转场（导航、顶栏底栏、遮罩、展开），`MaterialTheme.motionScheme` 的 spring 管**组件内部**。要跟 M3 组件同调就读 `MaterialTheme.motionScheme.defaultSpatialSpec()` 这类；两者观感不同（tween vs 弹性 spring），别在同一处界面上混着用。
+
+### 主题入口 → `MaterialExpressiveTheme`
+
+App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`（`ui/theme/Theme.kt`）与阅读页浮层的 `ReaderThemeScope` —— **两个都必须**是 `MaterialExpressiveTheme`。任一处退回普通 `MaterialTheme` 都会把 `LocalUsingExpressiveTheme` 关掉，那一片区域的组件就悄悄变回非 Expressive 形态（编译不报错，只是长得不一样）。
+
+`motionScheme` 这个参数**必须显式传**，别省：它默认 `null`，而 `null` 的含义是「沿用外层主题的方案」而非「填 expressive」—— 根节点没有外层，省掉就退成 `MotionScheme.standard()`，结果是组件形态换了、动效没换，编译与单测都看不出来。
+
+代价记清楚：Expressive 只在 material3 **1.5.0-alpha** 通道上（1.4.0-beta01 把这批 API 整批摘出了稳定线），所以 compose 依赖用的是 **`compose-bom-alpha`**，整个 Compose 栈都在预发布线。升级 BOM 前先读 release notes 的 breaking change 段，别盲升。
 
 ### 圆角 → `MaterialTheme.shapes`
 
@@ -70,6 +79,7 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`） |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
+| 整页加载态 | `LoadingState`（`Common.kt`），内部是 Expressive 的 `LoadingIndicator`。**行内 ≤24dp 的小转圈仍用 `CircularProgressIndicator`** —— 形变多边形缩小了读不出来 |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`） |
 
 出现「多个页面重复相似 UI」时，抽成组件而不是复制。

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -80,7 +82,16 @@ fun EmptyState(
  *
  * 从前每个页面各写各的 `Box(center){ CircularProgressIndicator() }`：有的裸 40dp、有的 24dp，
  * 有的配一行说明、有的没有 —— 同样是"正在加载"，跨页面长得不一样。收敛成一处。
+ *
+ * 用 M3 Expressive 的 [LoadingIndicator]（边转边形变的多边形），不是 `CircularProgressIndicator`。
+ * **尺寸分界**：整页加载态走这里；行内 ≤24dp 的小转圈（按钮上的、列表行尾的）继续用
+ * `CircularProgressIndicator` —— 形变多边形靠形状变化传达"在动"，缩到 18~24dp 就糊成一团，
+ * 反而不如一圈弧线清楚。别为了"统一"把小尺寸也换过来。
+ *
+ * `LoadingIndicator` 目前还是 `ExperimentalMaterial3ExpressiveApi`（`MaterialExpressiveTheme`
+ * 本身已不需要 opt-in，组件另算）。收在这个封装里就是为了这个：API 变了只改这一处。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LoadingState(
     modifier: Modifier = Modifier,
@@ -88,7 +99,7 @@ fun LoadingState(
 ) {
     Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            LoadingIndicator(color = MaterialTheme.colorScheme.primary)
             if (label != null) {
                 Text(
                     label,

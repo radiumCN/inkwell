@@ -1,11 +1,16 @@
 package com.radium.inkwell.ui.theme
 
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.animationsEnabled
 
 /** 统一圆角刻度：小控件 8，卡片/封面 12，大面板 16 */
 private val InkwellShapes = Shapes(
@@ -17,8 +22,39 @@ private val InkwellShapes = Shapes(
 )
 
 /**
+ * 系统「移除动画」开启时顶替掉整套 [MotionScheme]：M3 组件内部动画（Sheet 的滑入、Switch 的
+ * 拇指位移、Chip 的选中过渡……）全部拿到 0 时长的 spec，于是跟着一起静止。
+ *
+ * 从前这类框架内建动画是**逃出**无障碍约束的 —— `Motion.kt` 只管我们自己写的动画，组件内部
+ * 没有公开定制口。M3 Expressive 把 `MotionScheme` 变成主题的一等参数，这个缺口才补上。
+ *
+ * 六个 spec 全给 `tween(0)`：spatial（位移/尺寸）与 effects（透明度/颜色）两类、快中慢三档，
+ * 都是「立刻到位」。
+ */
+private object InstantMotionScheme : MotionScheme {
+    override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
+    override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
+    override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
+    override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
+    override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
+    override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
+}
+
+/**
  * Inkwell 全局主题：按用户主题配置解析配色（模式 + 预设/自定义日夜主题）。
  * 页面颜色一律走 MaterialTheme 语义令牌。
+ *
+ * 用 [MaterialExpressiveTheme] 而非 `MaterialTheme`：它把 M3 Expressive 的组件默认值与
+ * 动效方案打开（`LocalUsingExpressiveTheme`）。配色仍由 [AppThemes] 从「强调色 + 背景色」
+ * 推导、圆角仍用 [InkwellShapes] —— Expressive 换的是组件形态与动效，不是我们的令牌体系。
+ *
+ * `motionScheme` **必须显式传**：它的默认值是 `null`，而 `null` 的含义是「沿用外层
+ * `MaterialTheme` 的方案」，不是「填 expressive」—— 根节点没有外层，拿到的是
+ * `MaterialTheme.Values` 的默认值 `MotionScheme.standard()`。省掉这个参数的结果是
+ * 组件形态换成了 Expressive、动效还是 standard，编译和单测都看不出来。
+ *
+ * 注意：另一处主题入口 [com.radium.inkwell.ui.reader.ReaderThemeScope] 也必须是
+ * Expressive 版，否则进阅读页会把这个开关重新关掉。
  */
 @Composable
 fun InkwellTheme(
@@ -26,8 +62,16 @@ fun InkwellTheme(
     content: @Composable () -> Unit,
 ) {
     val (scheme, _) = AppThemes.resolve(config, systemDark = isSystemInDarkTheme())
-    MaterialTheme(
+    val animate = animationsEnabled()
+    // remember 住实例：主题走的是 staticCompositionLocalOf，换实例会让全树重组。
+    // 也别按 animate 拆成两个 MaterialExpressiveTheme 调用点 —— 那样用户在系统设置里切
+    // 「移除动画」时子树换槽位重建，滚动位置、展开态之类全丢。
+    val motion = remember(animate) {
+        if (animate) MotionScheme.expressive() else InstantMotionScheme
+    }
+    MaterialExpressiveTheme(
         colorScheme = scheme,
+        motionScheme = motion,
         shapes = InkwellShapes,
         content = content,
     )

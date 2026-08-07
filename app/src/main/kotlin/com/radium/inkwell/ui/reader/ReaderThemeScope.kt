@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -57,8 +58,14 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
             scrim = Color.Black.copy(alpha = 0.4f),
         )
     }
-    MaterialTheme(
+    // 必须也是 Expressive 版：换成普通 MaterialTheme 会把 LocalUsingExpressiveTheme 关掉，
+    // 于是一进阅读页，浮层里的组件就悄悄退回非 Expressive 形态。
+    // 三个参数都显式透传（不传 = null = 沿用外层，行为上等价），是为了不依赖那条隐含语义 ——
+    // 尤其 motionScheme：根主题在「移除动画」下换的是 0 时长方案，这里跟丢了，
+    // 阅读页就成了全 App 唯一还在动的地方。
+    MaterialExpressiveTheme(
         colorScheme = scheme,
+        motionScheme = MaterialTheme.motionScheme,
         shapes = MaterialTheme.shapes,
         typography = MaterialTheme.typography,
         content = content,

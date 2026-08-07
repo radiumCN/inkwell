@@ -9,7 +9,17 @@ kotlin = "2.3.20"
 ksp = "2.3.10"
 coroutines = "1.11.0"
 serialization = "1.11.0"
-composeBom = "2026.06.01"
+# 用的是 **compose-bom-alpha**，不是稳定的 compose-bom —— 为了 M3 Expressive。
+# M3 Expressive（MaterialExpressiveTheme、MotionScheme、ButtonGroup/FloatingToolbar…）在
+# 1.4.0-beta01 被整批摘出稳定线（"All public APIs tagged with ExperimentalMaterial3ExpressiveApi
+# ... have been removed, please switch to 1.5.0-alpha"），只活在 material3 1.5.0-alpha 通道。
+# 稳定 1.4.0 里那些类还在，但全是 internal —— 编译期就拦死，不是"加个 OptIn 就能用"。
+# 稳定 BOM 只收稳定版，永远给不到 alpha，所以启用 Expressive 就必须离开稳定 BOM。
+#
+# 为什么换整个 BOM，而不是只把 material3 单钉成 alpha：单钉也拦不住 —— material3 1.5.0-alpha
+# 要求 foundation/ui/animation 1.12.x，会把稳定 BOM 的 1.11.4 直接顶掉，栈照样进预发布，
+# 只是变成"toml 写 1.11.4、实际跑 1.12.0-beta01"。换 alpha BOM 反而更稳：它统一钉 rc01。
+composeBom = "2026.07.01"
 activityCompose = "1.13.0"
 # Navigation 3（与 Nav2 navigation-compose 不兼容，整图迁移）
 navigation3 = "1.1.4"
@@ -49,7 +59,7 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 
-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-bom = { module = "androidx.compose:compose-bom-alpha", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 compose-ui-text = { module = "androidx.compose.ui:ui-text" }
