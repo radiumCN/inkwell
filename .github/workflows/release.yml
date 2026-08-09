@@ -69,7 +69,9 @@ jobs:
 
       # 把标注 tag 的注解正文取出来当 Release 正文 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
       # 顺手剔掉 Co-Authored-By / Signed-off-by 之类 trailer 和首尾多余空行（|| true 兜底：万一被过滤空了
-      # 也不让 pipefail 把这步判失败）。应用内更新弹窗按纯文本显示正文，所以 tag 注解请写纯文本、别用 Markdown。
+      # 也不让 pipefail 把这步判失败）。
+      # 应用内更新弹窗按纯文本显示正文：tag 注解写「更新内容」+ feat/fix/优化 条目，别用 Markdown。
+      # 格式见 CLAUDE.md「发行说明格式」。
       - name: Extract tag message
         id: tag_notes
         run: |

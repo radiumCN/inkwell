@@ -128,8 +128,27 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 
 - 版本号**唯一来源**：`gradle/libs.versions.toml` 的 `inkwell = "x.y.z"`。CI 校验 tag 必须等于 `v$版本`。
 - 发布 = 打**附注 tag** `vx.y.z` 并推送 → 触发 `.github/workflows/release.yml`。
-- **tag 注解正文 = GitHub Release 正文 = 应用内更新弹窗内容**，所以**写纯文本、别用 Markdown**，面向用户描述改了什么。CI 会自动剔掉 `Co-Authored-By`/`Signed-off-by` trailer 和 `Full Changelog`。
+- **tag 注解正文 = GitHub Release 正文 = 应用内更新弹窗内容**。CI 会自动剔掉 `Co-Authored-By`/`Signed-off-by` trailer 和 `Full Changelog`。
 - 带 `-` 后缀的 tag（如 `v0.1.4-beta.1`）自动标记为**预发布**，只推测试渠道。
+
+### 发行说明格式
+
+面向用户、**纯文本**（应用内按纯文本渲染，别用 `###` / `*` 等 Markdown）。结构对齐常见阅读类 App 的 Release 习惯：
+
+```
+更新内容
+
+feat：一句话说明用户能感知到的新能力
+fix：一句话说明修了什么问题
+优化：一句话说明体验/性能上的改进
+```
+
+硬约束：
+- **第一行固定写** `更新内容`，下面空一行再列条目。
+- 每条一行，以类型前缀开头：`feat：` / `fix：` / `优化：`（必要时可加 `文档：`）。用全角冒号。
+- 写**用户能感知的结果**，别写实现细节（别提类名、模块名、依赖坐标、误诊过程）。
+- 条目按 feat → fix → 优化 排；同类型里用户感知更强的靠前。
+- 别写成长段散文，也别把多个改动揉进一条。
 
 ## 提交信息
 
