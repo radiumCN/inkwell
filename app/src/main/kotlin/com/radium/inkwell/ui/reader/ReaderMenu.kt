@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -222,48 +223,37 @@ fun ReaderMenu(
                         .navigationBarsPadding()
                         .padding(vertical = Dimens.gapS)
                 ) {
-                    // 章节进度：滑块独占中间宽度；页码挪到下方居中，避免和「下一章」挤在一起。
-                    // 关掉首尾停点 —— 窄栏里那两个圆点会像多出来的拇指。
-                    Column(
+                    // 章节进度：细轨滑块居中；上一章/下一章用文字链而不是 TextButton ——
+                    // TextButton 有固定最小高度（像一张小卡片），滑块收矮了它还在，整行照样高。
+                    // 页码不单独占一行：拖滑块时系统无障碍会读进度，视觉上留给正文。
+                    Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = Dimens.gapL),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            TextButton(
-                                onClick = { onGotoChapter(state.chapterIndex - 1) },
-                                enabled = state.chapterIndex > 0,
-                                contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                            ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
-
-                            AppSlider(
-                                value = if (state.pageCount <= 1) 0f
-                                else state.pageInChapter.toFloat() / (state.pageCount - 1),
-                                onValueChange = onSeekPercent,
-                                enabled = state.pageCount > 1,
-                                activeColor = barContent,
-                                inactiveColor = barContent.copy(alpha = 0.2f),
-                                showStopIndicators = false,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = Dimens.gapS),
-                            )
-
-                            TextButton(
-                                onClick = { onGotoChapter(state.chapterIndex + 1) },
-                                enabled = state.chapterIndex + 1 < state.chapterCount,
-                                contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                            ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
-                        }
-                        Text(
-                            "${state.pageInChapter + 1}/${state.pageCount.coerceAtLeast(1)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = barContent.copy(alpha = 0.65f),
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth(),
+                        ChapterTextAction(
+                            label = "上一章",
+                            enabled = state.chapterIndex > 0,
+                            color = barContent,
+                            onClick = { onGotoChapter(state.chapterIndex - 1) },
+                        )
+                        AppSlider(
+                            value = if (state.pageCount <= 1) 0f
+                            else state.pageInChapter.toFloat() / (state.pageCount - 1),
+                            onValueChange = onSeekPercent,
+                            enabled = state.pageCount > 1,
+                            activeColor = barContent,
+                            inactiveColor = barContent.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = Dimens.gapS),
+                        )
+                        ChapterTextAction(
+                            label = "下一章",
+                            enabled = state.chapterIndex + 1 < state.chapterCount,
+                            color = barContent,
+                            onClick = { onGotoChapter(state.chapterIndex + 1) },
                         )
                     }
                     Spacer(Modifier.height(Dimens.gapXS))
@@ -351,6 +341,33 @@ fun ReaderMenu(
         }
     }
 
+}
+
+/**
+ * 底栏「上一章 / 下一章」。不用 [TextButton]：它自带按钮最小高度，滑块收成细轨后
+ * 两边还像两张小卡片，整行高度被它们钉死。文字链 + [Dimens.touchTarget] 保触控，视觉跟轨对齐。
+ */
+@Composable
+private fun ChapterTextAction(
+    label: String,
+    enabled: Boolean,
+    color: Color,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (enabled) color else color.copy(alpha = 0.38f),
+        modifier = Modifier
+            .heightIn(min = Dimens.touchTarget)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = Dimens.gapXS)
+            .wrapContentHeight(align = Alignment.CenterVertically),
+    )
 }
 
 @Composable

@@ -1,27 +1,39 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 
 /**
  * 全应用统一的滑块。
  *
- * Expressive 默认是**竖条 thumb**（Handle 又高又窄）+ thumb 与轨道留缝，看起来进度像
- * 「一段厚胶囊 + 一根竖线」，行高被拇指抬得很高 —— 阅读底栏、亮度、调色这种窄位放不下。
- * 这里统一成**圆点拇指 + 连续轨道**（`thumbTrackGapSize = 0`）：仍走官方 [Slider] /
- * [SliderDefaults]（拖动、无障碍、主题色都在），只是换掉默认形，不再自画一套 SlimSlider。
+ * Expressive 默认轨高被 token 钉死（`Track` 内部会再 `.height(TrackHeight)`，外传
+ * `Modifier.height` 盖不掉），竖条拇指还会把行高再抬一截。这里自绘
+ * [Dimens.sliderTrack] 连续圆角轨 + [Dimens.sliderThumb] 圆点拇指：仍挂官方 [Slider]
+ * （拖动、无障碍、步进都在），只换形。
  *
  * @param activeColor 覆盖 thumb 与已完成轨道色。**只给阅读器浮层用** —— 那里的底色是纸色，
  *   不是 `colorScheme.surface`，用主题 primary 会在深色纸上糊掉。其余地方一律传 null 走主题。
- * @param showStopIndicators 首尾圆点停点。连续拖动（章节进度、亮度、调色）默认关。
+ * @param showStopIndicators 保留参数以兼容旧调用；细轨形态下不再画首尾停点。
  */
 @Composable
 fun AppSlider(
@@ -35,6 +47,7 @@ fun AppSlider(
     onValueChangeFinished: (() -> Unit)? = null,
     activeColor: Color? = null,
     inactiveColor: Color? = null,
+    @Suppress("UNUSED_PARAMETER")
     showStopIndicators: Boolean = false,
 ) {
     val colors = if (activeColor == null && inactiveColor == null) {
@@ -61,37 +74,48 @@ fun AppSlider(
         colors = colors,
         interactionSource = interactionSource,
         thumb = {
-            SliderDefaults.Thumb(
-                interactionSource = interactionSource,
-                colors = colors,
-                enabled = enabled,
-                thumbSize = CompactThumbSize,
-            )
+            val color = if (enabled) colors.thumbColor else colors.disabledThumbColor
+            Box(
+                Modifier
+                    .size(Dimens.sliderThumb)
+                    .hoverable(interactionSource)
+                    .pointerHoverIcon(PointerIcon.Hand),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(Dimens.sliderThumb).background(color, CircleShape))
+            }
         },
         track = { state ->
-            SliderDefaults.Track(
-                sliderState = state,
-                enabled = enabled,
-                colors = colors,
-                // 去掉拇指两侧的缝：否则已完成段会缩成厚胶囊，和竖条拇指叠在一起更显高
-                thumbTrackGapSize = 0.dp,
-                drawStopIndicator = if (showStopIndicators) {
-                    {
-                        with(SliderDefaults) {
-                            drawStopIndicator(
-                                offset = it,
-                                color = colors.thumbColor,
-                                size = TrackStopIndicatorSize,
-                            )
-                        }
-                    }
+            CompactTrack(
+                state = state,
+                activeColor = if (enabled) colors.activeTrackColor else colors.disabledActiveTrackColor,
+                inactiveColor = if (enabled) {
+                    colors.inactiveTrackColor
                 } else {
-                    null
+                    colors.disabledInactiveTrackColor
                 },
             )
         },
     )
 }
 
-/** 圆点拇指：边长对齐 [Dimens.iconSm]，远矮于 Expressive 默认竖条 Handle */
-private val CompactThumbSize = DpSize(Dimens.iconSm, Dimens.iconSm)
+@Composable
+private fun CompactTrack(
+    state: SliderState,
+    activeColor: Color,
+    inactiveColor: Color,
+) {
+    val fraction = state.coercedValueAsFraction
+    Canvas(Modifier.fillMaxWidth().height(Dimens.sliderTrack)) {
+        val radius = CornerRadius(size.height / 2f, size.height / 2f)
+        drawRoundRect(color = inactiveColor, cornerRadius = radius)
+        val activeWidth = size.width * fraction
+        if (activeWidth > 0f) {
+            drawRoundRect(
+                color = activeColor,
+                size = Size(activeWidth, size.height),
+                cornerRadius = radius,
+            )
+        }
+    }
+}

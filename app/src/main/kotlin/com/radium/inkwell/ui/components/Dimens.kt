@@ -94,4 +94,8 @@ object Dimens {
     val compactFieldHeight = 44.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
+    /** 滑块轨道厚度。Expressive 默认轨太厚，阅读底栏放不下 */
+    val sliderTrack = 4.dp
+    /** 滑块圆点拇指。远矮于 Expressive 竖条 Handle */
+    val sliderThumb = 12.dp
 }
