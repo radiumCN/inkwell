@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 
@@ -49,7 +50,7 @@ fun EmptyState(
             )
             Text(
                 title,
-                Modifier.padding(top = 16.dp),
+                Modifier.padding(top = Dimens.gapL),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -66,7 +67,7 @@ fun EmptyState(
                 )
             }
             if (actionLabel != null && onAction != null) {
-                TextButton(onClick = onAction, Modifier.padding(top = 8.dp)) {
+                TextButton(onClick = onAction, Modifier.padding(top = Dimens.gapS)) {
                     Text(actionLabel)
                 }
             }
@@ -77,16 +78,8 @@ fun EmptyState(
 /**
  * 加载态。与 [EmptyState]/[ErrorState] 三态对称，全应用统一形态。
  *
- * 从前每个页面各写各的 `Box(center){ CircularProgressIndicator() }`：有的裸 40dp、有的 24dp，
- * 有的配一行说明、有的没有 —— 同样是"正在加载"，跨页面长得不一样。收敛成一处。
- *
- * 用 M3 Expressive 的 [LoadingIndicator]（边转边形变的多边形），不是 `CircularProgressIndicator`。
- * **尺寸分界**：整页加载态走这里；行内 ≤24dp 的小转圈（按钮上的、列表行尾的）继续用
- * `CircularProgressIndicator` —— 形变多边形靠形状变化传达"在动"，缩到 18~24dp 就糊成一团，
- * 反而不如一圈弧线清楚。别为了"统一"把小尺寸也换过来。
- *
- * `LoadingIndicator` 目前还是 `ExperimentalMaterial3ExpressiveApi`（`MaterialExpressiveTheme`
- * 本身已不需要 opt-in，组件另算）。收在这个封装里就是为了这个：API 变了只改这一处。
+ * 内部是 Expressive [LoadingIndicator]。行内小尺寸走 [AppLoadingIndicator]，
+ * 别再写 `CircularProgressIndicator`。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -96,7 +89,7 @@ fun LoadingState(
 ) {
     Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            LoadingIndicator(color = MaterialTheme.colorScheme.primary)
+            AppLoadingIndicator()
             if (label != null) {
                 Text(
                     label,
@@ -108,6 +101,39 @@ fun LoadingState(
             }
         }
     }
+}
+
+/**
+ * Expressive 不确定进度指示。按钮 / 顶栏 / 列表尾 / 阅读纸色上的转圈都走这里；
+ * 用 [size] 缩放到目标尺寸（默认组件固有大小）。OptIn 收在封装里。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AppLoadingIndicator(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    size: Dp? = null,
+) {
+    LoadingIndicator(
+        modifier = if (size != null) modifier.size(size) else modifier,
+        color = color,
+    )
+}
+
+/**
+ * 确定进度条。用 Expressive [LinearWavyProgressIndicator]，搜索/书源校验/更新下载三处共用。
+ * OptIn 收在封装里，调用点不必各自标实验 API。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun DeterminateProgressBar(
+    progress: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    LinearWavyProgressIndicator(
+        progress = progress,
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
 /**
@@ -247,10 +273,9 @@ fun BookListRow(
                     )
                 }
                 if (trailingLoading) {
-                    CircularProgressIndicator(
-                        Modifier.size(Dimens.buttonSpinner),
-                        strokeWidth = 2.dp,
+                    AppLoadingIndicator(
                         color = MaterialTheme.colorScheme.primary,
+                        size = Dimens.buttonSpinner,
                     )
                 }
             }

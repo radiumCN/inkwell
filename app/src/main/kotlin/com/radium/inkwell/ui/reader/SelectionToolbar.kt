@@ -4,13 +4,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -21,16 +26,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 
 /**
- * 选中文字后的操作条。贴在屏幕底部而不是浮在选区旁边 ——
- * 浮动气泡要算避让（选区在顶部时往下、在底部时往上，还得避开挖孔），
- * 而这里真正要给的就三个动作，底部固定位置反而更好点。
+ * 选中文字后的操作条。
+ *
+ * 动作行用 Expressive [HorizontalFloatingToolbar]（底部居中的浮动药丸）；
+ * 替换表单仍用贴底 [Surface]（表单宽度与输入需要全宽，不适合塞进药丸）。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SelectionToolbar(
     selectedText: String,
@@ -43,23 +51,20 @@ fun SelectionToolbar(
     var replacing by remember { mutableStateOf(false) }
     var replacement by remember { mutableStateOf("") }
 
-    Surface(
-        modifier.fillMaxWidth(),
-        // 渲染在 ReaderThemeScope 内，直接吃语义色。靠顶部一道发丝线与正文分层，不投影 ——
-        // 同色纸上的投影会糊成一道脏灰线（与阅读菜单顶/底栏同一处理）。
-        color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        Column {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Column(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)) {
-            Text(
-                "「$selectedText」",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (replacing) {
+    if (replacing) {
+        Surface(
+            modifier.fillMaxWidth().navigationBarsPadding(),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = MaterialTheme.shapes.large,
+        ) {
+            Column(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)) {
+                Text(
+                    "「$selectedText」",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 OutlinedTextField(
                     value = replacement,
                     onValueChange = { replacement = it },
@@ -85,28 +90,44 @@ fun SelectionToolbar(
                         },
                     )
                 }
-            } else {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    TextButton(onClick = onCopy) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null)
-                        Text(" 复制")
-                    }
-                    // 最常用的动作：把这句话从本书里删掉
-                    TextButton(onClick = onPurify) {
-                        Icon(Icons.Default.CleaningServices, contentDescription = null)
-                        Text(" 净化")
-                    }
-                    TextButton(onClick = { replacing = true }) {
-                        Icon(Icons.Default.SwapHoriz, contentDescription = null)
-                        Text(" 替换")
-                    }
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                }
             }
         }
+    } else {
+        Column(
+            modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "「$selectedText」",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .padding(bottom = Dimens.gapS)
+                    .fillMaxWidth(),
+            )
+            HorizontalFloatingToolbar(
+                expanded = true,
+                colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
+            ) {
+                IconButton(onClick = onCopy) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "复制")
+                }
+                // 最常用的动作：把这句话从本书里删掉
+                IconButton(onClick = onPurify) {
+                    Icon(Icons.Default.CleaningServices, contentDescription = "净化")
+                }
+                IconButton(onClick = { replacing = true }) {
+                    Icon(Icons.Default.SwapHoriz, contentDescription = "替换")
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "取消")
+                }
+            }
         }
     }
 }

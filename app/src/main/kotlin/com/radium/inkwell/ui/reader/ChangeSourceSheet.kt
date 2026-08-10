@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -20,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
@@ -86,7 +86,7 @@ fun ChangeSourceSheet(
                     state.changingSource || (state.searchingSources && candidates.isEmpty()) -> Box(
                         Modifier.fillMaxWidth().padding(Dimens.gapXL),
                         contentAlignment = Alignment.Center,
-                    ) { CircularProgressIndicator() }
+                    ) { AppLoadingIndicator() }
                     candidates.isEmpty() -> Text(
                         when {
                             // 中途关掉再开：半截且一个都没命中，别说成「都没有」

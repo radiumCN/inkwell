@@ -19,11 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.DeterminateProgressBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -144,12 +144,11 @@ fun SearchScreen(
                 enter = expandEnter(),
                 exit = expandExit(),
             ) {
-                LinearProgressIndicator(
+                DeterminateProgressBar(
                     progress = {
                         if (state.sourceCount == 0) 0f
                         else state.doneCount.toFloat() / state.sourceCount
                     },
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             if (state.results.isEmpty() && !state.searching) {
@@ -202,7 +201,7 @@ fun SearchScreen(
                     if (state.loadingMore) {
                         item {
                             Box(Modifier.fillMaxWidth().padding(Dimens.gapL), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.size(Dimens.iconMd))
+                                AppLoadingIndicator(size = Dimens.iconMd)
                             }
                         }
                     }

@@ -41,10 +41,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -70,9 +72,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
@@ -106,6 +105,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.expandEnter
@@ -122,7 +122,7 @@ private fun originOf(bounds: Rect?, window: IntSize): TransformOrigin {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BookshelfScreen(
     onOpenBook: (String, TransformOrigin) -> Unit,
@@ -303,10 +303,9 @@ fun BookshelfScreen(
                             enabled = !importing,
                         ) {
                             if (importing) {
-                                CircularProgressIndicator(
-                                    Modifier.size(Dimens.buttonSpinner),
-                                    strokeWidth = 2.dp,
+                                AppLoadingIndicator(
                                     color = LocalContentColor.current,
+                                    size = Dimens.buttonSpinner,
                                 )
                             } else {
                                 Icon(Icons.Default.Add, contentDescription = "导入本地书")
@@ -414,10 +413,20 @@ fun BookshelfScreen(
                         ),
                     )
                 }
+                val pullRefreshState = rememberPullToRefreshState()
                 PullToRefreshBox(
                     isRefreshing = refreshing,
                     onRefresh = { viewModel.refreshAll() },
                     modifier = Modifier.fillMaxSize(),
+                    state = pullRefreshState,
+                    indicator = {
+                        // Expressive 形变指示，替代默认圆形 PullToRefreshDefaults.Indicator
+                        PullToRefreshDefaults.LoadingIndicator(
+                            state = pullRefreshState,
+                            isRefreshing = refreshing,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    },
                 ) {
                 // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
                 // 写进 items 里就是每本书挂一个
@@ -426,7 +435,7 @@ fun BookshelfScreen(
                 val motion = MaterialTheme.motionScheme
                 when (layout) {
                     BookshelfLayout.GRID -> LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 96.dp),
+                        columns = GridCells.Adaptive(minSize = Dimens.bookshelfGridMin),
                         modifier = Modifier.fillMaxSize(),
                         // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
                         // 而最后一排仍能滚清导航条不被挡住
@@ -589,21 +598,12 @@ fun BookshelfScreen(
                         singleLine = true,
                     )
                     if (groups.isNotEmpty()) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = Dimens.gapS),
-                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                        ) {
-                            groups.forEach { g ->
-                                FilterChip(
-                                    selected = groupInput == g,
-                                    onClick = { groupInput = g },
-                                    label = { Text(g) },
-                                )
-                            }
-                        }
+                        ChipRow(
+                            options = groups,
+                            selectedIndex = groups.indexOf(groupInput),
+                            onSelect = { groupInput = groups[it] },
+                            modifier = Modifier.padding(top = Dimens.gapS),
+                        )
                     }
                 }
             },
@@ -654,22 +654,13 @@ fun BookshelfScreen(
                         singleLine = true,
                     )
                     if (groups.isNotEmpty()) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = Dimens.gapS),
-                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                        ) {
-                            // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
-                            groups.forEach { g ->
-                                FilterChip(
-                                    selected = groupInput == g,
-                                    onClick = { groupInput = g },
-                                    label = { Text(g) },
-                                )
-                            }
-                        }
+                        // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
+                        ChipRow(
+                            options = groups,
+                            selectedIndex = groups.indexOf(groupInput),
+                            onSelect = { groupInput = groups[it] },
+                            modifier = Modifier.padding(top = Dimens.gapS),
+                        )
                     }
                 }
             },

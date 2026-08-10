@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,6 +40,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.runtime.snapshotFlow
@@ -247,7 +247,7 @@ fun ReaderScreen(
                 Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator(color = Color(state.settings.theme.textColor))
+                AppLoadingIndicator(color = Color(state.settings.theme.textColor))
                 Spacer(Modifier.height(Dimens.gapXL))
                 Text(
                     "正在自动换源…",
@@ -302,7 +302,7 @@ fun ReaderScreen(
                 // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
                 // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
                 if (firstContentShown) {
-                    CircularProgressIndicator(
+                    AppLoadingIndicator(
                         modifier = Modifier.align(Alignment.Center),
                         color = Color(state.settings.theme.textColor),
                     )
@@ -327,7 +327,7 @@ fun ReaderScreen(
                         Spacer(Modifier.height(Dimens.gapXL))
                         // 封面只交代"在开哪本书"，还得有个东西说明"仍在工作中"，
                         // 否则慢网络下一张静止的封面像卡死了
-                        CircularProgressIndicator(color = Color(state.settings.theme.textColor))
+                        AppLoadingIndicator(color = Color(state.settings.theme.textColor))
                     }
                 }
             }

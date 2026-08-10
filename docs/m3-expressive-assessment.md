@@ -82,29 +82,25 @@ Expressive 新增的 `FloatingToolbar`、`ButtonGroup`、`LoadingIndicator` 正�
 
 | Expressive 组件 | 撞上的现有实现 | 结论 |
 |---|---|---|
-| `LoadingIndicator` | `LoadingState`（`Common.kt`，5 个页面在用） | **已替换**。整页加载态换成形变多边形，调用点一处没动 |
-| `LoadingIndicator`（小尺寸） | `AppButtons` 的 18dp 按钮转圈、`SettingRow` 行尾 18dp、Explore/Search 的 24dp 内联 | **不用**。形变要靠形状变化才读得出，缩到 ≤24dp 糊成一团，不如一圈弧线清楚。尺寸分界已写进 `LoadingState` 的 KDoc |
-| `LoadingIndicator`（阅读器内） | `ReaderScreen` / `ChangeSourceSheet` 的转圈（纸色着色） | **不用**。内容区是刻意独立的纸张世界，多边形形变在纸上过跳 |
+| `LoadingIndicator` | 全库不确定进度（整页 / 按钮 / 顶栏 / 列表尾 / 阅读纸色 / 换源） | **已统一**到 `AppLoadingIndicator` / `LoadingState`。零 `CircularProgressIndicator` 调用点 |
+| `PullToRefreshDefaults.LoadingIndicator` | 书架下拉刷新默认圆指示 | **已替换**（`BookshelfScreen`） |
 | `ContainedLoadingIndicator` | 无对应（我们没有带容器的加载态） | 不用 |
-| `WavyProgressIndicator` | `LinearProgressIndicator` × 3（书源校验、搜索、更新下载） | **暂不用**。默认高度从 4dp 涨到约 10dp，会顶破这三处的紧凑布局；而且都是「要读进度数字」的确定进度，波浪是纯装饰。等实机看过再议 |
-| `FloatingToolbar` | `SelectionToolbar`（选中文字后贴底的操作条） | **不用**。贴底是刻意决定 —— 浮动要算选区避让还得躲挖孔，`SelectionToolbar` 的 KDoc 已写明；换成浮动药丸等于推翻这个结论 |
-| `FloatingToolbar` | `ReaderMenu` 的顶栏 / 底栏 | **不用**。它们是全宽栏 + 发丝线分层、与纸张同色不投影（同色纸上的投影会糊成脏灰线）；浮动药丸必然带阴影 |
-| `ButtonGroup` | `SelectionToolbar` 里四个 TextButton 一排 | **候选，未落地**。这是全库最贴合的一处（连体按钮 + 按压挤压邻居），但它改的是核心阅读交互，必须实机看过再定 |
-| `ButtonGroup` | `ChipRow` | 不用。`ChipRow` 是横滚单选 chip 条，不是定宽连体按钮组，语义不同 |
-| `SplitButton` | 无对应（没有「主操作 + 下拉」形态的按钮） | 不用 |
-| `FloatingActionButtonMenu` / `ToggleFloatingActionButton` | `ReplaceRuleScreen` 的单个 FAB | 不用。只有一个动作，展开菜单没有意义 |
-| `MaterialShapes` | `InkwellShapes` 五档圆角刻度 | 不用。我们的刻度是 4dp 栅格的一部分；`MaterialShapes` 是装饰形状库（`LoadingIndicator` 内部已经在用它） |
-| 可交互 `ListItem`（Expressive） | 各页手搓 `Row` + `clickable`/`combinedClickable` | **已统一**到 `ContentListItem` / `ChapterListItem`（`ui/components/ContentListItem.kt`）。覆盖书架、搜索/发现 `BookListRow`、书源/RSS/净化、目录三处、换源、OptionPicker、AppIcon、SettingRow/SwitchRow。未选 `surfaceContainerLow`、选中 `secondaryContainer`；LazyColumn 用 `listContentPadding` + `ListSpacing`。长列表不用 `SegmentedListItem` |
-| `Snackbar` | 手搓居中胶囊（`AppSnackbar` Surface） | **已改回**官方 `Snackbar(snackbarData)`；`AppSnackbarHost` 只负责边距。颜色/形状/elevation 走 `SnackbarDefaults` |
-| `AlertDialog` | 已用官方组件，但 `extraLarge` 曾是 24dp | **形状对齐**：主题 `extraLarge` → 28dp（M3 Dialog 规范） |
+| `WavyProgressIndicator` | 搜索 / 书源校验 / 更新下载 | **已替换**为 `DeterminateProgressBar`（`LinearWavyProgressIndicator`） |
+| `HorizontalFloatingToolbar` | `SelectionToolbar` 动作行 | **已落地**。底部居中浮动药丸；替换表单仍用全宽 Surface（输入需要全宽） |
+| `FloatingToolbar`（阅读菜单顶/底栏） | 全宽纸色栏 + 发丝线 | **不用浮动药丸**。同色纸上的投影会糊成脏灰线；栏内动作已改 `ButtonGroup`，Chip/Slider 走 `ReaderThemeScope` |
+| `ButtonGroup` | 选区动作、阅读菜单底栏动作 | **已落地**（含 overflow） |
+| `ButtonGroup` | `ChipRow` | 不用。语义是横滚单选 chip，不是定宽连体按钮组 |
+| `SplitButton` | 无对应 | 不用 |
+| `FloatingActionButtonMenu` | `ReplaceRuleScreen` 单个 FAB | 不用。只有一个动作；FAB 本身在 Expressive 主题下已是 Expressive 形态 |
+| `FlexibleTopAppBar` | 各页经典 `TopAppBar` | **不必换组件**。`MaterialExpressiveTheme` 下 `TopAppBar` 已吃 Expressive token；Flexible 变体只为滚动折叠，短设置页无收益 |
+| `MaterialShapes` | `InkwellShapes` 五档圆角刻度 | 不用。我们的刻度是 4dp 栅格；`MaterialShapes` 是装饰形状库 |
+| 可交互 `ListItem` | 手搓列表行 | **已统一**到 `ContentListItem` / `ChapterListItem` |
+| `FilterChip` 横条 | 手搓 chip 条 | **已统一**到 `ChipRow`（`trailing` 给额外动作） |
+| `Snackbar` / `AlertDialog` | 自定义胶囊 / 24dp 圆角 | **官方 Snackbar**；`extraLarge` → 28dp |
 
-opt-in 复查结论：**26 处 `ExperimentalMaterial3Api` 一处都摘不掉** —— `AppBarKt` 在 alpha25 里仍带这个标记，而这些 opt-in 绝大多数是为 `TopAppBar` 那一套加的。反倒新增了 1 处 `ExperimentalMaterial3ExpressiveApi`（`Common.kt` 的 `LoadingState`）：`MaterialExpressiveTheme` 与 `MotionScheme` 本身已不需要 opt-in，但**组件另算**，`LoadingIndicator` 还是实验性的。收在封装里就是为这个 —— API 变了只改一处。
+opt-in：`ExperimentalMaterial3ExpressiveApi` 收在 `AppLoadingIndicator` / `DeterminateProgressBar` / `SelectionToolbar` / `ReaderMenu` / 书架下拉刷新入口。
 
-顺手确认了一件相关的事（本来担心是第 1 阶段引入的回归）：`ProgressIndicatorKt` / `LoadingIndicatorKt` / `WavyProgressIndicatorKt` **都不读 `MotionScheme`**（反编译，0 处引用）。所以「移除动画」下 `InstantMotionScheme` 不会把转圈冻成一张静态残图 —— 那种冻住的进度指示比转着更像坏了。
-
-弃用迁移：`rememberModalBottomSheetState(skipPartiallyExpanded = true)` → `rememberBottomSheetState(initialValue = Hidden, enabledValues = setOf(Hidden, Expanded))`（`AppIconSheet.kt`，按官方 `ReplaceWith` 改）。
-
-status: **本轮完成**（表内「候选/暂不用」两项挂在实机验证后）；verify: 见上表，每行有结论
+status: **组件层按「全面符合」收口**；阅读菜单顶/底栏保持全宽纸色是纸书产品决定，不是漏用 Expressive。
 
 ### 6. 阅读器
 
@@ -163,8 +159,7 @@ status: **pending**
 
 ## 剩下要做的
 
-1. **第 0 项**：实机全页面截图巡检 —— 唯一的真实风险敞口，下面两项都卡在它后面；这轮换了转场物理，更该看一眼。
-2. 表里挂起的两项：`SelectionToolbar` 要不要换 `ButtonGroup`；三处 `LinearProgressIndicator` 要不要换 `WavyProgressIndicator`（先量它的实际高度）。
-3. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`AppTabs` 都是新类，旧 profile 规则覆盖不到）。
+1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。
+2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs` 都是新类，旧 profile 规则覆盖不到）。
 
 每一步都要跑通：`:core:test`、`:reader:test`、`:app:testDebugUnitTest`、`:app:lintDebug`、`assembleDebug`。

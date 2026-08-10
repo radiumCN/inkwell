@@ -16,7 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -160,7 +160,7 @@ fun ExploreScreen(
                             Box(
                                 Modifier.fillMaxWidth().padding(Dimens.gapL),
                                 contentAlignment = Alignment.Center,
-                            ) { CircularProgressIndicator(Modifier.size(Dimens.iconMd)) }
+                            ) { AppLoadingIndicator(size = Dimens.iconMd) }
                         }
                     }
                 }

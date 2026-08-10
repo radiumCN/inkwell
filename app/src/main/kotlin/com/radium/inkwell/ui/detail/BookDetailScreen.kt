@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -45,6 +44,7 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.ChapterListItem
@@ -176,10 +176,7 @@ fun BookDetailScreen(
                             enabled = !refreshing,
                         ) {
                             if (refreshing) {
-                                CircularProgressIndicator(
-                                    Modifier.size(Dimens.buttonSpinner),
-                                    strokeWidth = 2.dp,
-                                )
+                                AppLoadingIndicator(size = Dimens.buttonSpinner)
                             } else {
                                 Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
                             }
@@ -232,7 +229,7 @@ fun BookDetailScreen(
                                 .padding(Dimens.gapXXL),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            CircularProgressIndicator(Modifier.size(Dimens.iconMd))
+                            AppLoadingIndicator(size = Dimens.iconMd)
                             Spacer(Modifier.height(Dimens.gapM))
                             Text(
                                 "正在获取目录…",
@@ -298,7 +295,10 @@ private fun Header(
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
-                modifier = Modifier.size(width = 96.dp, height = 128.dp),
+                modifier = Modifier.size(
+                    width = Dimens.coverDetailWidth,
+                    height = Dimens.coverDetailHeight,
+                ),
                 placeholderChars = 4,
             )
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {

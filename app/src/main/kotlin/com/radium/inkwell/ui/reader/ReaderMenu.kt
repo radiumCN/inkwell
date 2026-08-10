@@ -33,8 +33,10 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -91,7 +93,7 @@ import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ReaderMenu(
     visible: Boolean,
@@ -257,34 +259,55 @@ fun ReaderMenu(
                         ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
                     }
                     HorizontalDivider()
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = Dimens.gapXS),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    // Expressive 连体按钮组；窄屏溢出去走官方 OverflowIndicator
+                    ButtonGroup(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = Dimens.gapXS, start = Dimens.gapS, end = Dimens.gapS),
+                        overflowIndicator = { menuState ->
+                            ButtonGroupDefaults.OverflowIndicator(menuState = menuState)
+                        },
                     ) {
-                        TextButton(onClick = { showToc = true }) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
-                            Text(" 目录")
-                        }
+                        clickableItem(
+                            onClick = { showToc = true },
+                            label = "目录",
+                            icon = {
+                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                            },
+                        )
                         if (state.isNetBook) {
-                            TextButton(onClick = onSearchSources) {
-                                Icon(Icons.Default.SwapHoriz, contentDescription = null)
-                                Text(" 换源")
-                            }
+                            clickableItem(
+                                onClick = onSearchSources,
+                                label = "换源",
+                                icon = {
+                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                },
+                            )
                         }
                         // 滚动模式下没有"页"，自动翻页无从谈起
                         if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
-                            TextButton(onClick = onToggleAutoFlip) {
-                                Icon(
-                                    if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                )
-                                Text(if (state.autoFlipping) " 停止" else " 自动")
-                            }
+                            clickableItem(
+                                onClick = onToggleAutoFlip,
+                                label = if (state.autoFlipping) "停止" else "自动",
+                                icon = {
+                                    Icon(
+                                        if (state.autoFlipping) {
+                                            Icons.Default.Pause
+                                        } else {
+                                            Icons.Default.PlayArrow
+                                        },
+                                        contentDescription = null,
+                                    )
+                                },
+                            )
                         }
-                        TextButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = null)
-                            Text(" 设置")
-                        }
+                        clickableItem(
+                            onClick = { showSettings = true },
+                            label = "设置",
+                            icon = {
+                                Icon(Icons.Default.Settings, contentDescription = null)
+                            },
+                        )
                     }
                 }
             }

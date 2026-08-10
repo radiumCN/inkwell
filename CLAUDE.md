@@ -37,7 +37,7 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 尺寸 → `app/.../ui/components/Dimens.kt`
 
-全部落在 **4dp 栅格**。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；设置行 `rowHorizontal`(20)/`rowVertical`(14)；内容列表行 `listHorizontal`(16)/`listVertical`(8)；图标 `iconSm`(18)/`iconMd`(24)/`iconLg`(32)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)；封面 `coverThumbWidth/Height`。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
+全部落在 **4dp 栅格**。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；设置行 `rowHorizontal`(20)/`rowVertical`(14)；内容列表行 `listHorizontal`(16)/`listVertical`(8)；图标 `iconSm`(18)/`iconMd`(24)/`iconLg`(32)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)；封面 `coverThumbWidth/Height`、详情 `coverDetailWidth/Height`、书架网格 `bookshelfGridMin`；输入高 `searchFieldHeight`/`compactFieldHeight`。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
 
 ### 动效 → `app/.../ui/components/Motion.kt`
 
@@ -78,13 +78,15 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 按钮（带 loading，不撑大） | `PrimaryButton` / `SecondaryButton`（`AppButtons.kt`） |
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`） |
 | 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体；对话框里也统一用它） |
-| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距） |
+| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`） |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
-| 整页加载态 | `LoadingState`（`Common.kt`），内部是 Expressive 的 `LoadingIndicator`。**行内 ≤24dp 的小转圈仍用 `CircularProgressIndicator`** —— 形变多边形缩小了读不出来 |
+| 整页加载态 | `LoadingState`（`Common.kt`） |
+| 不确定进度（任意尺寸） | `AppLoadingIndicator`（`Common.kt`，Expressive `LoadingIndicator`）；按钮/顶栏/列表尾/阅读纸色转圈都走它，**别写 `CircularProgressIndicator`** |
+| 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Expressive `LinearWavyProgressIndicator`）；搜索/书源校验/更新下载走它，别裸写 `LinearProgressIndicator` |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。内部是官方 M3 `Snackbar`（Expressive 主题下的默认形状/色/elevation）；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 | 对话框 | 直接用 M3 `AlertDialog`（形状走主题 `extraLarge`=28dp）；别手搓居中 `Surface` 冒充弹层 |
 

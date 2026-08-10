@@ -80,9 +80,18 @@ object Dimens {
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
     val coverThumbHeight = 64.dp
+    /** 详情 / 预览页书封（3:4） */
+    val coverDetailWidth = 96.dp
+    val coverDetailHeight = 128.dp
+    /** 书架网格单元最小边 —— Adaptive 栅格用 */
+    val bookshelfGridMin = 96.dp
     /** 进书 splash 居中显示的书封。3:4，比列表缩略图大一档，但**远不到铺满**（铺满会被拉糊） */
     val readerSplashCoverWidth = 120.dp
     val readerSplashCoverHeight = 160.dp
+    /** 顶栏 / 工具条搜索框高度 */
+    val searchFieldHeight = 40.dp
+    /** 对话框 / 表单行内紧凑输入高度 */
+    val compactFieldHeight = 44.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
 }

@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -47,8 +46,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
@@ -58,6 +57,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
@@ -281,29 +282,23 @@ fun SourceManageScreen(
                 modifier = Modifier.fillMaxWidth()
                     .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
             )
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Dimens.listHorizontal),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SourceFilter.entries.forEach { f ->
-                    FilterChip(
-                        selected = filter == f,
-                        onClick = { viewModel.setFilter(f) },
-                        label = { Text(f.label) },
-                    )
-                }
-                if (groups.isNotEmpty()) {
-                    FilterChip(
-                        selected = groupFilter != null,
-                        onClick = { showGroupPicker = true },
-                        label = { Text(groupFilter ?: "分组") },
-                    )
-                }
-            }
+            ChipRow(
+                options = SourceFilter.entries.map { it.label },
+                selectedIndex = SourceFilter.entries.indexOf(filter),
+                onSelect = { viewModel.setFilter(SourceFilter.entries[it]) },
+                contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
+                trailing = if (groups.isNotEmpty()) {
+                    {
+                        FilterChip(
+                            selected = groupFilter != null,
+                            onClick = { showGroupPicker = true },
+                            label = { Text(groupFilter ?: "分组") },
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
             // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
             checkProgress?.let { p ->
                 Row(
@@ -315,9 +310,9 @@ fun SourceManageScreen(
                             "正在校验 ${p.done}/${p.total}",
                             style = MaterialTheme.typography.labelMedium,
                         )
-                        LinearProgressIndicator(
+                        DeterminateProgressBar(
                             progress = { if (p.total == 0) 0f else p.done.toFloat() / p.total },
-                            modifier = Modifier.fillMaxWidth().padding(top = Dimens.gapXS),
+                            modifier = Modifier.padding(top = Dimens.gapXS),
                         )
                     }
                     TextButton(onClick = viewModel::cancelCheck) { Text("停止") }

@@ -152,7 +152,10 @@ private fun Header(
             BookCover(
                 title = state.title,
                 coverModel = state.coverUrl,
-                modifier = Modifier.size(width = 96.dp, height = 128.dp),
+                modifier = Modifier.size(
+                    width = Dimens.coverDetailWidth,
+                    height = Dimens.coverDetailHeight,
+                ),
                 placeholderChars = 4,
             )
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {

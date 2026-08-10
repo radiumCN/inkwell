@@ -23,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 
 /**
  * 紧凑搜索框：40dp 高、bodyMedium 字号、胶囊底色。
@@ -52,7 +51,7 @@ fun SearchField(
         keyboardActions = KeyboardActions(onSearch = { onSearch?.invoke() }),
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(Dimens.searchFieldHeight)
             .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
         decorationBox = { innerTextField ->
             Row(
@@ -111,7 +110,7 @@ fun CompactTextField(
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(Dimens.compactFieldHeight)
             .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small),
         decorationBox = { innerTextField ->
             Box(
