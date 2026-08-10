@@ -57,7 +57,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 
 ### 圆角 → `MaterialTheme.shapes`
 
-刻度在 `Theme.kt`：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16)/`extraLarge`(24)。用 `MaterialTheme.shapes.medium` 等，**不要**裸写 `RoundedCornerShape(12.dp)`。
+刻度在 `Theme.kt`：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16)/`extraLarge`(28，对齐 M3 Dialog)。用 `MaterialTheme.shapes.medium` 等，**不要**裸写 `RoundedCornerShape(12.dp)`。
 
 ### 颜色 → `MaterialTheme.colorScheme` 语义令牌
 
@@ -80,12 +80,13 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体；对话框里也统一用它） |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距） |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
-| 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部已走 `ContentListItem`） |
+| 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
 | 整页加载态 | `LoadingState`（`Common.kt`），内部是 Expressive 的 `LoadingIndicator`。**行内 ≤24dp 的小转圈仍用 `CircularProgressIndicator`** —— 形变多边形缩小了读不出来 |
-| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。是居中悬浮胶囊（`extraLarge` 圆角、`inverseSurface`、无阴影），**不是**通栏条；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
+| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。内部是官方 M3 `Snackbar`（Expressive 主题下的默认形状/色/elevation）；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
+| 对话框 | 直接用 M3 `AlertDialog`（形状走主题 `extraLarge`=28dp）；别手搓居中 `Surface` 冒充弹层 |
 
 出现「多个页面重复相似 UI」时，抽成组件而不是复制。
 

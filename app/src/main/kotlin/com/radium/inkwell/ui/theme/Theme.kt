@@ -12,13 +12,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.animationsEnabled
 
-/** 统一圆角刻度：小控件 8，卡片/封面 12，大面板 16 */
+/**
+ * M3 形状刻度（含 Expressive Dialog / Sheet / Snackbar 用的 extraLarge）。
+ * `extraLarge` 用 28dp —— 与 Material 3 `AlertDialogDefaults` / 大面板规范一致；
+ * 从前 24dp 会让对话框看起来比官方 Expressive 样例「方」一截。
+ */
 private val InkwellShapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(12.dp),
     large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 /**

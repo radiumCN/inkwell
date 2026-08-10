@@ -95,6 +95,8 @@ Expressive 新增的 `FloatingToolbar`、`ButtonGroup`、`LoadingIndicator` 正�
 | `FloatingActionButtonMenu` / `ToggleFloatingActionButton` | `ReplaceRuleScreen` 的单个 FAB | 不用。只有一个动作，展开菜单没有意义 |
 | `MaterialShapes` | `InkwellShapes` 五档圆角刻度 | 不用。我们的刻度是 4dp 栅格的一部分；`MaterialShapes` 是装饰形状库（`LoadingIndicator` 内部已经在用它） |
 | 可交互 `ListItem`（Expressive） | 各页手搓 `Row` + `clickable`/`combinedClickable` | **已统一**到 `ContentListItem` / `ChapterListItem`（`ui/components/ContentListItem.kt`）。覆盖书架、搜索/发现 `BookListRow`、书源/RSS/净化、目录三处、换源、OptionPicker、AppIcon、SettingRow/SwitchRow。未选 `surfaceContainerLow`、选中 `secondaryContainer`；LazyColumn 用 `listContentPadding` + `ListSpacing`。长列表不用 `SegmentedListItem` |
+| `Snackbar` | 手搓居中胶囊（`AppSnackbar` Surface） | **已改回**官方 `Snackbar(snackbarData)`；`AppSnackbarHost` 只负责边距。颜色/形状/elevation 走 `SnackbarDefaults` |
+| `AlertDialog` | 已用官方组件，但 `extraLarge` 曾是 24dp | **形状对齐**：主题 `extraLarge` → 28dp（M3 Dialog 规范） |
 
 opt-in 复查结论：**26 处 `ExperimentalMaterial3Api` 一处都摘不掉** —— `AppBarKt` 在 alpha25 里仍带这个标记，而这些 opt-in 绝大多数是为 `TopAppBar` 那一套加的。反倒新增了 1 处 `ExperimentalMaterial3ExpressiveApi`（`Common.kt` 的 `LoadingState`）：`MaterialExpressiveTheme` 与 `MotionScheme` 本身已不需要 opt-in，但**组件另算**，`LoadingIndicator` 还是实验性的。收在封装里就是为这个 —— API 变了只改一处。
 

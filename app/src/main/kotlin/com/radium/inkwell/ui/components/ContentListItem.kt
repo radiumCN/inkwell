@@ -21,11 +21,14 @@ import androidx.compose.ui.unit.dp
 /**
  * 内容列表的 M3 Expressive [ListItem] 统一层。
  *
- * 书架 / 搜索 / 书源 / RSS / 目录 / 选择面板……凡是「一列可点行」都走这里，
+ * 书架 / 搜索 / 书源 / RSS / 设置 / 目录 / 选择面板……凡是「一列可点行」都走这里，
  * 避免各页手搓 `Row + clickable + 半透明 primary` 导致形状、选中色、主题槽位对不齐。
  *
  * 颜色读 [MaterialTheme.colorScheme]：`surfaceContainerLow` / `secondaryContainer` 由
  * `AppThemes.schemeFrom` 从当前主题推导 —— 换预设或自定义强调色时层级跟着变。
+ *
+ * 行高跟 Expressive 规范走（两行约 72dp），别在外层另搓 `Surface` 去压矮 —— 那就不算
+ * Material 3 Expressive 了。
  *
  * `ListItem` 仍是 `ExperimentalMaterial3ExpressiveApi`；opt-in 收在本文件，调用方不用标。
  */
@@ -47,9 +50,7 @@ object ContentListDefaults {
 
     /**
      * 非 Lazy 列表（设置页 Column、底部面板里的 SettingRow）行自带的外边距。
-     * 调用方不必再改 Column 的 padding / spacedBy。
-     *
-     * 行距只留 [ListSpacing] 的一半在上下各侧，避免「卡片内边距 + 行外缝」叠成虚高。
+     * 左右内缩露出页面背景，上下各半格 [ListSpacing]，圆角容器才分得清条与条。
      */
     fun rowChrome(): Modifier = Modifier
         .padding(horizontal = Dimens.listHorizontal)
@@ -72,20 +73,11 @@ object ContentListDefaults {
         )
     }
 
-    /**
-     * 内容列表与设置行共用的内边距。
-     *
-     * 从前设置行用 [Dimens.rowVertical](14)——那是**无底色整行**时代的触控余量；
-     * 换成圆角容器后，14 再叠行外缝会显得每条都虚高一截。统一到 [Dimens.listVertical](8)：
-     * 两行字（标题+副标题）仍 ≥ 48dp 触控下限，一屏能多看几条。
-     */
+    /** Expressive [ListItem] 默认内边距；行高由组件按行数决定，别另压 */
     val ContentPadding: PaddingValues
-        get() = PaddingValues(
-            horizontal = Dimens.gapM,
-            vertical = Dimens.listVertical,
-        )
+        get() = ListItemDefaults.ContentPadding
 
-    /** @deprecated 与 [ContentPadding] 同值，保留别名以免各调用点分叉 */
+    /** 与 [ContentPadding] 同值，调用点别分叉 */
     val ComfortablePadding: PaddingValues
         get() = ContentPadding
 }
