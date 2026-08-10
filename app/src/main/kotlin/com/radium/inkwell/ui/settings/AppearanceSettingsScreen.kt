@@ -26,8 +26,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.ui.bookshelf.BookshelfLayout
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.util.AppIconManager
@@ -45,8 +48,10 @@ fun AppearanceSettingsScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val exploreEnabled by appPrefs.exploreEnabled.collectAsState(initial = true)
+    val bookshelfLayout by appPrefs.bookshelfLayout.collectAsState(initial = BookshelfLayout.GRID)
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
+    var showLayoutPicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -77,6 +82,14 @@ fun AppearanceSettingsScreen(
                 subtitle = "${appIcon.label} · ${appIcon.description}",
                 onClick = { showIconPicker = true },
             )
+            SettingRow(
+                title = "书架显示",
+                subtitle = bookshelfLayout.label + when (bookshelfLayout) {
+                    BookshelfLayout.GRID -> " · 封面优先"
+                    BookshelfLayout.LIST -> " · 一行一书，方便扫最新章"
+                },
+                onClick = { showLayoutPicker = true },
+            )
             SwitchRow(
                 title = "显示「发现」入口",
                 subtitle = if (exploreEnabled) {
@@ -89,6 +102,30 @@ fun AppearanceSettingsScreen(
             )
             Spacer(Modifier.height(Dimens.gapXL))
         }
+    }
+
+    if (showLayoutPicker) {
+        OptionPickerSheet(
+            title = "书架显示",
+            options = BookshelfLayout.entries.map {
+                PickerOption(
+                    id = it.name,
+                    label = it.label,
+                    subtitle = when (it) {
+                        BookshelfLayout.GRID -> "封面网格，一屏多本书"
+                        BookshelfLayout.LIST -> "小封面 + 书名作者与最新章"
+                    },
+                )
+            },
+            selectedId = bookshelfLayout.name,
+            onSelect = { opt ->
+                showLayoutPicker = false
+                runCatching { BookshelfLayout.valueOf(opt.id) }.getOrNull()?.let { picked ->
+                    scope.launch { appPrefs.setBookshelfLayout(picked) }
+                }
+            },
+            onDismiss = { showLayoutPicker = false },
+        )
     }
 
     if (showIconPicker) {

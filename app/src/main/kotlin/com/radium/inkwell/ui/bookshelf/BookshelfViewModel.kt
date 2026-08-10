@@ -156,6 +156,24 @@ class BookshelfViewModel(
     val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    /** 书架展示：网格或列表 */
+    val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayout
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookshelfLayout.GRID)
+
+    fun setLayout(layout: BookshelfLayout) {
+        viewModelScope.launch { appPrefs.setBookshelfLayout(layout) }
+    }
+
+    /** 顶栏一键在网格/列表间切换 */
+    fun toggleLayout() {
+        val next = if (layout.value == BookshelfLayout.GRID) {
+            BookshelfLayout.LIST
+        } else {
+            BookshelfLayout.GRID
+        }
+        setLayout(next)
+    }
+
     val allBooks: StateFlow<List<BookEntity>> = bookRepo.books
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

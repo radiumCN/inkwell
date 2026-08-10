@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.radium.inkwell.ui.bookshelf.BookshelfLayout
 import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
@@ -34,6 +35,7 @@ class AppPrefs(private val context: Context) {
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
+        val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
@@ -63,6 +65,7 @@ class AppPrefs(private val context: Context) {
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
+                "bookshelf_layout" to (p[Keys.BOOKSHELF_LAYOUT] ?: BookshelfLayout.GRID.name),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
                 "theme_dark" to theme.darkPreset,
@@ -92,6 +95,9 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
+            v["bookshelf_layout"]
+                ?.takeIf { name -> BookshelfLayout.entries.any { it.name == name } }
+                ?.let { p[Keys.BOOKSHELF_LAYOUT] = it }
             v["theme_mode"]
                 ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
                 ?.let { p[Keys.THEME_MODE] = it }
@@ -150,6 +156,18 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setExploreEnabled(on: Boolean) {
         context.appDataStore.edit { it[Keys.EXPLORE_ENABLED] = on }
+        touch()
+    }
+
+    /** 书架展示：网格（封面优先）或列表（一行一书，方便扫最新章）。默认网格。 */
+    val bookshelfLayout: Flow<BookshelfLayout> = context.appDataStore.data.map { p ->
+        p[Keys.BOOKSHELF_LAYOUT]
+            ?.let { runCatching { BookshelfLayout.valueOf(it) }.getOrNull() }
+            ?: BookshelfLayout.GRID
+    }
+
+    suspend fun setBookshelfLayout(layout: BookshelfLayout) {
+        context.appDataStore.edit { it[Keys.BOOKSHELF_LAYOUT] = layout.name }
         touch()
     }
 

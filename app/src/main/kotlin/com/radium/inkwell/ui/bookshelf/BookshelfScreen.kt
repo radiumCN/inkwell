@@ -81,6 +81,11 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
@@ -147,6 +152,7 @@ fun BookshelfScreen(
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
+    val layout by viewModel.layout.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
@@ -274,6 +280,17 @@ fun BookshelfScreen(
                         }
                     },
                     actions = {
+                        // 网格 ↔ 列表一键切换；外观设置里也有同项，这里是书架上最顺手的入口
+                        IconButton(onClick = { viewModel.toggleLayout() }) {
+                            if (layout == BookshelfLayout.GRID) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ViewList,
+                                    contentDescription = "切换为列表",
+                                )
+                            } else {
+                                Icon(Icons.Default.GridView, contentDescription = "切换为网格")
+                            }
+                        }
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Default.Search, contentDescription = "搜索")
                         }
@@ -417,47 +434,77 @@ fun BookshelfScreen(
                 val motionOn = animationsEnabled()
                 // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
                 val motion = MaterialTheme.motionScheme
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 96.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
-                    // 而最后一排仍能滚清导航条不被挡住
-                    contentPadding = PaddingValues(
-                        start = Dimens.gapM,
-                        end = Dimens.gapM,
-                        top = Dimens.gapM,
-                        bottom = Dimens.gapM + padding.calculateBottomPadding(),
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                    verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                ) {
-                    items(books, key = { it.id }) { book ->
-                        BookCard(
-                            book = book,
-                            selected = book.id in selected,
-                            selectionMode = selectionMode,
-                            onClick = { bounds ->
-                                if (selectionMode) viewModel.toggleSelect(book.id)
-                                else onOpenBook(book.id, originOf(bounds, windowSize))
-                            },
-                            // 方案 A：平时长按 = 单本操作面板；已在多选里则长按继续勾选切换。
-                            // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (selectionMode) viewModel.toggleSelect(book.id)
-                                else actionTarget = book
-                            },
-                            // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
-                            // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
-                            // 才看得出「这几本是插进来的」。
-                            // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
-                            // 后者仍会走一遍动画机器，只是时长为零。
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                            ),
-                        )
+                when (layout) {
+                    BookshelfLayout.GRID -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 96.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
+                        // 而最后一排仍能滚清导航条不被挡住
+                        contentPadding = PaddingValues(
+                            start = Dimens.gapM,
+                            end = Dimens.gapM,
+                            top = Dimens.gapM,
+                            bottom = Dimens.gapM + padding.calculateBottomPadding(),
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                    ) {
+                        items(books, key = { it.id }) { book ->
+                            BookCard(
+                                book = book,
+                                selected = book.id in selected,
+                                selectionMode = selectionMode,
+                                onClick = { bounds ->
+                                    if (selectionMode) viewModel.toggleSelect(book.id)
+                                    else onOpenBook(book.id, originOf(bounds, windowSize))
+                                },
+                                // 方案 A：平时长按 = 单本操作面板；已在多选里则长按继续勾选切换。
+                                // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (selectionMode) viewModel.toggleSelect(book.id)
+                                    else actionTarget = book
+                                },
+                                // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
+                                // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
+                                // 才看得出「这几本是插进来的」。
+                                // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
+                                // 后者仍会走一遍动画机器，只是时长为零。
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                    placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                    fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                ),
+                            )
+                        }
+                    }
+                    BookshelfLayout.LIST -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            bottom = padding.calculateBottomPadding(),
+                        ),
+                    ) {
+                        items(books, key = { it.id }) { book ->
+                            BookShelfListRow(
+                                book = book,
+                                selected = book.id in selected,
+                                selectionMode = selectionMode,
+                                onClick = { bounds ->
+                                    if (selectionMode) viewModel.toggleSelect(book.id)
+                                    else onOpenBook(book.id, originOf(bounds, windowSize))
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (selectionMode) viewModel.toggleSelect(book.id)
+                                    else actionTarget = book
+                                },
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                    placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                    fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                ),
+                            )
+                        }
                     }
                 }
                 }
@@ -665,6 +712,129 @@ fun BookshelfScreen(
         )
     }
 
+}
+
+/**
+ * 列表行：小封面 + 书名/作者/最新章，方便扫更新。
+ * 交互（点开、长按、多选、进书原点）与 [BookCard] 对齐，只是信息密度不同。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookShelfListRow(
+    book: BookEntity,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: (Rect?) -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var coverBounds by remember { mutableStateOf<Rect?>(null) }
+    val coverShape = MaterialTheme.shapes.small
+    Row(
+        modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                if (selectionMode) {
+                    role = Role.Checkbox
+                    this.selected = selected
+                }
+            }
+            .combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
+            .then(
+                if (selectionMode && selected) {
+                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                } else Modifier
+            )
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .width(Dimens.coverThumbWidth)
+                .height(Dimens.coverThumbHeight)
+        ) {
+            BookCover(
+                title = book.title,
+                coverModel = book.coverPath,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (selectionMode && selected) {
+                            Modifier.border(
+                                width = Dimens.gapXS,
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = coverShape,
+                            )
+                        } else Modifier
+                    )
+                    .onGloballyPositioned { coverBounds = it.boundsInWindow() },
+                placeholderChars = 2,
+            )
+            if (book.hidden) {
+                Icon(
+                    Icons.Default.VisibilityOff,
+                    contentDescription = "已隐藏",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(Dimens.gapXS)
+                        .size(Dimens.iconSm),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (book.newChapterCount > 0 && !selectionMode) {
+                Badge(
+                    modifier = Modifier.align(Alignment.TopEnd),
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ) {
+                    Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
+                }
+            }
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(horizontal = Dimens.gapM),
+        ) {
+            Text(
+                book.title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (book.author.isNotBlank()) {
+                Text(
+                    book.author,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val latest = book.latestChapterTitle
+            if (!latest.isNullOrBlank()) {
+                Text(
+                    latest,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (selectionMode) {
+            Icon(
+                if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                modifier = Modifier.size(Dimens.iconMd),
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
 }
 
 /**
