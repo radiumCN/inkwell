@@ -39,6 +39,24 @@ class AppThemesTest {
     }
 
     @Test
+    fun `dark list cards stay distinct from page background`() {
+        // 设置页等 ContentListItem 读 surfaceContainerLow；纯黑预设上若只提亮 3%，
+        // 卡片会糊进 background，夜间「看不见容器」、日间却正常 —— 就是这个不对称。
+        AppThemes.darkPresets.forEach { preset ->
+            val scheme = preset.scheme
+            assertTrue(
+                contrast(scheme.surfaceContainerLow, scheme.background) >= 1.12f,
+                "surfaceContainerLow 相对 background 太近: preset=${preset.id} " +
+                    "low=${scheme.surfaceContainerLow} bg=${scheme.background}",
+            )
+            assertTrue(
+                scheme.surfaceContainerLow.luminance() > scheme.background.luminance(),
+                "深色下 containerLow 应比 background 更亮: preset=${preset.id}",
+            )
+        }
+    }
+
+    @Test
     fun `resolve honors mode and presets`() {
         val config = ThemeConfig(
             mode = ThemeMode.DARK,

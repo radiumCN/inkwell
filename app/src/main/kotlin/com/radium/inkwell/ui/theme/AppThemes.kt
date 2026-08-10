@@ -143,6 +143,7 @@ object AppThemes {
      */
     fun schemeFrom(seed: Color, background: Color, dark: Boolean): ColorScheme {
         val onBg = if (background.luminance() > 0.5f) Color(0xFF1C1917) else Color(0xFFE7E1D7)
+        // surface / outline 仍可用 Oklab lerp：色相过渡更稳。容器层级不行 —— 见下方 mixSrgb。
         val surface = lerp(background, onBg, 0.02f)
         val surfaceVariant = lerp(background, onBg, if (dark) 0.08f else 0.06f)
         val outline = lerp(onBg, background, 0.45f)
@@ -153,13 +154,15 @@ object AppThemes {
         // 一个暖纸色的 App，弹出来的东西却是紫的。之前阅读页那次"割裂"是靠 ReaderThemeScope
         // 局部盖掉的，根子一直在这儿。
         //
-        // 都由背景朝正文色迈一小步得来，逐级抬高：浅色纸上是逐级压深，深色纸上是逐级提亮 ——
-        // lerp 到 onBg 天然满足两边。
-        val containerLowest = lerp(background, onBg, if (dark) 0.00f else 0.05f)
-        val containerLow = lerp(background, onBg, if (dark) 0.03f else 0.02f)
-        val containerMid = lerp(background, onBg, if (dark) 0.05f else 0.04f)
-        val containerHigh = lerp(background, onBg, if (dark) 0.08f else 0.07f)
-        val containerHighest = lerp(background, onBg, if (dark) 0.11f else 0.10f)
+        // 容器必须用 [mixSrgb] 而不是 [lerp]：Compose 的 Color.lerp 走 Oklab，近黑时同样
+        // fraction 几乎抬不动 sRGB（纯黑 + 10% Oklab ≈ #030202），设置页 ListItem 卡片会
+        // 整片糊进 background —— 日间看得到容器、夜间「消失」，就是这个不对称，不是两套布局。
+        // 深色档位也抬得更开，OLED 上灰阶才分得清。
+        val containerLowest = mixSrgb(background, onBg, if (dark) 0.00f else 0.06f)
+        val containerLow = mixSrgb(background, onBg, if (dark) 0.10f else 0.04f)
+        val containerMid = mixSrgb(background, onBg, if (dark) 0.14f else 0.07f)
+        val containerHigh = mixSrgb(background, onBg, if (dark) 0.18f else 0.10f)
+        val containerHighest = mixSrgb(background, onBg, if (dark) 0.22f else 0.13f)
         // 深色模式下抬高强调色亮度，避免按钮发闷
         val primary = if (dark) lerp(seed, Color.White, 0.25f) else seed
         // 前景取黑/白中对比更高者（中灰强调色下亮度阈值会失效）
@@ -230,6 +233,22 @@ object AppThemes {
     private fun bestForeground(bg: Color): Color {
         val black = Color(0xFF1C1917)
         return if (contrast(black, bg) >= contrast(Color.White, bg)) black else Color.White
+    }
+
+    /**
+     * sRGB 分量线性混合。容器抬阶专用。
+     *
+     * 不要换成 [lerp]：它在 Oklab 里插值，对「黑 → 暖白」这种两端，同样 fraction 落回
+     * sRGB 后亮度远远不够，纯黑主题上 surfaceContainerLow 会看起来还是黑的。
+     */
+    private fun mixSrgb(from: Color, to: Color, fraction: Float): Color {
+        val t = fraction.coerceIn(0f, 1f)
+        return Color(
+            red = from.red + (to.red - from.red) * t,
+            green = from.green + (to.green - from.green) * t,
+            blue = from.blue + (to.blue - from.blue) * t,
+            alpha = from.alpha + (to.alpha - from.alpha) * t,
+        )
     }
 
     private fun contrast(a: Color, b: Color): Float {

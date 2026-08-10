@@ -37,11 +37,11 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         val accent = if (theme.isDark) fg else base.primary
         val onAccent = if (theme.isDark) bg else base.onPrimary
 
-        // 浅纸压深、深纸提亮；档位对齐 AppThemes.schemeFrom 的 containerLow/Mid/High
+        // 浅纸压深、深纸提亮；档位对齐 AppThemes.schemeFrom（深色抬得更狠，否则 OLED 纯黑上看不见卡片）
         fun step(amount: Float) = if (lightPaper) bg.darken(amount) else bg.lighten(amount)
-        val containerLow = step(0.04f)
-        val containerMid = step(0.07f)
-        val containerHigh = step(0.10f)
+        val containerLow = step(if (lightPaper) 0.04f else 0.10f)
+        val containerMid = step(if (lightPaper) 0.07f else 0.14f)
+        val containerHigh = step(if (lightPaper) 0.10f else 0.18f)
 
         // 从 App 当前的 scheme 派生，只改与"纸张"相关的那些槽位 ——
         // 其余（error 之类）保持一致，不必凭空造一套
