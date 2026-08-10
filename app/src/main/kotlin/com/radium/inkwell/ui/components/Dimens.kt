@@ -94,8 +94,14 @@ object Dimens {
     val compactFieldHeight = 44.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
-    /** 滑块轨道厚度。Expressive 默认轨太厚，阅读底栏放不下 */
+    /**
+     * 滑块布局槽高度。必须对齐 M3 `SliderTokens.InactiveTrackHeight`（16dp）——
+     * [androidx.compose.material3.Slider] 内部 `requiredSizeIn(minHeight = TrackHeight)`，
+     * 自定义拇指/轨若矮于它，槽位与绘制中心会对不齐（圆点看起来飘在线上/线下）。
+     */
+    val sliderSlot = 16.dp
+    /** 滑块轨道厚度。Expressive 默认轨 16dp 太厚，阅读底栏改画细线 */
     val sliderTrack = 4.dp
-    /** 滑块圆点拇指。远矮于 Expressive 竖条 Handle */
+    /** 滑块圆点拇指。远矮于 Expressive 竖条 Handle（4×44） */
     val sliderThumb = 12.dp
 }
