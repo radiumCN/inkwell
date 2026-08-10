@@ -106,16 +106,23 @@ private fun CompactTrack(
     inactiveColor: Color,
 ) {
     val fraction = state.coercedValueAsFraction
-    Canvas(Modifier.fillMaxWidth().height(Dimens.sliderTrack)) {
-        val radius = CornerRadius(size.height / 2f, size.height / 2f)
-        drawRoundRect(color = inactiveColor, cornerRadius = radius)
-        val activeWidth = size.width * fraction
-        if (activeWidth > 0f) {
-            drawRoundRect(
-                color = activeColor,
-                size = Size(activeWidth, size.height),
-                cornerRadius = radius,
-            )
+    // 轨槽高度跟拇指对齐，细线画在正中 —— 只给 Canvas 4dp 高时，Slider 布局会把
+    // 矮轨贴到槽底，圆点看起来浮在线上方。
+    Box(
+        Modifier.fillMaxWidth().height(Dimens.sliderThumb),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Canvas(Modifier.fillMaxWidth().height(Dimens.sliderTrack)) {
+            val radius = CornerRadius(size.height / 2f, size.height / 2f)
+            drawRoundRect(color = inactiveColor, cornerRadius = radius)
+            val activeWidth = size.width * fraction
+            if (activeWidth > 0f) {
+                drawRoundRect(
+                    color = activeColor,
+                    size = Size(activeWidth, size.height),
+                    cornerRadius = radius,
+                )
+            }
         }
     }
 }

@@ -80,6 +80,17 @@ object ContentListDefaults {
     /** 与 [ContentPadding] 同值，调用点别分叉 */
     val ComfortablePadding: PaddingValues
         get() = ContentPadding
+
+    /**
+     * 设置导航行 / 选择面板行：比 Expressive 默认矮一档。
+     * 默认 ContentPadding 上下偏松，两行文案卡片会显得「虚高」；这里仍走 4dp 栅格，
+     * 触控高度靠 ListItem 自身下限兜住。
+     */
+    val CompactPadding: PaddingValues
+        get() = PaddingValues(
+            horizontal = Dimens.listHorizontal,
+            vertical = Dimens.listVertical,
+        )
 }
 
 /** 普通可点行（搜索结果、RSS、换源候选……） */

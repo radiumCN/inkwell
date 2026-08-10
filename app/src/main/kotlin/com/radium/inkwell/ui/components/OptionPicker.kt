@@ -11,13 +11,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.launch
 
 /**
  * 「从 N 项里选一个」的统一形态。
@@ -33,7 +38,7 @@ data class PickerOption(
 )
 
 /** 底部选择面板。选中项左侧打勾 —— 不再靠 "✓ " 前缀拼字符串 */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OptionPickerSheet(
     title: String,
@@ -43,7 +48,18 @@ fun OptionPickerSheet(
     onDismiss: () -> Unit,
     header: @Composable (() -> Unit)? = null,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // 只要收起 / 全展开：选项不多，半展开没意义。选中后先 hide() 再回调 ——
+    // 调用方若立刻把 `if (show)` 置 false，面板会从组合树摘掉，退场动画直接被掐断。
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    val scope = rememberCoroutineScope()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
         Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
             Text(
                 title,
@@ -57,7 +73,17 @@ fun OptionPickerSheet(
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(options, key = { it.id }) { opt ->
-                    OptionRow(opt, selected = opt.id == selectedId, onClick = { onSelect(opt) })
+                    OptionRow(
+                        option = opt,
+                        selected = opt.id == selectedId,
+                        onClick = {
+                            scope.launch {
+                                sheetState.hide()
+                                onSelect(opt)
+                                onDismiss()
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -86,7 +112,7 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
                 Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
-        contentPadding = ContentListDefaults.ComfortablePadding,
+        contentPadding = ContentListDefaults.CompactPadding,
         content = {
             Text(
                 option.label,
