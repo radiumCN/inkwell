@@ -42,7 +42,12 @@ fun ChangeSourceSheet(
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            // Sheet 用 surface（纸色）；列表卡片读 surfaceContainerLow。
+            // 默认两者都走 Low 时候选行会糊进底色，看起来像没有 Expressive 卡片。
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
         Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
             Row(
                 Modifier

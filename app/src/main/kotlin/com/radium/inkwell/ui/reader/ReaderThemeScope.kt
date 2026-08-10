@@ -18,6 +18,11 @@ import com.radium.inkwell.reader.api.ReaderTheme
  * 与其在每个控件上挨个传颜色（漏一个就露馅，而且以后新加的控件必然会漏），
  * 不如**换掉这一片区域的 MaterialTheme**：从 ReaderTheme 派生一套 colorScheme，
  * 里头所有 M3 组件自动就协调了。
+ *
+ * `surfaceContainer*` 必须逐级抬高，**不能**把 `surfaceContainerLow` 也钉成纸色：
+ * [ContentListItem] 的卡片底色读的就是 Low；BottomSheet 默认容器也是 Low。
+ * 两者同色时换源列表就「有 ListItem 却看不见卡片」—— 截图里开关行若隐若现、
+ * 候选行整片糊进纸底，就是这么来的。Sheet 再显式用 [surface]，卡片用 Low，层次才分得开。
  */
 @Composable
 fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
@@ -25,14 +30,18 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
     val scheme = remember(theme, base) {
         val bg = Color(theme.background)
         val fg = Color(theme.textColor)
+        val lightPaper = bg.luminance() > 0.5f
 
         // 强调色：浅色纸上沿用 App 的主色（深蓝，压得住）；深色纸上它会糊掉，
         // 改用正文色本身 —— 夜间主题的正文色本就是为深色背景挑的
         val accent = if (theme.isDark) fg else base.primary
         val onAccent = if (theme.isDark) bg else base.onPrimary
 
-        // 面板略微抬高一点，与正文分层；纸张浅就压深一丁点，纸张深就提亮一丁点
-        val raised = if (bg.luminance() > 0.5f) bg.darken(0.04f) else bg.lighten(0.06f)
+        // 浅纸压深、深纸提亮；档位对齐 AppThemes.schemeFrom 的 containerLow/Mid/High
+        fun step(amount: Float) = if (lightPaper) bg.darken(amount) else bg.lighten(amount)
+        val containerLow = step(0.04f)
+        val containerMid = step(0.07f)
+        val containerHigh = step(0.10f)
 
         // 从 App 当前的 scheme 派生，只改与"纸张"相关的那些槽位 ——
         // 其余（error 之类）保持一致，不必凭空造一套
@@ -43,13 +52,13 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
             onBackground = fg,
             surface = bg,
             onSurface = fg,
-            surfaceVariant = raised,
+            surfaceVariant = containerMid,
             onSurfaceVariant = fg.copy(alpha = 0.7f),
             surfaceContainerLowest = bg,
-            surfaceContainerLow = bg,
-            surfaceContainer = raised,
-            surfaceContainerHigh = raised,
-            surfaceContainerHighest = raised,
+            surfaceContainerLow = containerLow,
+            surfaceContainer = containerMid,
+            surfaceContainerHigh = containerHigh,
+            surfaceContainerHighest = containerHigh,
             // 选中的 Chip 用正文色的淡底，而不是 M3 的紫
             secondaryContainer = fg.copy(alpha = 0.14f),
             onSecondaryContainer = fg,

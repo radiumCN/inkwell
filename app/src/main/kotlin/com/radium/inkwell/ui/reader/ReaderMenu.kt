@@ -321,7 +321,10 @@ fun ReaderMenu(
     }
 
     if (showToc) {
-        ModalBottomSheet(onDismissRequest = { showToc = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showToc = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
             TocList(
                 toc = state.toc,
                 current = state.chapterIndex,
@@ -335,7 +338,10 @@ fun ReaderMenu(
     }
 
     if (showSettings) {
-        ModalBottomSheet(onDismissRequest = { showSettings = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettings = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
             TypographyPanel(
                 settings = state.settings,
                 onUpdate = onUpdateSettings,
