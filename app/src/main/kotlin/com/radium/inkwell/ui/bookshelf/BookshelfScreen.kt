@@ -86,8 +86,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.automirrored.filled.ViewList
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
@@ -282,17 +280,7 @@ fun BookshelfScreen(
                         }
                     },
                     actions = {
-                        // 网格 ↔ 列表一键切换；外观设置里也有同项，这里是书架上最顺手的入口
-                        IconButton(onClick = { viewModel.toggleLayout() }) {
-                            if (layout == BookshelfLayout.GRID) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ViewList,
-                                    contentDescription = "切换为列表",
-                                )
-                            } else {
-                                Icon(Icons.Default.GridView, contentDescription = "切换为网格")
-                            }
-                        }
+                        // 网格/列表改在「设置 → 外观 → 书架显示」—— 顶栏留给搜索/发现/导入，少一个占位
                         IconButton(onClick = onOpenSearch) {
                             Icon(Icons.Default.Search, contentDescription = "搜索")
                         }

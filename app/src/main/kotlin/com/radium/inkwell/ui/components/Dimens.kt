@@ -32,13 +32,16 @@ object Dimens {
     // ---- 页面 / 行 ----
     /** 屏幕级左右留白（设置页、面板） */
     val screenPadding = 20.dp
-    /** 设置行的左右内边距 */
+    /** 设置行的左右内边距（少数尚未迁到 ContentListItem 的表单行仍用） */
     val rowHorizontal = 20.dp
-    /** 设置行的上下内边距 */
-    val rowVertical = 14.dp
-    /** 内容列表行（书籍、书源、文章）的左右内边距。比设置行紧一点 —— 它一屏要放下更多条 */
+    /**
+     * 设置行上下内边距（遗留）。圆角列表行请用 [listVertical] ——
+     * Expressive 容器时代 14dp 会叠出行外缝，显得虚高。
+     */
+    val rowVertical = 10.dp
+    /** 内容列表行（书籍、书源、文章、设置卡片）的左右内边距 */
     val listHorizontal = 16.dp
-    /** 内容列表行的上下内边距 */
+    /** 内容列表 / 设置卡片行的上下内边距 */
     val listVertical = 8.dp
 
     // ---- 高度上限 ----

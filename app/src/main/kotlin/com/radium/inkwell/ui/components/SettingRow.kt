@@ -52,7 +52,7 @@ fun SettingRow(
         enabled = onClick != null,
         trailingContent = trailing,
         supportingContent = supporting,
-        contentPadding = ContentListDefaults.ComfortablePadding,
+        contentPadding = ContentListDefaults.ContentPadding,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },
@@ -88,7 +88,7 @@ fun SwitchRow(
             Switch(checked = checked, enabled = enabled, onCheckedChange = null)
         },
         supportingContent = supporting,
-        contentPadding = ContentListDefaults.ComfortablePadding,
+        contentPadding = ContentListDefaults.ContentPadding,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },

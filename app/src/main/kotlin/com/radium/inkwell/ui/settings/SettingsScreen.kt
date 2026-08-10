@@ -97,7 +97,7 @@ fun SettingsScreen(
                 // 使用：外观与阅读相关
                 SettingRow(
                     title = "外观",
-                    subtitle = "主题、应用图标与发现入口",
+                    subtitle = "主题、书架显示、应用图标与发现入口",
                     onClick = onOpenAppearance,
                 )
                 SettingRow(

@@ -48,10 +48,12 @@ object ContentListDefaults {
     /**
      * 非 Lazy 列表（设置页 Column、底部面板里的 SettingRow）行自带的外边距。
      * 调用方不必再改 Column 的 padding / spacedBy。
+     *
+     * 行距只留 [ListSpacing] 的一半在上下各侧，避免「卡片内边距 + 行外缝」叠成虚高。
      */
     fun rowChrome(): Modifier = Modifier
         .padding(horizontal = Dimens.listHorizontal)
-        .padding(vertical = Dimens.gapXS / 2)
+        .padding(vertical = ListSpacing / 2)
 
     @Composable
     fun colors(
@@ -70,18 +72,22 @@ object ContentListDefaults {
         )
     }
 
+    /**
+     * 内容列表与设置行共用的内边距。
+     *
+     * 从前设置行用 [Dimens.rowVertical](14)——那是**无底色整行**时代的触控余量；
+     * 换成圆角容器后，14 再叠行外缝会显得每条都虚高一截。统一到 [Dimens.listVertical](8)：
+     * 两行字（标题+副标题）仍 ≥ 48dp 触控下限，一屏能多看几条。
+     */
     val ContentPadding: PaddingValues
         get() = PaddingValues(
             horizontal = Dimens.gapM,
             vertical = Dimens.listVertical,
         )
 
-    /** 设置行 / 纯文字目录行：上下用 rowVertical，避免触控高度跌破 48dp */
+    /** @deprecated 与 [ContentPadding] 同值，保留别名以免各调用点分叉 */
     val ComfortablePadding: PaddingValues
-        get() = PaddingValues(
-            horizontal = Dimens.gapM,
-            vertical = Dimens.rowVertical,
-        )
+        get() = ContentPadding
 }
 
 /** 普通可点行（搜索结果、RSS、换源候选……） */
