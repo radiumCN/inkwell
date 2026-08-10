@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      父主题仍用框架 Light（项目不引 AppCompat，没有 DayNight 父类可挂）。
+      窗体底色走 @color/inkwell_window_background：values / values-night 按系统深浅分流，
+      避免冷启动与页面滑移缝隙透出纯白。用户强制日/夜或换预设后，MainActivity 再按
+      scheme.background 盖一次。
+    -->
     <style name="Theme.Inkwell" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/inkwell_window_background</item>
     </style>
 </resources>

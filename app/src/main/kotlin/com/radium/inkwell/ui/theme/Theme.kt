@@ -3,12 +3,15 @@ package com.radium.inkwell.ui.theme
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.animationsEnabled
 
@@ -59,6 +62,10 @@ private object InstantMotionScheme : MotionScheme {
  *
  * 注意：另一处主题入口 [com.radium.inkwell.ui.reader.ReaderThemeScope] 也必须是
  * Expressive 版，否则进阅读页会把这个开关重新关掉。
+ *
+ * 根上包一层 [Surface](color = background)：NavDisplay 的 shared-axis 旧页只让出 1/4，
+ * 缝隙里没有别的 Compose 节点可画；若不铺底色，就会透到 Activity 的 windowBackground。
+ * 以前那是纯白，深色主题下滑一下整条发白。
  */
 @Composable
 fun InkwellTheme(
@@ -77,6 +84,11 @@ fun InkwellTheme(
         colorScheme = scheme,
         motionScheme = motion,
         shapes = InkwellShapes,
-        content = content,
-    )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = scheme.background,
+            content = content,
+        )
+    }
 }

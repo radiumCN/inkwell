@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 与 AppThemes 默认日间「暖纸」一致；深色见 values-night。 -->
+    <color name="inkwell_window_background">#FFFBEB</color>
+
     <color name="ic_launcher_background">#2B3A55</color>
 
     <!--

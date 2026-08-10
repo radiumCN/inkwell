@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 AppThemes 默认夜间「暖黑」一致；用户选了纯黑等会在运行时被 scheme.background 覆盖。 -->
+    <color name="inkwell_window_background">#17140F</color>
+</resources>
