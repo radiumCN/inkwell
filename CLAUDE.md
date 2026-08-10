@@ -76,16 +76,19 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 需求 | 用这个（`app/.../ui/components/`） |
 |---|---|
 | 按钮（带 loading，不撑大） | `PrimaryButton` / `SecondaryButton`（`AppButtons.kt`） |
-| 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`） |
+| 图标按钮 | `AppIconButton`（`AppButtons.kt`）；顶栏返回键一律 `BackButton`。**别裸写 `IconButton`** —— 裸写的落到不带 `shapes` 的旧重载，按下去没有 Expressive 的圆角形变，同一条顶栏上就分成两派手感 |
+| 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Expressive `MediumFlexibleTopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏。四类例外仍用经典窄栏，理由写在 `AppTopBar` 的 KDoc 与各页注释里（标题位是交互控件的搜索页/发现页、带多选态的书架与书源管理） |
+| 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（M3 `TextField` 最小 56dp 塞不下），但配色形状取 `TextFieldDefaults.roundedShape` / `tonalColors()`，别自己发明底色 |
 | 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体；对话框里也统一用它） |
-| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`） |
+| 滑块 | `AppSlider`（`AppSlider.kt`）：M3 默认形态（厚轨 + 竖条 thumb + 停点），**别再自画细轨圆点**去压高度 —— 那会丢掉拖动反馈，颜色也不跟主题走。`activeColor` 只给阅读器浮层（纸色背景）用 |
+| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`）；单个独立 chip 用 `AppFilterChip`（同样为了按压形变的那个重载） |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
 | 整页加载态 | `LoadingState`（`Common.kt`） |
-| 不确定进度（任意尺寸） | `AppLoadingIndicator`（`Common.kt`，Expressive `LoadingIndicator`）；按钮/顶栏/列表尾/阅读纸色转圈都走它，**别写 `CircularProgressIndicator`** |
+| 不确定进度 | `AppLoadingIndicator`（`Common.kt`）：默认尺寸用 Expressive `LoadingIndicator`；**小于容器下限时自动回退** `CircularProgressIndicator`（强缩会炸约束）。调用点统一走封装，别裸写两种指示器 |
 | 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Expressive `LinearWavyProgressIndicator`）；搜索/书源校验/更新下载走它，别裸写 `LinearProgressIndicator` |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。内部是官方 M3 `Snackbar`（Expressive 主题下的默认形状/色/elevation）；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 | 对话框 | 直接用 M3 `AlertDialog`（形状走主题 `extraLarge`=28dp）；别手搓居中 `Surface` 冒充弹层 |
@@ -97,7 +100,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 ## 无障碍（提交前自查）
 
 - **语义角色**：可点击的 `Row/Box` 加 `Modifier.clickable(role = Role.Button)`；开关行用 `toggleable(role = Switch)` 且把行内 `Switch` 的 `onCheckedChange = null`（纯展示）；单选行用 `selectable(role = RadioButton)`。别让读屏出现「行 + 控件」两个焦点。
-- **可访问名称**：`IconButton` 必须有 `contentDescription`（装饰性的显式 `null`）。纯图形的可点元素（如色板）用 `Modifier.semantics { contentDescription = ... }` 补名字 —— 名字 Text 在可点区之外的，读屏念不到。
+- **可访问名称**：`AppIconButton` 必须有 `contentDescription`（装饰性的显式 `null`）。纯图形的可点元素（如色板）用 `Modifier.semantics { contentDescription = ... }` 补名字 —— 名字 Text 在可点区之外的，读屏念不到。
 - **触控目标 ≥ 48dp**（`Dimens.touchTarget`）。图标可小，可点区不能小；别用 `Modifier.size(32.dp)` 把 `IconButton` 钉到下限以下。
 - **对比度**：正文 ≥ 4.5:1（见「颜色」）。阅读纸张主题在 `ReaderThemeContrastTest` 里钉死 ≥ 7:1，新增纸色配色不合格测试直接挂。
 - **系统返回键**：有暂态浮层（菜单/面板/选区/多选模式）时用 `BackHandler` 先收起它们，再退页面。

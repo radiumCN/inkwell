@@ -1,6 +1,6 @@
 # M3 Expressive 评估清单
 
-**当前状态：第 1 阶段已落地** —— 主题入口已换成 `MaterialExpressiveTheme`，动效方案的无障碍接缝已解决（见文末「已落地」）。**实机视觉巡检（第 0 项）与组件层（第 5 项）仍未做**，剩下的项照这份走，做完把结论写回来。
+**当前状态：主题入口 + 动效来源 + 组件层都已收口**（见文末各阶段「已落地」）。**欠的是实机视觉巡检（第 0 / 6 / 7 项）与体积/Baseline Profile（第 8 项）** —— 这两笔恰恰是编译与单测看不见的部分，剩下的项照这份走，做完把结论写回来。
 
 ## 为什么是「未评估」而不是「评估后拒绝」
 
@@ -74,7 +74,7 @@ status: **pending**
 
 ### 5. 组件层
 
-现状：`ui/components` 下 **11 个**封装文件（`AppButtons`、`AppTextField`、`ChipRow`、`Common`、`Dimens`、`ErrorState`、`Messages`、`Motion`、`OptionPicker`、`SettingRow`、`SlimSlider`）；全库 **26 处** `@OptIn(ExperimentalMaterial3Api::class)`。
+现状：`ui/components` 下的封装文件（`AppButtons`、`AppSlider`、`AppTabs`、`AppTextField`、`AppTopBar`、`ChipRow`、`Common`、`ContentListItem`、`Dimens`、`ErrorState`、`Messages`、`Motion`、`OptionPicker`、`SettingRow`）；全库 **26 处** `@OptIn(ExperimentalMaterial3Api::class)`。
 
 Expressive 新增的 `FloatingToolbar`、`ButtonGroup`、`LoadingIndicator` 正好撞上已有封装（`AppButtons`、阅读器菜单、`SelectionToolbar`）。逐个决定：替换、并存还是不用 —— **并存违反「有封装就用封装」**，要么换掉封装的内部实现，要么不引入。顺带复查那 26 处 opt-in 有没有已经转正、可以摘掉的。
 
@@ -82,7 +82,7 @@ Expressive 新增的 `FloatingToolbar`、`ButtonGroup`、`LoadingIndicator` 正�
 
 | Expressive 组件 | 撞上的现有实现 | 结论 |
 |---|---|---|
-| `LoadingIndicator` | 全库不确定进度（整页 / 按钮 / 顶栏 / 列表尾 / 阅读纸色 / 换源） | **已统一**到 `AppLoadingIndicator` / `LoadingState`。零 `CircularProgressIndicator` 调用点 |
+| `LoadingIndicator` | 全库不确定进度（整页 / 按钮 / 顶栏 / 列表尾 / 阅读纸色 / 换源） | **已统一**到 `AppLoadingIndicator` / `LoadingState`。默认尺寸走形变多边形；**小于 `ContainerWidth` 时回退** `CircularProgressIndicator`（beta.5 曾强缩 18/24dp 触发 `maxWidth >= minWidth` 崩溃） |
 | `PullToRefreshDefaults.LoadingIndicator` | 书架下拉刷新默认圆指示 | **已替换**（`BookshelfScreen`） |
 | `ContainedLoadingIndicator` | 无对应（我们没有带容器的加载态） | 不用 |
 | `WavyProgressIndicator` | 搜索 / 书源校验 / 更新下载 | **已替换**为 `DeterminateProgressBar`（`LinearWavyProgressIndicator`） |
@@ -92,13 +92,16 @@ Expressive 新增的 `FloatingToolbar`、`ButtonGroup`、`LoadingIndicator` 正�
 | `ButtonGroup` | `ChipRow` | 不用。语义是横滚单选 chip，不是定宽连体按钮组 |
 | `SplitButton` | 无对应 | 不用 |
 | `FloatingActionButtonMenu` | `ReplaceRuleScreen` 单个 FAB | 不用。只有一个动作；FAB 本身在 Expressive 主题下已是 Expressive 形态 |
-| `FlexibleTopAppBar` | 各页经典 `TopAppBar` | **不必换组件**。`MaterialExpressiveTheme` 下 `TopAppBar` 已吃 Expressive token；Flexible 变体只为滚动折叠，短设置页无收益 |
+| `MediumFlexibleTopAppBar` | 各页经典 `TopAppBar` | **已替换**（16 页收进 `AppTopBar`，配 `exitUntilCollapsed` 折叠）。四处仍留经典窄栏：搜索页/发现页的标题位是交互控件；书架与书源管理有多选态，两种栏高度不同会跳 |
+| 按压形状形变（`ButtonDefaults.shapes()` / `IconButtonDefaults.shapes()` / `FilterChipDefaults.shapes()`） | `PrimaryButton`、`SecondaryButton`、裸 `IconButton`、`ChipRow` | **已替换**。这三类都有「带 `shapes` 的新重载」与「旧重载」两条路，裸写落到旧的一条，编译通过但按下不形变。收进 `AppIconButton` / `BackButton` / `AppFilterChip`，51 处图标按钮不再靠自觉传参数 |
+| `TextFieldDefaults.roundedShape` / `tonalColors()` | `SearchField`、`CompactTextField`（手搓 `BasicTextField`） | **已采纳视觉、不换组件**。M3 `TextField` 最小 56dp，顶栏与对话框行放不下；但形状/容器色/光标色改取 Expressive tonal 官方值，并按聚焦切换 focused/unfocused 两档 |
+| Expressive `Slider` 默认形态 | `SlimSlider`（自画 14dp 圆点 + 4dp 细轨） | **已改回默认**（`AppSlider`）。自画省下的高度换来两处代价：拖动反馈全丢、轨道色不跟主题走 |
 | `MaterialShapes` | `InkwellShapes` 五档圆角刻度 | 不用。我们的刻度是 4dp 栅格；`MaterialShapes` 是装饰形状库 |
 | 可交互 `ListItem` | 手搓列表行 | **已统一**到 `ContentListItem` / `ChapterListItem` |
 | `FilterChip` 横条 | 手搓 chip 条 | **已统一**到 `ChipRow`（`trailing` 给额外动作） |
 | `Snackbar` / `AlertDialog` | 自定义胶囊 / 24dp 圆角 | **官方 Snackbar**；`extraLarge` → 28dp |
 
-opt-in：`ExperimentalMaterial3ExpressiveApi` 收在 `AppLoadingIndicator` / `DeterminateProgressBar` / `SelectionToolbar` / `ReaderMenu` / 书架下拉刷新入口。
+opt-in：`ExperimentalMaterial3ExpressiveApi` 收在 `AppLoadingIndicator` / `DeterminateProgressBar` / `AppButtons`（按钮与图标按钮形变）/ `AppFilterChip` / `AppTopBar` / `SelectionToolbar` / `ReaderMenu` / 书架下拉刷新入口 —— 都在封装层，页面里没有一处。
 
 status: **组件层按「全面符合」收口**；阅读菜单顶/底栏保持全宽纸色是纸书产品决定，不是漏用 Expressive。
 
@@ -157,9 +160,22 @@ status: **pending**
 
 **误诊记录（beta.8，已撤）**：用户报「三级回二级干等一秒」时，曾误判成页面转场 spring 的尾巴，把 push/pop 改回定长 tween。用户当场否掉 —— 那是返回落地前的等待，不是过渡动画。根因是设置树三级页也标成了 `detailPane`，被盖住的二级页被 scaffold 卸掉组合，返回时冷启动。已改 `extraPane`；页面转场**继续走** `MotionScheme`，beta.8 的 tween 例外已撤回，别再照着那条改。
 
+## 已落地（第 5 阶段：按压形变 + Flexible 顶栏 + 滑块回归默认）
+
+上一轮盘点剩下的都是「组件换了，但调的是不带 Expressive 新形态的那条重载」，以及两处刻意自画。这一轮全收掉。先在 alpha25 的 aar 上 `javap` 确认过签名再动手 —— 这几个 API 都是**同名重载**，靠记忆写很容易以为传了参数其实落到旧的那条。
+
+- `AppButtons.kt`：`Button`/`OutlinedButton` 传 `shapes = ButtonDefaults.shapes()`（按下圆角收一档）。新增 **`AppIconButton`**（`shapes = IconButtonDefaults.shapes()`）与 **`BackButton`** —— 后者收掉 20 个页面一字不差的「IconButton + AutoMirrored ArrowBack + contentDescription 返回」，读屏名字与 RTL 镜像从此只有一处能写错。全库 51 处图标按钮改完，页面里再无裸 `IconButton`。
+- `ChipRow.kt`：新增 **`AppFilterChip`**（`shapes = FilterChipDefaults.shapes()`），`ChipRow` 内部与两处独立 chip（阅读菜单「系统亮度」、书源页「分组」）都走它。混用两种重载时，尾巴那个按下不动会像失灵。
+- `AppTextField.kt`：形状取 `TextFieldDefaults.roundedShape`，容器/光标/文字/占位色取 `tonalColors()`，并接 `interactionSource` 让容器色随聚焦切档。从前是 `surfaceVariant` + 自定义圆角，换强调色时它不跟着走。**没有**改用 M3 `TextField`：56dp 下限塞不进顶栏。
+- 新增 `AppSlider.kt` 替掉 `SlimSlider`（8 处调用）：回到 Expressive 默认厚轨 + 竖条 thumb + 停点。`activeColor`/`inactiveColor` 保留，只给阅读器浮层（纸色背景）用。
+- 新增 `AppTopBar.kt`：`MediumFlexibleTopAppBar` + `rememberAppTopBarScroll()`（`exitUntilCollapsed`）+ `Modifier.topBarScroll()`。16 个内容页迁完。**折叠是前提**：只换组件不接滚动等于给每页白送一条永久变高的顶栏，比原来更差，所以把「建行为」和「接行为」包成看得出配对的两个函数。四处例外见上表。
+
+验证：`:app:compileDebugKotlin` 通过；`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿；`assembleDebug` 通过。**实机仍未验** —— 这一轮改的恰恰是「按下去那一瞬间」和「顶栏折叠手势」，都是编译与单测看不见的东西。
+
 ## 剩下要做的
 
-1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。
-2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs` 都是新类，旧 profile 规则覆盖不到）。
+1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。这一轮新增两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。
+2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs`、`MediumFlexibleTopAppBar` 与三套 `*Shapes` 形变都是新类，旧 profile 规则覆盖不到）。
+3. **唯一还逃在 `MotionScheme` 之外的动效**：`reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）。reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值 —— 无障碍靠 `animationsEnabled()` 单独兜着。要动它得先想清楚 reader 怎么拿到令牌而不反向依赖 Compose。
 
 每一步都要跑通：`:core:test`、`:reader:test`、`:app:testDebugUnitTest`、`:app:lintDebug`、`assembleDebug`。

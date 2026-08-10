@@ -16,13 +16,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -114,6 +114,8 @@ fun SearchScreen(
 
     Scaffold(
         topBar = {
+            // 留经典窄栏：标题位放的是输入框。换成 AppTopBar 的两段式，输入框会被摊到
+            // 大标题那一行的位置上，它自己的高度与字号跟大标题的排版打架
             TopAppBar(
                 title = {
                     SearchField(
@@ -125,12 +127,10 @@ fun SearchScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                    BackButton(onClick = onBack)
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.search() }) {
+                    AppIconButton(onClick = { viewModel.search() }) {
                         Icon(Icons.Default.Search, contentDescription = "搜索")
                     }
                 },

@@ -48,11 +48,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
@@ -188,6 +188,9 @@ fun BookshelfScreen(
     ) { uris -> viewModel.importBooks(uris) }
 
     Scaffold(
+        // 这两条顶栏刻意留经典窄栏，不换 AppTopBar 的两段式 Flexible：一是进出多选会在两种
+        // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，两段式会把它
+        // 摊到大标题的位置上。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
@@ -201,15 +204,15 @@ fun BookshelfScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
+                        AppIconButton(onClick = viewModel::clearSelection) {
                             Icon(Icons.Default.Close, contentDescription = "退出多选")
                         }
                     },
                     actions = {
-                        IconButton(onClick = viewModel::selectAll) {
+                        AppIconButton(onClick = viewModel::selectAll) {
                             Icon(Icons.Default.SelectAll, contentDescription = "全选")
                         }
-                        IconButton(onClick = { confirmBatchDelete = true }) {
+                        AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
                                 Icons.Default.Delete,
                                 contentDescription = "删除",
@@ -217,7 +220,7 @@ fun BookshelfScreen(
                             )
                         }
                         Box {
-                            IconButton(onClick = { overflowOpen = true }) {
+                            AppIconButton(onClick = { overflowOpen = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "更多")
                             }
                             DropdownMenu(
@@ -281,17 +284,17 @@ fun BookshelfScreen(
                     },
                     actions = {
                         // 网格/列表改在「设置 → 外观 → 书架显示」—— 顶栏留给搜索/发现/导入，少一个占位
-                        IconButton(onClick = onOpenSearch) {
+                        AppIconButton(onClick = onOpenSearch) {
                             Icon(Icons.Default.Search, contentDescription = "搜索")
                         }
                         // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
                         if (exploreEnabled) {
-                            IconButton(onClick = onOpenExplore) {
+                            AppIconButton(onClick = onOpenExplore) {
                                 Icon(Icons.Default.Explore, contentDescription = "发现")
                             }
                         }
                         // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
-                        IconButton(
+                        AppIconButton(
                             onClick = {
                                 importLauncher.launch(
                                     arrayOf(
@@ -324,7 +327,7 @@ fun BookshelfScreen(
                         // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
                         // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
                         // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
-                        IconButton(onClick = onOpenSettings) {
+                        AppIconButton(onClick = onOpenSettings) {
                             Icon(Icons.Default.Settings, contentDescription = "设置")
                         }
                     },
@@ -1035,7 +1038,7 @@ private fun HiddenStatusBar(
                     enabled = biometricAvailable,
                 )
             }
-            IconButton(onClick = onCollapse) {
+            AppIconButton(onClick = onCollapse) {
                 Icon(Icons.Default.Close, contentDescription = "收起隐藏区")
             }
         }

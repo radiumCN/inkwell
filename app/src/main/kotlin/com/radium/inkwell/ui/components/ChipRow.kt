@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -44,12 +46,37 @@ fun ChipRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         options.forEachIndexed { i, label ->
-            FilterChip(
+            AppFilterChip(
                 selected = i == selectedIndex,
                 onClick = { onSelect(i) },
-                label = { Text(label, maxLines = 1) },
+                label = label,
             )
         }
         trailing?.invoke(this)
     }
+}
+
+/**
+ * 单个筛选 chip。[ChipRow] 装不下的场合用它（阅读菜单的「系统亮度」、书源页的「分组」——
+ * 它们是横滚条尾巴上的独立开关，不属于那组单选项）。
+ *
+ * 存在的理由只有一个：Expressive 的**按压形变**在带 `shapes` 的重载上（按下时圆角收一档，
+ * 选中态另有一档更方的圆角）。裸写 `FilterChip` 落到旧重载，形状是死的 —— 同一条 chip 条上
+ * 混着两种重载时，尾巴那个按下去不动，看着像失灵。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AppFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, maxLines = 1) },
+        shapes = FilterChipDefaults.shapes(),
+        modifier = modifier,
+    )
 }

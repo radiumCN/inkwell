@@ -9,18 +9,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.update.UpdateChecker
@@ -39,17 +36,10 @@ fun AboutSettingsScreen(
         }.getOrNull() ?: "?"
     }
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("关于") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
-        },
+        modifier = Modifier.topBarScroll(topBarScroll),
+        topBar = { AppTopBar("关于", topBarScroll, onBack = onBack) },
     ) { padding ->
         Column(
             Modifier

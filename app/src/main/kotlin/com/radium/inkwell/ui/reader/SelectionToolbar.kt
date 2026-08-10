@@ -15,7 +15,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -29,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 
@@ -114,17 +114,17 @@ fun SelectionToolbar(
                 expanded = true,
                 colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
             ) {
-                IconButton(onClick = onCopy) {
+                AppIconButton(onClick = onCopy) {
                     Icon(Icons.Default.ContentCopy, contentDescription = "复制")
                 }
                 // 最常用的动作：把这句话从本书里删掉
-                IconButton(onClick = onPurify) {
+                AppIconButton(onClick = onPurify) {
                     Icon(Icons.Default.CleaningServices, contentDescription = "净化")
                 }
-                IconButton(onClick = { replacing = true }) {
+                AppIconButton(onClick = { replacing = true }) {
                     Icon(Icons.Default.SwapHoriz, contentDescription = "替换")
                 }
-                IconButton(onClick = onDismiss) {
+                AppIconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = "取消")
                 }
             }

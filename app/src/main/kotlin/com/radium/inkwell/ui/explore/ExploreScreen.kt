@@ -13,18 +13,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +79,7 @@ fun ExploreScreen(
 
     Scaffold(
         topBar = {
+            // 留经典窄栏：标题位是个可点的书源切换按钮，两段式会把这个控件摊到大标题的位置上
             TopAppBar(
                 title = {
                     // 选书源统一走底部面板：从前是裸 DropdownMenu，弹个小浮层、选中态全靠猜
@@ -93,9 +93,7 @@ fun ExploreScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                    BackButton(onClick = onBack)
                 },
             )
         },

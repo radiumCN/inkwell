@@ -1,13 +1,14 @@
 package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,17 +16,58 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 
 /**
- * 紧凑搜索框：40dp 高、bodyMedium 字号、胶囊底色。
+ * 紧凑输入框的两个变体（[SearchField] / [CompactTextField]）共用的 Expressive 视觉。
+ *
+ * 这两个框是**手搓的** `BasicTextField`，不是 M3 `TextField` —— 后者最小高度 56dp，顶栏和
+ * 对话框行里放不下（这也是当初手搓的原因，别照着「统一用 M3 TextField」改回去）。
+ * 但「装不下 M3 的组件」不等于「配色也自己发明」：容器形状取 [TextFieldDefaults.roundedShape]、
+ * 容器/光标/文字色取 [TextFieldDefaults.tonalColors]，也就是 Expressive 那套 tonal 填充框的
+ * 官方取值。从前这里写的是 `surfaceVariant` + 自定义圆角，主题换强调色时它不跟着走。
+ *
+ * 容器色**随聚焦切换**（focused / unfocused 两个槽位），这是 tonal 填充框的既有行为：
+ * 光标在哪个框里，那个框的底色更实一点。不给 `BasicTextField` 传 interactionSource 就拿不到
+ * 焦点态，只能一直用 unfocused 色 —— 那就丢了这半个反馈。
+ */
+private class TonalFieldStyle(
+    val shape: Shape,
+    val container: Color,
+    val cursor: Color,
+    val content: Color,
+    val placeholder: Color,
+)
+
+@Composable
+private fun rememberTonalFieldStyle(
+    interactionSource: MutableInteractionSource,
+    shape: Shape = TextFieldDefaults.roundedShape,
+): TonalFieldStyle {
+    val colors = TextFieldDefaults.tonalColors()
+    val focused by interactionSource.collectIsFocusedAsState()
+    return TonalFieldStyle(
+        shape = shape,
+        container = if (focused) colors.focusedContainerColor else colors.unfocusedContainerColor,
+        cursor = colors.cursorColor,
+        content = if (focused) colors.focusedTextColor else colors.unfocusedTextColor,
+        placeholder = if (focused) colors.focusedPlaceholderColor else colors.unfocusedPlaceholderColor,
+    )
+}
+
+/**
+ * 紧凑搜索框：40dp 高、bodyMedium 字号、Expressive tonal 底色。
  * 顶栏/抽屉等空间敏感处用它，替代默认 56dp 的 OutlinedTextField。
  */
 @Composable
@@ -36,15 +78,16 @@ fun SearchField(
     modifier: Modifier = Modifier,
     onSearch: (() -> Unit)? = null,
 ) {
-    val textStyle = MaterialTheme.typography.bodyMedium.copy(
-        color = MaterialTheme.colorScheme.onSurface,
-    )
+    val interactionSource = remember { MutableInteractionSource() }
+    val style = rememberTonalFieldStyle(interactionSource)
+    val textStyle = MaterialTheme.typography.bodyMedium.copy(color = style.content)
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
         textStyle = textStyle,
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        cursorBrush = SolidColor(style.cursor),
+        interactionSource = interactionSource,
         keyboardOptions = KeyboardOptions(
             imeAction = if (onSearch != null) ImeAction.Search else ImeAction.Done,
         ),
@@ -52,7 +95,7 @@ fun SearchField(
         modifier = modifier
             .fillMaxWidth()
             .height(Dimens.searchFieldHeight)
-            .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+            .background(style.container, style.shape),
         decorationBox = { innerTextField ->
             Row(
                 Modifier.padding(start = Dimens.gapM, end = Dimens.gapXS),
@@ -62,14 +105,14 @@ fun SearchField(
                     Icons.Default.Search,
                     contentDescription = null,
                     Modifier.size(Dimens.iconSm),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = style.placeholder,
                 )
                 Box(Modifier.weight(1f).padding(horizontal = Dimens.gapS)) {
                     if (value.isEmpty()) {
                         Text(
                             placeholder,
                             style = textStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = style.placeholder,
                             maxLines = 1,
                         )
                     }
@@ -77,12 +120,12 @@ fun SearchField(
                 }
                 if (value.isNotEmpty()) {
                     // 不再钉死 32dp —— 让 IconButton 保持默认可点区，图标本身缩到 16dp 即可
-                    IconButton(onClick = { onValueChange("") }) {
+                    AppIconButton(onClick = { onValueChange("") }) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "清空",
                             Modifier.size(Dimens.iconSm),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = style.placeholder,
                         )
                     }
                 }
@@ -91,7 +134,7 @@ fun SearchField(
     )
 }
 
-/** 紧凑单行输入框：44dp 高、bodyMedium 字号、小圆角，对话框/表单行内使用 */
+/** 紧凑单行输入框：44dp 高、bodyMedium 字号、Expressive tonal 底色，对话框/表单行内使用 */
 @Composable
 fun CompactTextField(
     value: String,
@@ -99,19 +142,20 @@ fun CompactTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
 ) {
-    val textStyle = MaterialTheme.typography.bodyMedium.copy(
-        color = MaterialTheme.colorScheme.onSurface,
-    )
+    val interactionSource = remember { MutableInteractionSource() }
+    val style = rememberTonalFieldStyle(interactionSource)
+    val textStyle = MaterialTheme.typography.bodyMedium.copy(color = style.content)
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
         textStyle = textStyle,
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        cursorBrush = SolidColor(style.cursor),
+        interactionSource = interactionSource,
         modifier = modifier
             .fillMaxWidth()
             .height(Dimens.compactFieldHeight)
-            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small),
+            .background(style.container, style.shape),
         decorationBox = { innerTextField ->
             Box(
                 Modifier.padding(horizontal = Dimens.gapM),
@@ -121,7 +165,7 @@ fun CompactTextField(
                     Text(
                         placeholder,
                         style = textStyle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = style.placeholder,
                         maxLines = 1,
                     )
                 }

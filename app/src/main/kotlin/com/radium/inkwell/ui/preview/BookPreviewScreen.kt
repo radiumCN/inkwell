@@ -14,15 +14,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,7 +37,6 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.Dimens
@@ -65,17 +65,10 @@ fun BookPreviewScreen(
         viewModel.openReader.collect(onRead)
     }
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("书籍详情", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
-        },
+        modifier = Modifier.topBarScroll(topBarScroll),
+        topBar = { AppTopBar("书籍详情", topBarScroll, onBack = onBack) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         when {

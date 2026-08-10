@@ -12,19 +12,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,7 +41,11 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.ChapterListItem
@@ -158,32 +159,25 @@ fun BookDetailScreen(
         }
     }
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
+        modifier = Modifier.topBarScroll(topBarScroll),
         topBar = {
-            TopAppBar(
-                title = { Text("书籍详情") },
-                navigationIcon = {
-                    if (showBack) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画
+            AppTopBar("书籍详情", topBarScroll, onBack = onBack.takeIf { showBack }) {
+                if (book?.type == BookType.NET) {
+                    AppIconButton(
+                        onClick = { triggerRefresh(quiet = false) },
+                        enabled = !refreshing,
+                    ) {
+                        if (refreshing) {
+                            AppLoadingIndicator(size = Dimens.buttonSpinner)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
                         }
                     }
-                },
-                actions = {
-                    if (book?.type == BookType.NET) {
-                        IconButton(
-                            onClick = { triggerRefresh(quiet = false) },
-                            enabled = !refreshing,
-                        ) {
-                            if (refreshing) {
-                                AppLoadingIndicator(size = Dimens.buttonSpinner)
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
-                            }
-                        }
-                    }
-                },
-            )
+                }
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->

@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Delete
@@ -25,17 +24,19 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,17 +65,10 @@ fun ReplaceRuleScreen(
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("净化替换规则") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
-        },
+        modifier = Modifier.topBarScroll(topBarScroll),
+        topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack) },
         floatingActionButton = {
             FloatingActionButton(onClick = viewModel::newRule) {
                 Icon(Icons.Default.Add, contentDescription = "新建规则")
@@ -152,7 +146,7 @@ private fun RuleRow(
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 删除在前、开关在后、删除图标用 outline 灰：与书源/订阅列表的行尾一致
-                IconButton(onClick = onDelete) {
+                AppIconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = "删除",

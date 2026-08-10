@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RssFeed
@@ -21,16 +20,18 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,18 +67,13 @@ fun RssSourceScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
+        modifier = Modifier.topBarScroll(topBarScroll),
         topBar = {
-            TopAppBar(
-                title = { Text("订阅") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    Box {
-                    IconButton(onClick = { showImportMenu = true }) {
+            AppTopBar("订阅", topBarScroll, onBack = onBack) {
+                Box {
+                    AppIconButton(onClick = { showImportMenu = true }) {
                         Icon(Icons.Default.Add, contentDescription = "添加订阅源")
                     }
                     DropdownMenu(
@@ -102,9 +98,8 @@ fun RssSourceScreen(
                             },
                         )
                     }
-                    }
-                },
-            )
+                }
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
@@ -129,7 +124,7 @@ fun RssSourceScreen(
                         enabled = source.enabled,
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { deleteTarget = source }) {
+                                AppIconButton(onClick = { deleteTarget = source }) {
                                     Icon(
                                         Icons.Default.Delete,
                                         contentDescription = "删除",

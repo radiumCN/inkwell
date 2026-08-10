@@ -9,20 +9,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.rss.RssArticle
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.ContentListDefaults
@@ -40,23 +41,15 @@ fun RssArticlesScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
+        modifier = Modifier.topBarScroll(topBarScroll),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(state.sourceName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
-                    }
-                },
-            )
+            AppTopBar(state.sourceName, topBarScroll, onBack = onBack) {
+                AppIconButton(onClick = viewModel::refresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                }
+            }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -30,7 +29,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -53,7 +51,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.db.entity.CheckStatus
@@ -62,7 +59,10 @@ import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
-import com.radium.inkwell.ui.components.SlimSlider
+import com.radium.inkwell.ui.components.AppFilterChip
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppSlider
+import com.radium.inkwell.ui.components.BackButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,6 +134,8 @@ fun SourceManageScreen(
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
     Scaffold(
+        // 两条都留经典窄栏，不换 AppTopBar 的两段式 Flexible：这页有多选态，
+        // 上下文操作栏与常规栏来回切，两者高度不同就会让进出多选像跳了一下
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：文字按钮塞不下五个（标题会被挤成竖排单字）。
@@ -148,18 +150,18 @@ fun SourceManageScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
+                        AppIconButton(onClick = viewModel::clearSelection) {
                             Icon(Icons.Default.Close, contentDescription = "退出多选")
                         }
                     },
                     actions = {
-                        IconButton(onClick = viewModel::selectAll) {
+                        AppIconButton(onClick = viewModel::selectAll) {
                             Icon(Icons.Default.SelectAll, contentDescription = "全选")
                         }
-                        IconButton(onClick = { viewModel.validate(selected) }) {
+                        AppIconButton(onClick = { viewModel.validate(selected) }) {
                             Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验")
                         }
-                        IconButton(onClick = { confirmBatchDelete = true }) {
+                        AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
                                 Icons.Default.Delete,
                                 contentDescription = "删除",
@@ -167,7 +169,7 @@ fun SourceManageScreen(
                             )
                         }
                         Box {
-                        IconButton(onClick = { overflowOpen = true }) {
+                        AppIconButton(onClick = { overflowOpen = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "更多")
                         }
                         DropdownMenu(
@@ -215,21 +217,19 @@ fun SourceManageScreen(
             } else TopAppBar(
                 title = { Text("书源管理") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                    BackButton(onClick = onBack)
                 },
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
-                        IconButton(onClick = { showCheckOptions = true }) {
+                        AppIconButton(onClick = { showCheckOptions = true }) {
                             Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验书源")
                         }
                     }
-                    IconButton(onClick = { showSortPicker = true }) {
+                    AppIconButton(onClick = { showSortPicker = true }) {
                         Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序")
                     }
                     Box {
-                    IconButton(onClick = { showImportMenu = true }) {
+                    AppIconButton(onClick = { showImportMenu = true }) {
                         Icon(Icons.Default.Add, contentDescription = "导入书源")
                     }
                     DropdownMenu(
@@ -289,10 +289,10 @@ fun SourceManageScreen(
                 contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
                 trailing = if (groups.isNotEmpty()) {
                     {
-                        FilterChip(
+                        AppFilterChip(
                             selected = groupFilter != null,
                             onClick = { showGroupPicker = true },
-                            label = { Text(groupFilter ?: "分组") },
+                            label = groupFilter ?: "分组",
                         )
                     }
                 } else {
@@ -391,7 +391,7 @@ fun SourceManageScreen(
                         "单源超时 ${draft.timeoutMs / 1000} 秒",
                         style = MaterialTheme.typography.labelMedium,
                     )
-                    SlimSlider(
+                    AppSlider(
                         value = (draft.timeoutMs / 1000).toFloat(),
                         onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
                         valueRange = 15f..180f,
@@ -585,7 +585,7 @@ private fun SourceListRow(
     val trailing: (@Composable () -> Unit)? = if (!selectionMode) {
         {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDelete) {
+                AppIconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = "删除",

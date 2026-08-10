@@ -11,16 +11,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -48,16 +48,11 @@ fun SourceDetailScreen(
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
+        modifier = Modifier.topBarScroll(topBarScroll),
         topBar = {
-            TopAppBar(
-                title = { Text(state.name.ifBlank { "书源详情" }) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            AppTopBar(state.name.ifBlank { "书源详情" }, topBarScroll, onBack = onBack)
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->

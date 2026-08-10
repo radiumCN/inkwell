@@ -37,10 +37,8 @@ import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -62,7 +60,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
-import com.radium.inkwell.ui.components.SlimSlider
+import com.radium.inkwell.ui.components.AppFilterChip
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppSlider
 import androidx.compose.animation.AnimatedVisibility
 import com.radium.inkwell.ui.components.AppTabContent
 import com.radium.inkwell.ui.components.AppTabRow
@@ -159,7 +159,7 @@ fun ReaderMenu(
                         .padding(horizontal = Dimens.gapXS),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onExit) {
+                    AppIconButton(onClick = onExit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
                     }
                     Column(Modifier.weight(1f)) {
@@ -235,9 +235,8 @@ fun ReaderMenu(
                             contentPadding = PaddingValues(horizontal = Dimens.gapS),
                         ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
 
-                        // 细滑块 + 页码。M3 默认的 Slider thumb 是一根竖条，把这条本该最不起眼的
-                        // 进度撑得比按钮还厚 —— 章节进度是"瞄一眼"的东西，不该抢地方
-                        SlimSlider(
+                        // 滑块 + 页码。颜色跟着纸色走（barContent），不然深色纸上主题 primary 会糊掉
+                        AppSlider(
                             value = if (state.pageCount <= 1) 0f
                             else state.pageInChapter.toFloat() / (state.pageCount - 1),
                             onValueChange = onSeekPercent,
@@ -603,7 +602,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
             Icons.Default.DarkMode, contentDescription = null,
             Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        SlimSlider(
+        AppSlider(
             value = settings.brightnessOverride ?: 0.5f,
             onValueChange = { v ->
                 onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
@@ -616,7 +615,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
             Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(12)
-        FilterChip(
+        AppFilterChip(
             selected = settings.brightnessOverride == null,
             onClick = {
                 onUpdate(
@@ -625,7 +624,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
                     )
                 )
             },
-            label = { Text("系统") },
+            label = "系统",
         )
     }
 }
@@ -722,12 +721,12 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
 
     Spacer(Modifier.height(Dimens.gapM))
     SectionLabel("纸色")
-    SlimSlider(value = bgHsv[0], valueRange = 0f..360f, onValueChange = { rebuild(h = it) })
-    SlimSlider(value = bgHsv[1], valueRange = 0f..0.25f, onValueChange = { rebuild(s = it) })
-    SlimSlider(value = bgHsv[2], valueRange = 0f..1f, onValueChange = { rebuild(v = it) })
+    AppSlider(value = bgHsv[0], valueRange = 0f..360f, onValueChange = { rebuild(h = it) })
+    AppSlider(value = bgHsv[1], valueRange = 0f..0.25f, onValueChange = { rebuild(s = it) })
+    AppSlider(value = bgHsv[2], valueRange = 0f..1f, onValueChange = { rebuild(v = it) })
 
     SectionLabel("字色深浅")
-    SlimSlider(value = textLevel, valueRange = 0f..1f, onValueChange = { rebuild(t = it) })
+    AppSlider(value = textLevel, valueRange = 0f..1f, onValueChange = { rebuild(t = it) })
 
     Text(
         text = "正文对比度 %.1f:1".format(ratio) + when {

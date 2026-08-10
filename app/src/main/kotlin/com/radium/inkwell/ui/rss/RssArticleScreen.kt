@@ -11,15 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -29,6 +26,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
@@ -55,26 +56,20 @@ fun RssArticleScreen(
         }
     }
 
+    val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
+        modifier = Modifier.topBarScroll(topBarScroll),
         topBar = {
-            TopAppBar(
-                title = { Text("文章", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            AppTopBar("文章", topBarScroll, onBack = onBack) {
+                if (state.link.isNotBlank()) {
+                    AppIconButton(onClick = ::openInBrowser) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "浏览器打开原文",
+                        )
                     }
-                },
-                actions = {
-                    if (state.link.isNotBlank()) {
-                        IconButton(onClick = ::openInBrowser) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = "浏览器打开原文",
-                            )
-                        }
-                    }
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         if (state.loading) {
