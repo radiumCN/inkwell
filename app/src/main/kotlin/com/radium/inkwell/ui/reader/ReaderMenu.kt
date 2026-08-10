@@ -258,55 +258,65 @@ fun ReaderMenu(
                         ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
                     }
                     HorizontalDivider()
-                    // Expressive 连体按钮组；窄屏溢出去走官方 OverflowIndicator
-                    ButtonGroup(
-                        modifier = Modifier
+                    // Expressive 连体按钮组；窄屏溢出去走官方 OverflowIndicator。
+                    //
+                    // 不能给 ButtonGroup 本身 fillMaxWidth：overflow 测量会
+                    // `constraints.copy(maxWidth = remainingSpace + overflowWidth)`，而
+                    // fillMaxWidth 把 minWidth 钉成整行宽，两者一碰就
+                    // IllegalArgumentException（maxWidth < minWidth）—— 网文书 4 个带图标
+                    // 按钮在窄屏上几乎必溢出，一点底栏就崩。外层 Box 铺满、组本身 wrap。
+                    Box(
+                        Modifier
                             .fillMaxWidth()
                             .padding(top = Dimens.gapXS, start = Dimens.gapS, end = Dimens.gapS),
-                        overflowIndicator = { menuState ->
-                            ButtonGroupDefaults.OverflowIndicator(menuState = menuState)
-                        },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        clickableItem(
-                            onClick = { showToc = true },
-                            label = "目录",
-                            icon = {
-                                Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                        ButtonGroup(
+                            overflowIndicator = { menuState ->
+                                ButtonGroupDefaults.OverflowIndicator(menuState = menuState)
                             },
-                        )
-                        if (state.isNetBook) {
+                        ) {
                             clickableItem(
-                                onClick = onSearchSources,
-                                label = "换源",
+                                onClick = { showToc = true },
+                                label = "目录",
                                 icon = {
-                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                                },
+                            )
+                            if (state.isNetBook) {
+                                clickableItem(
+                                    onClick = onSearchSources,
+                                    label = "换源",
+                                    icon = {
+                                        Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                    },
+                                )
+                            }
+                            // 滚动模式下没有"页"，自动翻页无从谈起
+                            if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
+                                clickableItem(
+                                    onClick = onToggleAutoFlip,
+                                    label = if (state.autoFlipping) "停止" else "自动",
+                                    icon = {
+                                        Icon(
+                                            if (state.autoFlipping) {
+                                                Icons.Default.Pause
+                                            } else {
+                                                Icons.Default.PlayArrow
+                                            },
+                                            contentDescription = null,
+                                        )
+                                    },
+                                )
+                            }
+                            clickableItem(
+                                onClick = { showSettings = true },
+                                label = "设置",
+                                icon = {
+                                    Icon(Icons.Default.Settings, contentDescription = null)
                                 },
                             )
                         }
-                        // 滚动模式下没有"页"，自动翻页无从谈起
-                        if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
-                            clickableItem(
-                                onClick = onToggleAutoFlip,
-                                label = if (state.autoFlipping) "停止" else "自动",
-                                icon = {
-                                    Icon(
-                                        if (state.autoFlipping) {
-                                            Icons.Default.Pause
-                                        } else {
-                                            Icons.Default.PlayArrow
-                                        },
-                                        contentDescription = null,
-                                    )
-                                },
-                            )
-                        }
-                        clickableItem(
-                            onClick = { showSettings = true },
-                            label = "设置",
-                            icon = {
-                                Icon(Icons.Default.Settings, contentDescription = null)
-                            },
-                        )
                     }
                 }
             }
