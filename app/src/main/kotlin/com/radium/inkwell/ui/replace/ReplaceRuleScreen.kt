@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.replace
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,7 +91,11 @@ fun ReplaceRuleScreen(
                 )
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = ContentListDefaults.listContentPadding(),
+                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+            ) {
                 items(state.rules, key = { it.id }) { rule ->
                     RuleRow(
                         rule = rule,
@@ -142,15 +147,22 @@ private fun RuleRow(
     onToggle: (Boolean) -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(rule.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    ContentListItem(
+        onClick = onClick,
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 删除在前、开关在后、删除图标用 outline 灰：与书源/订阅列表的行尾一致
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                Switch(checked = rule.enabled, onCheckedChange = onToggle)
+            }
+        },
+        supportingContent = {
             Text(
                 buildString {
                     append(if (rule.isRegex) "正则  " else "文本  ")
@@ -161,23 +173,19 @@ private fun RuleRow(
                     // 否则用户会纳闷"这条规则怎么在别的书里不管用"
                     if (rule.bookId.isNotEmpty()) append("  ·  本书专属")
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        }
-        // 删除在前、开关在后、删除图标用 outline 灰：与书源/订阅列表的行尾一致
-        // （error 红此处过重 —— 真正的销毁确认在弹窗里）
-        IconButton(onClick = onDelete) {
-            Icon(
-                Icons.Default.Delete,
-                contentDescription = "删除",
-                tint = MaterialTheme.colorScheme.outline,
+        },
+        content = {
+            Text(
+                rule.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-        }
-        Switch(checked = rule.enabled, onCheckedChange = onToggle)
-    }
+        },
+    )
 }
 
 @Composable

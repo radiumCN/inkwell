@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.preview
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.PrimaryButton
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,24 +100,17 @@ fun BookPreviewScreen(
                 item {
                     Text(
                         "目录 · 共 ${state.chapters.size} 章",
-                        Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
+                        Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    HorizontalDivider()
                 }
                 items(state.chapters, key = { it.index }) { chapter ->
-                    Text(
-                        chapter.title,
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !state.busy) { viewModel.read(chapter.index) }
-                            // 纯文字可点行保留 rowVertical(14)：list*(8) 会让行高跌破 48dp 触控下限
-                            .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    ChapterListItem(
+                        title = chapter.title,
+                        selected = false,
+                        onClick = { viewModel.read(chapter.index) },
+                        enabled = !state.busy,
                     )
-                    HorizontalDivider()
                 }
                 item { Spacer(Modifier.height(Dimens.gapXL)) }
             }

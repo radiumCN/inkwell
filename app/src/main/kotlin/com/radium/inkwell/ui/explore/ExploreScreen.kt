@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.explore
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -46,11 +47,12 @@ import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
-import com.radium.inkwell.ui.components.CollectMessages
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExploreScreen(
@@ -132,7 +134,12 @@ fun ExploreScreen(
                     actionLabel = "重试",
                     onAction = { viewModel.retry() },
                 )
-                else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = ContentListDefaults.listContentPadding(),
+                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                ) {
                     items(state.books, key = { "${it.sourceId}|${it.bookUrl}" }) { book ->
                         val inShelf = bookKey(book.title, book.author) in state.shelfKeys
                         BookListRow(

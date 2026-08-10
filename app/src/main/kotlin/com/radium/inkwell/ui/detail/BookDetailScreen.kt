@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.detail
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,7 +36,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.data.db.dao.ChapterDao
@@ -49,6 +47,7 @@ import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
@@ -270,26 +269,11 @@ fun BookDetailScreen(
                 else -> {
                     items(chapters, key = { it.index }) { chapter ->
                         val current = chapter.index == b.readChapterIndex && b.readAt > 0
-                        Text(
-                            chapter.title,
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable(role = Role.Button) { openReader(chapter.index) }
-                                // 纯文字可点行保留 rowVertical(14)：list*(8) 会让行高跌破 48dp 触控下限
-                                .padding(
-                                    horizontal = Dimens.rowHorizontal,
-                                    vertical = Dimens.rowVertical,
-                                ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (current) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        ChapterListItem(
+                            title = chapter.title,
+                            selected = current,
+                            onClick = { openReader(chapter.index) },
                         )
-                        HorizontalDivider()
                     }
                 }
             }

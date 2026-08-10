@@ -2,7 +2,7 @@ package com.radium.inkwell.ui.rss
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 @OptIn(ExperimentalMaterial3Api::class)
@@ -116,42 +118,46 @@ fun RssSourceScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = ContentListDefaults.listContentPadding(),
+                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+            ) {
                 items(sources, key = { it.id }) { source ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = source.enabled) { onOpenSource(source.id) }
-                            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
+                    ContentListItem(
+                        onClick = { onOpenSource(source.id) },
+                        enabled = source.enabled,
+                        trailingContent = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { deleteTarget = source }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "删除",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                                Switch(
+                                    checked = source.enabled,
+                                    onCheckedChange = { viewModel.setEnabled(source.id, it) },
+                                )
+                            }
+                        },
+                        supportingContent = {
+                            Text(
+                                source.id,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        content = {
                             Text(
                                 source.name,
                                 style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                source.id,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        IconButton(onClick = { deleteTarget = source }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "删除",
-                                tint = MaterialTheme.colorScheme.outline,
-                            )
-                        }
-                        Switch(
-                            checked = source.enabled,
-                            onCheckedChange = { viewModel.setEnabled(source.id, it) },
-                        )
-                    }
+                        },
+                    )
                 }
             }
         }

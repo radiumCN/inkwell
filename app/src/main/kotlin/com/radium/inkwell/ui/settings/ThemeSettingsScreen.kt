@@ -276,39 +276,103 @@ private fun CustomThemeEditor(
     Surface(
         Modifier.fillMaxWidth().padding(top = Dimens.gapM),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        // 编辑器外壳走当前主题的容器槽，别用半透明 surfaceVariant —— 深色/自定义下会发灰发脏
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(Modifier.padding(Dimens.gapL)) {
-            // 实时预览
+            // 实时预览：背景 + 抬高容器 + 强调按钮，把 surfaceContainer* 层级也画出来。
+            // 从前只预览 background/primary，换主题后列表/弹层用的容器色对不上预览。
             Surface(
                 Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
+                shape = MaterialTheme.shapes.medium,
                 color = previewScheme.background,
                 border = androidx.compose.foundation.BorderStroke(
-                    1.dp, MaterialTheme.colorScheme.outlineVariant,
+                    Dimens.gapXS / 4,
+                    MaterialTheme.colorScheme.outlineVariant,
                 ),
             ) {
-                Row(
-                    Modifier.padding(Dimens.gapM),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("预览标题", color = previewScheme.onBackground)
-                        Text(
-                            "正文文字效果",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = previewScheme.onSurfaceVariant,
-                        )
+                Column(Modifier.padding(Dimens.gapM)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "预览标题",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = previewScheme.onBackground,
+                            )
+                            Text(
+                                "正文文字效果",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = previewScheme.onSurfaceVariant,
+                            )
+                        }
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = previewScheme.primary,
+                        ) {
+                            Text(
+                                "按钮",
+                                Modifier.padding(
+                                    horizontal = Dimens.gapM,
+                                    vertical = Dimens.gapXS,
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = previewScheme.onPrimary,
+                            )
+                        }
                     }
-                    Box(
+                    Surface(
                         Modifier
-                            .background(previewScheme.primary, MaterialTheme.shapes.small)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .fillMaxWidth()
+                            .padding(top = Dimens.gapS),
+                        shape = MaterialTheme.shapes.medium,
+                        color = previewScheme.surfaceContainerLow,
+                    ) {
+                        Row(
+                            Modifier.padding(
+                                horizontal = Dimens.gapM,
+                                vertical = Dimens.listVertical,
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight)
+                                    .background(
+                                        previewScheme.secondaryContainer,
+                                        MaterialTheme.shapes.small,
+                                    ),
+                            )
+                            Column(Modifier.padding(start = Dimens.gapM).weight(1f)) {
+                                Text(
+                                    "列表行标题",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = previewScheme.onSurface,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    "容器色与正文对比",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = previewScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                    Surface(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = Dimens.gapXS),
+                        shape = MaterialTheme.shapes.medium,
+                        color = previewScheme.secondaryContainer,
                     ) {
                         Text(
-                            "按钮",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = previewScheme.onPrimary,
+                            "选中的列表行",
+                            Modifier.padding(
+                                horizontal = Dimens.gapM,
+                                vertical = Dimens.listVertical,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = previewScheme.onSecondaryContainer,
                         )
                     }
                 }

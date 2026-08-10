@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -68,6 +66,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
@@ -343,93 +343,26 @@ fun SourceManageScreen(
                     }
                 }
             }
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = ContentListDefaults.listContentPadding(),
+                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+            ) {
                 items(visible, key = { it.id }) { source ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = {
-                                    if (selectionMode) viewModel.toggleSelect(source.id)
-                                    else onOpen(source.id)
-                                },
-                                // 长按进多选，和书架的删除手势一致
-                                onLongClick = { viewModel.toggleSelect(source.id) },
-                            )
-                            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (selectionMode) {
-                            Checkbox(
-                                checked = source.id in selected,
-                                onCheckedChange = { viewModel.toggleSelect(source.id) },
-                            )
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    source.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                )
-                                if (source.id in exploreOnlyIds) {
-                                    Text(
-                                        "仅发现",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier
-                                            .padding(start = 6.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.secondaryContainer,
-                                                MaterialTheme.shapes.extraSmall,
-                                            )
-                                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                                    )
-                                }
-                            }
-                            Text(
-                                source.id,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (source.checkStatus != CheckStatus.UNCHECKED) {
-                                val ok = source.checkStatus == CheckStatus.OK
-                                val statusColor = if (ok) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.error
-                                // 用真图标而非 "✓/✗" 字符：字符当图标是全 App 已弃的写法（见 OptionPicker）
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        if (ok) Icons.Default.Check else Icons.Default.Close,
-                                        contentDescription = null,
-                                        Modifier.size(Dimens.iconSm),
-                                        tint = statusColor,
-                                    )
-                                    Text(
-                                        source.checkMessage,
-                                        Modifier.padding(start = Dimens.gapXS),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = statusColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                        if (!selectionMode) {
-                            IconButton(onClick = { deleteTarget = source }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "删除",
-                                    tint = MaterialTheme.colorScheme.outline,
-                                )
-                            }
-                            Switch(
-                                checked = source.enabled,
-                                onCheckedChange = { viewModel.setEnabled(source.id, it) },
-                            )
-                        }
-                    }
+                    SourceListRow(
+                        source = source,
+                        exploreOnly = source.id in exploreOnlyIds,
+                        selected = source.id in selected,
+                        selectionMode = selectionMode,
+                        onClick = {
+                            if (selectionMode) viewModel.toggleSelect(source.id)
+                            else onOpen(source.id)
+                        },
+                        // 长按进多选，和书架的删除手势一致
+                        onLongClick = { viewModel.toggleSelect(source.id) },
+                        onDelete = { deleteTarget = source },
+                        onToggleEnabled = { viewModel.setEnabled(source.id, it) },
+                    )
                 }
             }
             }
@@ -629,6 +562,129 @@ fun SourceManageScreen(
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text("取消") }
             },
+        )
+    }
+}
+
+@Composable
+private fun SourceListRow(
+    source: BookSourceListItem,
+    exploreOnly: Boolean,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onDelete: () -> Unit,
+    onToggleEnabled: (Boolean) -> Unit,
+) {
+    val leading: (@Composable () -> Unit)? = if (selectionMode) {
+        {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = null,
+            )
+        }
+    } else {
+        null
+    }
+    val trailing: (@Composable () -> Unit)? = if (!selectionMode) {
+        {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                Switch(
+                    checked = source.enabled,
+                    onCheckedChange = onToggleEnabled,
+                )
+            }
+        }
+    } else {
+        null
+    }
+    val supporting: @Composable () -> Unit = {
+        Column {
+            Text(
+                source.id,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (source.checkStatus != CheckStatus.UNCHECKED) {
+                val ok = source.checkStatus == CheckStatus.OK
+                val statusColor = if (ok) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+                Row(
+                    Modifier.padding(top = Dimens.gapXS),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (ok) Icons.Default.Check else Icons.Default.Close,
+                        contentDescription = null,
+                        Modifier.size(Dimens.iconSm),
+                        tint = statusColor,
+                    )
+                    Text(
+                        source.checkMessage,
+                        Modifier.padding(start = Dimens.gapXS),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+    val headline: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                source.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (exploreOnly) {
+                Text(
+                    "仅发现",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier
+                        .padding(start = Dimens.gapS)
+                        .background(
+                            MaterialTheme.colorScheme.secondaryContainer,
+                            MaterialTheme.shapes.extraSmall,
+                        )
+                        .padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS / 4),
+                )
+            }
+        }
+    }
+
+    if (selectionMode) {
+        ContentListItem(
+            checked = selected,
+            onCheckedChange = { onClick() },
+            onLongClick = onLongClick,
+            leadingContent = leading,
+            trailingContent = trailing,
+            supportingContent = supporting,
+            content = headline,
+        )
+    } else {
+        ContentListItem(
+            onClick = onClick,
+            onLongClick = onLongClick,
+            leadingContent = leading,
+            trailingContent = trailing,
+            supportingContent = supporting,
+            content = headline,
         )
     }
 }

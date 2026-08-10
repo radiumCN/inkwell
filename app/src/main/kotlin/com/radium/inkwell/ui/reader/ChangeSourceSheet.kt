@@ -1,6 +1,6 @@
 package com.radium.inkwell.ui.reader
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SwitchRow
 
@@ -100,46 +102,47 @@ fun ChangeSourceSheet(
                         Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    else -> LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
+                    else -> LazyColumn(
+                        Modifier.heightIn(max = Dimens.sheetListMaxHeight),
+                        contentPadding = ContentListDefaults.listContentPadding(),
+                        verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                    ) {
                         if (state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal) {
                             item(key = "incomplete-hint") {
                                 Text(
                                     "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
-                                    Modifier.padding(
-                                        horizontal = Dimens.screenPadding,
-                                        vertical = Dimens.gapS,
-                                    ),
+                                    Modifier.padding(vertical = Dimens.gapS),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
                         items(candidates, key = { "${it.sourceId}|${it.bookUrl}" }) { c ->
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onApplySource(c) }
-                                    .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
-                            ) {
-                                // 书源名称打头。从前这行首位是 sourceId（其实是书源网址），
-                                // 满屏 m.22biqu.net / cread.com# 谁也认不出哪个是哪个源
-                                Text(
-                                    c.sourceName.ifBlank { c.sourceId },
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    buildString {
-                                        append(c.sourceId)
-                                        c.latestChapter?.takeIf { it.isNotBlank() }?.let { append("  ·  $it") }
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                            ContentListItem(
+                                onClick = { onApplySource(c) },
+                                supportingContent = {
+                                    Text(
+                                        buildString {
+                                            append(c.sourceId)
+                                            c.latestChapter?.takeIf { it.isNotBlank() }
+                                                ?.let { append("  ·  $it") }
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                contentPadding = ContentListDefaults.ComfortablePadding,
+                                content = {
+                                    // 书源名称打头。从前这行首位是 sourceId（其实是书源网址），
+                                    // 满屏 m.22biqu.net / cread.com# 谁也认不出哪个是哪个源
+                                    Text(
+                                        c.sourceName.ifBlank { c.sourceId },
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
                         }
                     }
                 }

@@ -1,0 +1,219 @@
+package com.radium.inkwell.ui.components
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemColors
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * 内容列表的 M3 Expressive [ListItem] 统一层。
+ *
+ * 书架 / 搜索 / 书源 / RSS / 目录 / 选择面板……凡是「一列可点行」都走这里，
+ * 避免各页手搓 `Row + clickable + 半透明 primary` 导致形状、选中色、主题槽位对不齐。
+ *
+ * 颜色读 [MaterialTheme.colorScheme]：`surfaceContainerLow` / `secondaryContainer` 由
+ * `AppThemes.schemeFrom` 从当前主题推导 —— 换预设或自定义强调色时层级跟着变。
+ *
+ * `ListItem` 仍是 `ExperimentalMaterial3ExpressiveApi`；opt-in 收在本文件，调用方不用标。
+ */
+object ContentListDefaults {
+
+    /** LazyColumn：左右内缩，让圆角容器露出页面背景 */
+    fun listContentPadding(
+        bottom: Dp = 0.dp,
+        top: Dp = 0.dp,
+    ): PaddingValues = PaddingValues(
+        start = Dimens.listHorizontal,
+        end = Dimens.listHorizontal,
+        top = top,
+        bottom = bottom,
+    )
+
+    /** 行与行之间的缝 —— 没有缝圆角几乎看不见 */
+    val ListSpacing = Dimens.gapXS
+
+    /**
+     * 非 Lazy 列表（设置页 Column、底部面板里的 SettingRow）行自带的外边距。
+     * 调用方不必再改 Column 的 padding / spacedBy。
+     */
+    fun rowChrome(): Modifier = Modifier
+        .padding(horizontal = Dimens.listHorizontal)
+        .padding(vertical = Dimens.gapXS / 2)
+
+    @Composable
+    fun colors(
+        containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+        selectedContainerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    ): ListItemColors {
+        val onSelected = MaterialTheme.colorScheme.onSecondaryContainer
+        return ListItemDefaults.colors(
+            containerColor = containerColor,
+            selectedContainerColor = selectedContainerColor,
+            selectedContentColor = onSelected,
+            selectedLeadingContentColor = onSelected,
+            selectedTrailingContentColor = onSelected,
+            selectedOverlineContentColor = onSelected,
+            selectedSupportingContentColor = onSelected,
+        )
+    }
+
+    val ContentPadding: PaddingValues
+        get() = PaddingValues(
+            horizontal = Dimens.gapM,
+            vertical = Dimens.listVertical,
+        )
+
+    /** 设置行 / 纯文字目录行：上下用 rowVertical，避免触控高度跌破 48dp */
+    val ComfortablePadding: PaddingValues
+        get() = PaddingValues(
+            horizontal = Dimens.gapM,
+            vertical = Dimens.rowVertical,
+        )
+}
+
+/** 普通可点行（搜索结果、RSS、换源候选……） */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ContentListItem(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
+    overlineContent: (@Composable () -> Unit)? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    colors: ListItemColors = ContentListDefaults.colors(),
+    content: @Composable () -> Unit,
+) {
+    ListItem(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
+        leadingContent = leadingContent,
+        trailingContent = trailingContent,
+        overlineContent = overlineContent,
+        supportingContent = supportingContent,
+        verticalAlignment = Alignment.CenterVertically,
+        onLongClick = onLongClick,
+        colors = colors,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
+
+/** 单选行（OptionPicker、图标选择、当前章节） */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ContentListItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
+    overlineContent: (@Composable () -> Unit)? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    colors: ListItemColors = ContentListDefaults.colors(),
+    content: @Composable () -> Unit,
+) {
+    ListItem(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
+        leadingContent = leadingContent,
+        trailingContent = trailingContent,
+        overlineContent = overlineContent,
+        supportingContent = supportingContent,
+        verticalAlignment = Alignment.CenterVertically,
+        onLongClick = onLongClick,
+        colors = colors,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
+
+/** 多选行（书架 / 书源批量操作） */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ContentListItem(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
+    overlineContent: (@Composable () -> Unit)? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    colors: ListItemColors = ContentListDefaults.colors(),
+    content: @Composable () -> Unit,
+) {
+    ListItem(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
+        leadingContent = leadingContent,
+        trailingContent = trailingContent,
+        overlineContent = overlineContent,
+        supportingContent = supportingContent,
+        verticalAlignment = Alignment.CenterVertically,
+        onLongClick = onLongClick,
+        colors = colors,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
+
+/**
+ * 目录章名行。详情 / 预览 / 阅读菜单共用，当前章走 selected 容器色。
+ *
+ * @param inset 为 true 时自带左右内缩与行距（详情页 LazyColumn 里夹着全宽 Header 时用）
+ */
+@Composable
+fun ChapterListItem(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    inset: Boolean = true,
+    trailingContent: (@Composable () -> Unit)? = null,
+) {
+    ContentListItem(
+        selected = selected,
+        onClick = onClick,
+        modifier = if (inset) modifier.then(ContentListDefaults.rowChrome()) else modifier,
+        enabled = enabled,
+        trailingContent = trailingContent,
+        contentPadding = ContentListDefaults.ComfortablePadding,
+        content = {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    )
+}

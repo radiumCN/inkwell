@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.search
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +48,7 @@ import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.OptionPickerSheet
@@ -165,7 +167,12 @@ fun SearchScreen(
                     onOpenSort = { showSortPicker = true },
                 )
                 // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来
-                LazyColumn(state = listState, modifier = Modifier.imePadding()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.imePadding(),
+                    contentPadding = ContentListDefaults.listContentPadding(),
+                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                ) {
                     items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
                         val result = hit.result
                         val inShelf = bookKey(result.title, result.author) in state.shelfKeys

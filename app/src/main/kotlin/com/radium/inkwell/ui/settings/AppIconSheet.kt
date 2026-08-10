@@ -2,11 +2,9 @@ package com.radium.inkwell.ui.settings
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +25,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.util.AppIcon
 
@@ -74,12 +74,16 @@ fun AppIconSheet(
                 ),
             )
 
-            AppIcon.entries.forEach { icon ->
-                IconRow(
-                    icon = icon,
-                    selected = icon == selected,
-                    onClick = { onSelect(icon) },
-                )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+            ) {
+                AppIcon.entries.forEach { icon ->
+                    IconRow(
+                        icon = icon,
+                        selected = icon == selected,
+                        onClick = { onSelect(icon) },
+                    )
+                }
             }
         }
     }
@@ -88,53 +92,56 @@ fun AppIconSheet(
 @Composable
 private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapM),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
-    ) {
-        Box(
-            Modifier
-                .size(Dimens.swatch)
-                .clip(CircleShape)
-                // 选中的那个描一圈主色。只靠"某一项颜色深一点"是分不出来的
-                .then(
-                    if (selected) {
-                        Modifier.border(2.dp, accent, CircleShape)
-                    } else {
-                        Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                    }
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(icon.preview),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
+    ContentListItem(
+        selected = selected,
+        onClick = onClick,
+        modifier = ContentListDefaults.rowChrome(),
+        leadingContent = {
+            Box(
+                Modifier
                     .size(Dimens.swatch)
-                    .clip(CircleShape),
-            )
-        }
-        Column(Modifier.weight(1f)) {
+                    .clip(CircleShape)
+                    // 选中的那个描一圈主色。只靠"某一项颜色深一点"是分不出来的
+                    .then(
+                        if (selected) {
+                            Modifier.border(2.dp, accent, CircleShape)
+                        } else {
+                            Modifier.border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant,
+                                CircleShape,
+                            )
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(icon.preview),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(Dimens.swatch)
+                        .clip(CircleShape),
+                )
+            }
+        },
+        trailingContent = if (selected) {
+            {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "已选中",
+                    Modifier.size(Dimens.iconMd),
+                )
+            }
+        } else {
+            null
+        },
+        supportingContent = {
+            Text(icon.description, style = MaterialTheme.typography.bodySmall)
+        },
+        contentPadding = ContentListDefaults.ComfortablePadding,
+        content = {
             Text(icon.label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                icon.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (selected) {
-            // 选中态与 OptionPicker / 主题色板一致：主色勾选图标，不再是自成一套的描边小圆点
-            Icon(
-                Icons.Default.Check,
-                contentDescription = "已选中",
-                Modifier.size(Dimens.iconMd),
-                tint = accent,
-            )
-        }
-    }
+        },
+    )
 }

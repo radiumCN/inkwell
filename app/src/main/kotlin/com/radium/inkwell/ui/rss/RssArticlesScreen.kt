@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.rss
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,18 +18,18 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
@@ -90,8 +89,11 @@ fun RssArticlesScreen(
                     message = state.error!!,
                     onRetry = viewModel::refresh,
                 )
-                // 不画分割线：与书架/搜索/书源列表一致，靠行内边距分隔
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = ContentListDefaults.listContentPadding(),
+                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                ) {
                     items(state.articles, key = { it.key }) { article ->
                         ArticleRow(article, onClick = { onOpenArticle(article) })
                     }
@@ -103,53 +105,41 @@ fun RssArticlesScreen(
 
 @Composable
 private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                article.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            // 摘要往往是一整段 HTML；这里只是列表，去掉标签给个大概
-            article.description?.let { desc ->
-                Text(
-                    desc.stripHtml(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+    val desc = article.description?.stripHtml()?.takeIf { it.isNotBlank() }
+    val date = article.pubDate?.takeIf { it.isNotBlank() }
+    ContentListItem(
+        onClick = onClick,
+        trailingContent = article.image?.takeIf { it.isNotBlank() }?.let { url ->
+            {
+                BookCover(
+                    title = article.title,
+                    coverModel = url,
+                    modifier = Modifier.size(
+                        width = Dimens.coverThumbWidth,
+                        height = Dimens.coverThumbHeight,
+                    ),
+                    placeholderChars = 2,
                 )
             }
-            article.pubDate?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
+        },
+        supportingContent = if (desc != null || date != null) {
+            {
+                Column {
+                    if (desc != null) {
+                        Text(desc, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (date != null) {
+                        Text(date, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
-        }
-        // 走 BookCover：与书架/搜索的封面一套形态（圆角、占位、抓图失败优雅降级），
-        // 而不是裸 AsyncImage 方图 —— 图挂了不再是一块空白
-        article.image?.takeIf { it.isNotBlank() }?.let { url ->
-            BookCover(
-                title = article.title,
-                coverModel = url,
-                modifier = Modifier
-                    .padding(start = Dimens.gapM)
-                    .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight),
-                placeholderChars = 2,
-            )
-        }
-    }
+        } else {
+            null
+        },
+        content = {
+            Text(article.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        },
+    )
 }
 
 private fun String.stripHtml(): String =

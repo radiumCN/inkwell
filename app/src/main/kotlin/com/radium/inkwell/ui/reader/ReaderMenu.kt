@@ -82,7 +82,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -351,36 +353,33 @@ private fun TocList(
                 )
             }
         } else {
-            LazyColumn(state = listState, modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight),
+                contentPadding = ContentListDefaults.listContentPadding(),
+                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+            ) {
                 items(filtered, key = { it.index }) { item ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(role = Role.Button) { onSelect(item.index) }
-                            .padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.rowVertical),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            item.title,
-                            Modifier.weight(1f),
-                            fontWeight = if (item.index == current) FontWeight.Bold else FontWeight.Normal,
-                            color = if (item.index == current) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                        )
-                        // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
-                        // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
-                        if (showCacheState && item.cached) {
-                            Spacer(Modifier.width(Dimens.gapS))
-                            Box(
-                                Modifier
-                                    .size(Dimens.gapS)
-                                    // 光一个色点读屏念不出来，得显式补名字
-                                    .semantics { contentDescription = "已缓存" }
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape),
-                            )
-                        }
-                    }
+                    ChapterListItem(
+                        title = item.title,
+                        selected = item.index == current,
+                        onClick = { onSelect(item.index) },
+                        inset = false,
+                        trailingContent = if (showCacheState && item.cached) {
+                            {
+                                // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
+                                // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
+                                Box(
+                                    Modifier
+                                        .size(Dimens.gapS)
+                                        .semantics { contentDescription = "已缓存" }
+                                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                    )
                 }
             }
         }

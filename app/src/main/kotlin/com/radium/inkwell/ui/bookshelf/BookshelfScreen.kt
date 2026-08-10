@@ -76,6 +76,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingRow
@@ -480,9 +482,12 @@ fun BookshelfScreen(
                     }
                     BookshelfLayout.LIST -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
+                        // 左右内缩 + 行距：给 Expressive ListItem 的圆角容器留出背景露出，
+                        // 否则贴边铺满时形状变化几乎看不见，主题的 surface 层级也读不出来。
+                        contentPadding = ContentListDefaults.listContentPadding(
                             bottom = padding.calculateBottomPadding(),
                         ),
+                        verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                     ) {
                         items(books, key = { it.id }) { book ->
                             BookShelfListRow(
@@ -716,9 +721,8 @@ fun BookshelfScreen(
 
 /**
  * 列表行：小封面 + 书名/作者/最新章，方便扫更新。
- * 交互（点开、长按、多选、进书原点）与 [BookCard] 对齐，只是信息密度不同。
+ * 走共享 [ContentListItem]；交互（点开、长按、多选、进书原点）与 [BookCard] 对齐。
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookShelfListRow(
     book: BookEntity,
@@ -729,110 +733,120 @@ private fun BookShelfListRow(
     modifier: Modifier = Modifier,
 ) {
     var coverBounds by remember { mutableStateOf<Rect?>(null) }
-    val coverShape = MaterialTheme.shapes.small
-    Row(
-        modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                if (selectionMode) {
-                    role = Role.Checkbox
-                    this.selected = selected
-                }
-            }
-            .combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
-            .then(
-                if (selectionMode && selected) {
-                    Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                } else Modifier
-            )
-            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .width(Dimens.coverThumbWidth)
-                .height(Dimens.coverThumbHeight)
-        ) {
-            BookCover(
-                title = book.title,
-                coverModel = book.coverPath,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (selectionMode && selected) {
-                            Modifier.border(
-                                width = Dimens.gapXS,
-                                color = MaterialTheme.colorScheme.primary,
-                                shape = coverShape,
-                            )
-                        } else Modifier
-                    )
-                    .onGloballyPositioned { coverBounds = it.boundsInWindow() },
-                placeholderChars = 2,
-            )
-            if (book.hidden) {
-                Icon(
-                    Icons.Default.VisibilityOff,
-                    contentDescription = "已隐藏",
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(Dimens.gapXS)
-                        .size(Dimens.iconSm),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (book.newChapterCount > 0 && !selectionMode) {
-                Badge(
-                    modifier = Modifier.align(Alignment.TopEnd),
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ) {
-                    Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
-                }
-            }
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .padding(horizontal = Dimens.gapM),
-        ) {
-            Text(
-                book.title,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (book.author.isNotBlank()) {
-                Text(
-                    book.author,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val latest = book.latestChapterTitle
-            if (!latest.isNullOrBlank()) {
-                Text(
-                    latest,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (selectionMode) {
+    val leadingContent: @Composable () -> Unit = {
+        BookShelfListLeading(
+            book = book,
+            selected = selected,
+            selectionMode = selectionMode,
+            onBounds = { coverBounds = it },
+        )
+    }
+    val trailingContent: (@Composable () -> Unit)? = if (selectionMode) {
+        {
             Icon(
                 if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                 contentDescription = null,
                 modifier = Modifier.size(Dimens.iconMd),
-                tint = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
             )
+        }
+    } else {
+        null
+    }
+    val overlineContent: (@Composable () -> Unit)? = if (book.author.isNotBlank()) {
+        {
+            Text(book.author, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    } else {
+        null
+    }
+    val latest = book.latestChapterTitle
+    val supportingContent: (@Composable () -> Unit)? = if (!latest.isNullOrBlank()) {
+        {
+            Text(latest, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    } else {
+        null
+    }
+    val headline: @Composable () -> Unit = {
+        Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+
+    if (selectionMode) {
+        ContentListItem(
+            checked = selected,
+            onCheckedChange = { onClick(coverBounds) },
+            onLongClick = onLongClick,
+            modifier = modifier,
+            leadingContent = leadingContent,
+            trailingContent = trailingContent,
+            overlineContent = overlineContent,
+            supportingContent = supportingContent,
+            content = headline,
+        )
+    } else {
+        ContentListItem(
+            onClick = { onClick(coverBounds) },
+            onLongClick = onLongClick,
+            modifier = modifier,
+            leadingContent = leadingContent,
+            overlineContent = overlineContent,
+            supportingContent = supportingContent,
+            content = headline,
+        )
+    }
+}
+
+@Composable
+private fun BookShelfListLeading(
+    book: BookEntity,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onBounds: (Rect) -> Unit,
+) {
+    val coverShape = MaterialTheme.shapes.small
+    Box(
+        Modifier
+            .width(Dimens.coverThumbWidth)
+            .height(Dimens.coverThumbHeight),
+    ) {
+        BookCover(
+            title = book.title,
+            coverModel = book.coverPath,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (selectionMode && selected) {
+                        Modifier.border(
+                            width = Dimens.gapXS,
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = coverShape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .onGloballyPositioned { onBounds(it.boundsInWindow()) },
+            placeholderChars = 2,
+        )
+        if (book.hidden) {
+            Icon(
+                Icons.Default.VisibilityOff,
+                contentDescription = "已隐藏",
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(Dimens.gapXS)
+                    .size(Dimens.iconSm),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (book.newChapterCount > 0 && !selectionMode) {
+            Badge(
+                modifier = Modifier.align(Alignment.TopEnd),
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ) {
+                Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
+            }
         }
     }
 }
