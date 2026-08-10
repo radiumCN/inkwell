@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.Color
  *
  * @param activeColor 覆盖 thumb 与已完成轨道色。**只给阅读器浮层用** —— 那里的底色是纸色，
  *   不是 `colorScheme.surface`，用主题 primary 会在深色纸上糊掉。其余地方一律传 null 走主题。
+ * @param showStopIndicators 首尾圆点停点。章节进度这类连续拖动关掉它 —— 窄栏里停点会像多长了
+ *   一个拇指，和竖条 thumb 抢视觉。
  */
 @Composable
 fun AppSlider(
@@ -34,6 +36,7 @@ fun AppSlider(
     onValueChangeFinished: (() -> Unit)? = null,
     activeColor: Color? = null,
     inactiveColor: Color? = null,
+    showStopIndicators: Boolean = true,
 ) {
     val colors = if (activeColor == null && inactiveColor == null) {
         SliderDefaults.colors()
@@ -47,14 +50,35 @@ fun AppSlider(
         )
     }
 
-    Slider(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier,
-        enabled = enabled,
-        valueRange = valueRange,
-        steps = steps,
-        onValueChangeFinished = onValueChangeFinished,
-        colors = colors,
-    )
+    if (showStopIndicators) {
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = onValueChangeFinished,
+            colors = colors,
+        )
+    } else {
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = onValueChangeFinished,
+            colors = colors,
+            track = { state ->
+                SliderDefaults.Track(
+                    sliderState = state,
+                    enabled = enabled,
+                    colors = colors,
+                    drawStopIndicator = null,
+                )
+            },
+        )
+    }
 }

@@ -22,6 +22,7 @@ import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
+import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SwitchRow
 
@@ -41,111 +42,170 @@ fun ChangeSourceSheet(
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-        ModalBottomSheet(onDismissRequest = onDismiss) {
-            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("换源", style = MaterialTheme.typography.titleMedium)
-                        // 告诉用户现在读的是哪个源 —— 换源列表里刻意不含当前源，不标出来就无从对比
-                        state.currentSourceName.takeIf { it.isNotBlank() }?.let {
-                            Text(
-                                "当前：$it",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    // 边搜边出，让用户看得见还在搜、搜了多少，而不是干等一个转圈
-                    if (state.searchingSources) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("换源", style = MaterialTheme.typography.titleMedium)
+                    // 告诉用户现在读的是哪个源 —— 换源列表里刻意不含当前源，不标出来就无从对比
+                    state.currentSourceName.takeIf { it.isNotBlank() }?.let {
                         Text(
-                            "搜索中 ${state.sourcesDone}/${state.sourcesTotal}",
+                            "当前：$it",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    } else if (!state.changingSource) {
-                        // 会话内复用上次结果；书源有增删/站点恢复时用这个主动重搜
-                        TextButton(onClick = onRefresh) {
-                            Text("重新搜索")
-                        }
                     }
                 }
-                // 作者匹配开关：书源返回的作者字段太脏，卡死了就一个源都换不到；
-                // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式
-                SwitchRow(
-                    title = "匹配作者",
-                    subtitle = if (state.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
-                    checked = state.checkAuthor,
-                    onCheckedChange = onToggleCheckAuthor,
-                )
-                when {
-                    state.changingSource || (state.searchingSources && candidates.isEmpty()) -> Box(
-                        Modifier.fillMaxWidth().padding(Dimens.gapXL),
-                        contentAlignment = Alignment.Center,
-                    ) { AppLoadingIndicator() }
-                    candidates.isEmpty() -> Text(
-                        when {
-                            // 中途关掉再开：半截且一个都没命中，别说成「都没有」
-                            state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal ->
-                                "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}）。" +
-                                    "可点右上角「重新搜索」继续找。"
-                            state.checkAuthor ->
-                                "其他 ${state.sourcesTotal} 个书源都没有找到这本书。" +
-                                    "可以关掉上面的「匹配作者」再看看 —— 不少书源的作者字段是空的或带前缀。"
-                            else ->
-                                "其他 ${state.sourcesTotal} 个书源都没有找到这本书"
-                        },
-                        Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
-                        style = MaterialTheme.typography.bodyMedium,
+                // 边搜边出，让用户看得见还在搜、搜了多少，而不是干等一个转圈
+                if (state.searchingSources) {
+                    Text(
+                        "${state.sourcesDone}/${state.sourcesTotal}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    else -> LazyColumn(
-                        Modifier.heightIn(max = Dimens.sheetListMaxHeight),
-                        contentPadding = ContentListDefaults.listContentPadding(),
-                        verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                } else if (!state.changingSource) {
+                    // 会话内复用上次结果；书源有增删/站点恢复时用这个主动重搜
+                    TextButton(onClick = onRefresh) {
+                        Text("重新搜索")
+                    }
+                }
+            }
+            // 搜索进度拉成整行波浪条：右上角只留分数，比「搜索中 98/380」一坨小字好扫
+            if (state.searchingSources && state.sourcesTotal > 0) {
+                DeterminateProgressBar(
+                    progress = {
+                        (state.sourcesDone.toFloat() / state.sourcesTotal).coerceIn(0f, 1f)
+                    },
+                    modifier = Modifier.padding(
+                        horizontal = Dimens.screenPadding,
+                        vertical = Dimens.gapXS,
+                    ),
+                )
+            }
+            // 作者匹配开关：书源返回的作者字段太脏，卡死了就一个源都换不到；
+            // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式
+            SwitchRow(
+                title = "匹配作者",
+                subtitle = if (state.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
+                checked = state.checkAuthor,
+                onCheckedChange = onToggleCheckAuthor,
+            )
+            when {
+                state.changingSource || (state.searchingSources && candidates.isEmpty()) -> Box(
+                    Modifier.fillMaxWidth().padding(Dimens.gapXL),
+                    contentAlignment = Alignment.Center,
+                ) { AppLoadingIndicator() }
+                candidates.isEmpty() -> Text(
+                    when {
+                        // 中途关掉再开：半截且一个都没命中，别说成「都没有」
+                        state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal ->
+                            "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}）。" +
+                                "可点右上角「重新搜索」继续找。"
+                        state.checkAuthor ->
+                            "其他 ${state.sourcesTotal} 个书源都没有找到这本书。" +
+                                "可以关掉上面的「匹配作者」再看看 —— 不少书源的作者字段是空的或带前缀。"
+                        else ->
+                            "其他 ${state.sourcesTotal} 个书源都没有找到这本书"
+                    },
+                    Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                else -> LazyColumn(
+                    Modifier.heightIn(max = Dimens.sheetListMaxHeight),
+                    contentPadding = ContentListDefaults.listContentPadding(),
+                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                ) {
+                    if (state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal &&
+                        !state.searchingSources
                     ) {
-                        if (state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal) {
-                            item(key = "incomplete-hint") {
-                                Text(
-                                    "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
-                                    Modifier.padding(vertical = Dimens.gapS),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        items(candidates, key = { "${it.sourceId}|${it.bookUrl}" }) { c ->
-                            ContentListItem(
-                                onClick = { onApplySource(c) },
-                                supportingContent = {
-                                    Text(
-                                        buildString {
-                                            append(c.sourceId)
-                                            c.latestChapter?.takeIf { it.isNotBlank() }
-                                                ?.let { append("  ·  $it") }
-                                        },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                                contentPadding = ContentListDefaults.ComfortablePadding,
-                                content = {
-                                    // 书源名称打头。从前这行首位是 sourceId（其实是书源网址），
-                                    // 满屏 m.22biqu.net / cread.com# 谁也认不出哪个是哪个源
-                                    Text(
-                                        c.sourceName.ifBlank { c.sourceId },
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
+                        item(key = "incomplete-hint") {
+                            Text(
+                                "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
+                                Modifier.padding(vertical = Dimens.gapS),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                    }
+                    items(candidates, key = { "${it.sourceId}|${it.bookUrl}" }) { c ->
+                        ChangeSourceCandidateRow(
+                            candidate = c,
+                            onClick = { onApplySource(c) },
+                        )
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * 换源候选行：书源名（overline）→ 书名（主行）→ 作者/最新章（副行）。
+ *
+ * 从前主行是 sourceName、副行塞 sourceId（网址），书源没填名称时整行就是裸 URL，
+ * 和截图里那条 `http://m.x2552.com` 一样 —— 认不出换的是哪本书、哪个站。
+ */
+@Composable
+private fun ChangeSourceCandidateRow(
+    candidate: SearchResult,
+    onClick: () -> Unit,
+) {
+    val sourceLabel = candidate.sourceDisplayName()
+    val supporting = buildList {
+        candidate.author?.takeIf { it.isNotBlank() }?.let(::add)
+        candidate.latestChapter?.takeIf { it.isNotBlank() }?.let(::add)
+    }.joinToString("  ·  ")
+
+    ContentListItem(
+        onClick = onClick,
+        overlineContent = {
+            Text(
+                sourceLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        supportingContent = if (supporting.isNotEmpty()) {
+            {
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            null
+        },
+        contentPadding = ContentListDefaults.ComfortablePadding,
+        content = {
+            Text(
+                candidate.title.ifBlank { "未命名" },
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    )
+}
+
+/** 书源展示名：有名称用名称；否则从 sourceId 里抠主机名，别把整段 URL 甩到主视觉上 */
+private fun SearchResult.sourceDisplayName(): String {
+    sourceName.takeIf { it.isNotBlank() }?.let { return it }
+    val host = sourceId
+        .removePrefix("https://")
+        .removePrefix("http://")
+        .substringBefore('/')
+        .substringBefore('#')
+        .substringBefore('?')
+    return host.ifBlank { sourceId }
 }

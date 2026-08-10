@@ -33,12 +33,10 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material3.ButtonGroup
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -93,7 +91,7 @@ import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderMenu(
     visible: Boolean,
@@ -224,98 +222,97 @@ fun ReaderMenu(
                         .navigationBarsPadding()
                         .padding(vertical = Dimens.gapS)
                 ) {
-                    // 章节进度
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = Dimens.gapL),
-                        verticalAlignment = Alignment.CenterVertically,
+                    // 章节进度：滑块独占中间宽度；页码挪到下方居中，避免和「下一章」挤在一起。
+                    // 关掉首尾停点 —— 窄栏里那两个圆点会像多出来的拇指。
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Dimens.gapL),
                     ) {
-                        TextButton(
-                            onClick = { onGotoChapter(state.chapterIndex - 1) },
-                            enabled = state.chapterIndex > 0,
-                            contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                        ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(
+                                onClick = { onGotoChapter(state.chapterIndex - 1) },
+                                enabled = state.chapterIndex > 0,
+                                contentPadding = PaddingValues(horizontal = Dimens.gapS),
+                            ) { Text("上一章", style = MaterialTheme.typography.labelLarge) }
 
-                        // 滑块 + 页码。颜色跟着纸色走（barContent），不然深色纸上主题 primary 会糊掉
-                        AppSlider(
-                            value = if (state.pageCount <= 1) 0f
-                            else state.pageInChapter.toFloat() / (state.pageCount - 1),
-                            onValueChange = onSeekPercent,
-                            enabled = state.pageCount > 1,
-                            activeColor = barContent,
-                            inactiveColor = barContent.copy(alpha = 0.2f),
-                            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
-                        )
+                            AppSlider(
+                                value = if (state.pageCount <= 1) 0f
+                                else state.pageInChapter.toFloat() / (state.pageCount - 1),
+                                onValueChange = onSeekPercent,
+                                enabled = state.pageCount > 1,
+                                activeColor = barContent,
+                                inactiveColor = barContent.copy(alpha = 0.2f),
+                                showStopIndicators = false,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = Dimens.gapS),
+                            )
+
+                            TextButton(
+                                onClick = { onGotoChapter(state.chapterIndex + 1) },
+                                enabled = state.chapterIndex + 1 < state.chapterCount,
+                                contentPadding = PaddingValues(horizontal = Dimens.gapS),
+                            ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
+                        }
                         Text(
                             "${state.pageInChapter + 1}/${state.pageCount.coerceAtLeast(1)}",
                             style = MaterialTheme.typography.labelSmall,
                             color = barContent.copy(alpha = 0.65f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
                         )
-
-                        TextButton(
-                            onClick = { onGotoChapter(state.chapterIndex + 1) },
-                            enabled = state.chapterIndex + 1 < state.chapterCount,
-                            contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                        ) { Text("下一章", style = MaterialTheme.typography.labelLarge) }
                     }
+                    Spacer(Modifier.height(Dimens.gapXS))
                     HorizontalDivider()
-                    // Expressive 连体按钮组；窄屏溢出去走官方 OverflowIndicator。
-                    //
-                    // 不能给 ButtonGroup 本身 fillMaxWidth：overflow 测量会
-                    // `constraints.copy(maxWidth = remainingSpace + overflowWidth)`，而
-                    // fillMaxWidth 把 minWidth 钉成整行宽，两者一碰就
-                    // IllegalArgumentException（maxWidth < minWidth）—— 网文书 4 个带图标
-                    // 按钮在窄屏上几乎必溢出，一点底栏就崩。外层 Box 铺满、组本身 wrap。
-                    Box(
+                    // 四个等分图标按钮：纯图标 + contentDescription，窄屏也能一次摆开，
+                    // 不再走带文字的 ButtonGroup（会溢出成「⋯」或触发布局崩溃）。
+                    // 本地书/滚动模式下不适用的动作保留占位并禁用，位置不跳。
+                    val actionColors = IconButtonDefaults.iconButtonColors(
+                        contentColor = barContent,
+                        disabledContentColor = barContent.copy(alpha = 0.38f),
+                    )
+                    Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(top = Dimens.gapXS, start = Dimens.gapS, end = Dimens.gapS),
-                        contentAlignment = Alignment.Center,
+                            .padding(horizontal = Dimens.gapS),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
-                        ButtonGroup(
-                            overflowIndicator = { menuState ->
-                                ButtonGroupDefaults.OverflowIndicator(menuState = menuState)
-                            },
+                        AppIconButton(
+                            onClick = { showToc = true },
+                            colors = actionColors,
+                            modifier = Modifier.weight(1f),
                         ) {
-                            clickableItem(
-                                onClick = { showToc = true },
-                                label = "目录",
-                                icon = {
-                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
-                                },
+                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "目录")
+                        }
+                        AppIconButton(
+                            onClick = onSearchSources,
+                            enabled = state.isNetBook,
+                            colors = actionColors,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = "换源")
+                        }
+                        AppIconButton(
+                            onClick = onToggleAutoFlip,
+                            enabled = state.settings.flipAnimation != FlipAnimation.SCROLL,
+                            colors = actionColors,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(
+                                if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (state.autoFlipping) "停止自动翻页" else "自动翻页",
                             )
-                            if (state.isNetBook) {
-                                clickableItem(
-                                    onClick = onSearchSources,
-                                    label = "换源",
-                                    icon = {
-                                        Icon(Icons.Default.SwapHoriz, contentDescription = null)
-                                    },
-                                )
-                            }
-                            // 滚动模式下没有"页"，自动翻页无从谈起
-                            if (state.settings.flipAnimation != FlipAnimation.SCROLL) {
-                                clickableItem(
-                                    onClick = onToggleAutoFlip,
-                                    label = if (state.autoFlipping) "停止" else "自动",
-                                    icon = {
-                                        Icon(
-                                            if (state.autoFlipping) {
-                                                Icons.Default.Pause
-                                            } else {
-                                                Icons.Default.PlayArrow
-                                            },
-                                            contentDescription = null,
-                                        )
-                                    },
-                                )
-                            }
-                            clickableItem(
-                                onClick = { showSettings = true },
-                                label = "设置",
-                                icon = {
-                                    Icon(Icons.Default.Settings, contentDescription = null)
-                                },
-                            )
+                        }
+                        AppIconButton(
+                            onClick = { showSettings = true },
+                            colors = actionColors,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
                         }
                     }
                 }
@@ -618,6 +615,7 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
                 onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
             },
             enabled = settings.brightnessOverride != null,
+            showStopIndicators = false,
             modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
         )
         Icon(
@@ -731,12 +729,32 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
 
     Spacer(Modifier.height(Dimens.gapM))
     SectionLabel("纸色")
-    AppSlider(value = bgHsv[0], valueRange = 0f..360f, onValueChange = { rebuild(h = it) })
-    AppSlider(value = bgHsv[1], valueRange = 0f..0.25f, onValueChange = { rebuild(s = it) })
-    AppSlider(value = bgHsv[2], valueRange = 0f..1f, onValueChange = { rebuild(v = it) })
+    AppSlider(
+        value = bgHsv[0],
+        valueRange = 0f..360f,
+        onValueChange = { rebuild(h = it) },
+        showStopIndicators = false,
+    )
+    AppSlider(
+        value = bgHsv[1],
+        valueRange = 0f..0.25f,
+        onValueChange = { rebuild(s = it) },
+        showStopIndicators = false,
+    )
+    AppSlider(
+        value = bgHsv[2],
+        valueRange = 0f..1f,
+        onValueChange = { rebuild(v = it) },
+        showStopIndicators = false,
+    )
 
     SectionLabel("字色深浅")
-    AppSlider(value = textLevel, valueRange = 0f..1f, onValueChange = { rebuild(t = it) })
+    AppSlider(
+        value = textLevel,
+        valueRange = 0f..1f,
+        onValueChange = { rebuild(t = it) },
+        showStopIndicators = false,
+    )
 
     Text(
         text = "正文对比度 %.1f:1".format(ratio) + when {
