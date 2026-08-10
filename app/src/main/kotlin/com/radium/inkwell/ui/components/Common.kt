@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.LoadingIndicatorDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -78,8 +80,7 @@ fun EmptyState(
 /**
  * 加载态。与 [EmptyState]/[ErrorState] 三态对称，全应用统一形态。
  *
- * 内部是 Expressive [LoadingIndicator]。行内小尺寸走 [AppLoadingIndicator]，
- * 别再写 `CircularProgressIndicator`。
+ * 内部走 [AppLoadingIndicator]（默认尺寸的 Expressive [LoadingIndicator]）。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -104,8 +105,10 @@ fun LoadingState(
 }
 
 /**
- * Expressive 不确定进度指示。按钮 / 顶栏 / 列表尾 / 阅读纸色上的转圈都走这里；
- * 用 [size] 缩放到目标尺寸（默认组件固有大小）。OptIn 收在封装里。
+ * 不确定进度指示。默认尺寸用 Expressive [LoadingIndicator]；
+ * 小于其容器下限（[LoadingIndicatorDefaults.ContainerWidth]）时回退
+ * [CircularProgressIndicator] —— 形变多边形靠形状变化传达「在动」，强缩到 18~24dp
+ * 会让 minConstraints > maxConstraints，直接 `IllegalArgumentException`。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -114,10 +117,19 @@ fun AppLoadingIndicator(
     color: Color = MaterialTheme.colorScheme.primary,
     size: Dp? = null,
 ) {
-    LoadingIndicator(
-        modifier = if (size != null) modifier.size(size) else modifier,
-        color = color,
-    )
+    val floor = LoadingIndicatorDefaults.ContainerWidth
+    if (size != null && size < floor) {
+        CircularProgressIndicator(
+            modifier = modifier.size(size),
+            strokeWidth = 2.dp,
+            color = color,
+        )
+    } else {
+        LoadingIndicator(
+            modifier = if (size != null) modifier.size(size) else modifier,
+            color = color,
+        )
+    }
 }
 
 /**
