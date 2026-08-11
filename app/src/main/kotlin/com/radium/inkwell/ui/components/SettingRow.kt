@@ -23,7 +23,7 @@ fun SectionHeader(
     val h = if (horizontalInset) Dimens.listHorizontal else 0.dp
     Text(
         text,
-        modifier.padding(start = h, end = h, top = Dimens.gapXL, bottom = Dimens.gapS),
+        modifier.padding(start = h, end = h, top = Dimens.sectionHeaderTop, bottom = Dimens.gapS),
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
     )
@@ -52,7 +52,6 @@ fun SettingRow(
         enabled = onClick != null,
         trailingContent = trailing,
         supportingContent = supporting,
-        contentPadding = ContentListDefaults.CompactPadding,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },
@@ -88,7 +87,6 @@ fun SwitchRow(
             Switch(checked = checked, enabled = enabled, onCheckedChange = null)
         },
         supportingContent = supporting,
-        contentPadding = ContentListDefaults.CompactPadding,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },

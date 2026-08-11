@@ -112,7 +112,6 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
                 Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
-        contentPadding = ContentListDefaults.CompactPadding,
         content = {
             Text(
                 option.label,

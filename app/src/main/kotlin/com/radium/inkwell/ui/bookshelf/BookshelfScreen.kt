@@ -763,6 +763,7 @@ private fun BookShelfListRow(
             trailingContent = trailingContent,
             overlineContent = overlineContent,
             supportingContent = supportingContent,
+            contentPadding = ContentListDefaults.ComfortablePadding,
             content = headline,
         )
     } else {
@@ -773,6 +774,7 @@ private fun BookShelfListRow(
             leadingContent = leadingContent,
             overlineContent = overlineContent,
             supportingContent = supportingContent,
+            contentPadding = ContentListDefaults.ComfortablePadding,
             content = headline,
         )
     }

@@ -27,8 +27,9 @@ import androidx.compose.ui.unit.dp
  * 颜色读 [MaterialTheme.colorScheme]：`surfaceContainerLow` / `secondaryContainer` 由
  * `AppThemes.schemeFrom` 从当前主题推导 —— 换预设或自定义强调色时层级跟着变。
  *
- * 行高跟 Expressive 规范走（两行约 72dp），别在外层另搓 `Surface` 去压矮 —— 那就不算
- * Material 3 Expressive 了。
+ * **形态**走 Expressive ListItem（圆角容器、选中槽、交互重载）；**密度**走
+ * [CompactPadding] / [ComfortablePadding] 两档 —— Expressive 不等于必须用官方最松内边距。
+ * 别在外层另搓 `Surface` 去压矮：那会丢掉 ListItem 的形状与选中态。
  *
  * `ListItem` 仍是 `ExperimentalMaterial3ExpressiveApi`；opt-in 收在本文件，调用方不用标。
  */
@@ -73,17 +74,19 @@ object ContentListDefaults {
         )
     }
 
-    /** Expressive [ListItem] 默认内边距；行高由组件按行数决定，别另压 */
+    /** M3 ListItem 官方内边距（约 16×10）；多媒体行用 [ComfortablePadding] */
     val ContentPadding: PaddingValues
         get() = ListItemDefaults.ContentPadding
 
-    /** 与 [ContentPadding] 同值，调用点别分叉 */
+    /**
+     * 带封面 / 大图标预览等多媒体行：比 Compact 松一档，避免 48×64 书封贴边。
+     * 与 [ContentPadding] 同值，调用点别再直接读 ListItemDefaults。
+     */
     val ComfortablePadding: PaddingValues
         get() = ContentPadding
 
     /**
-     * 设置导航行 / 选择面板行：比 Expressive 默认矮一档。
-     * 默认 ContentPadding 上下偏松，两行文案卡片会显得「虚高」；这里仍走 4dp 栅格，
+     * 全应用默认密度（16×8）。设置、书源、选择面板、纯文字目录都走它；
      * 触控高度靠 ListItem 自身下限兜住。
      */
     val CompactPadding: PaddingValues
@@ -105,7 +108,7 @@ fun ContentListItem(
     overlineContent: (@Composable () -> Unit)? = null,
     supportingContent: (@Composable () -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
-    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
     content: @Composable () -> Unit,
 ) {
@@ -138,7 +141,7 @@ fun ContentListItem(
     overlineContent: (@Composable () -> Unit)? = null,
     supportingContent: (@Composable () -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
-    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
     content: @Composable () -> Unit,
 ) {
@@ -172,7 +175,7 @@ fun ContentListItem(
     overlineContent: (@Composable () -> Unit)? = null,
     supportingContent: (@Composable () -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
-    contentPadding: PaddingValues = ContentListDefaults.ContentPadding,
+    contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
     content: @Composable () -> Unit,
 ) {
@@ -214,7 +217,6 @@ fun ChapterListItem(
         modifier = if (inset) modifier.then(ContentListDefaults.rowChrome()) else modifier,
         enabled = enabled,
         trailingContent = trailingContent,
-        contentPadding = ContentListDefaults.ComfortablePadding,
         content = {
             Text(
                 title,

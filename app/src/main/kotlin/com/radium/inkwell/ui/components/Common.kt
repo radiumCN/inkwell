@@ -294,6 +294,8 @@ fun BookListRow(
         },
         overlineContent = overline,
         supportingContent = supporting,
+        // 48×64 书封：用 Comfortable，Compact 会贴边
+        contentPadding = ContentListDefaults.ComfortablePadding,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
         },

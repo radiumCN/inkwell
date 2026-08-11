@@ -42,7 +42,7 @@ fun ChipRow(
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(contentPadding),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.chipSpacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         options.forEachIndexed { i, label ->

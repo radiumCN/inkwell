@@ -42,7 +42,7 @@ fun PrimaryButton(
         onClick = onClick,
         shapes = ButtonDefaults.shapes(),
         enabled = enabled && !loading,
-        modifier = modifier.defaultMinSize(minHeight = ButtonDefaults.MinHeight),
+        modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
     ) {
         ButtonContent(text, loading)
     }
@@ -61,7 +61,7 @@ fun SecondaryButton(
         onClick = onClick,
         shapes = ButtonDefaults.shapes(),
         enabled = enabled && !loading,
-        modifier = modifier.defaultMinSize(minHeight = ButtonDefaults.MinHeight),
+        modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
     ) {
         ButtonContent(text, loading)
     }

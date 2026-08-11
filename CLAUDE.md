@@ -37,7 +37,9 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 尺寸 → `app/.../ui/components/Dimens.kt`
 
-全部落在 **4dp 栅格**。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；设置行 `rowHorizontal`(20)/`rowVertical`(14)；内容列表行 `listHorizontal`(16)/`listVertical`(8)；图标 `iconSm`(18)/`iconMd`(24)/`iconLg`(32)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)；封面 `coverThumbWidth/Height`、详情 `coverDetailWidth/Height`、书架网格 `bookshelfGridMin`；输入高 `searchFieldHeight`/`compactFieldHeight`。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
+全部落在 **4dp 栅格**。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；设置行 `rowHorizontal`(20)/`rowVertical`(10)；内容列表行 `listHorizontal`(16)/`listVertical`(8)；`sectionHeaderTop`(16)、`chipSpacing`(4)、`buttonMinHeight`(40)；图标 `iconSm`(18)/`iconMd`(24)/`iconLg`(32)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)；封面 `coverThumbWidth/Height`、详情 `coverDetailWidth/Height`、书架网格 `bookshelfGridMin`；输入高 `searchFieldHeight`/`compactFieldHeight`（均为 40）。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
+
+**Expressive 管形态与动效，Compact 管密度：** 继续用 `MaterialExpressiveTheme`、带 `shapes()` 的按钮/Chip/图标按钮重载、ListItem 交互重载；默认行内边距用 `ContentListDefaults.CompactPadding`，带封面/大图标预览的行才显式 `ComfortablePadding`。别为了「收矮」退回普通 `MaterialTheme` 或外层另搓 `Surface` 冒充列表行。
 
 ### 动效 → `app/.../ui/components/Motion.kt`
 
@@ -80,8 +82,9 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Expressive `MediumFlexibleTopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏。四类例外仍用经典窄栏，理由写在 `AppTopBar` 的 KDoc 与各页注释里（标题位是交互控件的搜索页/发现页、带多选态的书架与书源管理） |
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（M3 `TextField` 最小 56dp 塞不下），但配色形状取 `TextFieldDefaults.roundedShape` / `tonalColors()`，别自己发明底色 |
 | 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体；对话框里也统一用它） |
-| 滑块 | `AppSlider`（`AppSlider.kt`）：M3 默认形态（厚轨 + 竖条 thumb + 停点），**别再自画细轨圆点**去压高度 —— 那会丢掉拖动反馈，颜色也不跟主题走。`activeColor` 只给阅读器浮层（纸色背景）用 |
+| 滑块 | `AppSlider`（`AppSlider.kt`）：挂官方 `Slider`，自绘细轨 + 圆点（槽高对齐 M3 `TrackHeight`）。`activeColor` 只给阅读器浮层（纸色背景）用 |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`）；单个独立 chip 用 `AppFilterChip`（同样为了按压形变的那个重载） |
+| 列表行密度 | 默认 `CompactPadding`；带封面/大图标的行（`BookListRow`、书架列表、`AppIconSheet`）用 `ComfortablePadding` |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |

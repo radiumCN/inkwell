@@ -41,8 +41,12 @@ object Dimens {
     val rowVertical = 10.dp
     /** 内容列表行（书籍、书源、文章、设置卡片）的左右内边距 */
     val listHorizontal = 16.dp
-    /** 内容列表 / 设置卡片行的上下内边距 */
+    /** 内容列表 / 设置卡片行的上下内边距（Compact 默认密度） */
     val listVertical = 8.dp
+    /** 设置分组小标题上方间距（比 gapXL 矮一档，一屏多看一组） */
+    val sectionHeaderTop = gapL
+    /** Chip 横排间距（比 gapS 更紧） */
+    val chipSpacing = gapXS
 
     // ---- 高度上限 ----
     /**
@@ -90,8 +94,10 @@ object Dimens {
     val readerSplashCoverHeight = 160.dp
     /** 顶栏 / 工具条搜索框高度 */
     val searchFieldHeight = 40.dp
-    /** 对话框 / 表单行内紧凑输入高度 */
-    val compactFieldHeight = 44.dp
+    /** 对话框 / 表单行内紧凑输入高度（与搜索框同高） */
+    val compactFieldHeight = 40.dp
+    /** 主按钮 / 次按钮最小高度（对齐 M3 ButtonDefaults.MinHeight，走令牌不裸读） */
+    val buttonMinHeight = 40.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
     /**

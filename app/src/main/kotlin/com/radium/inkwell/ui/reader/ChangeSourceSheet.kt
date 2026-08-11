@@ -191,7 +191,6 @@ private fun ChangeSourceCandidateRow(
         } else {
             null
         },
-        contentPadding = ContentListDefaults.ComfortablePadding,
         content = {
             Text(
                 candidate.title.ifBlank { "未命名" },
