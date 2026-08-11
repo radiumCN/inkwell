@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
@@ -19,13 +18,19 @@ import com.radium.inkwell.ui.components.animationsEnabled
  * M3 形状刻度（含 Expressive Dialog / Sheet / Snackbar 用的 extraLarge）。
  * `extraLarge` 用 28dp —— 与 Material 3 `AlertDialogDefaults` / 大面板规范一致；
  * 从前 24dp 会让对话框看起来比官方 Expressive 样例「方」一截。
+ *
+ * 刻度值不变，换的是**角的画法**：全部走 [SquircleShape]（曲率连续的平滑圆角）而非
+ * `RoundedCornerShape` 的「直边接圆弧」。半径读数一样，所以间距、对齐、既有的视觉重量都不动。
+ *
+ * 小半径那两档（4/8dp）肉眼几乎看不出差别，仍然一并换掉 —— 留着混用会让同一屏上出现两种角，
+ * 而这类不一致恰恰是只在余光里察觉、却找不出原因的那种。
  */
 private val InkwellShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = SquircleShape(4.dp),
+    small = SquircleShape(8.dp),
+    medium = SquircleShape(12.dp),
+    large = SquircleShape(16.dp),
+    extraLarge = SquircleShape(28.dp),
 )
 
 /**

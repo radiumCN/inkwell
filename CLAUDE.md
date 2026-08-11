@@ -62,6 +62,12 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 
 刻度在 `Theme.kt`：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16)/`extraLarge`(28，对齐 M3 Dialog)。用 `MaterialTheme.shapes.medium` 等，**不要**裸写 `RoundedCornerShape(12.dp)`。
 
+五档全部是 `SquircleShape`（`ui/theme/SquircleShape.kt`）——曲率连续的平滑圆角，直边到圆角之间没有那道曲率突跳。**半径读数不变**，所以间距与对齐都照旧。参数（外扩 1.1、控制柄 0.643）照 Apache-2.0 的 [Miuix](https://github.com/compose-miuix-ui/miuix) 重写，没引依赖：它用 Kotlin 2.4 编译，本项目卡在 2.3.21（KSP 无 2.4.x，见 `libs.versions.toml`）。
+
+要新形状就 `SquircleShape(x.dp)`，别退回 `RoundedCornerShape` —— 混用会让同屏出现两种角。真正的**正圆**（色板、滑块拇指、角标）仍用 `CircleShape`，那不是圆角是圆。
+
+代价记一笔：它产出 `Outline.Generic`（Path）而非 `Outline.Rounded`，带阴影的 `Surface`/`Card` 要靠底层 `Outline.setPath` 投影、而那条路只吃凸路径。本形状是凸的，但**这是真机才能确认的一项**。
+
 ### 颜色 → `MaterialTheme.colorScheme` 语义令牌
 
 页面颜色一律走语义令牌（`primary`/`surface`/`onSurface`/`surfaceContainer*`/`error`…），**不写十六进制、不写 `Color.Gray`**。配色由 `AppThemes.kt` 从「强调色 + 背景色」推导整套（含 `surfaceContainer*` 全槽位）。
@@ -96,8 +102,11 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Expressive `LinearWavyProgressIndicator`）；搜索/书源校验/更新下载走它，别裸写 `LinearProgressIndicator` |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。内部是官方 M3 `Snackbar`（Expressive 主题下的默认形状/色/elevation）；页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 | 对话框 | 直接用 M3 `AlertDialog`（形状走主题 `extraLarge`=28dp）；别手搓居中 `Surface` 冒充弹层 |
+| 大块可点元素的按压反馈 | `rememberSinkIndication()`（`PressFeedback.kt`）当 `indication` 传给自己写的 `clickable`/`combinedClickable`：按下缩到 94%、欠阻尼回弹。**只用在书封这类大块媒体元素上**，普通列表行/按钮维持水波纹（见下） |
 
 出现「多个页面重复相似 UI」时，抽成组件而不是复制。
+
+**按压反馈为什么不全局统一：** M3 组件（`Button`、`ListItem` 的交互重载、`FilterChip`…）把 `ripple()` 写死在内部，既不收 `indication` 参数也不读 `LocalIndication` —— 没有公开口子能把下沉塞进去。所以别试图「关掉水波纹让全应用统一」：`LocalRippleConfiguration provides null` 确实能关，但关掉之后那些组件按下去**毫无反馈**，比两种反馈并存更糟。想让 M3 组件也沉下去，只能整套重写组件，那就是换设计系统了。
 
 ---
 

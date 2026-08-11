@@ -192,9 +192,24 @@ status: **pending**
 
 验证：`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。**实机未验** —— 改的全是「滑动那 300 毫秒长什么样」，编译与单测一概看不见。
 
+## 已完成（第 7 阶段：平滑圆角 + 大块元素按压下沉）
+
+前六个阶段都在 M3 自己的刻度里调。这一阶段第一次引入**外部参照**：[Miuix](https://github.com/compose-miuix-ui/miuix)（Apache-2.0），一个以实现 HyperOS 设计语言为目标的 Compose Multiplatform 组件库。
+
+**为什么是读源码而不是加依赖。** Miuix 0.9.3 用 Kotlin 2.4.0 编译（tag `v0.9.3` 的 toml 与发布 POM 里的 `kotlin-stdlib:2.4.0` 都能对上），本项目卡在 2.3.21 —— KSP 至今没发 2.4.x，升上去 Room 的注解处理就崩（`libs.versions.toml` 里早记过这条）。旧编译器读不了新 Kotlin 的 metadata，这条路直接堵死。另外两条即使 Kotlin 不卡也在：它的 android 构件拖 `org.jetbrains.compose.foundation:foundation:1.11.1`，与本项目 1.12.0-rc01 的预发布栈没人验过；而且它是**与 M3 平行的另一套设计系统**（`MiuixTheme` 自带 Colors/TextStyles），用它等于放弃 `MaterialExpressiveTheme`，且不能半用 —— 半用就是一屏两套设计语言。
+
+所以取的是**数值**，代码照着重写，出处写进 KDoc。
+
+- **平滑圆角**（`ui/theme/SquircleShape.kt`）：`CornerBasedShape` 实现，五档形状刻度全部换掉，半径读数不变。每角一条三次贝塞尔，外扩 `1.1`、控制柄 `1 - 0.643`。**必须是 `CornerBasedShape` 而非裸 `Shape`** —— Expressive 按钮按下的形状形变靠 `copy()` 插值角半径，只实现 `Shape` 会让形变整个失效。`ReaderThemeScope` 传的是 `MaterialTheme.shapes`，自动跟上。
+- **按压下沉**（`ui/components/PressFeedback.kt`）：`SinkIndication`，按下缩到 `0.94`、`spring(0.8, 600)` 欠阻尼收尾。走 `LayoutModifierNode` 在放置阶段改 scale，不是 `graphicsLayer` + `State`（后者每帧重组调用点，一次按压几十帧）。系统关动画时换 `snap()` —— 仍然沉下去，反馈不能丢。目前只用在书架的书封网格上。
+
+**一堵撞上的墙，值得记住**：M3 组件把 `ripple()` 写死在内部，既不收 `indication` 也不读 `LocalIndication`。所以下沉**只能**用在我们自己持有 clickable 的地方，`ContentListItem`（M3 `ListItem` 交互重载）这类注不进去。别试图靠 `LocalRippleConfiguration provides null` 关掉水波纹求统一：关得掉，但关掉之后那些组件按下去毫无反馈，比两种反馈并存更糟。要让 M3 组件也沉下去，只能整套重写组件 —— 那就回到「换设计系统」那个选项了。
+
+验证：`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿，`assembleDebug` 通过。**实机未验**，且这一阶段多出一个编译期看不见的风险点：`SquircleShape` 产出 `Outline.Generic`（Path）而非 `Outline.Rounded`，带阴影的 `Surface`/`Card` 要靠底层 `android.graphics.Outline.setPath` 投影、而那条路只接受**凸**路径。本形状是凸的，理应正常，但必须真机确认阴影没丢、边缘没锯齿。
+
 ## 剩下要做的
 
-1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。第 5 阶段留下两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。第 6 阶段再添两个：进退页那 300 毫秒的整体节奏（重点看被盖住那页是否与上层同步、返回第一帧还跳不跳），以及**从左右两个边缘各划一次返回**，判断预测性返回要不要按边缘分方向。
+1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。第 5 阶段留下两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。第 6 阶段再添两个：进退页那 300 毫秒的整体节奏（重点看被盖住那页是否与上层同步、返回第一帧还跳不跳），以及**从左右两个边缘各划一次返回**，判断预测性返回要不要按边缘分方向。第 7 阶段再添两个，都是编译期看不见的：**带阴影的卡片/对话框投影是否还在**（`Outline.Generic` 走 `setPath`，只吃凸路径），以及书封按下去那一下的下沉幅度在真实网格间距下会不会显得整片抖动。
 2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs`、`MediumFlexibleTopAppBar` 与三套 `*Shapes` 形变都是新类，旧 profile 规则覆盖不到）。
 3. **还逃在 `MotionScheme` 之外的动效**，共三处，无障碍都靠 `animationsEnabled()` 单独兜着：页面进退与阅读器开合是**刻意例外**（理由分别见第 6 阶段与 `Motion.kt` 的 KDoc，两处都已在 `InkwellNavDisplay` 里接了关动画时的 instant 分支）；剩下 `reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）是**唯一还没想清楚的一处** —— reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值。要动它得先想清楚 reader 怎么拿到令牌而不反向依赖 Compose。
 
