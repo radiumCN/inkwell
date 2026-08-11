@@ -47,7 +47,7 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 - **spatial / effects 分工**（M3 约定，混了会难看）：位移与尺寸用 `defaultSpatialSpec()`，纯视觉属性（alpha、颜色）用 `defaultEffectsSpec()`。
 - **「退场比入场快」**：帮手里入场 `default*`、退场 `fast*`。
 - **系统「移除动画」**：`InkwellTheme` 把 `motionScheme` 换成 `InstantMotionScheme`；帮手里不必再判 `animationsEnabled()`。`animateItem` 仍可传 `null` 省插值；reader 翻页在主题外。
-- **页面进退例外**：`Motion.pagePushTransform()` / `pagePopTransform()`（拟合 HyperOS：部分横滑 + fade + 微缩放，~350/300ms cubic-bezier）。`ANIMATOR_DURATION_SCALE==0` 时用 `instantPageTransform()`；非 0 时时长由 Compose `MotionDurationScale` 自动乘倍率，勿再手乘。别套 Expressive `defaultSpatial` 做整屏横滑。
+- **页面进退例外**：`Motion.pagePushTransform()` / `pagePopTransform()`（拟合 HyperOS：部分横滑 + fade + 微缩放，~320/280ms cubic-bezier，alpha 另走更短一档）。**同一次转场里上下两层必须共用一条时长**（`pagePushSpec()` 或 `pagePopSpec()`，别一层进场 spec 一层退场 spec）—— 分层并行的前提是两层同一条进度，差几十毫秒会看出背景先停、前景后到。「退场比入场快」在这里指 pop 整体比 push 快，不是同一次转场里的两层之间。`ANIMATOR_DURATION_SCALE==0` 时用 `instantPageTransform()`；非 0 时时长由 Compose `MotionDurationScale` 自动乘倍率，勿再手乘。别套 Expressive `defaultSpatial` 做整屏横滑。
 - **阅读器开合仍硬编码 tween**（`READER_ENTER_MS` / `READER_EXIT_MS`）：与 splash 窗口咬合，别改成令牌 spring。
 
 ### 主题入口 → `MaterialExpressiveTheme`

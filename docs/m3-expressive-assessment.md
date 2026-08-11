@@ -49,6 +49,8 @@ status: **pending**；verify: 每个页面有 1.4.0 现状截图
 另有一个**踩进去过的坑**，记下来：`MaterialExpressiveTheme` 的 `motionScheme` 默认是 `null`，很容易以为「不传就是 expressive」。反编译 alpha25 的 `MaterialThemeKt` 看清楚了 —— `null` 走的是 `MaterialTheme.getMotionScheme()`，即**沿用外层主题**；根节点没有外层，拿到的是 `MaterialTheme.Values` 的默认值 `MotionScheme.standard()`。也就是说省掉这个参数的结果是「组件形态换成 Expressive、动效还是 standard」，而**编译器和单测都看不见**。所以必须显式 `MotionScheme.expressive()`（这个函数在 1.5.0-alpha25 是公开的，1.4.0 里是 internal）。
 
 成功判据 2（动效只有一个来源）**只算部分达成**：现在是分工并存 —— `Motion.kt` 的 tween 管我们自己写的转场，`MotionScheme` 的 spring 管组件内部。无障碍风险已闭合（两边都会被关成 0 时长），剩下的是**观感一致性**：弹性 spring 和 220ms tween 摆在同一屏上，节奏不一样。要不要把 `Motion.kt` 也改成读 `MaterialTheme.motionScheme`，留给第 2 阶段 —— 那是纯观感取舍，不再是无障碍红线。
+
+**后续（第 3 / 6 阶段）**：八个组件帮手已全部改读 `MotionScheme`，判据 2 在**组件层**达成；页面进退与阅读器开合作为两条**刻意例外**留在 tween，理由写在第 6 阶段与 `Motion.kt` 的 KDoc 里。所以这一项的终态不是「一个来源」，而是「一个来源 + 两条写明理由的例外」。
 status: **已解决**；verify: 待实机 —— 开「移除动画」录屏，确认 Sheet 滑入 / Switch 拇指 / Chip 选中都不再有过渡
 
 ### 2. 颜色层
@@ -150,15 +152,17 @@ status: **pending**
 
 前两阶段留下的是「局部对齐」：Expressive 主题开了，但我们自己写的转场还是 `Motion.kt` 里的硬编码 tween，与组件内部读的 `MotionScheme` 两套并存 —— 同一屏上 Sheet 弹性滑入、它上面的顶栏匀速划下来。这一阶段把它收成一个来源。
 
-- `ui/components/Motion.kt`：八个帮手全部改读 `MaterialTheme.motionScheme`，位移取 `*SpatialSpec`、alpha 取 `*EffectsSpec`，退场取 `fast*` 档（「退场比入场快」不再靠手写毫秒）。删掉 `ENTER_MS`/`EXIT_MS`/`NAV_*` 与两条自定义 easing。帮手里**不再判** `animationsEnabled()` —— 无障碍由 `InstantMotionScheme` 在主题那一处兜住，判两遍等于两个来源。**只保留**阅读器开合两条 tween：时长与 `READER_SPLASH_DELAY_MS` 咬合，spring 给不出确定时长。
-- `ui/nav/InkwellNavDisplay.kt`：页面 push/pop 转场接令牌（阅读器缩放那条不动）。
+- `ui/components/Motion.kt`：八个帮手全部改读 `MaterialTheme.motionScheme`，位移取 `*SpatialSpec`、alpha 取 `*EffectsSpec`，退场取 `fast*` 档（「退场比入场快」不再靠手写毫秒）。删掉 `ENTER_MS`/`EXIT_MS`/`NAV_*` 与两条自定义 easing。帮手里**不再判** `animationsEnabled()` —— 无障碍由 `InstantMotionScheme` 在主题那一处兜住，判两遍等于两个来源。**只保留**阅读器开合两条 tween：时长与 `READER_SPLASH_DELAY_MS` 咬合，spring 给不出确定时长。（**这句后来不再成立**：页面进退也回到了 tween，见第 6 阶段。八个帮手走令牌这部分仍然有效。）
+- ~~`ui/nav/InkwellNavDisplay.kt`：页面 push/pop 转场接令牌（阅读器缩放那条不动）。~~ **已推翻**，见第 6 阶段：页面进退是刻意的 tween 例外，`InkwellNavDisplay` 现在接的是 `Motion.pagePushTransform()` / `pagePopTransform()`。阅读器缩放那条从头到尾没动过。
 - `ui/bookshelf/BookshelfScreen.kt`：`animateItem` 的三个 spec 接令牌；`motionOn` 保留，因为这个 API 的「不动画」写法是传 `null`，比 `tween(0)` 省掉每帧插值。
 - 新增 `ui/components/AppTabs.kt`：`AppTabRow`（`PrimaryTabRow`）+ `AppTabContent`（横移 1/8 + 淡入淡出，`using(null)` 关掉 SizeTransform）。`ReaderMenu` 改用它 —— 上一轮只改了这唯一一处 Tab，但没有封装约束后来者，形态与节奏迟早再分叉。
 - `Messages.kt` 的 Snackbar 已经是全局的（14 个页面都走 `AppSnackbarHost`，无裸 `Snackbar`），本轮只在 `CLAUDE.md` 里把「居中悬浮胶囊、页面别自己写 host」写成规则。
 
 验证：`:core:test`/`:reader:test`/`:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。
 
-**误诊记录（beta.8，已撤）**：用户报「三级回二级干等一秒」时，曾误判成页面转场 spring 的尾巴，把 push/pop 改回定长 tween。用户当场否掉 —— 那是返回落地前的等待，不是过渡动画。根因是设置树三级页也标成了 `detailPane`，被盖住的二级页被 scaffold 卸掉组合，返回时冷启动。已改 `extraPane`；页面转场**继续走** `MotionScheme`，beta.8 的 tween 例外已撤回，别再照着那条改。
+**误诊记录（beta.8，已撤）**：用户报「三级回二级干等一秒」时，曾误判成页面转场 spring 的尾巴，把 push/pop 改回定长 tween。用户当场否掉 —— 那是返回落地前的等待，不是过渡动画。根因是设置树三级页也标成了 `detailPane`，被盖住的二级页被 scaffold 卸掉组合，返回时冷启动。已改 `extraPane`。
+
+**这条误诊记录的结论只对了一半，订正如下**：「三级回二级干等一秒」的根因确实是 `detailPane` 卸组合，与转场无关 —— 这部分成立。但由此推出的「所以页面转场该继续走 `MotionScheme`」是**过度纠正**：当时是拿一个被误诊的 bug 去反推动效方案，两件事本就没有因果。后来页面进退还是回到了 tween，理由与那个 bug 无关：Expressive 的 spatial spring 带回弹，整屏横滑上看得出过冲；而要拟合的那条 HyperOS 曲线是「头两成时间冲掉九成行程」的极端前置减速，spring 的参数空间里表达不出来（见第 6 阶段）。原文末尾「别再照着那条改」现已作废，**以 `CLAUDE.md` 的「页面进退例外」为准**。
 
 ## 已落地（第 5 阶段：按压形变 + Flexible 顶栏 + 滑块回归默认）
 
@@ -172,10 +176,26 @@ status: **pending**
 
 验证：`:app:compileDebugKotlin` 通过；`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿；`assembleDebug` 通过。**实机仍未验** —— 这一轮改的恰恰是「按下去那一瞬间」和「顶栏折叠手势」，都是编译与单测看不见的东西。
 
+## 已落地（第 6 阶段：页面进退转场收口）
+
+第 3 阶段把八个组件帮手收进了 `MotionScheme`，页面进退则另立为 tween 例外（`CLAUDE.md` 的「页面进退例外」）。这一轮只动这一处例外，把它从「大致像 HyperOS」调到「参数说得出理由」。
+
+改动都在 `ui/components/Motion.kt`，`InkwellNavDisplay` 只跟着改了一行注释。**两条是修 bug，不是调观感**：
+
+- **push / pop 的位移不对称**。`pagePushExit` 把被盖住的页推到屏宽 -17.5%，而 `pagePopEnter` 只让它从 -10.5% 处回位 —— 同一个页面，推走时停在一处、回来时从另一处起步，差了 7% 屏宽，返回的第一帧会跳一下。现在两边共用 `PAGE_UNDER_SLIDE_FRACTION`（19%）。
+- **同一次转场里两层用了两条时长**。入场页 350ms、被盖页 300ms，各走各的：被盖页提前 50ms 停住，压在上面的新页还在滑。分层并行的前提就是两层同一条进度，差几十毫秒会在余光里看出「背景先定住、前景后到」。现在 push 两层都用 `pagePushSpec()`（320ms），pop 两层都用 `pagePopSpec()`（280ms）。
+  顺带把「退场比入场快」的适用范围写清楚了：它指 **pop 整体比 push 快**（280 vs 320），不是同一次转场里的两层之间。这条歧义已写进 `CLAUDE.md`，否则下一个人会照第 3 阶段的帮手写法把两层再拆开。
+
+其余是观感项：曲线换成 `(0.2, 0.9, 0.1, 1)`（原 `(0.2, 0, 0, 1)` 起步有段近似线性的爬升，看着是「先动一下、再滑过去」两段感）；alpha 从位移里拆出来单走一档（push 200 / pop 180，约位移六成），免得新页整段滑行都半透明地压着旧页、两页的字叠在一起；被盖页淡到 0.6 而非 0（它还在屏幕上，淡到 0 是凭空消失，与「被压到下一层」相反）；横滑 35% → 38%、进出页缩放 0.92 → 0.95、被盖页 0.95 → 0.94。
+
+**没做、且刻意没做的一处**：`NavDisplay.predictivePopTransitionSpec` 的 lambda 参数是返回手势的滑动**边缘**（`Int`），现在仍然忽略它，两个边缘一律「向右滑出」。从右边缘往左划时页面是逆着手指走的，看上去该跟手；但 `InkwellNavDisplay` 里已有相反的既定决定 —— 阅读器那处特意让手势返回与按键返回长得一样，理由是同一个动作不该有两种样子。按边缘分方向会直接违反它。**这个只有真机上两只手各划一次才判得了，留给实机巡检**。
+
+验证：`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。**实机未验** —— 改的全是「滑动那 300 毫秒长什么样」，编译与单测一概看不见。
+
 ## 剩下要做的
 
-1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。这一轮新增两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。
+1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。第 5 阶段留下两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。第 6 阶段再添两个：进退页那 300 毫秒的整体节奏（重点看被盖住那页是否与上层同步、返回第一帧还跳不跳），以及**从左右两个边缘各划一次返回**，判断预测性返回要不要按边缘分方向。
 2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs`、`MediumFlexibleTopAppBar` 与三套 `*Shapes` 形变都是新类，旧 profile 规则覆盖不到）。
-3. **唯一还逃在 `MotionScheme` 之外的动效**：`reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）。reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值 —— 无障碍靠 `animationsEnabled()` 单独兜着。要动它得先想清楚 reader 怎么拿到令牌而不反向依赖 Compose。
+3. **还逃在 `MotionScheme` 之外的动效**，共三处，无障碍都靠 `animationsEnabled()` 单独兜着：页面进退与阅读器开合是**刻意例外**（理由分别见第 6 阶段与 `Motion.kt` 的 KDoc，两处都已在 `InkwellNavDisplay` 里接了关动画时的 instant 分支）；剩下 `reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）是**唯一还没想清楚的一处** —— reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值。要动它得先想清楚 reader 怎么拿到令牌而不反向依赖 Compose。
 
 每一步都要跑通：`:core:test`、`:reader:test`、`:app:testDebugUnitTest`、`:app:lintDebug`、`assembleDebug`。

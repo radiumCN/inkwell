@@ -107,7 +107,7 @@ fun InkwellNavDisplay() {
     )
     val dualPane = directive.maxHorizontalPartitions > 1
 
-    // HyperOS 风格：35% 横滑 + 淡入淡出 + 0.92 微缩放；关动画走 instant。
+    // HyperOS 风格：38% 横滑 + 淡入淡出 + 0.95 微缩放，两层同一条时长；关动画走 instant。
     val defaultPush = remember(animate) {
         if (animate) Motion.pagePushTransform() else Motion.instantPageTransform()
     }

@@ -48,8 +48,9 @@ import androidx.compose.ui.platform.LocalContext
  *
  * 两条不走 Expressive 默认档的例外：
  * 1. **页面进退**（[pagePushTransform] / [pagePopTransform]）：拟合 HyperOS 系统页切换 ——
- *    部分横滑 + 淡入淡出 + 轻微缩放，~350/300ms 的 cubic-bezier tween。时长由框架
- *    `MotionDurationScale` 乘 [ANIMATOR_DURATION_SCALE]；`scale==0` 时走 [instantPageTransform]。
+ *    部分横滑 + 淡入淡出 + 轻微缩放，~320/280ms 的 cubic-bezier tween（alpha 另走更短的一档）。
+ *    时长由框架 `MotionDurationScale` 乘 [ANIMATOR_DURATION_SCALE]；`scale==0` 时走
+ *    [instantPageTransform]。
  * 2. **阅读器开合** tween：时长与进书 splash 窗口咬合，同样由框架乘倍率，勿再手乘。
  */
 object Motion {
@@ -60,28 +61,78 @@ object Motion {
      */
     fun <T> instantSpec(): FiniteAnimationSpec<T> = tween(0)
 
-    // ---- 页面进退（拟合 HyperOS：部分横滑 + fade + 微缩放）----
+    // ---- 页面进退（拟合 HyperOS：分层并行的部分横滑 + fade + 微缩放）----
 
-    /** 入场约 350ms；退场略短，符合「退场比入场快」。 */
-    const val PAGE_ENTER_MS = 350
-    const val PAGE_EXIT_MS = 300
+    /**
+     * 一次转场里**上下两层共用同一条时长**，push / pop 各一条。
+     *
+     * 分层并行（layered parallel）的要义是两层由同一条进度驱动，像一摞卡片被整体推动。
+     * 从前是「入场页 350 / 退场页 300」—— 两层各走各的，被盖住那页提前 50ms 停住，而压在
+     * 上面的新页还在滑；余光里是背景先定住、前景后到，那一下的错位就是廉价感的来源。
+     *
+     * 「退场比入场快」仍然守着，只是它管的是**两个动作之间**（返回整体比前进快 40ms），
+     * 不是同一次转场里的两层之间。
+     */
+    const val PAGE_PUSH_MS = 320
+    const val PAGE_POP_MS = 280
 
-    /** HyperOS 常用：快进缓停 / 略加速收尾。 */
-    val PageEnterEasing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-    val PageExitEasing: Easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+    /**
+     * 位移与缩放的曲线。
+     *
+     * 控制点取 HyperOS 系统页切换的拟合值：第二个控制点 y 已经到 0.9，意味着**头两成时间就
+     * 冲掉了九成行程**，剩下八成时间全用来极缓地收尾。「跟手」就是这么来的 —— 手指离开的
+     * 瞬间页面基本已经到位，长尾只负责把最后一点距离稳稳放下。
+     *
+     * 比从前的 `(0.2, 0, 0, 1)` 更靠前发力：那条起步还有一段近似线性的爬升，落到眼里是
+     * 「先动一下、再滑过去」的两段感。
+     *
+     * pop 那条收得略缓（0.8 而非 0.9）：返回是把页面抽走，不需要进场那种扑面而来的冲劲。
+     */
+    val PagePushEasing: Easing = CubicBezierEasing(0.2f, 0.9f, 0.1f, 1f)
+    val PagePopEasing: Easing = CubicBezierEasing(0.3f, 0.8f, 0.2f, 1f)
 
-    /** 入场页从屏宽 35% 处滑入（不是整屏硬推）。 */
-    const val PAGE_SLIDE_FRACTION = 0.35f
+    /**
+     * 透明度**单独走一条更短的时长**（约位移的六成），不跟位移共用。
+     *
+     * 位移 320ms 里若让 alpha 也走满，新页会在整段滑行途中半透明地压着旧页，两页的字叠在一起
+     * 是脏的。让 alpha 早早落定：眼睛先确认「这是一个完整的新页面」，剩下的位移只交代方向。
+     */
+    const val PAGE_PUSH_FADE_MS = 200
+    const val PAGE_POP_FADE_MS = 180
 
-    /** 入场起始缩放；被盖住页略收到 [PAGE_UNDER_SCALE]。 */
-    const val PAGE_SCALE_START = 0.92f
-    const val PAGE_UNDER_SCALE = 0.95f
+    /** 进出屏那一页的横向行程（占屏宽）—— 不是整屏硬推。 */
+    const val PAGE_SLIDE_FRACTION = 0.38f
 
-    fun <T> pageEnterTweenSpec(): FiniteAnimationSpec<T> =
-        tween(PAGE_ENTER_MS, easing = PageEnterEasing)
+    /**
+     * 被盖住那页的横向行程，约为 [PAGE_SLIDE_FRACTION] 的一半。
+     *
+     * 两层走**不等距**才有纵深：等距的话两页像焊在一起平移，看不出谁压着谁。
+     */
+    const val PAGE_UNDER_SLIDE_FRACTION = 0.19f
 
-    fun <T> pageExitTweenSpec(): FiniteAnimationSpec<T> =
-        tween(PAGE_EXIT_MS, easing = PageExitEasing)
+    /** 进出屏那页的缩放端点；被盖住那页收得再狠一点（[PAGE_UNDER_SCALE]）。 */
+    const val PAGE_SCALE_START = 0.95f
+    const val PAGE_UNDER_SCALE = 0.94f
+
+    /**
+     * 被盖住的页**不淡到全透明**，停在 0.6。
+     *
+     * 它此刻还在屏幕上（只让出不到两成宽），淡到 0 就成了凭空消失，与「被压到下一层去了」的
+     * 深度暗示正好相反。留 0.6 是让它看着像退到后面一层，而不是被删掉。
+     */
+    const val PAGE_UNDER_ALPHA = 0.6f
+
+    fun <T> pagePushSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_PUSH_MS, easing = PagePushEasing)
+
+    fun <T> pagePopSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_POP_MS, easing = PagePopEasing)
+
+    private fun <T> pagePushFadeSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_PUSH_FADE_MS, easing = PagePushEasing)
+
+    private fun <T> pagePopFadeSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_POP_FADE_MS, easing = PagePopEasing)
 
     /** 系统关动画时的页面转场（瞬间淡变，避免残留位移/缩放）。 */
     fun instantPageTransform(): ContentTransform =
@@ -90,37 +141,37 @@ object Motion {
             fadeOut(instantSpec()),
         )
 
-    /** push：新页从右切入并放大显现，旧页左让并略缩淡出。 */
+    /** push：新页从右切入并放大显现，旧页左让、略缩、淡到 [PAGE_UNDER_ALPHA]。 */
     fun pagePushTransform(): ContentTransform =
         pagePushEnter() togetherWith pagePushExit()
 
-    /** pop：当前页右滑出并缩小，底层页从左回位放大显现。 */
+    /** pop：当前页右滑出并缩小，底层页从左回位、放大、由 [PAGE_UNDER_ALPHA] 淡回不透明。 */
     fun pagePopTransform(): ContentTransform =
         pagePopEnter() togetherWith pagePopExit()
 
     fun pagePushEnter(): EnterTransition =
-        slideInHorizontally(pageEnterTweenSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
-            fadeIn(pageEnterTweenSpec()) +
-            scaleIn(initialScale = PAGE_SCALE_START, animationSpec = pageEnterTweenSpec())
+        slideInHorizontally(pagePushSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
+            fadeIn(pagePushFadeSpec()) +
+            scaleIn(initialScale = PAGE_SCALE_START, animationSpec = pagePushSpec())
 
     fun pagePushExit(): ExitTransition =
-        slideOutHorizontally(pageExitTweenSpec()) {
-            -(it * PAGE_SLIDE_FRACTION * 0.5f).toInt()
+        slideOutHorizontally(pagePushSpec()) {
+            -(it * PAGE_UNDER_SLIDE_FRACTION).toInt()
         } +
-            fadeOut(pageExitTweenSpec()) +
-            scaleOut(targetScale = PAGE_UNDER_SCALE, animationSpec = pageExitTweenSpec())
+            fadeOut(pagePushFadeSpec(), targetAlpha = PAGE_UNDER_ALPHA) +
+            scaleOut(targetScale = PAGE_UNDER_SCALE, animationSpec = pagePushSpec())
 
     fun pagePopEnter(): EnterTransition =
-        slideInHorizontally(pageEnterTweenSpec()) {
-            -(it * PAGE_SLIDE_FRACTION * 0.3f).toInt()
+        slideInHorizontally(pagePopSpec()) {
+            -(it * PAGE_UNDER_SLIDE_FRACTION).toInt()
         } +
-            fadeIn(pageEnterTweenSpec()) +
-            scaleIn(initialScale = PAGE_UNDER_SCALE, animationSpec = pageEnterTweenSpec())
+            fadeIn(pagePopFadeSpec(), initialAlpha = PAGE_UNDER_ALPHA) +
+            scaleIn(initialScale = PAGE_UNDER_SCALE, animationSpec = pagePopSpec())
 
     fun pagePopExit(): ExitTransition =
-        slideOutHorizontally(pageExitTweenSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
-            fadeOut(pageExitTweenSpec()) +
-            scaleOut(targetScale = PAGE_SCALE_START, animationSpec = pageExitTweenSpec())
+        slideOutHorizontally(pagePopSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
+            fadeOut(pagePopFadeSpec()) +
+            scaleOut(targetScale = PAGE_SCALE_START, animationSpec = pagePopSpec())
 
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
