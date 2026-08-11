@@ -7,6 +7,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -72,6 +73,41 @@ object ContentListDefaults {
             selectedOverlineContentColor = onSelected,
             selectedSupportingContentColor = onSelected,
         )
+    }
+
+    /**
+     * 开关行专用色：开/关**不**换容器色。
+     *
+     * Expressive ListItem 的 checked 重载会把 `checked=true` 当成「选中」，套上
+     * `secondaryContainer` —— 于是同一页上导航行是浅灰小圆角、打开的开关行是深灰大圆角，
+     * 像两套组件。开/关状态只该由行内 [Switch] 表达，卡片底色与导航行对齐。
+     */
+    @Composable
+    fun toggleColors(): ListItemColors {
+        val scheme = MaterialTheme.colorScheme
+        return ListItemDefaults.colors(
+            containerColor = scheme.surfaceContainerLow,
+            selectedContainerColor = scheme.surfaceContainerLow,
+            selectedContentColor = scheme.onSurface,
+            selectedLeadingContentColor = scheme.onSurface,
+            selectedTrailingContentColor = scheme.onSurface,
+            selectedOverlineContentColor = scheme.onSurfaceVariant,
+            selectedSupportingContentColor = scheme.onSurfaceVariant,
+        )
+    }
+
+    /**
+     * 开关行专用形：开/关**不**换圆角。
+     *
+     * Expressive 默认 `selectedShape` 比静息 `shape` 更圆（接近 extraLarge），
+     * 开关打开时整行会「鼓」成另一副面孔。这里把 selected 钉成与静息同一条，
+     * 按压形变（pressedShape）仍保留。
+     */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun toggleShapes(): ListItemShapes {
+        val resting = ListItemDefaults.shapes()
+        return resting.copy(selectedShape = resting.shape)
     }
 
     /** M3 ListItem 官方内边距（约 16×10）；多媒体行用 [ComfortablePadding] */
@@ -177,6 +213,7 @@ fun ContentListItem(
     onLongClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
+    shapes: ListItemShapes = ListItemDefaults.shapes(),
     content: @Composable () -> Unit,
 ) {
     ListItem(
@@ -190,6 +227,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         verticalAlignment = Alignment.CenterVertically,
         onLongClick = onLongClick,
+        shapes = shapes,
         colors = colors,
         contentPadding = contentPadding,
         content = content,

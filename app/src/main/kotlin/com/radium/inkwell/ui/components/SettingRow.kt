@@ -64,6 +64,10 @@ fun SettingRow(
  * 用 checked 重载让整行成为一个开关语义目标，并把行内 Switch 的
  * onCheckedChange 置空（纯展示）—— 否则读屏会出现「行」和「开关」两个焦点，
  * 且行焦点念不出开/关状态。
+ *
+ * 形状与底色走 [ContentListDefaults.toggleShapes] / [ContentListDefaults.toggleColors]：
+ * Expressive 默认会把 checked 当成「选中」换成更圆的角和 secondaryContainer，
+ * 设置页里就会和旁边的 [SettingRow] 长得不像一类东西。开/关只由行内 Switch 表达。
  */
 @Composable
 fun SwitchRow(
@@ -87,6 +91,8 @@ fun SwitchRow(
             Switch(checked = checked, enabled = enabled, onCheckedChange = null)
         },
         supportingContent = supporting,
+        colors = ContentListDefaults.toggleColors(),
+        shapes = ContentListDefaults.toggleShapes(),
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },
