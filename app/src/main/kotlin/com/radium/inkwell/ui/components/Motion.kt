@@ -9,6 +9,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -26,28 +27,67 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /**
- * 动效层。**全应用只有一个动效来源**：[MaterialTheme.motionScheme]。
+ * 动效层。组件内建与浮层帮手以 [MaterialTheme.motionScheme] 为唯一来源；
+ * 页面级进退与阅读器开合是刻意例外（见下方）。
  *
- * 从前这里是一套硬编码 tween（入场 220ms / 退场 140ms + 自定义贝塞尔），而 M3 组件内部读的是
- * 主题里的 `MotionScheme`。两套并存的结果是同一屏上节奏对不上 —— 底部面板用弹性 spring 滑入、
- * 它上面的顶栏却匀速 tween 划下来，说不清哪里怪但就是不像一套东西。现在统一读主题：
  * `InkwellTheme` 把 `motionScheme` 钉成 `MotionScheme.expressive()`，系统开「移除动画」时
- * 整套换成 `InstantMotionScheme`（六个 spec 全 `tween(0)`）。
- *
- * 于是**无障碍也只剩一个开关**：这些帮手里不再逐个判 [animationsEnabled] —— 动画该不该动，
- * 由主题那一处决定，组件内部动画和我们自己写的转场一起静止，不会再漏掉某一处。
+ * 整套换成 `InstantMotionScheme`（六个 spec 全 `tween(0)`）。顶栏/底栏/蒙层/展开帮手
+ * 读令牌，不再逐个判 [animationsEnabled]。
  *
  * spatial / effects 的分工是 M3 的约定，别混：
  * - **spatial**（带回弹的 spring）管**位置与尺寸**：滑入、展开、缩放
  * - **effects**（不回弹）管**纯视觉属性**：alpha、颜色
  *
  * 用 effects 做位移会发木；用 spatial 做淡入会让透明度过冲，看着像闪了一下。
- * 「退场比入场快」这条仍然在，只是不再靠手写毫秒数，而是退场取 `fast*`、入场取 `default*`。
+ * 「退场比入场快」：帮手里退场取 `fast*`、入场取 `default*`；页面级见 [pageEnterSpatialSpec]。
  *
- * 仍然硬编码 tween 的只有阅读器开合那两条（见 [Motion]）：它们的时长与进书 splash 的等待
- * 窗口是**咬合**的，换成 spring 就没有确定时长可对齐了。
+ * 两条不走 Expressive 默认档的例外：
+ * 1. **页面进退**（[pageEnterSpatialSpec] / [pageExitSpatialSpec]）：整屏横滑套 Expressive
+ *    defaultSpatial（stiffness 380）偏软偏慢；这里用更硬、近临界阻尼的弹簧，节奏贴近
+ *    澎湃 OS 一类系统页切换。Spring **不会**被 Compose 的 `MotionDurationScale` 缩放，
+ *    所以要传入 [rememberAnimatorDurationScale]：`stiffness / scale²`（scale=0 → [instantSpec]）。
+ * 2. **阅读器开合** tween：时长与进书 splash 窗口咬合，spring 给不出确定时长。
+ *    tween 已由框架按 `ANIMATOR_DURATION_SCALE` 乘倍率，这里不必再手乘。
  */
 object Motion {
+
+    /**
+     * 「移除动画」时用的 0 时长 spec。页面转场不读主题令牌时靠它兜底，
+     * 与 [InstantMotionScheme] 行为一致。
+     */
+    fun <T> instantSpec(): FiniteAnimationSpec<T> = tween(0)
+
+    /**
+     * 页面 push 入场（新页从右滑入）。
+     *
+     * Expressive `defaultSpatial` 是 stiffness 380 / damping 0.8，整屏滑动会「肉」；
+     * 这里抬到约 M3 standard 量级并略硬一点，damping 近 1 少软回弹 —— 进得干脆、落得稳。
+     *
+     * @param durationScale [Settings.Global.ANIMATOR_DURATION_SCALE]；0 则瞬间到位。
+     * 弹簧沉降时间大致 ∝ 1/√k，要让体感时长随系统倍率走，刚度除以 scale²。
+     */
+    fun <T> pageEnterSpatialSpec(durationScale: Float): FiniteAnimationSpec<T> {
+        if (durationScale <= 0f) return instantSpec()
+        val scale = durationScale.coerceIn(0.01f, 10f)
+        return spring(
+            dampingRatio = 0.92f,
+            stiffness = 800f / (scale * scale),
+        )
+    }
+
+    /**
+     * 页面 pop / 被盖住页让位。比入场更硬更快，符合「退场比入场快」。
+     *
+     * @param durationScale 同 [pageEnterSpatialSpec]。
+     */
+    fun <T> pageExitSpatialSpec(durationScale: Float): FiniteAnimationSpec<T> {
+        if (durationScale <= 0f) return instantSpec()
+        val scale = durationScale.coerceIn(0.01f, 10f)
+        return spring(
+            dampingRatio = 0.95f,
+            stiffness = 1200f / (scale * scale),
+        )
+    }
 
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
@@ -106,38 +146,47 @@ object Motion {
 }
 
 /**
- * 系统开了「移除动画」就别动。
+ * 系统 [Settings.Global.ANIMATOR_DURATION_SCALE]（开发者选项「动画程序时长缩放」）。
  *
- * 大部分地方**不需要**直接问它 —— 主题已经把 [MaterialTheme.motionScheme] 换成 0 时长的一套，
- * 走令牌的动画自动静止。留着它是给两类逃在主题之外的场合：翻页容器那套自绘动画（reader 模块，
- * 拿不到 Compose 主题），以及「关了动画就干脆别做这件事」而不只是缩到 0 时长的判断
- * （如 LazyGrid 的 `animateItem` 直接传 null，省掉每帧的插值开销）。
+ * - `0`：「移除动画」—— 主题换 [InstantMotionScheme]，页面弹簧走 [Motion.instantSpec]
+ * - `0.5` / `1` / `2`…：页面弹簧按 `k / scale²` 调刚度；Compose tween（含阅读器开合、
+ *   主题里 effects）由框架 `MotionDurationScale` 自动乘倍率，不必再手乘
  *
- * 用 ContentObserver 监听而不是 `remember {}` 读一次：读一次的话，用户在系统设置里
- * 关掉动画再切回来，旧值还生效 —— 得杀进程才认。而「关掉动画」恰恰是那种关掉了
- * 就希望立刻生效的设置。
+ * 用 ContentObserver 实时听，别 `remember {}` 读一次 —— 用户改完设置应立刻生效。
+ * 同一组合里只挂一处观察者；[animationsEnabled] 复用本函数，避免双重监听。
  */
 @Composable
-fun animationsEnabled(): Boolean {
+fun rememberAnimatorDurationScale(): Float {
     val context = LocalContext.current
     val resolver = context.contentResolver
 
-    fun read(): Boolean =
-        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+    fun read(): Float =
+        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
 
-    var enabled by remember { mutableStateOf(read()) }
+    var scale by remember { mutableStateOf(read()) }
     DisposableEffect(resolver) {
         val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                enabled = read()
+                scale = read()
             }
         }
         resolver.registerContentObserver(uri, false, observer)
         onDispose { resolver.unregisterContentObserver(observer) }
     }
-    return enabled
+    return scale
 }
+
+/**
+ * 系统开了「移除动画」就别动（[rememberAnimatorDurationScale] != 0）。
+ *
+ * 大部分地方**不需要**直接问它 —— 主题已经把 [MaterialTheme.motionScheme] 换成 0 时长的一套，
+ * 走令牌的动画自动静止。留着它是给两类逃在主题之外的场合：翻页容器那套自绘动画（reader 模块，
+ * 拿不到 Compose 主题），以及「关了动画就干脆别做这件事」而不只是缩到 0 时长的判断
+ * （如 LazyGrid 的 `animateItem` 直接传 null，省掉每帧的插值开销）。
+ */
+@Composable
+fun animationsEnabled(): Boolean = rememberAnimatorDurationScale() != 0f
 
 /** 顶栏：从上方滑入 + 淡入 */
 @Composable

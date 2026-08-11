@@ -3,7 +3,6 @@ package com.radium.inkwell.ui.nav
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -30,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
@@ -41,7 +41,7 @@ import com.radium.inkwell.ui.bookshelf.BookshelfScreen
 import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.Motion
-import com.radium.inkwell.ui.components.animationsEnabled
+import com.radium.inkwell.ui.components.rememberAnimatorDurationScale
 import com.radium.inkwell.ui.detail.BookDetailScreen
 import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.explore.ExploreViewModel
@@ -94,10 +94,9 @@ fun InkwellNavDisplay() {
     val containerSize = LocalWindowInfo.current.containerSize
     LaunchedEffect(containerSize) { nav.openOrigin.value = TransformOrigin.Center }
 
-    val animate = animationsEnabled()
-    // 页面转场也走主题的动效令牌（全局唯一来源）。系统关动画时主题已换成 0 时长的一套，
-    // 所以这两条不必再自己判 animate —— 只有下面阅读器那条硬编码 tween 才需要。
-    val motion = MaterialTheme.motionScheme
+    // 页面弹簧不走 MotionDurationScale，必须显式吃系统倍率；tween（阅读器开合）框架会自乘。
+    val durationScale = rememberAnimatorDurationScale()
+    val animate = durationScale != 0f
     val windowAdaptiveInfo = currentWindowAdaptiveInfoV2()
     val directive = remember(windowAdaptiveInfo) {
         calculatePaneScaffoldDirective(windowAdaptiveInfo)
@@ -113,20 +112,27 @@ fun InkwellNavDisplay() {
     val dualPane = directive.maxHorizontalPartitions > 1
 
     // shared-axis X：新页从右滑入，旧页往左让出四分之一（不是整屏，留出层次感）。
-    // 位移走 spatial（带回弹），退场取 fast —— 「退场比入场快」这条现在由令牌档位表达。
-    val defaultPush = remember(motion) {
-        slideInHorizontally(motion.defaultSpatialSpec()) { it } togetherWith
-            slideOutHorizontally(motion.fastSpatialSpec()) { -it / 4 }
+    // 不用 Expressive defaultSpatial（整屏会偏肉），改页面专用硬弹簧；刚度随 ANIMATOR_DURATION_SCALE。
+    val defaultPush = remember(durationScale) {
+        val enter = Motion.pageEnterSpatialSpec<IntOffset>(durationScale)
+        val exit = Motion.pageExitSpatialSpec<IntOffset>(durationScale)
+        slideInHorizontally(enter) { it } togetherWith
+            slideOutHorizontally(exit) { -it / 4 }
     }
-    val defaultPop = remember(motion) {
-        slideInHorizontally(motion.defaultSpatialSpec()) { -it / 4 } togetherWith
-            slideOutHorizontally(motion.fastSpatialSpec()) { it }
+    val defaultPop = remember(durationScale) {
+        val enter = Motion.pageEnterSpatialSpec<IntOffset>(durationScale)
+        val exit = Motion.pageExitSpatialSpec<IntOffset>(durationScale)
+        slideInHorizontally(enter) { -it / 4 } togetherWith
+            slideOutHorizontally(exit) { it }
     }
 
     val readerMeta = remember(animate, nav) {
         val shrinkBack = {
             if (!animate) {
-                ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
+                ContentTransform(
+                    fadeIn(Motion.instantSpec()),
+                    fadeOut(Motion.instantSpec()),
+                )
             } else {
                 EnterTransition.None togetherWith scaleOut(
                     Motion.readerExitSpec(),
@@ -137,7 +143,10 @@ fun InkwellNavDisplay() {
         }
         NavDisplay.transitionSpec {
             if (!animate) {
-                ContentTransform(fadeIn(tween(0)), fadeOut(tween(0)))
+                ContentTransform(
+                    fadeIn(Motion.instantSpec()),
+                    fadeOut(Motion.instantSpec()),
+                )
             } else {
                 scaleIn(
                     Motion.readerEnterSpec(),

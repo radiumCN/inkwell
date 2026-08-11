@@ -43,11 +43,12 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 动效 → `app/.../ui/components/Motion.kt`
 
-**全应用只有一个动效来源：`MaterialTheme.motionScheme`。** 页面里优先用现成帮手 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`；需要裸 spec（`animateItem`、`AnimatedContent`、页面 push/pop）时读令牌，**别裸写 `tween(300)`、别再往 `Motion.kt` 加毫秒常量**。
-- **spatial / effects 分工**（M3 约定，混了会难看）：位移与尺寸（滑入、展开、缩放）用 `defaultSpatialSpec()`，纯视觉属性（alpha、颜色）用 `defaultEffectsSpec()`。effects 做位移发木；spatial 做淡入会让透明度过冲，看着像闪一下。
-- **「退场比入场快」用档位表达**：入场 `default*`、退场 `fast*`。
-- **系统「移除动画」只在一处兜住**：`InkwellTheme` 把整套 `motionScheme` 换成 0 时长的 `InstantMotionScheme`，我们写的转场与组件内部动画（Sheet 滑入、Switch 拇指位移、Chip 选中过渡）一起静止。所以帮手里**不必**再逐个判 `animationsEnabled()`；还留着它是给两类逃在主题外的场合：reader 模块自绘的翻页动画，以及「关了就干脆别做」而非缩到 0 的判断（如 `animateItem` 直接传 `null`，省掉每帧插值）。**别在组件外面另搭一套动画绕过它。**
-- **唯一还硬编码 tween 的是阅读器开合两条**（`Motion.READER_ENTER_MS` / `READER_EXIT_MS` + 强调减速/加速曲线）：它们的时长与进书 splash 的等待窗口 `READER_SPLASH_DELAY_MS` 是咬合的，spring 给不出确定时长。别顺手把它们也改成令牌。
+**组件与浮层帮手以 `MaterialTheme.motionScheme` 为唯一来源。** 优先用 `topBarEnter/Exit`、`bottomBarEnter/Exit`、`scrimEnter/Exit`、`expandEnter/Exit`；需要裸 spec（`animateItem`、`AnimatedContent`）时读令牌，**别裸写 `tween(300)`**。
+- **spatial / effects 分工**（M3 约定，混了会难看）：位移与尺寸用 `defaultSpatialSpec()`，纯视觉属性（alpha、颜色）用 `defaultEffectsSpec()`。
+- **「退场比入场快」**：帮手里入场 `default*`、退场 `fast*`。
+- **系统「移除动画」**：`InkwellTheme` 把 `motionScheme` 换成 `InstantMotionScheme`；帮手里不必再判 `animationsEnabled()`。`animateItem` 仍可传 `null` 省插值；reader 翻页在主题外。
+- **页面进退例外**：`Motion.pageEnterSpatialSpec(durationScale)` / `pageExitSpatialSpec`（硬弹簧；`durationScale` 来自 `rememberAnimatorDurationScale()`，刚度 `k/scale²`，对齐系统「动画程序时长缩放」）。整屏横滑不要套 Expressive `defaultSpatial`（偏软）。`scale==0` 时函数内已回落 `instantSpec()`。阅读器开合 tween 由 Compose `MotionDurationScale` 自动乘倍率，勿再手乘。
+- **阅读器开合仍硬编码 tween**（`READER_ENTER_MS` / `READER_EXIT_MS`）：与 splash 窗口咬合，别改成令牌 spring。
 
 ### 主题入口 → `MaterialExpressiveTheme`
 
