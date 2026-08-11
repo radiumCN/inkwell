@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -40,6 +41,7 @@ fun AboutSettingsScreen(
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = { AppTopBar("关于", topBarScroll, onBack = onBack) },
     ) { padding ->
         Column(

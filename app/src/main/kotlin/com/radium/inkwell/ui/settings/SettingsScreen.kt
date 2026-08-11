@@ -72,6 +72,7 @@ fun SettingsScreen(
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = { AppTopBar("设置", topBarScroll, onBack = onBack) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->

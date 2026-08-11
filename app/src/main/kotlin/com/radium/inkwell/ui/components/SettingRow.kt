@@ -40,8 +40,14 @@ fun SectionHeader(
 /**
  * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（`grouped = true`）收进同一张大圆角 Surface。
  *
- * 圆角只画在这一层（`extraLarge`），组内行用直角透明底，避免「框套框」。
+ * 圆角只画在这一层，组内行用直角透明底，避免「框套框」。
  * 组间距靠上下各半格 [Dimens.gapM]，组与组之间等于一整格。
+ *
+ * 色：卡用 [ColorScheme.surfaceContainerLowest]（浅色近白），页画布用
+ * [ColorScheme.surfaceContainerLow]（见各设置页 Scaffold）—— 灰底白卡。
+ *
+ * 角：用 [Shapes.large]（16dp），对齐系统设置分组卡；不要用 extraLarge（28dp，Dialog 档），
+ * 并排一看会显得比系统「鼓」一圈。
  */
 @Composable
 fun SettingGroup(
@@ -53,8 +59,8 @@ fun SettingGroup(
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal)
             .padding(vertical = Dimens.gapM / 2),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
         content = { Column(content = content) },
     )
 }

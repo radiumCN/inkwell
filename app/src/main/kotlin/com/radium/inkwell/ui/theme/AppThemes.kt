@@ -158,7 +158,10 @@ object AppThemes {
         // fraction 几乎抬不动 sRGB（纯黑 + 10% Oklab ≈ #030202），设置页 ListItem 卡片会
         // 整片糊进 background —— 日间看得到容器、夜间「消失」，就是这个不对称，不是两套布局。
         // 深色档位也抬得更开，OLED 上灰阶才分得清。
-        val containerLowest = mixSrgb(background, onBg, if (dark) 0.00f else 0.06f)
+        // surfaceContainer*：浅色越「高」越深、深色越「高」越亮（相对 background 抬阶）。
+        // Lowest 必须是最贴近纸面/最「白」的一档 —— 设置分组卡用它压在灰画布上；
+        // 浅色若把 Lowest 抬得比 Low 还深，就会变成「白底灰卡」，和系统设置反着来。
+        val containerLowest = mixSrgb(background, onBg, 0.00f)
         val containerLow = mixSrgb(background, onBg, if (dark) 0.10f else 0.04f)
         val containerMid = mixSrgb(background, onBg, if (dark) 0.14f else 0.07f)
         val containerHigh = mixSrgb(background, onBg, if (dark) 0.18f else 0.10f)
