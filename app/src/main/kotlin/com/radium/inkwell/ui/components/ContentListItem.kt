@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.components
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
@@ -112,14 +113,22 @@ object ContentListDefaults {
     }
 
     /**
-     * [SettingGroup] 内的行：底色透明，让外层 Surface 露出来。
-     * 选中/checked 也不换底 —— 组内开关开着时不该整行变色。
+     * [SettingGroup] 内的行：静息底色透明，让外层 Surface 露出来。
+     *
+     * Expressive ListItem 的按压反馈主要靠**不透明容器的形变**；透明底上形变等于没画。
+     * 所以按下时铺一层 [ColorScheme.onSurface] 8%（M3 state layer），抬起再回到透明。
+     * 选中/checked 仍不换底 —— 组内开关开着时不该整行变色。
      */
     @Composable
-    fun groupedColors(): ListItemColors {
+    fun groupedColors(pressed: Boolean = false): ListItemColors {
         val scheme = MaterialTheme.colorScheme
+        val container = if (pressed) {
+            scheme.onSurface.copy(alpha = 0.08f)
+        } else {
+            Color.Transparent
+        }
         return ListItemDefaults.colors(
-            containerColor = Color.Transparent,
+            containerColor = container,
             selectedContainerColor = Color.Transparent,
             selectedContentColor = scheme.onSurface,
             selectedLeadingContentColor = scheme.onSurface,
@@ -180,6 +189,7 @@ fun ContentListItem(
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
     shapes: ListItemShapes = ListItemDefaults.shapes(),
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit,
 ) {
     ListItem(
@@ -195,6 +205,7 @@ fun ContentListItem(
         shapes = shapes,
         colors = colors,
         contentPadding = contentPadding,
+        interactionSource = interactionSource,
         content = content,
     )
 }
@@ -249,6 +260,7 @@ fun ContentListItem(
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
     shapes: ListItemShapes = ListItemDefaults.shapes(),
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit,
 ) {
     ListItem(
@@ -265,6 +277,7 @@ fun ContentListItem(
         shapes = shapes,
         colors = colors,
         contentPadding = contentPadding,
+        interactionSource = interactionSource,
         content = content,
     )
 }

@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +14,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,8 +105,11 @@ fun SettingRow(
             )
         }
     }
+    // 分组行静息透明：Expressive 形变按压看不见，要靠按下态铺一层 state layer。
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     val colors = if (grouped) {
-        ContentListDefaults.groupedColors()
+        ContentListDefaults.groupedColors(pressed = pressed)
     } else {
         ContentListDefaults.colors()
     }
@@ -121,6 +128,7 @@ fun SettingRow(
             supportingContent = supporting,
             colors = colors,
             shapes = shapes,
+            interactionSource = if (grouped) interactionSource else null,
             content = {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
             },
@@ -139,7 +147,9 @@ fun SettingRow(
             },
         )
     }
-}/**
+}
+
+/**
  * 开关项：整行可点，点行等于拨开关。
  *
  * 用 checked 重载让整行成为一个开关语义目标，并把行内 Switch 的
@@ -163,6 +173,8 @@ fun SwitchRow(
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
     }
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     ContentListItem(
         checked = checked,
         onCheckedChange = onCheckedChange,
@@ -173,7 +185,7 @@ fun SwitchRow(
         },
         supportingContent = supporting,
         colors = if (grouped) {
-            ContentListDefaults.groupedColors()
+            ContentListDefaults.groupedColors(pressed = pressed)
         } else {
             ContentListDefaults.toggleColors()
         },
@@ -182,6 +194,7 @@ fun SwitchRow(
         } else {
             ContentListDefaults.toggleShapes()
         },
+        interactionSource = if (grouped) interactionSource else null,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge)
         },
