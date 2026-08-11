@@ -1,12 +1,25 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Snackbar
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -41,22 +54,88 @@ fun CollectMessages(bus: MessageBus, snackbar: SnackbarHostState) {
 }
 
 /**
- * 全应用统一的一级提示宿主。
+ * 全应用统一的一次性提示。
  *
- * 直接用 M3 [Snackbar] / [SnackbarDefaults]（形状、`inverseSurface`、elevation 全走主题），
- * 挂在 [MaterialExpressiveTheme] 下即是 Expressive 默认形态 —— **不再**手搓居中胶囊。
+ * 不走 M3 默认 [androidx.compose.material3.Snackbar]：那条默认 `fillMaxWidth`，
+ * 短到「已是最新版本」六个字也会被拉成贴底横杠，再加默认 elevation 投影，
+ * 在浅色纸面上糊成一道脏灰边 —— 看起来像系统 Toast 的廉价版。
+ *
+ * 这里改成**居中、随文案收窄的浮起胶囊**：
+ * - 短提示是一颗药丸，长提示才横向展开（上限吃满宿主宽度）；
+ * - 底色/字色用已主题化的 `inverseSurface` / `inverseOnSurface`
+ *   （日间暖墨底 + 纸色字，夜间自动对调），对比度自带；
+ * - 圆角走主题 `extraLarge`（28dp，对齐 Dialog）；**不投影**，靠深浅对比浮起；
+ * - 内边距走 [Dimens]，正文用 `bodyMedium`。
+ *
+ * 形状/色槽仍取自 Expressive 主题；变的只是**宽度与对齐**，不是另起一套设计语言。
+ */
+@Composable
+fun AppSnackbar(
+    data: SnackbarData,
+    modifier: Modifier = Modifier,
+) {
+    val visuals = data.visuals
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.inverseSurface,
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Row(
+            Modifier.padding(
+                start = Dimens.gapL,
+                // 有操作按钮时右侧少留一点，避免按钮外侧空一截
+                end = if (visuals.actionLabel != null) Dimens.gapS else Dimens.gapL,
+                top = Dimens.gapM,
+                bottom = Dimens.gapM,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+        ) {
+            Text(
+                text = visuals.message,
+                // fill=false：短文案按自身宽度收，别被 Row 撑满
+                modifier = Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            visuals.actionLabel?.let { label ->
+                TextButton(onClick = { data.performAction() }) {
+                    Text(
+                        label,
+                        color = MaterialTheme.colorScheme.inversePrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 替代裸 `SnackbarHost`：把 [AppSnackbar] 居中托起。
+ * 两侧/底边留白走 [Dimens.screenPadding]，像浮在页面上，不是焊在底边。
  * 页面只通过这里挂 host，别自己写 `snackbarHost = { SnackbarHost(...) }`。
  */
 @Composable
 fun AppSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
     SnackbarHost(
         hostState = hostState,
-        // 左右/底边留白：M3 浮动 snackbar 与屏幕边缘的标准间距，不是改组件形态
-        modifier = modifier.padding(
-            horizontal = Dimens.gapS,
-            vertical = Dimens.gapS,
-        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.screenPadding)
+            .padding(bottom = Dimens.gapS),
     ) { data ->
-        Snackbar(snackbarData = data)
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            AppSnackbar(
+                data = data,
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .wrapContentWidth(align = Alignment.CenterHorizontally),
+            )
+        }
     }
 }

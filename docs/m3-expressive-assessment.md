@@ -153,7 +153,7 @@ status: **pending**
 前两阶段留下的是「局部对齐」：Expressive 主题开了，但我们自己写的转场还是 `Motion.kt` 里的硬编码 tween，与组件内部读的 `MotionScheme` 两套并存 —— 同一屏上 Sheet 弹性滑入、它上面的顶栏匀速划下来。这一阶段把它收成一个来源。
 
 - `ui/components/Motion.kt`：八个帮手全部改读 `MaterialTheme.motionScheme`，位移取 `*SpatialSpec`、alpha 取 `*EffectsSpec`，退场取 `fast*` 档（「退场比入场快」不再靠手写毫秒）。删掉 `ENTER_MS`/`EXIT_MS`/`NAV_*` 与两条自定义 easing。帮手里**不再判** `animationsEnabled()` —— 无障碍由 `InstantMotionScheme` 在主题那一处兜住，判两遍等于两个来源。**只保留**阅读器开合两条 tween：时长与 `READER_SPLASH_DELAY_MS` 咬合，spring 给不出确定时长。（**这句后来不再成立**：页面进退也回到了 tween，见第 6 阶段。八个帮手走令牌这部分仍然有效。）
-- ~~`ui/nav/InkwellNavDisplay.kt`：页面 push/pop 转场接令牌（阅读器缩放那条不动）。~~ **已推翻**，见第 6 阶段：页面进退是刻意的 tween 例外，`InkwellNavDisplay` 现在接的是 `Motion.pagePushTransform()` / `pagePopTransform()`。阅读器缩放那条从头到尾没动过。
+- `ui/nav/InkwellNavDisplay.kt`：页面 push/pop 转场接令牌（阅读器缩放那条不动）。中间曾改 HyperOS tween，已撤回（见「抛弃 HyperOS 拟合」）。
 - `ui/bookshelf/BookshelfScreen.kt`：`animateItem` 的三个 spec 接令牌；`motionOn` 保留，因为这个 API 的「不动画」写法是传 `null`，比 `tween(0)` 省掉每帧插值。
 - 新增 `ui/components/AppTabs.kt`：`AppTabRow`（`PrimaryTabRow`）+ `AppTabContent`（横移 1/8 + 淡入淡出，`using(null)` 关掉 SizeTransform）。`ReaderMenu` 改用它 —— 上一轮只改了这唯一一处 Tab，但没有封装约束后来者，形态与节奏迟早再分叉。
 - `Messages.kt` 的 Snackbar 已经是全局的（14 个页面都走 `AppSnackbarHost`，无裸 `Snackbar`），本轮只在 `CLAUDE.md` 里把「居中悬浮胶囊、页面别自己写 host」写成规则。
@@ -162,7 +162,7 @@ status: **pending**
 
 **误诊记录（beta.8，已撤）**：用户报「三级回二级干等一秒」时，曾误判成页面转场 spring 的尾巴，把 push/pop 改回定长 tween。用户当场否掉 —— 那是返回落地前的等待，不是过渡动画。根因是设置树三级页也标成了 `detailPane`，被盖住的二级页被 scaffold 卸掉组合，返回时冷启动。已改 `extraPane`。
 
-**这条误诊记录的结论只对了一半，订正如下**：「三级回二级干等一秒」的根因确实是 `detailPane` 卸组合，与转场无关 —— 这部分成立。但由此推出的「所以页面转场该继续走 `MotionScheme`」是**过度纠正**：当时是拿一个被误诊的 bug 去反推动效方案，两件事本就没有因果。后来页面进退还是回到了 tween，理由与那个 bug 无关：Expressive 的 spatial spring 带回弹，整屏横滑上看得出过冲；而要拟合的那条 HyperOS 曲线是「头两成时间冲掉九成行程」的极端前置减速，spring 的参数空间里表达不出来（见第 6 阶段）。原文末尾「别再照着那条改」现已作废，**以 `CLAUDE.md` 的「页面进退例外」为准**。
+**这条误诊记录的结论只对了一半，订正如下**：「三级回二级干等一秒」的根因确实是 `detailPane` 卸组合，与转场无关 —— 这部分成立。中间曾一度改回定长 tween、后又拟合 HyperOS，均已撤回；**页面进退以 `MotionScheme` 共享轴为准**（见「抛弃 HyperOS 拟合」）。
 
 ## 已落地（第 5 阶段：按压形变 + Flexible 顶栏 + 滑块回归默认）
 
@@ -176,9 +176,11 @@ status: **pending**
 
 验证：`:app:compileDebugKotlin` 通过；`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿；`assembleDebug` 通过。**实机仍未验** —— 这一轮改的恰恰是「按下去那一瞬间」和「顶栏折叠手势」，都是编译与单测看不见的东西。
 
-## 已落地（第 6 阶段：页面进退转场收口）
+## 已撤回（原第 6 阶段：HyperOS 页面转场拟合）
 
-第 3 阶段把八个组件帮手收进了 `MotionScheme`，页面进退则另立为 tween 例外（`CLAUDE.md` 的「页面进退例外」）。这一轮只动这一处例外，把它从「大致像 HyperOS」调到「参数说得出理由」。
+曾把页面进退改成 HyperOS 风格 tween。实机观感成渐隐渐显，**整段撤回**，见「抛弃 HyperOS 拟合」。以下原文仅作档案。
+
+第 3 阶段把八个组件帮手收进了 `MotionScheme`，页面进退则另立为 tween 例外。这一轮只动这一处例外，把它从「大致像 HyperOS」调到「参数说得出理由」。
 
 改动都在 `ui/components/Motion.kt`，`InkwellNavDisplay` 只跟着改了一行注释。**两条是修 bug，不是调观感**：
 
@@ -192,25 +194,24 @@ status: **pending**
 
 验证：`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿，`:app:lintDebug` + `assembleDebug` 通过。**实机未验** —— 改的全是「滑动那 300 毫秒长什么样」，编译与单测一概看不见。
 
-## 已完成（第 7 阶段：平滑圆角 + 大块元素按压下沉）
+## 订正（抛弃 HyperOS 拟合，拥抱 M3 Expressive）
 
-前六个阶段都在 M3 自己的刻度里调。这一阶段第一次引入**外部参照**：[Miuix](https://github.com/compose-miuix-ui/miuix)（Apache-2.0），一个以实现 HyperOS 设计语言为目标的 Compose Multiplatform 组件库。
+方向裁定：不再拟合 HyperOS。页面进退、圆角、按压反馈一律走 Material 3 Expressive。
 
-**为什么是读源码而不是加依赖。** Miuix 0.9.3 用 Kotlin 2.4.0 编译（tag `v0.9.3` 的 toml 与发布 POM 里的 `kotlin-stdlib:2.4.0` 都能对上），本项目卡在 2.3.21 —— KSP 至今没发 2.4.x，升上去 Room 的注解处理就崩（`libs.versions.toml` 里早记过这条）。旧编译器读不了新 Kotlin 的 metadata，这条路直接堵死。另外两条即使 Kotlin 不卡也在：它的 android 构件拖 `org.jetbrains.compose.foundation:foundation:1.11.1`，与本项目 1.12.0-rc01 的预发布栈没人验过；而且它是**与 M3 平行的另一套设计系统**（`MiuixTheme` 自带 Colors/TextStyles），用它等于放弃 `MaterialExpressiveTheme`，且不能半用 —— 半用就是一屏两套设计语言。
+- **页面进退**：撤回第 6 阶段 HyperOS tween（部分横滑 + fade + 微缩放），恢复第 3 阶段写法 —— `pagePushTransform` / `pagePopTransform` 读 `MotionScheme`（新页整屏滑入、旧页让 1/4、无 fade）。阅读器开合仍是唯一 tween 例外。
+- **圆角 / 按压**：撤回第 7 阶段从 Miuix 移植的 `SquircleShape` 与 `SinkIndication`。形状刻度回到 `RoundedCornerShape`；书封回到默认水波纹。Miuix 是与 M3 平行的另一套设计系统，半用就是一屏两套语言。
+- 仍保留本轮无关的修复：底栏 `containerColor = surface`（避免卡片糊进 `surfaceContainerLow`）、`listVertical` 收到 4dp。
 
-所以取的是**数值**，代码照着重写，出处写进 KDoc。
+## 已撤回（原第 7 阶段：Miuix 平滑圆角 + 按压下沉）
 
-- **平滑圆角**（`ui/theme/SquircleShape.kt`）：`CornerBasedShape` 实现，五档形状刻度全部换掉，半径读数不变。每角一条三次贝塞尔，外扩 `1.1`、控制柄 `1 - 0.643`。**必须是 `CornerBasedShape` 而非裸 `Shape`** —— Expressive 按钮按下的形状形变靠 `copy()` 插值角半径，只实现 `Shape` 会让形变整个失效。`ReaderThemeScope` 传的是 `MaterialTheme.shapes`，自动跟上。
-- **按压下沉**（`ui/components/PressFeedback.kt`）：`SinkIndication`，按下缩到 `0.94`、`spring(0.8, 600)` 欠阻尼收尾。走 `LayoutModifierNode` 在放置阶段改 scale，不是 `graphicsLayer` + `State`（后者每帧重组调用点，一次按压几十帧）。系统关动画时换 `snap()` —— 仍然沉下去，反馈不能丢。目前只用在书架的书封网格上。
+曾读 [Miuix](https://github.com/compose-miuix-ui/miuix) 源码移植 HyperOS 形态。已整段撤回，见上方「抛弃 HyperOS 拟合」。原文证据链（Kotlin 2.4 / 不能加依赖）仍成立，但结论改为：**不移植，也不半用**。
 
-**一堵撞上的墙，值得记住**：M3 组件把 `ripple()` 写死在内部，既不收 `indication` 也不读 `LocalIndication`。所以下沉**只能**用在我们自己持有 clickable 的地方，`ContentListItem`（M3 `ListItem` 交互重载）这类注不进去。别试图靠 `LocalRippleConfiguration provides null` 关掉水波纹求统一：关得掉，但关掉之后那些组件按下去毫无反馈，比两种反馈并存更糟。要让 M3 组件也沉下去，只能整套重写组件 —— 那就回到「换设计系统」那个选项了。
-
-验证：`:core:test` / `:reader:test` / `:app:testDebugUnitTest` 全绿，`assembleDebug` 通过。**实机未验**，且这一阶段多出一个编译期看不见的风险点：`SquircleShape` 产出 `Outline.Generic`（Path）而非 `Outline.Rounded`，带阴影的 `Surface`/`Card` 要靠底层 `android.graphics.Outline.setPath` 投影、而那条路只接受**凸**路径。本形状是凸的，理应正常，但必须真机确认阴影没丢、边缘没锯齿。
+~~前六个阶段都在 M3 自己的刻度里调。这一阶段第一次引入**外部参照**：Miuix……~~
 
 ## 剩下要做的
 
-1. **第 0 / 6 / 7 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。第 5 阶段留下两个必看点：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页），以及滑块变厚后阅读菜单的整体高度。第 6 阶段再添两个：进退页那 300 毫秒的整体节奏（重点看被盖住那页是否与上层同步、返回第一帧还跳不跳），以及**从左右两个边缘各划一次返回**，判断预测性返回要不要按边缘分方向。第 7 阶段再添两个，都是编译期看不见的：**带阴影的卡片/对话框投影是否还在**（`Outline.Generic` 走 `setPath`，只吃凸路径），以及书封按下去那一下的下沉幅度在真实网格间距下会不会显得整片抖动。
+1. **第 0 / 5 项**：实机视觉巡检（含阅读器浮层、系统「移除动画」）—— 组件层已对齐，欠的是人眼确认。必看：顶栏折叠在 16 个页面里的手感（尤其带 `imePadding` 的表单页与带 FAB 的列表页）、滑块变厚后阅读菜单的整体高度、Expressive 共享轴进退页节奏，以及**从左右两个边缘各划一次返回**（判断预测性返回要不要按边缘分方向）。
 2. **第 8 项**：release 体积对比 + **Baseline Profile 重生成**（`LoadingIndicator`、`ButtonGroup`、`LinearWavyProgressIndicator`、`AppTabs`、`MediumFlexibleTopAppBar` 与三套 `*Shapes` 形变都是新类，旧 profile 规则覆盖不到）。
-3. **还逃在 `MotionScheme` 之外的动效**，共三处，无障碍都靠 `animationsEnabled()` 单独兜着：页面进退与阅读器开合是**刻意例外**（理由分别见第 6 阶段与 `Motion.kt` 的 KDoc，两处都已在 `InkwellNavDisplay` 里接了关动画时的 instant 分支）；剩下 `reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）是**唯一还没想清楚的一处** —— reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值。要动它得先想清楚 reader 怎么拿到令牌而不反向依赖 Compose。
+3. **还逃在 `MotionScheme` 之外的动效**：阅读器开合是**刻意例外**（与 splash 窗口咬合）；`reader/flip/PageFlipContainer.kt` 的翻页回弹（`tween` + `LinearOutSlowInEasing`）是**唯一还没想清楚的一处** —— reader 模块按约定不依赖 Compose 主题，且时长由手势速度算出来，`MotionScheme` 给不了确定值。页面进退已回令牌，不再是例外。
 
 每一步都要跑通：`:core:test`、`:reader:test`、`:app:testDebugUnitTest`、`:app:lintDebug`、`assembleDebug`。

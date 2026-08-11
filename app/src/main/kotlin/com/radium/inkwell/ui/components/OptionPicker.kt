@@ -59,6 +59,8 @@ fun OptionPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        // Sheet 用 surface；选项行读 surfaceContainerLow。默认都走 Low 时卡片糊进底色。
+        containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
             Text(

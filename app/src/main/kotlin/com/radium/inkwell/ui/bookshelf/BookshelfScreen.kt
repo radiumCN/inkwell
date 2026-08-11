@@ -110,7 +110,6 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
-import com.radium.inkwell.ui.components.rememberSinkIndication
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -519,7 +518,12 @@ fun BookshelfScreen(
     }
 
     actionTarget?.let { book ->
-        ModalBottomSheet(onDismissRequest = { actionTarget = null }) {
+        ModalBottomSheet(
+            onDismissRequest = { actionTarget = null },
+            // Sheet 用 surface；SettingRow 卡片读 surfaceContainerLow。
+            // 默认两者都走 Low 时选项会糊进底色，看起来像没有卡片（见 ChangeSourceSheet）。
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
             Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
                 Text(
                     book.title,
@@ -860,8 +864,8 @@ private fun BookCard(
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
         // 就直接啃掉了书名第一个字的一角。
         //
-        // 它当初是为了约束涟漪。现在这里根本没有涟漪（见下方 indication），
-        // 更没有裁剪的理由；封面自己的圆角由 BookCover 负责。
+        // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
+        // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
         modifier
             .semantics(mergeDescendants = true) {
                 // 多选时整张卡就是一个 Checkbox：读屏报「已选中/未选中」，
@@ -871,14 +875,7 @@ private fun BookCard(
                     this.selected = selected
                 }
             }
-            // 按下整张卡微微沉下去，替掉水波纹。书封是全应用最大的一块可点区域，
-            // 铺满整张卡的方角涟漪在这个尺寸上像一层脏印子；缩放则是「按住了一本书」。
-            .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = rememberSinkIndication(),
-                onClick = { onClick(coverBounds) },
-                onLongClick = onLongClick,
-            )
+            .combinedClickable(onClick = { onClick(coverBounds) }, onLongClick = onLongClick)
     ) {
         // 多选态外圈留出与描边等宽的 padding：未选不画边、已选才描 primary，
         // 占位却始终在 —— 勾选不会把封面挤小一圈。

@@ -41,8 +41,13 @@ object Dimens {
     val rowVertical = 10.dp
     /** 内容列表行（书籍、书源、文章、设置卡片）的左右内边距 */
     val listHorizontal = 16.dp
-    /** 内容列表 / 设置卡片行的上下内边距（Compact 默认密度） */
-    val listVertical = 8.dp
+    /**
+     * 内容列表 / 设置卡片行的上下内边距（Compact 默认密度）。
+     *
+     * 取 4 而非 8：两行字（标题 + 副标题）再叠 8+8，卡片相对字重显得虚高，
+     * 设置页一屏少看一组。触控高度仍靠 ListItem 自身下限与两行字撑住 ≥48dp。
+     */
+    val listVertical = 4.dp
     /** 设置分组小标题上方间距（比 gapXL 矮一档，一屏多看一组） */
     val sectionHeaderTop = gapL
     /** Chip 横排间距（比 gapS 更紧） */

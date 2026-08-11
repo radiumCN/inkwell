@@ -39,6 +39,8 @@ import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
+import com.radium.inkwell.ui.components.pagePopTransform
+import com.radium.inkwell.ui.components.pagePushTransform
 import com.radium.inkwell.ui.detail.BookDetailScreen
 import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.explore.ExploreViewModel
@@ -80,7 +82,8 @@ import org.koin.core.parameter.parametersOf
  * - ViewModel 只在 `entry` 内用 [koinViewModel]（`org.koin.compose.viewmodel`）创建，绑到
  *   [rememberViewModelStoreNavEntryDecorator] 提供的 NavEntry 作用域；退栈即清
  * - 宽屏：书架|详情、设置|二级 用 [ListDetailSceneStrategy]；阅读器全屏
- * - 转场：常规页拟合 HyperOS（部分横滑 + fade + 微缩放）；进阅读 shared-axis Z（从书封原点缩放）
+ * - 转场：常规页 Expressive 共享轴 X（`pagePushTransform` / `pagePopTransform`）；
+ *   进阅读 shared-axis Z（从书封原点缩放）
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -107,13 +110,10 @@ fun InkwellNavDisplay() {
     )
     val dualPane = directive.maxHorizontalPartitions > 1
 
-    // HyperOS 风格：38% 横滑 + 淡入淡出 + 0.95 微缩放，两层同一条时长；关动画走 instant。
-    val defaultPush = remember(animate) {
-        if (animate) Motion.pagePushTransform() else Motion.instantPageTransform()
-    }
-    val defaultPop = remember(animate) {
-        if (animate) Motion.pagePopTransform() else Motion.instantPageTransform()
-    }
+    // Expressive 共享轴横滑（读 MotionScheme）；关动画时主题已换成 InstantMotionScheme，
+    // 不必再分支 instant —— 判两遍等于又造两个来源。
+    val defaultPush = pagePushTransform()
+    val defaultPop = pagePopTransform()
 
     val readerMeta = remember(animate, nav) {
         val shrinkBack = {
