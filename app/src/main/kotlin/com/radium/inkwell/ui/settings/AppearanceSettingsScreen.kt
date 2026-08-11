@@ -52,11 +52,12 @@ fun AppearanceSettingsScreen(
     var showIconPicker by remember { mutableStateOf(false) }
     var showLayoutPicker by remember { mutableStateOf(false) }
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("外观", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("外观", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         Column(

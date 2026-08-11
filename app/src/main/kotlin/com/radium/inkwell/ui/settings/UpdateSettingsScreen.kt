@@ -43,11 +43,12 @@ fun UpdateSettingsScreen(onBack: () -> Unit) {
     var showChannelPicker by remember { mutableStateOf(false) }
     var showSourcePicker by remember { mutableStateOf(false) }
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("更新源与渠道", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("更新源与渠道", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier

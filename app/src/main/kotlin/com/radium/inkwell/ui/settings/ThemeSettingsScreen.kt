@@ -65,11 +65,12 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         scope.launch { prefs.setThemeConfig(new) }
     }
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("主题外观", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("主题外观", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier

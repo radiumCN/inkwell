@@ -66,6 +66,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -187,10 +188,17 @@ fun BookshelfScreen(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.importBooks(uris) }
 
+    val pageColor = MaterialTheme.colorScheme.background
+    val topBarColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = pageColor,
+        scrolledContainerColor = pageColor,
+    )
     Scaffold(
         // 这两条顶栏刻意留经典窄栏，不换 AppTopBar 的两段式 Flexible：一是进出多选会在两种
         // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，两段式会把它
         // 摊到大标题的位置上。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
+        // 顶栏与内容区同用 background，避免默认 surface / scrolled surfaceContainer 顶出一道色缝。
+        containerColor = pageColor,
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
@@ -255,6 +263,7 @@ fun BookshelfScreen(
                             }
                         }
                     },
+                    colors = topBarColors,
                 )
             } else {
                 TopAppBar(
@@ -331,6 +340,7 @@ fun BookshelfScreen(
                             Icon(Icons.Default.Settings, contentDescription = "设置")
                         }
                     },
+                    colors = topBarColors,
                 )
             }
         },

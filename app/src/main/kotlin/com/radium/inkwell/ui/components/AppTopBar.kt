@@ -3,12 +3,14 @@ package com.radium.inkwell.ui.components
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 
@@ -19,6 +21,10 @@ import androidx.compose.ui.text.style.TextOverflow
  * 一往下滚就收成一条常规高度的窄栏（内容优先）。**折叠是它成立的前提** —— 只换组件不接滚动，
  * 等于给每页白送一条永久变高的顶栏，比原来更差。所以 [scrollBehavior] 不是可选装饰：
  * 用 [rememberAppTopBarScroll] 建一个，再用 [topBarScroll] 挂到 `Scaffold` 上，两步缺一不可。
+ *
+ * **颜色跟内容区走**：默认 [ColorScheme.background]（与 Scaffold 默认画布一致）；
+ * 设置页那种灰画布把 [containerColor] 传成与 `Scaffold.containerColor` 同一个令牌。
+ * `scrolledContainerColor` 钉成同一色 —— 滚动时不要抬成 `surfaceContainer`，否则顶栏与内容又一道缝。
  *
  * **不是所有顶栏都该换成它**，另外三类刻意留了经典窄栏：
  * - 标题位放着交互控件的（搜索页的输入框、发现页的书源切换按钮）—— 两段式会把控件摊到大标题
@@ -34,6 +40,8 @@ fun AppTopBar(
     scrollBehavior: TopAppBarScrollBehavior,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    /** 与本页 Scaffold / 内容区同色；默认 background */
+    containerColor: Color = MaterialTheme.colorScheme.background,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     MediumFlexibleTopAppBar(
@@ -41,6 +49,10 @@ fun AppTopBar(
         modifier = modifier,
         navigationIcon = { if (onBack != null) BackButton(onClick = onBack) },
         actions = actions,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = containerColor,
+            scrolledContainerColor = containerColor,
+        ),
         scrollBehavior = scrollBehavior,
     )
 }

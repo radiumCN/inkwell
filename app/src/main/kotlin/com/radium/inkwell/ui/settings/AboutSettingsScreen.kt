@@ -38,11 +38,12 @@ fun AboutSettingsScreen(
         }.getOrNull() ?: "?"
     }
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("关于", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("关于", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier

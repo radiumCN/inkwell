@@ -69,11 +69,12 @@ fun SettingsScreen(
     }
     LaunchedEffect(Unit) { refreshCacheSize() }
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("设置", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("设置", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         Column(

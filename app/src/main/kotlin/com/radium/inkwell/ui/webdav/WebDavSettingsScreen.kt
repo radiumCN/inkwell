@@ -53,11 +53,12 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         Column(

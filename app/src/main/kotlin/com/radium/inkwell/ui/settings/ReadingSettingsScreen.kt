@@ -38,11 +38,12 @@ fun ReadingSettingsScreen(
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
 
+    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        topBar = { AppTopBar("阅读与规则", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("阅读与规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier
