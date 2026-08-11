@@ -4,19 +4,24 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,15 +44,13 @@ import androidx.compose.ui.platform.LocalContext
  * - **effects**（不回弹）管**纯视觉属性**：alpha、颜色
  *
  * 用 effects 做位移会发木；用 spatial 做淡入会让透明度过冲，看着像闪了一下。
- * 「退场比入场快」：帮手里退场取 `fast*`、入场取 `default*`；页面级见 [pageEnterSpatialSpec]。
+ * 「退场比入场快」：帮手里退场取 `fast*`、入场取 `default*`；页面级见 [pagePushTransform]。
  *
  * 两条不走 Expressive 默认档的例外：
- * 1. **页面进退**（[pageEnterSpatialSpec] / [pageExitSpatialSpec]）：整屏横滑套 Expressive
- *    defaultSpatial（stiffness 380）偏软偏慢；这里用更硬、近临界阻尼的弹簧，节奏贴近
- *    澎湃 OS 一类系统页切换。Spring **不会**被 Compose 的 `MotionDurationScale` 缩放，
- *    所以要传入 [rememberAnimatorDurationScale]：`stiffness / scale²`（scale=0 → [instantSpec]）。
- * 2. **阅读器开合** tween：时长与进书 splash 窗口咬合，spring 给不出确定时长。
- *    tween 已由框架按 `ANIMATOR_DURATION_SCALE` 乘倍率，这里不必再手乘。
+ * 1. **页面进退**（[pagePushTransform] / [pagePopTransform]）：拟合 HyperOS 系统页切换 ——
+ *    部分横滑 + 淡入淡出 + 轻微缩放，~350/300ms 的 cubic-bezier tween。时长由框架
+ *    `MotionDurationScale` 乘 [ANIMATOR_DURATION_SCALE]；`scale==0` 时走 [instantPageTransform]。
+ * 2. **阅读器开合** tween：时长与进书 splash 窗口咬合，同样由框架乘倍率，勿再手乘。
  */
 object Motion {
 
@@ -57,37 +60,67 @@ object Motion {
      */
     fun <T> instantSpec(): FiniteAnimationSpec<T> = tween(0)
 
-    /**
-     * 页面 push 入场（新页从右滑入）。
-     *
-     * Expressive `defaultSpatial` 是 stiffness 380 / damping 0.8，整屏滑动会「肉」；
-     * 这里抬到约 M3 standard 量级并略硬一点，damping 近 1 少软回弹 —— 进得干脆、落得稳。
-     *
-     * @param durationScale [Settings.Global.ANIMATOR_DURATION_SCALE]；0 则瞬间到位。
-     * 弹簧沉降时间大致 ∝ 1/√k，要让体感时长随系统倍率走，刚度除以 scale²。
-     */
-    fun <T> pageEnterSpatialSpec(durationScale: Float): FiniteAnimationSpec<T> {
-        if (durationScale <= 0f) return instantSpec()
-        val scale = durationScale.coerceIn(0.01f, 10f)
-        return spring(
-            dampingRatio = 0.92f,
-            stiffness = 800f / (scale * scale),
-        )
-    }
+    // ---- 页面进退（拟合 HyperOS：部分横滑 + fade + 微缩放）----
 
-    /**
-     * 页面 pop / 被盖住页让位。比入场更硬更快，符合「退场比入场快」。
-     *
-     * @param durationScale 同 [pageEnterSpatialSpec]。
-     */
-    fun <T> pageExitSpatialSpec(durationScale: Float): FiniteAnimationSpec<T> {
-        if (durationScale <= 0f) return instantSpec()
-        val scale = durationScale.coerceIn(0.01f, 10f)
-        return spring(
-            dampingRatio = 0.95f,
-            stiffness = 1200f / (scale * scale),
+    /** 入场约 350ms；退场略短，符合「退场比入场快」。 */
+    const val PAGE_ENTER_MS = 350
+    const val PAGE_EXIT_MS = 300
+
+    /** HyperOS 常用：快进缓停 / 略加速收尾。 */
+    val PageEnterEasing: Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    val PageExitEasing: Easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+
+    /** 入场页从屏宽 35% 处滑入（不是整屏硬推）。 */
+    const val PAGE_SLIDE_FRACTION = 0.35f
+
+    /** 入场起始缩放；被盖住页略收到 [PAGE_UNDER_SCALE]。 */
+    const val PAGE_SCALE_START = 0.92f
+    const val PAGE_UNDER_SCALE = 0.95f
+
+    fun <T> pageEnterTweenSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_ENTER_MS, easing = PageEnterEasing)
+
+    fun <T> pageExitTweenSpec(): FiniteAnimationSpec<T> =
+        tween(PAGE_EXIT_MS, easing = PageExitEasing)
+
+    /** 系统关动画时的页面转场（瞬间淡变，避免残留位移/缩放）。 */
+    fun instantPageTransform(): ContentTransform =
+        ContentTransform(
+            fadeIn(instantSpec()),
+            fadeOut(instantSpec()),
         )
-    }
+
+    /** push：新页从右切入并放大显现，旧页左让并略缩淡出。 */
+    fun pagePushTransform(): ContentTransform =
+        pagePushEnter() togetherWith pagePushExit()
+
+    /** pop：当前页右滑出并缩小，底层页从左回位放大显现。 */
+    fun pagePopTransform(): ContentTransform =
+        pagePopEnter() togetherWith pagePopExit()
+
+    fun pagePushEnter(): EnterTransition =
+        slideInHorizontally(pageEnterTweenSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
+            fadeIn(pageEnterTweenSpec()) +
+            scaleIn(initialScale = PAGE_SCALE_START, animationSpec = pageEnterTweenSpec())
+
+    fun pagePushExit(): ExitTransition =
+        slideOutHorizontally(pageExitTweenSpec()) {
+            -(it * PAGE_SLIDE_FRACTION * 0.5f).toInt()
+        } +
+            fadeOut(pageExitTweenSpec()) +
+            scaleOut(targetScale = PAGE_UNDER_SCALE, animationSpec = pageExitTweenSpec())
+
+    fun pagePopEnter(): EnterTransition =
+        slideInHorizontally(pageEnterTweenSpec()) {
+            -(it * PAGE_SLIDE_FRACTION * 0.3f).toInt()
+        } +
+            fadeIn(pageEnterTweenSpec()) +
+            scaleIn(initialScale = PAGE_UNDER_SCALE, animationSpec = pageEnterTweenSpec())
+
+    fun pagePopExit(): ExitTransition =
+        slideOutHorizontally(pageExitTweenSpec()) { (it * PAGE_SLIDE_FRACTION).toInt() } +
+            fadeOut(pageExitTweenSpec()) +
+            scaleOut(targetScale = PAGE_SCALE_START, animationSpec = pageExitTweenSpec())
 
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
@@ -148,9 +181,8 @@ object Motion {
 /**
  * 系统 [Settings.Global.ANIMATOR_DURATION_SCALE]（开发者选项「动画程序时长缩放」）。
  *
- * - `0`：「移除动画」—— 主题换 [InstantMotionScheme]，页面弹簧走 [Motion.instantSpec]
- * - `0.5` / `1` / `2`…：页面弹簧按 `k / scale²` 调刚度；Compose tween（含阅读器开合、
- *   主题里 effects）由框架 `MotionDurationScale` 自动乘倍率，不必再手乘
+ * - `0`：「移除动画」—— 主题换 [InstantMotionScheme]，页面走 [Motion.instantPageTransform]
+ * - `0.5` / `1` / `2`…：页面 / 阅读器 / 主题里的 tween 由框架 `MotionDurationScale` 自动乘倍率
  *
  * 用 ContentObserver 实时听，别 `remember {}` 读一次 —— 用户改完设置应立刻生效。
  * 同一组合里只挂一处观察者；[animationsEnabled] 复用本函数，避免双重监听。

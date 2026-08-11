@@ -7,8 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
@@ -41,7 +38,7 @@ import com.radium.inkwell.ui.bookshelf.BookshelfScreen
 import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.Motion
-import com.radium.inkwell.ui.components.rememberAnimatorDurationScale
+import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.detail.BookDetailScreen
 import com.radium.inkwell.ui.explore.ExploreScreen
 import com.radium.inkwell.ui.explore.ExploreViewModel
@@ -83,7 +80,7 @@ import org.koin.core.parameter.parametersOf
  * - ViewModel 只在 `entry` 内用 [koinViewModel]（`org.koin.compose.viewmodel`）创建，绑到
  *   [rememberViewModelStoreNavEntryDecorator] 提供的 NavEntry 作用域；退栈即清
  * - 宽屏：书架|详情、设置|二级 用 [ListDetailSceneStrategy]；阅读器全屏
- * - 转场：常规 shared-axis X；进阅读 shared-axis Z（从书封原点缩放、不叠 alpha）
+ * - 转场：常规页拟合 HyperOS（部分横滑 + fade + 微缩放）；进阅读 shared-axis Z（从书封原点缩放）
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -94,9 +91,8 @@ fun InkwellNavDisplay() {
     val containerSize = LocalWindowInfo.current.containerSize
     LaunchedEffect(containerSize) { nav.openOrigin.value = TransformOrigin.Center }
 
-    // 页面弹簧不走 MotionDurationScale，必须显式吃系统倍率；tween（阅读器开合）框架会自乘。
-    val durationScale = rememberAnimatorDurationScale()
-    val animate = durationScale != 0f
+    // 页面 / 阅读器 tween 由 MotionDurationScale 乘倍率；这里只区分「关动画 → 瞬间」。
+    val animate = animationsEnabled()
     val windowAdaptiveInfo = currentWindowAdaptiveInfoV2()
     val directive = remember(windowAdaptiveInfo) {
         calculatePaneScaffoldDirective(windowAdaptiveInfo)
@@ -111,19 +107,12 @@ fun InkwellNavDisplay() {
     )
     val dualPane = directive.maxHorizontalPartitions > 1
 
-    // shared-axis X：新页从右滑入，旧页往左让出四分之一（不是整屏，留出层次感）。
-    // 不用 Expressive defaultSpatial（整屏会偏肉），改页面专用硬弹簧；刚度随 ANIMATOR_DURATION_SCALE。
-    val defaultPush = remember(durationScale) {
-        val enter = Motion.pageEnterSpatialSpec<IntOffset>(durationScale)
-        val exit = Motion.pageExitSpatialSpec<IntOffset>(durationScale)
-        slideInHorizontally(enter) { it } togetherWith
-            slideOutHorizontally(exit) { -it / 4 }
+    // HyperOS 风格：35% 横滑 + 淡入淡出 + 0.92 微缩放；关动画走 instant。
+    val defaultPush = remember(animate) {
+        if (animate) Motion.pagePushTransform() else Motion.instantPageTransform()
     }
-    val defaultPop = remember(durationScale) {
-        val enter = Motion.pageEnterSpatialSpec<IntOffset>(durationScale)
-        val exit = Motion.pageExitSpatialSpec<IntOffset>(durationScale)
-        slideInHorizontally(enter) { -it / 4 } togetherWith
-            slideOutHorizontally(exit) { it }
+    val defaultPop = remember(animate) {
+        if (animate) Motion.pagePopTransform() else Motion.instantPageTransform()
     }
 
     val readerMeta = remember(animate, nav) {
