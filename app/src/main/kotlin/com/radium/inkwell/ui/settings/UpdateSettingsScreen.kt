@@ -24,6 +24,7 @@ import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateSource
@@ -50,22 +51,23 @@ fun UpdateSettingsScreen(onBack: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(top = Dimens.gapS),
         ) {
-            SettingRow(
-                title = "更新源",
-                subtitle = when (source) {
-                    UpdateSource.GITHUB -> "GitHub（需能访问 GitHub）"
-                    UpdateSource.SERVER -> "中转服务器（GitHub 受限时用，应用内直接安装）"
-                },
-                onClick = { showSourcePicker = true },
-            )
-            SettingRow(
-                title = "更新渠道",
-                subtitle = channel.label +
-                    if (channel == UpdateChannel.BETA) "（包含预发布版本，可能不稳定）" else "",
-                onClick = { showChannelPicker = true },
-            )
+            SettingGroup {
+                SettingRow(
+                    title = "更新源",
+                    value = source.label,
+                    onClick = { showSourcePicker = true },
+                    grouped = true,
+                )
+                SettingRow(
+                    title = "更新渠道",
+                    value = channel.label,
+                    onClick = { showChannelPicker = true },
+                    grouped = true,
+                )
+            }
             Spacer(Modifier.height(Dimens.gapXL))
         }
     }

@@ -88,6 +88,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 列表行密度 | 默认 `CompactPadding`；带封面/大图标的行（`BookListRow`、书架列表、`AppIconSheet`）用 `ComfortablePadding` |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |
+| 设置分组卡 | `SettingGroup` + `SettingRow(..., grouped = true)` / `SwitchRow(..., grouped = true)`；底栏/选择面板等「一条一卡」保持 `grouped = false` |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |

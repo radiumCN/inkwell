@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -128,16 +129,14 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            SwitchRow(
-                title = "自动同步",
-                subtitle = if (state.autoSync) {
-                    "启动时与退到后台时静默同步（至少间隔 1 分钟）"
-                } else {
-                    "已关闭。只有手动点「立即同步」才会同步"
-                },
-                checked = state.autoSync,
-                onCheckedChange = viewModel::setAutoSync,
-            )
+            SettingGroup {
+                SwitchRow(
+                    title = "自动同步",
+                    checked = state.autoSync,
+                    onCheckedChange = viewModel::setAutoSync,
+                    grouped = true,
+                )
+            }
 
             if (state.lastSyncAt > 0) {
                 Text(

@@ -19,6 +19,7 @@ import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.update.UpdateChecker
 
@@ -45,27 +46,33 @@ fun AboutSettingsScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(top = Dimens.gapS),
         ) {
-            SettingRow(
-                title = "意见反馈",
-                subtitle = "问题与建议直接提给开发者",
-                onClick = onOpenFeedback,
-            )
-            SettingRow(
-                title = "用户协议与免责声明",
-                subtitle = "软件性质、使用责任与隐私说明",
-                onClick = onOpenDisclaimer,
-            )
-            SettingRow(title = "版本", subtitle = "v$currentVersion")
-            SettingRow(title = "开源许可", subtitle = "MIT License")
-            SettingRow(
-                title = "开源地址",
-                subtitle = UpdateChecker.REPO_URL,
-                onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
-                },
-            )
+            SettingGroup {
+                SettingRow(
+                    title = "意见反馈",
+                    onClick = onOpenFeedback,
+                    grouped = true,
+                )
+                SettingRow(
+                    title = "用户协议与免责声明",
+                    onClick = onOpenDisclaimer,
+                    grouped = true,
+                )
+            }
+            SettingGroup {
+                SettingRow(title = "版本", value = "v$currentVersion", grouped = true)
+                SettingRow(title = "开源许可", value = "MIT License", grouped = true)
+                SettingRow(
+                    title = "开源地址",
+                    value = UpdateChecker.REPO_URL,
+                    onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL)))
+                    },
+                    grouped = true,
+                )
+            }
             Spacer(Modifier.height(Dimens.gapXL))
         }
     }

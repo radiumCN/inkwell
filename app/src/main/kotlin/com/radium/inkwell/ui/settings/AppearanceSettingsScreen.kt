@@ -28,6 +28,7 @@ import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.util.AppIconManager
@@ -60,36 +61,36 @@ fun AppearanceSettingsScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(top = Dimens.gapS),
         ) {
-            SettingRow(
-                title = "主题外观",
-                subtitle = "日间/夜间模式与自定义配色",
-                onClick = onOpenTheme,
-            )
-            SettingRow(
-                title = "应用图标",
-                subtitle = "${appIcon.label} · ${appIcon.description}",
-                onClick = { showIconPicker = true },
-            )
-            SettingRow(
-                title = "书架显示",
-                subtitle = bookshelfLayout.label + when (bookshelfLayout) {
-                    BookshelfLayout.GRID -> " · 封面优先"
-                    BookshelfLayout.LIST -> " · 一行一书，方便扫最新章"
-                },
-                onClick = { showLayoutPicker = true },
-            )
-            SwitchRow(
-                title = "显示「发现」入口",
-                subtitle = if (exploreEnabled) {
-                    "书架顶栏显示发现按钮（需已导入带发现规则的来源）"
-                } else {
-                    "已隐藏。仍可从搜索找书"
-                },
-                checked = exploreEnabled,
-                onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
-            )
+            SettingGroup {
+                SettingRow(
+                    title = "主题外观",
+                    onClick = onOpenTheme,
+                    grouped = true,
+                )
+                SettingRow(
+                    title = "应用图标",
+                    value = appIcon.label,
+                    onClick = { showIconPicker = true },
+                    grouped = true,
+                )
+                SettingRow(
+                    title = "书架显示",
+                    value = bookshelfLayout.label,
+                    onClick = { showLayoutPicker = true },
+                    grouped = true,
+                )
+            }
+            SettingGroup {
+                SwitchRow(
+                    title = "显示「发现」入口",
+                    checked = exploreEnabled,
+                    onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
+                    grouped = true,
+                )
+            }
             Spacer(Modifier.height(Dimens.gapXL))
         }
     }

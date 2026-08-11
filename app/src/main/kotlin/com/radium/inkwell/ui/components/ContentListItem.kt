@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -110,6 +111,38 @@ object ContentListDefaults {
         return resting.copy(selectedShape = resting.shape)
     }
 
+    /**
+     * [SettingGroup] 内的行：底色透明，让外层 Surface 露出来。
+     * 选中/checked 也不换底 —— 组内开关开着时不该整行变色。
+     */
+    @Composable
+    fun groupedColors(): ListItemColors {
+        val scheme = MaterialTheme.colorScheme
+        return ListItemDefaults.colors(
+            containerColor = Color.Transparent,
+            selectedContainerColor = Color.Transparent,
+            selectedContentColor = scheme.onSurface,
+            selectedLeadingContentColor = scheme.onSurface,
+            selectedTrailingContentColor = scheme.onSurface,
+            selectedOverlineContentColor = scheme.onSurfaceVariant,
+            selectedSupportingContentColor = scheme.onSurfaceVariant,
+        )
+    }
+
+    /**
+     * [SettingGroup] 内的行形：静息与选中都是直角，圆角只由外层 Surface 画一次。
+     * 按压形变仍取 Expressive 默认，按下时有反馈、抬起后不露第二层圆角框。
+     */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun groupedShapes(): ListItemShapes {
+        val resting = ListItemDefaults.shapes()
+        return resting.copy(
+            shape = RectangleShape,
+            selectedShape = RectangleShape,
+        )
+    }
+
     /** M3 ListItem 官方内边距（约 16×10）；多媒体行用 [ComfortablePadding] */
     val ContentPadding: PaddingValues
         get() = ListItemDefaults.ContentPadding
@@ -146,6 +179,7 @@ fun ContentListItem(
     onLongClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ListItemColors = ContentListDefaults.colors(),
+    shapes: ListItemShapes = ListItemDefaults.shapes(),
     content: @Composable () -> Unit,
 ) {
     ListItem(
@@ -158,6 +192,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         verticalAlignment = Alignment.CenterVertically,
         onLongClick = onLongClick,
+        shapes = shapes,
         colors = colors,
         contentPadding = contentPadding,
         content = content,
