@@ -26,6 +26,7 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateSource
@@ -62,13 +63,13 @@ fun UpdateSettingsScreen(onBack: () -> Unit) {
                     title = "更新源",
                     value = source.label,
                     onClick = { showSourcePicker = true },
-                    grouped = true,
+                    position = SettingGroupPosition.First,
                 )
                 SettingRow(
                     title = "更新渠道",
                     value = channel.label,
                     onClick = { showChannelPicker = true },
-                    grouped = true,
+                    position = SettingGroupPosition.Last,
                 )
             }
             Spacer(Modifier.height(Dimens.gapXL))

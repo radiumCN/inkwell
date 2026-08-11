@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -17,6 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -42,16 +45,49 @@ fun SectionHeader(
 }
 
 /**
- * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（`grouped = true`）收进同一张大圆角 Surface。
+ * 组内行位置：决定按压遮罩的圆角，与系统设置一致。
  *
- * 圆角只画在这一层，组内行用直角透明底，避免「框套框」。
+ * - [Alone] 单行组：四角圆（如「关于」）
+ * - [First] 组首：上圆下直（如「WebDAV 备份同步」）
+ * - [Middle] 组中：四角直
+ * - [Last] 组末：上直下圆（如「清除正文缓存」）
+ */
+enum class SettingGroupPosition {
+    Alone,
+    First,
+    Middle,
+    Last,
+}
+
+/** 与 [SettingGroup] / [MaterialTheme.shapes.large] 同档的圆角半径 */
+private val SettingGroupCorner = 16.dp
+
+@Composable
+internal fun settingGroupItemShape(position: SettingGroupPosition): Shape = when (position) {
+    SettingGroupPosition.Alone -> MaterialTheme.shapes.large
+    SettingGroupPosition.First -> RoundedCornerShape(
+        topStart = SettingGroupCorner,
+        topEnd = SettingGroupCorner,
+        bottomStart = 0.dp,
+        bottomEnd = 0.dp,
+    )
+    SettingGroupPosition.Middle -> RectangleShape
+    SettingGroupPosition.Last -> RoundedCornerShape(
+        topStart = 0.dp,
+        topEnd = 0.dp,
+        bottomStart = SettingGroupCorner,
+        bottomEnd = SettingGroupCorner,
+    )
+}
+
+/**
+ * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张大圆角 Surface。
+ *
+ * 圆角只画在这一层，组内行按位置切角，避免「框套框」与按压遮罩四角形状不对。
  * 组间距靠上下各半格 [Dimens.gapM]，组与组之间等于一整格。
  *
- * 色：卡用 [ColorScheme.surfaceContainerLowest]（浅色近白），页画布用
- * [ColorScheme.surfaceContainerLow]（见各设置页 Scaffold）—— 灰底白卡。
- *
- * 角：用 [Shapes.large]（16dp），对齐系统设置分组卡；不要用 extraLarge（28dp，Dialog 档），
- * 并排一看会显得比系统「鼓」一圈。
+ * 色：卡用 surfaceContainerLowest（浅色近白），页画布用 surfaceContainerLow —— 灰底白卡。
+ * 角：用 [MaterialTheme.shapes.large]（16dp），对齐系统设置分组卡。
  */
 @Composable
 fun SettingGroup(
@@ -76,8 +112,8 @@ fun SettingGroup(
  * 走 [value]（右侧同行）。说明性长文案不要塞 [subtitle] —— 需要解释时留给点开后的面板。
  * `trailing` 优先于 `value`（开关等自定义尾部仍走它）。
  *
- * @param grouped 为 true 时放进 [SettingGroup]：去掉行级 chrome，底色透明、角直角。
- *   底栏 / 选择面板等「一条一卡」场景保持默认 false。
+ * @param position 非 null 表示在 [SettingGroup] 内，并标明组内位置（按压遮罩圆角）。
+ *   底栏 / 选择面板等「一条一卡」场景保持 null。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -87,8 +123,9 @@ fun SettingRow(
     value: String? = null,
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
-    grouped: Boolean = false,
+    position: SettingGroupPosition? = null,
 ) {
+    val grouped = position != null
     val supporting: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
             Text(it, style = MaterialTheme.typography.bodySmall)
@@ -113,8 +150,8 @@ fun SettingRow(
     } else {
         ContentListDefaults.colors()
     }
-    val shapes = if (grouped) {
-        ContentListDefaults.groupedShapes()
+    val shapes = if (position != null) {
+        ContentListDefaults.groupedShapes(position)
     } else {
         ListItemDefaults.shapes()
     }
@@ -157,7 +194,7 @@ fun SettingRow(
  * 且行焦点念不出开/关状态。
  *
  * 独立成卡时形状与底色走 [ContentListDefaults.toggleShapes] / [toggleColors]；
- * 进 [SettingGroup] 时走 grouped 变体（开/关不换外形，圆角交给外层 Surface）。
+ * 进 [SettingGroup] 时传 [position]，按压遮罩圆角跟组内位置走。
  */
 @Composable
 fun SwitchRow(
@@ -166,8 +203,9 @@ fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
-    grouped: Boolean = false,
+    position: SettingGroupPosition? = null,
 ) {
+    val grouped = position != null
     val supporting: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
             Text(it, style = MaterialTheme.typography.bodySmall)
@@ -189,8 +227,8 @@ fun SwitchRow(
         } else {
             ContentListDefaults.toggleColors()
         },
-        shapes = if (grouped) {
-            ContentListDefaults.groupedShapes()
+        shapes = if (position != null) {
+            ContentListDefaults.groupedShapes(position)
         } else {
             ContentListDefaults.toggleShapes()
         },

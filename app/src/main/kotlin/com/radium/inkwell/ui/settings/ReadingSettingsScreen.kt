@@ -19,6 +19,7 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
@@ -56,12 +57,12 @@ fun ReadingSettingsScreen(
                 SettingRow(
                     title = "书源管理",
                     onClick = onOpenSources,
-                    grouped = true,
+                    position = SettingGroupPosition.First,
                 )
                 SettingRow(
                     title = "净化替换规则",
                     onClick = onOpenReplaceRules,
-                    grouped = true,
+                    position = SettingGroupPosition.Last,
                 )
             }
             SettingGroup {
@@ -69,13 +70,13 @@ fun ReadingSettingsScreen(
                     title = "自动换源",
                     checked = autoChangeSource,
                     onCheckedChange = { on -> scope.launch { appPrefs.setAutoChangeSource(on) } },
-                    grouped = true,
+                    position = SettingGroupPosition.First,
                 )
                 SwitchRow(
                     title = "换源时匹配作者",
                     checked = checkAuthor,
                     onCheckedChange = { on -> scope.launch { appPrefs.setChangeSourceCheckAuthor(on) } },
-                    grouped = true,
+                    position = SettingGroupPosition.Last,
                 )
             }
             Spacer(Modifier.height(Dimens.gapXL))

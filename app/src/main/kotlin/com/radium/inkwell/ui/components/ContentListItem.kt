@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -139,16 +138,23 @@ object ContentListDefaults {
     }
 
     /**
-     * [SettingGroup] 内的行形：静息与选中都是直角，圆角只由外层 Surface 画一次。
-     * 按压形变仍取 Expressive 默认，按下时有反馈、抬起后不露第二层圆角框。
+     * [SettingGroup] 内的行形：按 [SettingGroupPosition] 切角，且静息/选中/按压同一形，
+     * 不做 Expressive 形变（避免松手闪直角）。
+     *
+     * - 组首上圆下直、组末上直下圆、组中直角、单行四角圆 —— 与系统设置按压遮罩一致。
      */
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable
-    fun groupedShapes(): ListItemShapes {
+    fun groupedShapes(position: SettingGroupPosition): ListItemShapes {
+        val itemShape = settingGroupItemShape(position)
         val resting = ListItemDefaults.shapes()
         return resting.copy(
-            shape = RectangleShape,
-            selectedShape = RectangleShape,
+            shape = itemShape,
+            selectedShape = itemShape,
+            pressedShape = itemShape,
+            focusedShape = itemShape,
+            hoveredShape = itemShape,
+            draggedShape = itemShape,
         )
     }
 

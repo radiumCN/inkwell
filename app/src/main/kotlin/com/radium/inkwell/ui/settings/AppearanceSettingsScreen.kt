@@ -30,6 +30,7 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.util.AppIconManager
@@ -71,19 +72,19 @@ fun AppearanceSettingsScreen(
                 SettingRow(
                     title = "主题外观",
                     onClick = onOpenTheme,
-                    grouped = true,
+                    position = SettingGroupPosition.First,
                 )
                 SettingRow(
                     title = "应用图标",
                     value = appIcon.label,
                     onClick = { showIconPicker = true },
-                    grouped = true,
+                    position = SettingGroupPosition.Middle,
                 )
                 SettingRow(
                     title = "书架显示",
                     value = bookshelfLayout.label,
                     onClick = { showLayoutPicker = true },
-                    grouped = true,
+                    position = SettingGroupPosition.Last,
                 )
             }
             SettingGroup {
@@ -91,7 +92,7 @@ fun AppearanceSettingsScreen(
                     title = "显示「发现」入口",
                     checked = exploreEnabled,
                     onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
-                    grouped = true,
+                    position = SettingGroupPosition.Alone,
                 )
             }
             Spacer(Modifier.height(Dimens.gapXL))

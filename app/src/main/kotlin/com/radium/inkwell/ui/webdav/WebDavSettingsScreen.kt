@@ -39,6 +39,7 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -136,7 +137,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
                     title = "自动同步",
                     checked = state.autoSync,
                     onCheckedChange = viewModel::setAutoSync,
-                    grouped = true,
+                    position = SettingGroupPosition.Alone,
                 )
             }
 

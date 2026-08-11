@@ -29,6 +29,7 @@ import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
@@ -93,24 +94,24 @@ fun SettingsScreen(
                     SettingRow(
                         title = "外观",
                         onClick = onOpenAppearance,
-                        grouped = true,
+                        position = SettingGroupPosition.First,
                     )
                     SettingRow(
                         title = "阅读与规则",
                         onClick = onOpenReading,
-                        grouped = true,
+                        position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "订阅源",
                         onClick = onOpenRss,
-                        grouped = true,
+                        position = SettingGroupPosition.Last,
                     )
                 }
                 SettingGroup {
                     SettingRow(
                         title = "WebDAV 备份同步",
                         onClick = onOpenWebDav,
-                        grouped = true,
+                        position = SettingGroupPosition.First,
                     )
                     SettingRow(
                         title = "清除正文缓存",
@@ -120,7 +121,7 @@ fun SettingsScreen(
                             else -> formatSize(cacheBytes)
                         },
                         onClick = { if (cacheBytes > 0) confirmClearCache = true },
-                        grouped = true,
+                        position = SettingGroupPosition.Last,
                     )
                 }
 
@@ -134,12 +135,12 @@ fun SettingsScreen(
                             "${updateCheck.source.label} · ${updateCheck.channel.label}"
                         },
                         onClick = updateCheck.check,
-                        grouped = true,
+                        position = SettingGroupPosition.First,
                     )
                     SettingRow(
                         title = "更新源与渠道",
                         onClick = onOpenUpdate,
-                        grouped = true,
+                        position = SettingGroupPosition.Last,
                     )
                 }
 
@@ -147,7 +148,7 @@ fun SettingsScreen(
                     SettingRow(
                         title = "关于",
                         onClick = onOpenAbout,
-                        grouped = true,
+                        position = SettingGroupPosition.Alone,
                     )
                 }
             }
