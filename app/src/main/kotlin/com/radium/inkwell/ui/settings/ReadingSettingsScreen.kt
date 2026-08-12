@@ -22,6 +22,7 @@ import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
+import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import kotlinx.coroutines.launch
@@ -39,7 +40,7 @@ fun ReadingSettingsScreen(
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsState(initial = true)
     val autoChangeSource by appPrefs.autoChangeSource.collectAsState(initial = true)
 
-    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),

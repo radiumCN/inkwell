@@ -41,6 +41,7 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SwitchRow
+import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.text.SimpleDateFormat
@@ -54,7 +55,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
 
     CollectMessages(viewModel.messages, snackbar)
 
-    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),

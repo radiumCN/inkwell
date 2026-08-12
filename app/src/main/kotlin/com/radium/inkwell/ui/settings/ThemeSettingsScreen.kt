@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.settingsPageColor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.theme.AppThemes
@@ -65,7 +66,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         scope.launch { prefs.setThemeConfig(new) }
     }
 
-    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),

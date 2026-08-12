@@ -28,6 +28,7 @@ import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateSource
 import kotlinx.coroutines.launch
@@ -44,7 +45,7 @@ fun UpdateSettingsScreen(onBack: () -> Unit) {
     var showChannelPicker by remember { mutableStateOf(false) }
     var showSourcePicker by remember { mutableStateOf(false) }
 
-    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),

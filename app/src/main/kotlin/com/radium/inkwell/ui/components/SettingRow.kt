@@ -18,8 +18,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -81,12 +83,44 @@ internal fun settingGroupItemShape(position: SettingGroupPosition): Shape = when
 }
 
 /**
+ * 设置页画布色（Scaffold / 顶栏）。
+ *
+ * 浅色：灰底（[ColorScheme.surfaceContainerLow]）；深色：最深底（[ColorScheme.background]）。
+ * 深色不能再用 Low —— Low 比 Lowest 亮，会变成「浅底深卡」凹陷感，和系统设置反着。
+ */
+@Composable
+fun settingsPageColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.background.luminance() > 0.5f) {
+        scheme.surfaceContainerLow
+    } else {
+        scheme.background
+    }
+}
+
+/**
+ * 设置分组卡底色。
+ *
+ * 浅色：近白（[ColorScheme.surfaceContainerLowest]）；深色：抬一阶的灰
+ * （[ColorScheme.surfaceContainerLow]），压在黑画布上才像「浮起来」的卡。
+ */
+@Composable
+fun settingsCardColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.background.luminance() > 0.5f) {
+        scheme.surfaceContainerLowest
+    } else {
+        scheme.surfaceContainerLow
+    }
+}
+
+/**
  * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张大圆角 Surface。
  *
  * 圆角只画在这一层，组内行按位置切角，避免「框套框」与按压遮罩四角形状不对。
  * 组间距靠上下各半格 [Dimens.gapM]，组与组之间等于一整格。
  *
- * 色：卡用 surfaceContainerLowest（浅色近白），页画布用 surfaceContainerLow —— 灰底白卡。
+ * 色：见 [settingsPageColor] / [settingsCardColor] —— 浅色灰底白卡、深色黑底浅卡。
  * 角：用 [MaterialTheme.shapes.large]（16dp），对齐系统设置分组卡。
  */
 @Composable
@@ -100,11 +134,10 @@ fun SettingGroup(
             .padding(horizontal = Dimens.listHorizontal)
             .padding(vertical = Dimens.gapM / 2),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        color = settingsCardColor(),
         content = { Column(content = content) },
     )
 }
-
 /**
  * 设置项。走 [ContentListItem]，与内容列表同一套 Expressive 容器色 / 圆角。
  *

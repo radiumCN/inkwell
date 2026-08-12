@@ -23,6 +23,7 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.update.UpdateChecker
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,7 +40,7 @@ fun AboutSettingsScreen(
         }.getOrNull() ?: "?"
     }
 
-    val pageColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
