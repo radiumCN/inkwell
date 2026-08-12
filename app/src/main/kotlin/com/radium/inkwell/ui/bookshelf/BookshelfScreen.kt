@@ -81,6 +81,8 @@ import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import com.radium.inkwell.ui.components.settingsCardColor
+import com.radium.inkwell.ui.components.settingsPageColor
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -188,7 +190,8 @@ fun BookshelfScreen(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.importBooks(uris) }
 
-    val pageColor = MaterialTheme.colorScheme.background
+    // 与设置页同一套画布：浅色灰底、深色黑底（见 settingsPageColor），进出设置不再闪白。
+    val pageColor = settingsPageColor()
     val topBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = pageColor,
         scrolledContainerColor = pageColor,
@@ -197,7 +200,7 @@ fun BookshelfScreen(
         // 这两条顶栏刻意留经典窄栏，不换 AppTopBar 的两段式 Flexible：一是进出多选会在两种
         // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，两段式会把它
         // 摊到大标题的位置上。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
-        // 顶栏与内容区同用 background，避免默认 surface / scrolled surfaceContainer 顶出一道色缝。
+        // 顶栏与内容区同色，避免默认 surface / scrolled surfaceContainer 顶出一道色缝。
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
@@ -999,8 +1002,8 @@ private fun BookCard(
  * 隐藏区状态条。打开隐藏区 = 就是在看隐藏书。
  * 「下次展开需验证」直接挂在条上（进了隐藏区才能改，外人翻设置看不到）；✕ 退出。
  *
- * 形态对齐设置分组卡：`large` 圆角 + `surfaceContainerLow`（书架画布是 background，
- * 用 Low 才能看出卡片；设置页是灰底白卡，这里是白底灰卡，同一套容器阶梯）。
+ * 形态对齐设置分组卡：`large` 圆角 + [settingsCardColor]（书架画布已与设置页同用
+ * [settingsPageColor]，浅色灰底白卡 / 深色黑底浅卡）。
  * 开关行语义与 [SwitchRow] 相同：整行可点，Switch 只展示；✕ 不进开关焦点。
  */
 @Composable
@@ -1020,7 +1023,7 @@ private fun HiddenStatusBar(
             .padding(horizontal = Dimens.listHorizontal)
             .padding(vertical = Dimens.gapM / 2),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = settingsCardColor(),
     ) {
         Row(
             Modifier.fillMaxWidth(),

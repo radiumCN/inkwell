@@ -10,6 +10,8 @@ import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.BookType
+import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
@@ -137,7 +139,7 @@ class ReaderViewModel(
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
     private val contentCache: ChapterContentCache,
-    private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
+    private val appPrefs: AppPrefs,
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
 ) : ViewModel() {
@@ -240,6 +242,12 @@ class ReaderViewModel(
                 currentSourceName = currentSourceName,
                 error = null,
             )
+            // 网络书：首章加载别等清理。进度之前且超龄的正文缓存顺手清掉，目录 isCached 一并 sync。
+            if (b.type == BookType.NET) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    pruneStaleChapterCache(position.chapterIndex, chapters)
+                }
+            }
             // 排版环境已就绪（换源重载场景）→ 立即重新分页
             if (facade != null && spec != null) {
                 engineMutex.withLock {
@@ -251,6 +259,34 @@ class ReaderViewModel(
             _state.value = _state.value.copy(loading = false, error = e.message ?: "打开书籍失败")
             // 书源被删了、目录拉不到 —— 这两种进书就废的情况，Legado 原生也自动换源
             maybeAutoChangeSource(e.message ?: "打开书籍失败")
+        }
+    }
+
+    /**
+     * 按设置清掉「进度之前」且超龄的正文缓存，并 sync 目录 isCached。
+     * 偏好为 0（关闭）时直接返回。不挡首章加载。
+     */
+    private suspend fun pruneStaleChapterCache(
+        readChapterIndex: Int,
+        chapters: List<ChapterEntity>,
+    ) {
+        val days = appPrefs.cacheAutoPruneDays.first()
+        if (days <= 0) return
+        val maxAgeMs = days * 86_400_000L
+        // 按下标对齐：目录偶有空洞时不能用 list 位置冒充 chapter.index
+        val maxIndex = chapters.maxOfOrNull { it.index } ?: return
+        val urls = MutableList<String?>(maxIndex + 1) { null }
+        for (c in chapters) {
+            if (c.index in urls.indices) urls[c.index] = c.url
+        }
+        val pruned = contentCache.pruneBehindProgress(
+            bookId = bookId,
+            readChapterIndex = readChapterIndex,
+            chapterUrls = urls,
+            maxAgeMs = maxAgeMs,
+        )
+        for (index in pruned) {
+            chapterDao.markCached(bookId, index, false)
         }
     }
 

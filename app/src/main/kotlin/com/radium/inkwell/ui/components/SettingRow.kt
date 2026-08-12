@@ -126,12 +126,24 @@ fun settingsCardColor(): Color {
 @Composable
 fun SettingGroup(
     modifier: Modifier = Modifier,
+    /**
+     * 是否自带左右 [Dimens.listHorizontal]。
+     * 父级已经有水平边距时（阅读设置面板外层已有 screenPadding）关掉，
+     * 否则开关卡会比上面的 Chip 行左右各再缩一截。
+     */
+    applyHorizontalInset: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.listHorizontal)
+            .then(
+                if (applyHorizontalInset) {
+                    Modifier.padding(horizontal = Dimens.listHorizontal)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = Dimens.gapM / 2),
         shape = MaterialTheme.shapes.large,
         color = settingsCardColor(),

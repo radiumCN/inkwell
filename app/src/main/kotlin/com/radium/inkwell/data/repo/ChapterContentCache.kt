@@ -55,6 +55,9 @@ class ChapterContentCache(private val root: File) {
                 else -> ContentElement.Paragraph(line)
             }
         }
+        // 命中即续命：自动清理按 lastModified 算「多久没碰过」。回看旧章时必须刷新，
+        // 否则「刚翻回去看」也会被当成过期缓存下一进书就删掉。
+        f.setLastModified(System.currentTimeMillis())
         return ChapterContent(elements)
     }
 
@@ -112,6 +115,54 @@ class ChapterContentCache(private val root: File) {
         dir(bookId).listFiles()
             ?.filter { it.nameWithoutExtension.toIntOrNull() != null }
             ?.forEach { it.delete() }
+    }
+
+    /**
+     * 清掉「进度之前」且超过 [maxAgeMs] 未碰过的正文缓存。
+     *
+     * 当前章与其后（含预取）一律保留 —— 用户可能离线往后翻，或刚预取完还没用。
+     * [chapterUrls] 按下标对齐目录；返回被删章节的下标（孤儿文件无下标，不进列表）。
+     *
+     * 目录换过后对不上任何现 URL 的 `.txt` 算孤儿：同样超龄才删，避免误伤刚写入、
+     * 但 TOC 尚未刷新到的竞态窗口。
+     */
+    fun pruneBehindProgress(
+        bookId: String,
+        readChapterIndex: Int,
+        chapterUrls: List<String?>,
+        maxAgeMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): List<Int> {
+        if (maxAgeMs <= 0L) return emptyList()
+        val cutoff = nowMs - maxAgeMs
+        val bookDir = File(root, bookId)
+        if (!bookDir.isDirectory) return emptyList()
+
+        val liveKeys = chapterUrls.mapNotNullTo(HashSet()) { url ->
+            url?.takeIf { it.isNotBlank() }?.let { key(it) }
+        }
+        val pruned = ArrayList<Int>()
+
+        // 进度为 0（还在第一章）时没有「进度之前」的章，跳过；孤儿仍要清。
+        if (readChapterIndex > 0) {
+            for (index in 0 until readChapterIndex.coerceAtMost(chapterUrls.size)) {
+                val url = chapterUrls.getOrNull(index)?.takeIf { it.isNotBlank() } ?: continue
+                val f = file(bookId, url)
+                if (!f.isFile) continue
+                if (f.lastModified() > cutoff) continue
+                if (f.delete()) pruned.add(index)
+            }
+        }
+
+        bookDir.listFiles()
+            ?.asSequence()
+            ?.filter { it.isFile && it.extension == "txt" }
+            ?.filter { it.nameWithoutExtension !in liveKeys }
+            // 旧按序号命名的残留也算孤儿；purgeLegacy 仍可另清，这里按年龄兜底
+            ?.filter { it.lastModified() <= cutoff }
+            ?.forEach { it.delete() }
+
+        return pruned
     }
 
     private companion object {

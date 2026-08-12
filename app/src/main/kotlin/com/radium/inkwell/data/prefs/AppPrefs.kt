@@ -3,6 +3,7 @@ package com.radium.inkwell.data.prefs
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -37,6 +38,11 @@ class AppPrefs(private val context: Context) {
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
+        /**
+         * 已读章节正文缓存保留天数。0 = 关闭自动清理；合法值 0/7/14/30，默认 14。
+         * 只清进度之前且超过该天数未碰过的缓存，当前章与其后不动。
+         */
+        val CACHE_AUTO_PRUNE_DAYS = intPreferencesKey("cache_auto_prune_days")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -66,6 +72,7 @@ class AppPrefs(private val context: Context) {
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
                 "bookshelf_layout" to (p[Keys.BOOKSHELF_LAYOUT] ?: BookshelfLayout.GRID.name),
+                "cache_auto_prune_days" to (p[Keys.CACHE_AUTO_PRUNE_DAYS] ?: DEFAULT_CACHE_AUTO_PRUNE_DAYS).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
                 "theme_dark" to theme.darkPreset,
@@ -98,6 +105,9 @@ class AppPrefs(private val context: Context) {
             v["bookshelf_layout"]
                 ?.takeIf { name -> BookshelfLayout.entries.any { it.name == name } }
                 ?.let { p[Keys.BOOKSHELF_LAYOUT] = it }
+            v["cache_auto_prune_days"]?.toIntOrNull()
+                ?.takeIf { it in CACHE_AUTO_PRUNE_DAYS_OPTIONS }
+                ?.let { p[Keys.CACHE_AUTO_PRUNE_DAYS] = it }
             v["theme_mode"]
                 ?.takeIf { name -> ThemeMode.entries.any { it.name == name } }
                 ?.let { p[Keys.THEME_MODE] = it }
@@ -172,6 +182,24 @@ class AppPrefs(private val context: Context) {
     }
 
     /**
+     * 已读章节正文缓存自动清理保留天数。
+     *
+     * 0 = 关闭；默认 14。只清「当前进度之前」且超过该天数未读过的缓存，
+     * 当前章与预取章不受影响。合法值见 [CACHE_AUTO_PRUNE_DAYS_OPTIONS]。
+     */
+    val cacheAutoPruneDays: Flow<Int> = context.appDataStore.data.map { p ->
+        p[Keys.CACHE_AUTO_PRUNE_DAYS]
+            ?.takeIf { it in CACHE_AUTO_PRUNE_DAYS_OPTIONS }
+            ?: DEFAULT_CACHE_AUTO_PRUNE_DAYS
+    }
+
+    suspend fun setCacheAutoPruneDays(days: Int) {
+        require(days in CACHE_AUTO_PRUNE_DAYS_OPTIONS) { "非法保留天数: $days" }
+        context.appDataStore.edit { it[Keys.CACHE_AUTO_PRUNE_DAYS] = days }
+        touch()
+    }
+
+    /**
      * 查看隐藏书籍是否需要系统验证（指纹/面容/设备密码）。
      *
      * **不跨设备同步**：换台没录指纹的设备，同步过去就把人锁在自己的书外面了。
@@ -234,5 +262,11 @@ class AppPrefs(private val context: Context) {
             p[Keys.CUSTOM_DARK_BG] = config.customDarkBg
         }
         touch()
+    }
+
+    companion object {
+        const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14
+        /** 关闭 / 7 / 14 / 30 天 */
+        val CACHE_AUTO_PRUNE_DAYS_OPTIONS = setOf(0, 7, 14, 30)
     }
 }

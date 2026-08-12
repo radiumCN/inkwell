@@ -88,6 +88,8 @@ import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -678,17 +680,23 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
             onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
         )
 
-        SwitchRow(
-            title = "音量键翻页",
-            checked = settings.volumeKeyFlip,
-            onCheckedChange = { onUpdate(settings.copy(volumeKeyFlip = it)) },
-        )
-        SwitchRow(
-            title = "翻页震动",
-            subtitle = "翻过一页时轻震一下。连续翻页会一直震，默认关",
-            checked = settings.flipHaptic,
-            onCheckedChange = { onUpdate(settings.copy(flipHaptic = it)) },
-        )
+        // 外层 AppTabContent 已有 screenPadding；SettingGroup 再套 listHorizontal
+        // 会比上面 Chip 左右各再缩一截。关 inset，卡宽与 Chip 行对齐。
+        SettingGroup(applyHorizontalInset = false) {
+            SwitchRow(
+                title = "音量键翻页",
+                checked = settings.volumeKeyFlip,
+                onCheckedChange = { onUpdate(settings.copy(volumeKeyFlip = it)) },
+                position = SettingGroupPosition.First,
+            )
+            SwitchRow(
+                title = "翻页震动",
+                subtitle = "翻过一页时轻震一下。连续翻页会一直震，默认关",
+                checked = settings.flipHaptic,
+                onCheckedChange = { onUpdate(settings.copy(flipHaptic = it)) },
+                position = SettingGroupPosition.Last,
+            )
+        }
     }
 }
 
@@ -706,26 +714,31 @@ private fun MoreTab(
         onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
     )
 
-    // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
-    SwitchRow(
-        title = "阅读时保持屏幕常亮",
-        checked = settings.keepScreenOn,
-        onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
-    )
+    // 外层已有 screenPadding，关 SettingGroup 水平 inset，卡宽与 Chip 对齐（同 FlipTab）。
+    SettingGroup(applyHorizontalInset = false) {
+        // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
+        SwitchRow(
+            title = "阅读时保持屏幕常亮",
+            checked = settings.keepScreenOn,
+            onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
+            position = SettingGroupPosition.First,
+        )
 
-    // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨
-    // DataStore 迁移，弄不好会把已经关掉它的用户静默改回开。这里只是把开关挪到它该在的地方 ——
-    // 它是纯粹的阅读页设置，从前却待在全局设置的「书源」分组下。
-    SwitchRow(
-        title = "长按选字",
-        subtitle = if (textSelectionEnabled) {
-            "长按正文可选中、复制，或建一条只对这本书生效的净化规则"
-        } else {
-            "已关闭。翻页时手指停顿久了不会再误触选中"
-        },
-        checked = textSelectionEnabled,
-        onCheckedChange = onTextSelectionChange,
-    )
+        // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨
+        // DataStore 迁移，弄不好会把已经关掉它的用户静默改回开。这里只是把开关挪到它该在的地方 ——
+        // 它是纯粹的阅读页设置，从前却待在全局设置的「书源」分组下。
+        SwitchRow(
+            title = "长按选字",
+            subtitle = if (textSelectionEnabled) {
+                "长按正文可选中、复制，或建一条只对这本书生效的净化规则"
+            } else {
+                "已关闭。翻页时手指停顿久了不会再误触选中"
+            },
+            checked = textSelectionEnabled,
+            onCheckedChange = onTextSelectionChange,
+            position = SettingGroupPosition.Last,
+        )
+    }
 
 }
 

@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -23,10 +24,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -60,11 +64,16 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit,
 ) {
     val cache = koinInject<ChapterContentCache>()
+    val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val updateCheck = rememberUpdateCheckState(snackbar)
     var confirmClearCache by remember { mutableStateOf(false) }
+    var showPrunePicker by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
+    val pruneDays by appPrefs.cacheAutoPruneDays.collectAsState(
+        initial = AppPrefs.DEFAULT_CACHE_AUTO_PRUNE_DAYS,
+    )
 
     suspend fun refreshCacheSize() {
         cacheBytes = withContext(Dispatchers.IO) { cache.sizeBytes() }
@@ -113,6 +122,12 @@ fun SettingsScreen(
                         title = "WebDAV 备份同步",
                         onClick = onOpenWebDav,
                         position = SettingGroupPosition.First,
+                    )
+                    SettingRow(
+                        title = "自动清理已读缓存",
+                        value = cacheAutoPruneLabel(pruneDays),
+                        onClick = { showPrunePicker = true },
+                        position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "清除正文缓存",
@@ -173,6 +188,42 @@ fun SettingsScreen(
 
     updateCheck.UpdateDialog()
 
+    if (showPrunePicker) {
+        OptionPickerSheet(
+            title = "自动清理已读缓存",
+            options = listOf(
+                PickerOption(
+                    id = "0",
+                    label = "关闭",
+                    subtitle = "已读章节正文一直保留，直到手动清除",
+                ),
+                PickerOption(
+                    id = "7",
+                    label = "7 天",
+                    subtitle = "进度之前且超过 7 天未回看的章节会删掉缓存",
+                ),
+                PickerOption(
+                    id = "14",
+                    label = "14 天",
+                    subtitle = "进度之前且超过 14 天未回看的章节会删掉缓存",
+                ),
+                PickerOption(
+                    id = "30",
+                    label = "30 天",
+                    subtitle = "进度之前且超过 30 天未回看的章节会删掉缓存",
+                ),
+            ),
+            selectedId = pruneDays.toString(),
+            onSelect = { opt ->
+                showPrunePicker = false
+                opt.id.toIntOrNull()
+                    ?.takeIf { it in AppPrefs.CACHE_AUTO_PRUNE_DAYS_OPTIONS }
+                    ?.let { days -> scope.launch { appPrefs.setCacheAutoPruneDays(days) } }
+            },
+            onDismiss = { showPrunePicker = false },
+        )
+    }
+
     if (confirmClearCache) {
         AlertDialog(
             onDismissRequest = { confirmClearCache = false },
@@ -198,4 +249,9 @@ fun SettingsScreen(
             },
         )
     }
+}
+
+private fun cacheAutoPruneLabel(days: Int): String = when (days) {
+    0 -> "关闭"
+    else -> "$days 天"
 }

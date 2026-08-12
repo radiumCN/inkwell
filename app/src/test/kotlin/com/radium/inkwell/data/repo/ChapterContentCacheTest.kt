@@ -110,4 +110,90 @@ class ChapterContentCacheTest {
         cache.clear("b1")
         assertFalse(cache.has("b1", "https://ex.com/1.html"))
     }
+
+    @Test
+    fun `进度之前且超龄的缓存会被清掉，当前章与之后保留`() {
+        val urls = listOf(
+            "https://ex.com/0.html",
+            "https://ex.com/1.html",
+            "https://ex.com/2.html",
+            "https://ex.com/3.html",
+        )
+        urls.forEach { cache.write("b1", it, content) }
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        // 0、1 超龄；2（当前）、3（预取）即使超龄也不删
+        File(root, "b1").listFiles()!!.forEach { it.setLastModified(now - 20 * day) }
+
+        val pruned = cache.pruneBehindProgress(
+            bookId = "b1",
+            readChapterIndex = 2,
+            chapterUrls = urls,
+            maxAgeMs = 14 * day,
+            nowMs = now,
+        )
+
+        assertEquals(listOf(0, 1), pruned)
+        assertFalse(cache.has("b1", urls[0]))
+        assertFalse(cache.has("b1", urls[1]))
+        assertTrue(cache.has("b1", urls[2]))
+        assertTrue(cache.has("b1", urls[3]))
+    }
+
+    @Test
+    fun `进度之前但未超龄的缓存保留`() {
+        val urls = listOf("https://ex.com/0.html", "https://ex.com/1.html")
+        urls.forEach { cache.write("b1", it, content) }
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        File(root, "b1").listFiles()!!.forEach { it.setLastModified(now - 3 * day) }
+
+        val pruned = cache.pruneBehindProgress(
+            bookId = "b1",
+            readChapterIndex = 1,
+            chapterUrls = urls,
+            maxAgeMs = 14 * day,
+            nowMs = now,
+        )
+
+        assertTrue(pruned.isEmpty())
+        assertTrue(cache.has("b1", urls[0]))
+    }
+
+    @Test
+    fun `读缓存会刷新 lastModified，避免刚回看就被当成过期`() {
+        val url = "https://ex.com/1.html"
+        cache.write("b1", url, content)
+        val f = File(root, "b1").listFiles()!!.single { it.name.endsWith(".txt") }
+        val old = 1_000_000_000_000L
+        assertTrue(f.setLastModified(old))
+        assertEquals(old, f.lastModified())
+
+        assertTrue(cache.read("b1", url) != null)
+        assertTrue(f.lastModified() > old)
+    }
+
+    @Test
+    fun `超龄孤儿缓存会被清掉`() {
+        cache.write("b1", "https://ex.com/live.html", content)
+        val orphan = File(root, "b1/deadbeefdeadbeefdeadbeefdeadbeef.txt")
+        orphan.writeText("orphan")
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        orphan.setLastModified(now - 20 * day)
+        File(root, "b1").listFiles()!!
+            .filter { it != orphan }
+            .forEach { it.setLastModified(now) }
+
+        cache.pruneBehindProgress(
+            bookId = "b1",
+            readChapterIndex = 0,
+            chapterUrls = listOf("https://ex.com/live.html"),
+            maxAgeMs = 14 * day,
+            nowMs = now,
+        )
+
+        assertFalse(orphan.exists())
+        assertTrue(cache.has("b1", "https://ex.com/live.html"))
+    }
 }
