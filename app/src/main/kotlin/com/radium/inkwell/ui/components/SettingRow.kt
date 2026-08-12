@@ -115,6 +115,16 @@ fun settingsCardColor(): Color {
 }
 
 /**
+ * 设置栈灰底上的内容列表行色。
+ *
+ * 默认 [ContentListDefaults.colors] 用 Low，和 [settingsPageColor] 同色会糊成一片；
+ * 这里改用 [settingsCardColor]（白卡 / 深色浅卡），与 [SettingGroup] 同阶。
+ */
+@Composable
+fun settingsStackListColors() =
+    ContentListDefaults.colors(containerColor = settingsCardColor())
+
+/**
  * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张大圆角 Surface。
  *
  * 圆角只画在这一层，组内行按位置切角，避免「框套框」与按压遮罩四角形状不对。

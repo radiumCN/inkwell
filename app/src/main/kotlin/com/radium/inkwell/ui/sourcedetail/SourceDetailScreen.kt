@@ -33,6 +33,7 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.settingsPageColor
 /**
  * 书源详情：只读展示规则原文 + 一键全链路测试。书源不在应用内编辑，改规则请重新导入。
  */
@@ -48,11 +49,18 @@ fun SourceDetailScreen(
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = pageColor,
         topBar = {
-            AppTopBar(state.name.ifBlank { "书源详情" }, topBarScroll, onBack = onBack)
+            AppTopBar(
+                state.name.ifBlank { "书源详情" },
+                topBarScroll,
+                onBack = onBack,
+                containerColor = pageColor,
+            )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->

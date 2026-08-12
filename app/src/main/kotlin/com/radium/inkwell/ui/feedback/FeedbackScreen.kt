@@ -40,6 +40,7 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.settingsPageColor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedbackScreen(
@@ -52,10 +53,12 @@ fun FeedbackScreen(
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        topBar = { AppTopBar("意见反馈", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("意见反馈", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         val url = state.successUrl

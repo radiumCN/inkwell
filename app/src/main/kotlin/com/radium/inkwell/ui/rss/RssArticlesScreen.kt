@@ -31,6 +31,8 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.settingsStackListColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RssArticlesScreen(
@@ -41,11 +43,13 @@ fun RssArticlesScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = pageColor,
         topBar = {
-            AppTopBar(state.sourceName, topBarScroll, onBack = onBack) {
+            AppTopBar(state.sourceName, topBarScroll, onBack = onBack, containerColor = pageColor) {
                 AppIconButton(onClick = viewModel::refresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "刷新")
                 }
@@ -90,6 +94,7 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
     val date = article.pubDate?.takeIf { it.isNotBlank() }
     ContentListItem(
         onClick = onClick,
+        colors = settingsStackListColors(),
         trailingContent = article.image?.takeIf { it.isNotBlank() }?.let { url ->
             {
                 BookCover(

@@ -19,6 +19,7 @@ import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.settingsPageColor
 
 /**
  * 用户协议与免责声明（只读）。
@@ -32,10 +33,12 @@ fun DisclaimerScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val body = remember { loadDisclaimer(context) }
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        topBar = { AppTopBar("用户协议与免责声明", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("用户协议与免责声明", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Text(
             text = body,

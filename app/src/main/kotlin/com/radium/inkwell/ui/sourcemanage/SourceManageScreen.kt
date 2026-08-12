@@ -37,6 +37,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,7 +67,6 @@ import com.radium.inkwell.ui.components.BackButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
@@ -76,6 +76,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.settingsStackListColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SourceManageScreen(
@@ -133,9 +135,15 @@ fun SourceManageScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
+    val pageColor = settingsPageColor()
+    val topBarColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = pageColor,
+        scrolledContainerColor = pageColor,
+    )
     Scaffold(
         // 两条都留经典窄栏，不换 AppTopBar 的两段式 Flexible：这页有多选态，
         // 上下文操作栏与常规栏来回切，两者高度不同就会让进出多选像跳了一下
+        containerColor = pageColor,
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：文字按钮塞不下五个（标题会被挤成竖排单字）。
@@ -154,6 +162,7 @@ fun SourceManageScreen(
                             Icon(Icons.Default.Close, contentDescription = "退出多选")
                         }
                     },
+                    colors = topBarColors,
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
                             Icon(Icons.Default.SelectAll, contentDescription = "全选")
@@ -219,6 +228,7 @@ fun SourceManageScreen(
                 navigationIcon = {
                     BackButton(onClick = onBack)
                 },
+                colors = topBarColors,
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
                         AppIconButton(onClick = { showCheckOptions = true }) {
@@ -667,6 +677,7 @@ private fun SourceListRow(
             checked = selected,
             onCheckedChange = { onClick() },
             onLongClick = onLongClick,
+            colors = settingsStackListColors(),
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,
@@ -676,6 +687,7 @@ private fun SourceListRow(
         ContentListItem(
             onClick = onClick,
             onLongClick = onLongClick,
+            colors = settingsStackListColors(),
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,

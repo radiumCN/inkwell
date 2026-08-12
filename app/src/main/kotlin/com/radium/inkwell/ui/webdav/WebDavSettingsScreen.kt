@@ -133,7 +133,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            SettingGroup {
+            SettingGroup(applyHorizontalInset = false) {
                 SwitchRow(
                     title = "自动同步",
                     checked = state.autoSync,

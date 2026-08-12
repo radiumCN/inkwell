@@ -53,6 +53,8 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.settingsStackListColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReplaceRuleScreen(
@@ -65,10 +67,12 @@ fun ReplaceRuleScreen(
 
     CollectMessages(viewModel.messages, snackbar)
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
-        topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack) },
+        containerColor = pageColor,
+        topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
         floatingActionButton = {
             FloatingActionButton(onClick = viewModel::newRule) {
                 Icon(Icons.Default.Add, contentDescription = "新建规则")
@@ -143,6 +147,7 @@ private fun RuleRow(
 ) {
     ContentListItem(
         onClick = onClick,
+        colors = settingsStackListColors(),
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 删除在前、开关在后、删除图标用 outline 灰：与书源/订阅列表的行尾一致

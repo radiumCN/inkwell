@@ -33,6 +33,7 @@ import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.settingsPageColor
 /**
  * 文章阅读。
  *
@@ -56,11 +57,13 @@ fun RssArticleScreen(
         }
     }
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = pageColor,
         topBar = {
-            AppTopBar("文章", topBarScroll, onBack = onBack) {
+            AppTopBar("文章", topBarScroll, onBack = onBack, containerColor = pageColor) {
                 if (state.link.isNotBlank()) {
                     AppIconButton(onClick = ::openInBrowser) {
                         Icon(

@@ -47,6 +47,8 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.settingsStackListColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RssSourceScreen(
@@ -67,11 +69,13 @@ fun RssSourceScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
+    val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
+        containerColor = pageColor,
         topBar = {
-            AppTopBar("订阅", topBarScroll, onBack = onBack) {
+            AppTopBar("订阅", topBarScroll, onBack = onBack, containerColor = pageColor) {
                 Box {
                     AppIconButton(onClick = { showImportMenu = true }) {
                         Icon(Icons.Default.Add, contentDescription = "添加订阅源")
@@ -122,6 +126,7 @@ fun RssSourceScreen(
                     ContentListItem(
                         onClick = { onOpenSource(source.id) },
                         enabled = source.enabled,
+                        colors = settingsStackListColors(),
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 AppIconButton(onClick = { deleteTarget = source }) {
