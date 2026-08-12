@@ -54,7 +54,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -80,9 +79,9 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -99,6 +98,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import com.radium.inkwell.util.BiometricAuth
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -998,6 +998,10 @@ private fun BookCard(
 /**
  * 隐藏区状态条。打开隐藏区 = 就是在看隐藏书。
  * 「下次展开需验证」直接挂在条上（进了隐藏区才能改，外人翻设置看不到）；✕ 退出。
+ *
+ * 形态对齐设置分组卡：`large` 圆角 + `surfaceContainerLow`（书架画布是 background，
+ * 用 Low 才能看出卡片；设置页是灰底白卡，这里是白底灰卡，同一套容器阶梯）。
+ * 开关行语义与 [SwitchRow] 相同：整行可点，Switch 只展示；✕ 不进开关焦点。
  */
 @Composable
 private fun HiddenStatusBar(
@@ -1008,53 +1012,51 @@ private fun HiddenStatusBar(
     modifier: Modifier = Modifier,
 ) {
     val authOn = requireAuth && biometricAvailable
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     Surface(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            .padding(horizontal = Dimens.listHorizontal)
+            .padding(vertical = Dimens.gapM / 2),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Row(
-            Modifier
-                .padding(start = Dimens.gapL, end = Dimens.gapXS)
-                .heightIn(min = Dimens.touchTarget),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 整行可点切换；Switch 只作展示，避免「行 + 开关」两个焦点
-            Row(
-                Modifier
-                    .weight(1f)
-                    .then(
-                        if (biometricAvailable) {
-                            Modifier.toggleable(
-                                value = authOn,
-                                role = Role.Switch,
-                                onValueChange = onToggleAuth,
-                            )
-                        } else Modifier
+            // 开关区吃掉剩余宽度；形用 Middle（直角），外层 Surface 裁出大圆角，
+            // 避免 Alone 四角圆贴到 ✕ 左侧看起来像两块卡。
+            ContentListItem(
+                checked = authOn,
+                onCheckedChange = onToggleAuth,
+                modifier = Modifier.weight(1f),
+                enabled = biometricAvailable,
+                trailingContent = {
+                    Switch(
+                        checked = authOn,
+                        enabled = biometricAvailable,
+                        onCheckedChange = null,
                     )
-                    .padding(end = Dimens.gapS),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (biometricAvailable) "展开需验证" else "无法上锁",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (biometricAvailable) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Switch(
-                    checked = authOn,
-                    onCheckedChange = null,
-                    enabled = biometricAvailable,
-                )
-            }
+                },
+                colors = ContentListDefaults.groupedColors(pressed = pressed),
+                shapes = ContentListDefaults.groupedShapes(SettingGroupPosition.Middle),
+                interactionSource = interactionSource,
+                content = {
+                    Text(
+                        if (biometricAvailable) "展开需验证" else "无法上锁",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (biometricAvailable) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
             AppIconButton(onClick = onCollapse) {
                 Icon(Icons.Default.Close, contentDescription = "收起隐藏区")
             }
