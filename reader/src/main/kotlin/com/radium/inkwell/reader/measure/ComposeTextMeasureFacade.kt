@@ -43,40 +43,66 @@ class ComposeTextMeasureFacade(
 ) : TextMeasureFacade {
 
     private val measurer = TextMeasurer(fontFamilyResolver, density, LayoutDirection.Ltr, cacheSize = 0)
+    /** 一章最多三种样式；getOrPut 避免每段 new TextStyle（量字热路径上的 pointer chasing） */
+    private val styleCache = HashMap<ResolvedTextStyle, TextStyle>(4)
 
     override fun measureParagraph(text: String, style: ResolvedTextStyle, widthPx: Int): MeasuredParagraph {
-        val fontSizeSp = with(density) { style.fontSizePx.toSp() }
-        val lineHeightSp = with(density) { style.lineHeightPx.toSp() }
-        val indentSp = (fontSizeSp.value * style.firstLineIndentEm).sp
         val result = measurer.measure(
             text = AnnotatedString(text),
-            style = TextStyle(
-                fontSize = fontSizeSp,
-                lineHeight = lineHeightSp,
-                fontFamily = fontRegistry.resolve(style.fontId),
-                fontWeight = if (style.isBold) FontWeight.Bold else FontWeight.Normal,
-                textIndent = TextIndent(firstLine = indentSp),
-                textAlign = if (style.justify) TextAlign.Justify else TextAlign.Start,
-                lineBreak = LineBreak.Paragraph,
-                lineHeightStyle = LineHeightStyle(
-                    alignment = LineHeightStyle.Alignment.Center,
-                    trim = LineHeightStyle.Trim.None,
-                ),
-                platformStyle = PlatformTextStyle(includeFontPadding = false),
-            ),
+            style = textStyleOf(style),
             constraints = Constraints(maxWidth = widthPx.coerceAtLeast(1)),
         )
         return ComposeMeasuredParagraph(result)
     }
 
+    private fun textStyleOf(style: ResolvedTextStyle): TextStyle = styleCache.getOrPut(style) {
+        val fontSizeSp = with(density) { style.fontSizePx.toSp() }
+        val lineHeightSp = with(density) { style.lineHeightPx.toSp() }
+        val indentSp = (fontSizeSp.value * style.firstLineIndentEm).sp
+        TextStyle(
+            fontSize = fontSizeSp,
+            lineHeight = lineHeightSp,
+            fontFamily = fontRegistry.resolve(style.fontId),
+            fontWeight = if (style.isBold) FontWeight.Bold else FontWeight.Normal,
+            textIndent = TextIndent(firstLine = indentSp),
+            textAlign = if (style.justify) TextAlign.Justify else TextAlign.Start,
+            lineBreak = LineBreak.Paragraph,
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.None,
+            ),
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+        )
+    }
+
     private class ComposeMeasuredParagraph(
         private val result: TextLayoutResult,
     ) : MeasuredParagraph {
-        override val lineCount: Int get() = result.lineCount
-        override fun lineTop(line: Int): Float = result.getLineTop(line)
-        override fun lineBottom(line: Int): Float = result.getLineBottom(line)
-        override fun lineStartOffset(line: Int): Int = result.getLineStart(line)
-        override fun lineEndOffset(line: Int): Int = result.getLineEnd(line)
+        // 行高/偏移抽成连续数组：分页装箱只扫这些，不再每次虚调用进 TextLayoutResult 对象图
+        private val lineTops: FloatArray
+        private val lineBottoms: FloatArray
+        private val lineStarts: IntArray
+        private val lineEnds: IntArray
+
+        init {
+            val n = result.lineCount
+            lineTops = FloatArray(n)
+            lineBottoms = FloatArray(n)
+            lineStarts = IntArray(n)
+            lineEnds = IntArray(n)
+            for (i in 0 until n) {
+                lineTops[i] = result.getLineTop(i)
+                lineBottoms[i] = result.getLineBottom(i)
+                lineStarts[i] = result.getLineStart(i)
+                lineEnds[i] = result.getLineEnd(i)
+            }
+        }
+
+        override val lineCount: Int get() = lineTops.size
+        override fun lineTop(line: Int): Float = lineTops[line]
+        override fun lineBottom(line: Int): Float = lineBottoms[line]
+        override fun lineStartOffset(line: Int): Int = lineStarts[line]
+        override fun lineEndOffset(line: Int): Int = lineEnds[line]
         override val text: String get() = result.layoutInput.text.text
 
         override fun offsetForPosition(x: Float, y: Float): Int =

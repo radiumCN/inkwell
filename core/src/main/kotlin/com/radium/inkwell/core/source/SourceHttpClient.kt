@@ -19,12 +19,11 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
 
-/** 抓取结果；bodyText 已按探测到的字符集解码 */
+/** 抓取结果；bodyText 已按探测到的字符集解码。不再同时握一份 bodyBytes —— 解码后那份字节只是峰值翻倍。 */
 class FetchedPage(
     val finalUrl: String,
     val statusCode: Int,
     val bodyText: String,
-    val bodyBytes: ByteArray,
     val detectedCharset: String,
 )
 
@@ -107,7 +106,6 @@ class SourceHttpClient(
                     finalUrl = resp.request.url.toString(),
                     statusCode = resp.code,
                     bodyText = String(bytes, charset),
-                    bodyBytes = bytes,
                     detectedCharset = charset.name(),
                 )
             }

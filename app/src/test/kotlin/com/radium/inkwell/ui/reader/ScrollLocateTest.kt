@@ -20,7 +20,8 @@ class ScrollLocateTest {
         items = (0 until elementCount).map { e ->
             PageItem.TextSlice(
                 elementIndex = e,
-                lineRange = 0..0,
+                startLine = 0,
+                endLine = 0,
                 yTopInPage = e * 50f,
                 height = 40f,
                 isTitle = e == 0,

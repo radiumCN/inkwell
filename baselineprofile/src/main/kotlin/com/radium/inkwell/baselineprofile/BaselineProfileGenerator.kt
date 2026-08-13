@@ -20,15 +20,11 @@ import org.junit.runner.RunWith
  * ### 这段旅程覆盖了什么、没覆盖什么
  *
  * 覆盖：冷启动（Application/Koin/Room/DataStore）、Compose 起步与首帧、书架、导航转场、
- * 设置、书源管理、搜索页。这占了方法量的绝大头 —— 生成出来 23062 条，其中 compose/ui 就
- * 7290 条、compose/ui/text 1418 条。而进书时**占住主线程**的正是 Compose 的组合与绘制，
- * 所以这一段恰好压在痛点上。
+ * 设置、书源管理、搜索页、**阅读器进书与翻页**（夹具 txt，见 [ProfileSeed]）。
+ * 生成出来的规则量里 compose/ui 仍是大头，进书时占住主线程的也是组合与绘制。
  *
- * **没覆盖：阅读器自己那几个类**（Paginator、正文解析、ReaderScreen）。全新安装的书架是
- * 空的，生成器走不进阅读器。让它走进去只有两条路：跑网络书源（那样书源一挂、发版就挂），
- * 或在系统文件选择器上做 UI 自动化（各 ROM 的选择器长得不一样，CI 上必然飘）。两条都是
- * 把发版绑在一个会自己坏掉的东西上。这几个类跑在 Dispatchers.Default/IO 上，不直接占主线程，
- * 优先级低于上面那一大块。
+ * 阅读器靠启动 extra 把 `assets/benchmark/seed.txt` 导入书架再点进去，不碰文件选择器、
+ * 也不走网络书源 —— 那两条在 CI 上都会自己坏掉。
  *
  * ### 别去写手工规则补它 —— 试过了，不成立
  *
@@ -86,7 +82,9 @@ class BaselineProfileGenerator {
         includeInStartupProfile = true,
     ) {
         pressHome()
-        startActivityAndWait()
+        startActivityAndWait {
+            it.putExtra("com.radium.inkwell.seed_profile_book", true)
+        }
 
         // 书架首帧。空书架走的是 EmptyState，有书走列表 —— 两条都在冷启动路径上，
         // 等"更多"按钮出来就说明顶栏已经组合完毕，两条都到位了。
@@ -101,6 +99,22 @@ class BaselineProfileGenerator {
         device.waitForIdle()
         device.pressBack()
         device.waitForIdle()
+
+        // 夹具书：等导入落书架（onCreate 里异步），再点进去覆盖分页/翻页/阅读菜单。
+        device.wait(Until.hasObject(By.text("Benchmark")), UI_TIMEOUT_MS)
+        device.findObject(By.text("Benchmark"))?.click()
+        device.wait(Until.hasObject(By.textContains("第1章")), UI_TIMEOUT_MS)
+        device.waitForIdle()
+        val w = device.displayWidth
+        val h = device.displayHeight
+        device.swipe((w * 0.85f).toInt(), h / 2, (w * 0.2f).toInt(), h / 2, 25)
+        device.waitForIdle()
+        device.click(w / 2, h / 2)
+        device.waitForIdle()
+        device.pressBack()
+        device.waitForIdle()
+        device.pressBack()
+        device.wait(Until.hasObject(By.desc("更多")), UI_TIMEOUT_MS)
     }
 
     /** 从书架右上角"更多"菜单进某一页，看一眼再退回来 */

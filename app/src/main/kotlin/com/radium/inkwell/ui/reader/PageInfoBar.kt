@@ -44,10 +44,10 @@ import java.util.Locale
  * 左下：章内页码；右下：全书进度百分比 · 时间 · 电池图标。
  */
 @Composable
-fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
+fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec) {
     val density = LocalDensity.current
     val context = LocalContext.current
-    val footerColor = Color(state.settings.theme.footerColor)
+    val footerColor = Color(session.settings.theme.footerColor)
     val footerNumStyle = remember { TextStyle(fontSize = FOOTER_SP, fontFeatureSettings = "tnum") }
 
     var time by remember { mutableStateOf(currentTime()) }
@@ -61,13 +61,13 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
     }
 
     // 全书阅读进度：章节 + 章内页比例
-    val bookPercent = remember(state.chapterIndex, state.pageInChapter, state.pageCount, state.chapterCount) {
-        if (state.chapterCount <= 0) 0f
+    val bookPercent = remember(pageUi.chapterIndex, pageUi.pageInChapter, pageUi.pageCount, session.chapterCount) {
+        if (session.chapterCount <= 0) 0f
         else {
-            val pageFraction = if (state.pageCount > 0) {
-                (state.pageInChapter + 1f) / state.pageCount
+            val pageFraction = if (pageUi.pageCount > 0) {
+                (pageUi.pageInChapter + 1f) / pageUi.pageCount
             } else 0f
-            ((state.chapterIndex + pageFraction) / state.chapterCount * 100f).coerceIn(0f, 100f)
+            ((pageUi.chapterIndex + pageFraction) / session.chapterCount * 100f).coerceIn(0f, 100f)
         }
     }
 
@@ -82,7 +82,7 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
     Box(Modifier.fillMaxSize()) {
         // 页眉：章节名，落在正文上方的页眉带里
         Text(
-            state.chapterTitle,
+            pageUi.chapterTitle,
             Modifier
                 .align(Alignment.TopStart)
                 .padding(start = marginH, end = marginH, top = headerTop),
@@ -101,7 +101,7 @@ fun PageInfoBar(state: ReaderUiState, spec: LayoutSpec) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "${state.pageInChapter + 1} / ${state.pageCount}",
+                "${pageUi.pageInChapter + 1} / ${pageUi.pageCount}",
                 color = footerColor,
                 style = footerNumStyle,
             )

@@ -14,10 +14,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
+import okio.Path.Companion.toOkioPath
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
 
-class InkwellApp : Application() {
+class InkwellApp : Application(), SingletonImageLoader.Factory {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -67,6 +73,25 @@ class InkwellApp : Application() {
             }
         )
     }
+
+    /**
+     * 封面缩略图专用 ImageLoader：内存封顶 15MB，避免 Coil 默认按进程内存 20% 把原图堆进 RSS。
+     * 解码尺寸由 BookCover 的 ImageRequest.size 再卡一道。
+     */
+    override fun newImageLoader(context: PlatformContext): ImageLoader =
+        ImageLoader.Builder(context)
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizeBytes(15L * 1024 * 1024)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("coil").toOkioPath())
+                    .maxSizeBytes(50L * 1024 * 1024)
+                    .build()
+            }
+            .build()
 
     /**
      * 静默同步。失败不打扰用户 —— 自动同步是背景行为，网络不好就下次再说，

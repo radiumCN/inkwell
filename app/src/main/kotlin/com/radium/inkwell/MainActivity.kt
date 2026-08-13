@@ -19,6 +19,8 @@ import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.InkwellTheme
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.util.KeyEventBus
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
 /**
@@ -33,6 +35,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra(ProfileSeed.EXTRA, false)) {
+            lifecycleScope.launch {
+                ProfileSeed.importIfRequested(this@MainActivity, true)
+            }
+        }
         setContent {
             val themeConfig by appPrefs.themeConfig.collectAsState(initial = ThemeConfig())
             val systemDark = isSystemInDarkTheme()

@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import coil3.size.Precision
 
 /** 空状态：图标 + 标题 + 提示 + 可选动作，全应用统一形态 */
 @Composable
@@ -169,11 +173,20 @@ fun BookCover(
         color = MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 1.dp,
     ) {
-        Box {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
             DefaultCover(title, placeholderChars)
             if (coverModel != null) {
+                // 按显示尺寸解码：列表封面 48×64dp，不能把 1000px 原图解进内存。
+                // 无界约束时退回 256 —— 比 ORIGINAL 小得多，也够 splash/详情用。
+                val w = if (constraints.hasBoundedWidth) constraints.maxWidth.coerceAtLeast(1) else 256
+                val h = if (constraints.hasBoundedHeight) constraints.maxHeight.coerceAtLeast(1) else 256
+                val context = LocalPlatformContext.current
                 AsyncImage(
-                    model = coverModel,
+                    model = ImageRequest.Builder(context)
+                        .data(coverModel)
+                        .size(w, h)
+                        .precision(Precision.INEXACT)
+                        .build(),
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

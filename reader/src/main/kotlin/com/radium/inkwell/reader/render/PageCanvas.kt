@@ -11,7 +11,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -103,8 +102,12 @@ fun PageCanvas(
 
 /**
  * 把一页渲染为位图（仿真卷页需要对整页做几何变形）。
- * 返回不可变位图：HWUI 对可变位图每帧重新上传 GPU 纹理（全屏 ~10MB），
- * 是仿真翻页掉帧的主因；不可变位图纹理只上传一次。
+ *
+ * 画在一张可变 ARGB 底图上，再拷成 **RGB_565 不可变**图：纸色页不透明，阴影在
+ * CurlRenderer 里另画，不需要页图 alpha。565 是 ARGB 的一半，也更吃 CPU/GPU 缓存。
+ * 拷完立刻 recycle 底图，避免峰值双份全屏 ARGB（1080×2400 一张约 10MB）。
+ *
+ * 不可变：HWUI 对可变位图每帧重新上传 GPU 纹理，是仿真翻页掉帧的主因。
  */
 fun renderPageBitmap(
     page: RenderablePage?,
@@ -114,18 +117,23 @@ fun renderPageBitmap(
 ): ImageBitmap {
     val width = layout.viewportWidthPx.coerceAtLeast(1)
     val height = layout.viewportHeightPx.coerceAtLeast(1)
-    val bitmap = ImageBitmap(width, height)
+    val software = android.graphics.Bitmap.createBitmap(
+        width, height, android.graphics.Bitmap.Config.ARGB_8888,
+    )
     CanvasDrawScope().draw(
         density,
         LayoutDirection.Ltr,
-        Canvas(bitmap),
+        Canvas(software.asImageBitmap()),
         Size(width.toFloat(), height.toFloat()),
     ) {
         drawPage(page, layout, theme)
     }
-    return bitmap.asAndroidBitmap()
-        .copy(android.graphics.Bitmap.Config.ARGB_8888, /* isMutable = */ false)
-        .asImageBitmap()
+    val compact = software.copy(android.graphics.Bitmap.Config.RGB_565, /* isMutable = */ false)
+    if (compact != null) {
+        software.recycle()
+        return compact.asImageBitmap()
+    }
+    return software.asImageBitmap()
 }
 
 /**
@@ -144,11 +152,11 @@ private fun DrawScope.drawSelection(
     val start = selection.start.coerceIn(0, len)
     val end = selection.end.coerceIn(start, len)
     if (end <= start) return
-    val sliceTopInParagraph = layoutResult.getLineTop(slice.lineRange.first)
+    val sliceTopInParagraph = layoutResult.getLineTop(slice.startLine)
     translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {
         clipRect(
             top = sliceTopInParagraph,
-            bottom = layoutResult.getLineBottom(slice.lineRange.last),
+            bottom = layoutResult.getLineBottom(slice.endLine),
         ) {
             drawPath(layoutResult.getPathForRange(start, end), color)
         }
@@ -162,11 +170,11 @@ private fun DrawScope.drawTextSlice(
     top: Float,
     color: Color,
 ) {
-    val sliceTopInParagraph = layoutResult.getLineTop(slice.lineRange.first)
+    val sliceTopInParagraph = layoutResult.getLineTop(slice.startLine)
     translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {
         clipRect(
             top = sliceTopInParagraph,
-            bottom = layoutResult.getLineBottom(slice.lineRange.last),
+            bottom = layoutResult.getLineBottom(slice.endLine),
         ) {
             drawIntoCanvas { canvas ->
                 layoutResult.multiParagraph.paint(canvas, color = color)

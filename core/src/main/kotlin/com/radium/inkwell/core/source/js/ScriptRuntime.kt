@@ -45,6 +45,16 @@ class RhinoScriptRuntime(
         }
     }
 
+    /**
+     * 同一段 JS 规则会被每个列表项、每章正文反复 eval。opt=-1 不能出字节码，
+     * 但 compileString 仍能把源码变成 AST，免掉每次的解析。64 条 LRU 够覆盖
+     * 一个书源里常见的 search/detail/toc/content 脚本，又不会把超长动态脚本攒满。
+     */
+    private val compiledScripts = object : LinkedHashMap<String, org.mozilla.javascript.Script>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, org.mozilla.javascript.Script>?): Boolean =
+            size > 64
+    }
+
     override fun eval(script: String, bindings: Map<String, Any?>): String? {
         val cx = factory.enterContext()
         try {
@@ -53,7 +63,12 @@ class RhinoScriptRuntime(
             bindings.forEach { (name, value) ->
                 scope.put(name, scope, Context.javaToJS(value, scope))
             }
-            val result = cx.evaluateString(scope, script, "rule.js", 1, null)
+            val compiled = synchronized(compiledScripts) {
+                compiledScripts[script] ?: cx.compileString(script, "rule.js", 1, null).also {
+                    compiledScripts[script] = it
+                }
+            }
+            val result = compiled.exec(cx, scope)
             return when {
                 result == null || result === Context.getUndefinedValue() -> null
                 // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，

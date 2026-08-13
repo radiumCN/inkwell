@@ -102,4 +102,23 @@ class PaginatorTest {
         val firstPageFirst = result.chapter.pages[1].items.first() as PageItem.TextSlice
         assertEquals(0f, firstPageFirst.yTopInPage)
     }
+
+    @Test
+    fun `长章先回调覆盖目标偏移的页，再返回完整结果`() {
+        // 300 字 = 20 行 → 2 页；notifyAfterChar=0 应在第一页封好时就回调
+        val content = ChapterContent(listOf(ContentElement.Paragraph(cjk(300))))
+        var partial: Paginator.Result? = null
+        val result = paginator.paginate(
+            0, "", content, spec(),
+            notifyAfterChar = 0,
+            onPartial = { if (partial == null) partial = it },
+        )
+        val first = partial
+        assertTrue(first != null, "应先出第一页")
+        checkNotNull(first)
+        assertEquals(false, first.complete)
+        assertEquals(1, first.chapter.pages.size)
+        assertEquals(true, result.complete)
+        assertEquals(2, result.chapter.pages.size)
+    }
 }

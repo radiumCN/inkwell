@@ -165,25 +165,28 @@ class RuleEvaluator(
     /**
      * XPath 由 JsoupXpath 求值。Legado 的 @XPath 规则直接用它，语义一致。
      * 选择器非法或不匹配时返回空 —— 书源里手写的 XPath 质量参差，不该拖垮整条链路。
+     *
+     * 从已有 Element 建 JXNode，不要 `outerHtml()` 再整页重解析：那是把同一棵 DOM
+     * 再序列化+解析一遍，长正文上既吃内存又吃 CPU。
      */
     private fun xpathNodes(path: String, ctx: EvalContext): List<Element> {
         val el = ctx.element ?: return emptyList()
         return runCatching {
-            org.seimicrawler.xpath.JXDocument.create(el.outerHtml())
-                .selN(path)
-                .mapNotNull { if (it.isElement) it.asElement() else null }
+            xpathSel(el, path).mapNotNull { if (it.isElement) it.asElement() else null }
         }.getOrDefault(emptyList())
     }
 
     private fun xpathStrings(path: String, ctx: EvalContext): List<String> {
         val el = ctx.element ?: return emptyList()
         return runCatching {
-            org.seimicrawler.xpath.JXDocument.create(el.outerHtml())
-                .selN(path)
+            xpathSel(el, path)
                 .map { if (it.isElement) it.asElement().text() else it.asString() }
                 .filter { it.isNotBlank() }
         }.getOrDefault(emptyList())
     }
+
+    private fun xpathSel(el: Element, path: String): List<org.seimicrawler.xpath.JXNode> =
+        org.seimicrawler.xpath.JXNode.create(el).sel(path)
 
     // ---- json ----
 

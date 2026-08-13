@@ -89,61 +89,7 @@ class BookRepository(
             } ?: error("无法读取所选文件")
 
             try {
-                val handle = parserRegistry.open(dest)
-                handle.use { book ->
-                    var coverFile: File? = null
-                    val coverPath = book.metadata.cover?.let { cover ->
-                        val f = File(coversDir(), "$bookId.img")
-                        f.writeBytes(cover.data)
-                        coverFile = f
-                        f.absolutePath
-                    }
-                    val now = System.currentTimeMillis()
-                    // 文件已改名为 bookId，txt 的书名只能来自原始文件名；
-                    // EPUB/MOBI 优先元数据，无标题时同样回落原始文件名
-                    val type = when (ext) {
-                        "epub" -> BookType.LOCAL_EPUB
-                        "mobi", "azw3", "azw" -> BookType.LOCAL_MOBI
-                        else -> BookType.LOCAL_TXT
-                    }
-                    val fallbackTitle = displayName.substringBeforeLast('.').trim()
-                    val title = if (type == BookType.LOCAL_TXT) {
-                        fallbackTitle
-                    } else {
-                        book.metadata.title.takeIf { it.isNotBlank() && it != "未命名" }
-                            ?: fallbackTitle
-                    }.ifBlank { "未命名" }
-                    val author = book.metadata.author ?: ""
-
-                    shelfLocalBookIdByKey(title, author)?.let { existingId ->
-                        // 副本文件和刚写的封面都没用了，别占磁盘
-                        dest.delete()
-                        coverFile?.delete()
-                        return@runCatching LocalImportResult.AlreadyOnShelf(existingId)
-                    }
-
-                    val entity = BookEntity(
-                        id = bookId,
-                        type = type,
-                        title = title,
-                        author = author,
-                        coverPath = coverPath,
-                        intro = book.metadata.description,
-                        localPath = dest.absolutePath,
-                        totalChapters = book.chapters.size,
-                        addedAt = now,
-                        updatedAt = now,
-                    )
-                    val chapters = book.chapters.map { ChapterEntity(bookId, it.index, it.title) }
-                    // 书行与目录成对落库。下面的 catch 只兜得住异常，兜不住进程被杀 ——
-                    // 两句之间被杀就留下一本"有书行、没目录"的书：书架上看得见，点进去空目录。
-                    // 解析和封面写盘都在事务外，别把文件 IO 圈进来拉长锁。
-                    db.withWriteTransaction {
-                        bookDao.upsert(entity)
-                        chapterDao.upsertAll(chapters)
-                    }
-                    LocalImportResult.Added(bookId)
-                }
+                insertCopiedLocal(dest, displayName, bookId, ext)
             } catch (e: Exception) {
                 // 书行可能已插入、章节写失败 —— 回滚掉，别留一条指向已删文件的幽灵书
                 dest.delete()
@@ -153,6 +99,85 @@ class BookRepository(
                 chapterDao.deleteByBook(bookId)
                 throw e
             }
+        }
+    }
+
+    /**
+     * 从已有文件导入（Baseline Profile 夹具、测试用）。走和 SAF 导入同一套解析/去重。
+     */
+    suspend fun importLocalFile(file: File, displayName: String = file.name): Result<LocalImportResult> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bookId = UUID.randomUUID().toString()
+                val ext = displayName.substringAfterLast('.', "txt").lowercase()
+                val dest = File(booksDir(), "$bookId.$ext")
+                file.copyTo(dest, overwrite = true)
+                try {
+                    insertCopiedLocal(dest, displayName, bookId, ext)
+                } catch (e: Exception) {
+                    dest.delete()
+                    bookDao.hardDelete(bookId)
+                    chapterDao.deleteByBook(bookId)
+                    throw e
+                }
+            }
+        }
+
+    private suspend fun insertCopiedLocal(
+        dest: File,
+        displayName: String,
+        bookId: String,
+        ext: String,
+    ): LocalImportResult {
+        val handle = parserRegistry.open(dest)
+        return handle.use { book ->
+            var coverFile: File? = null
+            val coverPath = book.metadata.cover?.let { cover ->
+                val f = File(coversDir(), "$bookId.img")
+                f.writeBytes(cover.data)
+                coverFile = f
+                f.absolutePath
+            }
+            val now = System.currentTimeMillis()
+            val type = when (ext) {
+                "epub" -> BookType.LOCAL_EPUB
+                "mobi", "azw3", "azw" -> BookType.LOCAL_MOBI
+                else -> BookType.LOCAL_TXT
+            }
+            val fallbackTitle = displayName.substringBeforeLast('.').trim()
+            val title = if (type == BookType.LOCAL_TXT) {
+                fallbackTitle
+            } else {
+                book.metadata.title.takeIf { it.isNotBlank() && it != "未命名" }
+                    ?: fallbackTitle
+            }.ifBlank { "未命名" }
+            val author = book.metadata.author ?: ""
+
+            shelfLocalBookIdByKey(title, author)?.let { existingId ->
+                dest.delete()
+                coverFile?.delete()
+                return@use LocalImportResult.AlreadyOnShelf(existingId)
+            }
+
+            val entity = BookEntity(
+                id = bookId,
+                type = type,
+                title = title,
+                author = author,
+                coverPath = coverPath,
+                intro = book.metadata.description,
+                localPath = dest.absolutePath,
+                totalChapters = book.chapters.size,
+                addedAt = now,
+                updatedAt = now,
+            )
+            val chapters = book.chapters.map { ChapterEntity(bookId, it.index, it.title) }
+            // 书行与目录成对落库。解析和封面写盘都在事务外，别把文件 IO 圈进来拉长锁。
+            db.withWriteTransaction {
+                bookDao.upsert(entity)
+                chapterDao.upsertAll(chapters)
+            }
+            LocalImportResult.Added(bookId)
         }
     }
 

@@ -97,4 +97,12 @@ class ScriptRuntimeTest {
         assertEquals("YWJj", withBridge("""java.base64Encode("abc")"""))
         assertEquals("abc", withBridge("""java.base64Decode("YWJj")"""))
     }
+
+    @Test
+    fun `same script can be evaluated twice after compile cache`() {
+        // 编译缓存不能把第二次变成「作用域脏了 / 绑错变量」
+        val script = "baseUrl + result"
+        assertEquals("https://a.com/1", runtime.eval(script, mapOf("baseUrl" to "https://a.com/", "result" to "1")))
+        assertEquals("https://b.com/2", runtime.eval(script, mapOf("baseUrl" to "https://b.com/", "result" to "2")))
+    }
 }

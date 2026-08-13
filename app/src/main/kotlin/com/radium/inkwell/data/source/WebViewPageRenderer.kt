@@ -50,7 +50,6 @@ class WebViewPageRenderer(
                         finalUrl = wv.url ?: url,
                         statusCode = 200, // WebView 不暴露状态码；加载失败already走 null 分支
                         bodyText = html,
-                        bodyBytes = html.toByteArray(Charsets.UTF_8),
                         detectedCharset = "utf-8",
                     )
                 }

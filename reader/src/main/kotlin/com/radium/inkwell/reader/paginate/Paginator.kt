@@ -18,9 +18,26 @@ class Paginator(private val measurer: TextMeasureFacade) {
     class Result(
         val chapter: PaginatedChapter,
         val measured: Map<Int, MeasuredParagraph>,
+        /**
+         * false = 还在往后排，[chapter.pages] 只是已经封好的前缀。
+         * 翻页时若已在最后一页且 !complete，不要跳下一章 —— 下一页马上就来。
+         */
+        val complete: Boolean = true,
     )
 
-    fun paginate(chapterIndex: Int, title: String, content: ChapterContent, spec: LayoutSpec): Result {
+    /**
+     * @param notifyAfterChar 调用方想尽快看到的章内偏移（进书进度）。覆盖到该偏移的页
+     *   一旦封好就 [onPartial] 一次，让 UI 先出字；余下页继续排完再返回完整结果。
+     *   `Int.MAX_VALUE`（跳到章末）不中途回调，避免先闪第一页再跳最后一页。
+     */
+    fun paginate(
+        chapterIndex: Int,
+        title: String,
+        content: ChapterContent,
+        spec: LayoutSpec,
+        notifyAfterChar: Int = 0,
+        onPartial: ((Result) -> Unit)? = null,
+    ): Result {
         val elements = buildList {
             add(TitleElement(title))
             addAll(content.elements)
@@ -29,11 +46,28 @@ class Paginator(private val measurer: TextMeasureFacade) {
         val pages = mutableListOf<PageSpec>()
         var cursor = PageCursor(spec)
         var charOffset = 0
+        // 一章只有三种样式：循环里复用，别每段 new 一个 data class 去砸分配器
+        val bodyStyle = spec.bodyStyle()
+        val titleStyle = spec.titleStyle()
+        val headingStyle = spec.headingStyle()
+        var partialEmitted = false
+        val partialCb = onPartial.takeIf { notifyAfterChar != Int.MAX_VALUE }
+
+        fun snapshot(complete: Boolean) = Result(
+            PaginatedChapter(chapterIndex, title, pages.toList(), charOffset),
+            HashMap(measured),
+            complete,
+        )
 
         fun seal() {
             if (!cursor.isEmpty) {
                 pages += cursor.seal(chapterIndex, pages.size)
                 cursor = PageCursor(spec)
+                // 目标偏移已经落在已封页里 → 先让 UI 出这一屏，余下继续排
+                if (partialCb != null && !partialEmitted && notifyAfterChar < pages.last().endCharOffset) {
+                    partialEmitted = true
+                    partialCb(snapshot(complete = false))
+                }
             }
         }
 
@@ -41,7 +75,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
             when (element) {
                 is TitleElement -> {
                     if (element.text.isNotBlank()) {
-                        val mp = measurer.measureParagraph(element.text, spec.titleStyle(), spec.contentWidthPx)
+                        val mp = measurer.measureParagraph(element.text, titleStyle, spec.contentWidthPx)
                         measured[idx] = mp
                         cursor.addGap(spec.titleTopSpacingPx)
                         placeParagraph(idx, element.text.length, mp, spec, cursor, charOffset,
@@ -52,7 +86,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
                 }
                 is ContentElement.Paragraph -> {
                     if (element.text.isNotBlank()) {
-                        val mp = measurer.measureParagraph(element.text, spec.bodyStyle(), spec.contentWidthPx)
+                        val mp = measurer.measureParagraph(element.text, bodyStyle, spec.contentWidthPx)
                         measured[idx] = mp
                         placeParagraph(idx, element.text.length, mp, spec, cursor, charOffset,
                             isTitle = false, onSeal = ::seal, currentCursor = { cursor })
@@ -62,7 +96,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
                 }
                 is ContentElement.Heading -> {
                     if (element.text.isNotBlank()) {
-                        val mp = measurer.measureParagraph(element.text, spec.headingStyle(), spec.contentWidthPx)
+                        val mp = measurer.measureParagraph(element.text, headingStyle, spec.contentWidthPx)
                         measured[idx] = mp
                         placeParagraph(idx, element.text.length, mp, spec, cursor, charOffset,
                             isTitle = true, onSeal = ::seal, currentCursor = { cursor })
@@ -86,7 +120,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
             // 空章节兜底：产出一个空页，游标语义不塌
             pages += PageSpec(chapterIndex, 0, emptyList(), 0, 0)
         }
-        return Result(PaginatedChapter(chapterIndex, title, pages, charOffset), measured)
+        return snapshot(complete = true)
     }
 
     private inline fun placeParagraph(
@@ -208,11 +242,13 @@ internal class PageCursor(private val spec: LayoutSpec) {
     }
 
     fun addTextSlice(elementIndex: Int, lineRange: IntRange, mp: MeasuredParagraph, isTitle: Boolean, elementCharBase: Int) {
-        val height = mp.lineBottom(lineRange.last) - mp.lineTop(lineRange.first)
-        items += PageItem.TextSlice(elementIndex, lineRange, usedHeight, height, isTitle)
+        val startLine = lineRange.first
+        val endLine = lineRange.last
+        val height = mp.lineBottom(endLine) - mp.lineTop(startLine)
+        items += PageItem.TextSlice(elementIndex, startLine, endLine, usedHeight, height, isTitle)
         usedHeight += height
-        val sliceStart = elementCharBase + mp.lineStartOffset(lineRange.first)
-        val sliceEnd = elementCharBase + mp.lineEndOffset(lineRange.last)
+        val sliceStart = elementCharBase + mp.lineStartOffset(startLine)
+        val sliceEnd = elementCharBase + mp.lineEndOffset(endLine)
         if (startChar < 0) startChar = sliceStart
         endChar = maxOf(endChar, sliceEnd)
     }

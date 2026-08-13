@@ -109,6 +109,6 @@ private fun toParagraphLocal(
 ): Pair<Float, Float> {
     val contentLeft = layout.marginLeftPx
     val contentTop = layout.marginTopPx + layout.headerHeightPx
-    val sliceTopInParagraph = para.lineTop(slice.lineRange.first)
+    val sliceTopInParagraph = para.lineTop(slice.startLine)
     return (x - contentLeft) to (y - contentTop - slice.yTopInPage + sliceTopInParagraph)
 }

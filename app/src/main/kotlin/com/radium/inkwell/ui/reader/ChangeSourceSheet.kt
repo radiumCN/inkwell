@@ -35,7 +35,8 @@ import com.radium.inkwell.ui.components.SwitchRow
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChangeSourceSheet(
-    state: ReaderUiState,
+    overlay: ReaderOverlayUi,
+    currentSourceName: String,
     candidates: List<SearchResult>,
     onApplySource: (SearchResult) -> Unit,
     onToggleCheckAuthor: (Boolean) -> Unit,
@@ -58,7 +59,7 @@ fun ChangeSourceSheet(
                 Column(Modifier.weight(1f)) {
                     Text("换源", style = MaterialTheme.typography.titleMedium)
                     // 告诉用户现在读的是哪个源 —— 换源列表里刻意不含当前源，不标出来就无从对比
-                    state.currentSourceName.takeIf { it.isNotBlank() }?.let {
+                    currentSourceName.takeIf { it.isNotBlank() }?.let {
                         Text(
                             "当前：$it",
                             style = MaterialTheme.typography.bodySmall,
@@ -69,13 +70,13 @@ fun ChangeSourceSheet(
                     }
                 }
                 // 边搜边出，让用户看得见还在搜、搜了多少，而不是干等一个转圈
-                if (state.searchingSources) {
+                if (overlay.searchingSources) {
                     Text(
-                        "${state.sourcesDone}/${state.sourcesTotal}",
+                        "${overlay.sourcesDone}/${overlay.sourcesTotal}",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (!state.changingSource) {
+                } else if (!overlay.changingSource) {
                     // 会话内复用上次结果；书源有增删/站点恢复时用这个主动重搜
                     TextButton(onClick = onRefresh) {
                         Text("重新搜索")
@@ -83,10 +84,10 @@ fun ChangeSourceSheet(
                 }
             }
             // 搜索进度拉成整行波浪条：右上角只留分数，比「搜索中 98/380」一坨小字好扫
-            if (state.searchingSources && state.sourcesTotal > 0) {
+            if (overlay.searchingSources && overlay.sourcesTotal > 0) {
                 DeterminateProgressBar(
                     progress = {
-                        (state.sourcesDone.toFloat() / state.sourcesTotal).coerceIn(0f, 1f)
+                        (overlay.sourcesDone.toFloat() / overlay.sourcesTotal).coerceIn(0f, 1f)
                     },
                     modifier = Modifier.padding(
                         horizontal = Dimens.screenPadding,
@@ -98,26 +99,26 @@ fun ChangeSourceSheet(
             // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式
             SwitchRow(
                 title = "匹配作者",
-                subtitle = if (state.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
-                checked = state.checkAuthor,
+                subtitle = if (overlay.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
+                checked = overlay.checkAuthor,
                 onCheckedChange = onToggleCheckAuthor,
             )
             when {
-                state.changingSource || (state.searchingSources && candidates.isEmpty()) -> Box(
+                overlay.changingSource || (overlay.searchingSources && candidates.isEmpty()) -> Box(
                     Modifier.fillMaxWidth().padding(Dimens.gapXL),
                     contentAlignment = Alignment.Center,
                 ) { AppLoadingIndicator() }
                 candidates.isEmpty() -> Text(
                     when {
                         // 中途关掉再开：半截且一个都没命中，别说成「都没有」
-                        state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal ->
-                            "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}）。" +
+                        overlay.sourcesTotal > 0 && overlay.sourcesDone < overlay.sourcesTotal ->
+                            "上次搜索未完成（已查 ${overlay.sourcesDone}/${overlay.sourcesTotal}）。" +
                                 "可点右上角「重新搜索」继续找。"
-                        state.checkAuthor ->
-                            "其他 ${state.sourcesTotal} 个书源都没有找到这本书。" +
+                        overlay.checkAuthor ->
+                            "其他 ${overlay.sourcesTotal} 个书源都没有找到这本书。" +
                                 "可以关掉上面的「匹配作者」再看看 —— 不少书源的作者字段是空的或带前缀。"
                         else ->
-                            "其他 ${state.sourcesTotal} 个书源都没有找到这本书"
+                            "其他 ${overlay.sourcesTotal} 个书源都没有找到这本书"
                     },
                     Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
                     style = MaterialTheme.typography.bodyMedium,
@@ -127,12 +128,12 @@ fun ChangeSourceSheet(
                     contentPadding = ContentListDefaults.listContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
-                    if (state.sourcesTotal > 0 && state.sourcesDone < state.sourcesTotal &&
-                        !state.searchingSources
+                    if (overlay.sourcesTotal > 0 && overlay.sourcesDone < overlay.sourcesTotal &&
+                        !overlay.searchingSources
                     ) {
                         item(key = "incomplete-hint") {
                             Text(
-                                "上次搜索未完成（已查 ${state.sourcesDone}/${state.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
+                                "上次搜索未完成（已查 ${overlay.sourcesDone}/${overlay.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
                                 Modifier.padding(vertical = Dimens.gapS),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

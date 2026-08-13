@@ -45,10 +45,14 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -117,6 +121,66 @@ data class ReaderUiState(
 )
 
 /**
+ * 阅读 UI 拆成三份 StateFlow：翻页只动 [ReaderPageUi]，菜单开关只动 [ReaderOverlayUi]。
+ * 一份大 data class 每次 copy 都会让整棵阅读树重组 —— 目录 LazyColumn、换源面板都跟着刷。
+ */
+data class ReaderPageUi(
+    val chapterTitle: String = "",
+    val chapterIndex: Int = 0,
+    val pageInChapter: Int = 0,
+    val pageCount: Int = 0,
+    val page: RenderablePage? = null,
+    val prevPage: RenderablePage? = null,
+    val nextPage: RenderablePage? = null,
+    val hasPrev: Boolean = false,
+    val hasNext: Boolean = false,
+    val loading: Boolean = true,
+    val error: String? = null,
+    val atBookEnd: Boolean = false,
+)
+
+data class ReaderSessionUi(
+    val bookTitle: String = "",
+    val coverPath: String? = null,
+    val chapterCount: Int = 0,
+    val toc: List<TocItem> = emptyList(),
+    val settings: ReaderSettings = ReaderSettings(),
+    val isNetBook: Boolean = false,
+    val currentSourceName: String = "",
+    val textSelectionEnabled: Boolean = true,
+)
+
+data class ReaderOverlayUi(
+    val menuVisible: Boolean = false,
+    val toast: String? = null,
+    val autoFlipping: Boolean = false,
+    val sourceCandidates: List<SearchResult>? = null,
+    val searchingSources: Boolean = false,
+    val changingSource: Boolean = false,
+    val sourcesDone: Int = 0,
+    val sourcesTotal: Int = 0,
+    val checkAuthor: Boolean = true,
+    val autoChanging: Boolean = false,
+    val autoChangeDone: Int = 0,
+    val autoChangeTotal: Int = 0,
+    val autoChangedTo: String? = null,
+)
+
+private fun ReaderUiState.toPage() = ReaderPageUi(
+    chapterTitle, chapterIndex, pageInChapter, pageCount,
+    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd,
+)
+
+private fun ReaderUiState.toSession() = ReaderSessionUi(
+    bookTitle, coverPath, chapterCount, toc, settings, isNetBook, currentSourceName, textSelectionEnabled,
+)
+
+private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
+    menuVisible, toast, autoFlipping, sourceCandidates, searchingSources, changingSource,
+    sourcesDone, sourcesTotal, checkAuthor, autoChanging, autoChangeDone, autoChangeTotal, autoChangedTo,
+)
+
+/**
  * 正文加载超时。
  *
  * 从前代码里根本没有"超时"这个概念 —— 只能干等 OkHttp 的 10s 读超时抛出来，
@@ -147,6 +211,18 @@ class ReaderViewModel(
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
     private val _state = MutableStateFlow(ReaderUiState(settings = readerPrefs.settings.value))
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
+    val page: StateFlow<ReaderPageUi> = _state
+        .map { it.toPage() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toPage())
+    val session: StateFlow<ReaderSessionUi> = _state
+        .map { it.toSession() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toSession())
+    val overlay: StateFlow<ReaderOverlayUi> = _state
+        .map { it.toOverlay() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toOverlay())
 
     private var book: BookEntity? = null
     private var source: ReaderBookSource? = null
@@ -306,11 +382,15 @@ class ReaderViewModel(
 
     fun flip(direction: FlipDirection) {
         val s = _state.value
-        val chapter = paginated[s.chapterIndex]?.chapter ?: return
+        val result = paginated[s.chapterIndex] ?: return
+        val chapter = result.chapter
         when (direction) {
             FlipDirection.FORWARD -> {
                 if (s.pageInChapter + 1 < chapter.pages.size) {
                     showPage(s.chapterIndex, s.pageInChapter + 1)
+                } else if (!result.complete) {
+                    // 本章还在往后排，下一页马上就来；跳章会把人甩到下一章开头
+                    return
                 } else if (s.chapterIndex + 1 < s.chapterCount) {
                     gotoChapter(s.chapterIndex + 1, charOffset = 0)
                 } else {
@@ -880,7 +960,11 @@ class ReaderViewModel(
     /** 定位到指定位置：必要时加载+分页该章，并预取相邻章 */
     private suspend fun showPosition(target: ReadPosition) {
         // 这条永远是"用户在等的那一章"（进书、翻章、跳目录、重试都走这里），预取不走这里
-        val result = ensurePaginated(target.chapterIndex, userFacing = true) ?: run {
+        val result = ensurePaginated(
+            target.chapterIndex,
+            userFacing = true,
+            notifyAfterChar = target.charOffset,
+        ) ?: run {
             // ensurePaginated 的前置守卫是静默返回 null 的。其中"排版环境还没就绪"
             // （source/facade/spec 为 null）属于正常启动时序 —— loadSession/onLayoutReady
             // 随后会再来一次，这里报错只会闪一下假错误。
@@ -1085,6 +1169,7 @@ class ReaderViewModel(
             nextPage = next,
             hasPrev = pageIndex > 0 || chapterIndex > 0,
             hasNext = pageIndex + 1 < result.chapter.pages.size ||
+                !result.complete ||
                 chapterIndex + 1 < _state.value.chapterCount,
             loading = false,
             error = null,
@@ -1117,8 +1202,9 @@ class ReaderViewModel(
     private suspend fun ensurePaginated(
         chapterIndex: Int,
         userFacing: Boolean = false,
+        notifyAfterChar: Int = 0,
     ): Paginator.Result? {
-        paginated[chapterIndex]?.let { return it }
+        paginated[chapterIndex]?.let { if (it.complete) return it }
         if (chapterIndex !in 0 until (_state.value.chapterCount)) return null
         val src = source ?: return null
         val facade = facade ?: return null
@@ -1127,7 +1213,21 @@ class ReaderViewModel(
             val content = loadPurified(src, chapterIndex)
             val title = src.chapterTitle(chapterIndex) ?: ""
             val result = withContext(Dispatchers.Default) {
-                Paginator(facade).paginate(chapterIndex, title, content, spec)
+                Paginator(facade).paginate(
+                    chapterIndex, title, content, spec,
+                    notifyAfterChar = notifyAfterChar,
+                    onPartial = { partial ->
+                        paginated[chapterIndex] = partial
+                        if (userFacing) {
+                            val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
+                                partial.chapter.pages.lastIndex
+                            } else {
+                                partial.chapter.pageIndexFor(notifyAfterChar)
+                            }
+                            showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
+                        }
+                    },
+                )
             }
             paginated[chapterIndex] = result
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被

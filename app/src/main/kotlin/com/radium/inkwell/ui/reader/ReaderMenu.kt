@@ -98,7 +98,9 @@ import com.radium.inkwell.reader.api.ReaderTheme
 @Composable
 fun ReaderMenu(
     visible: Boolean,
-    state: ReaderUiState,
+    session: ReaderSessionUi,
+    overlay: ReaderOverlayUi,
+    pageUi: ReaderPageUi,
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
@@ -122,7 +124,7 @@ fun ReaderMenu(
 
     // 菜单栏跟随阅读主题的纸张色。从前用 MaterialTheme.surface（白色），
     // 而正文是米色/夜间色 —— 白条压在纸上非常割裂。
-    val theme = state.settings.theme
+    val theme = session.settings.theme
     val barColor = Color(theme.background)
     val barContent = Color(theme.textColor)
 
@@ -165,13 +167,13 @@ fun ReaderMenu(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            state.bookTitle,
+                            session.bookTitle,
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            state.chapterTitle,
+                            pageUi.chapterTitle,
                             style = MaterialTheme.typography.bodySmall,
                             // 次要文字也跟主题走：M3 的灰色在夜间纸张上会糊掉
                             color = barContent.copy(alpha = 0.65f),
@@ -236,15 +238,15 @@ fun ReaderMenu(
                     ) {
                         ChapterTextAction(
                             label = "上一章",
-                            enabled = state.chapterIndex > 0,
+                            enabled = pageUi.chapterIndex > 0,
                             color = barContent,
-                            onClick = { onGotoChapter(state.chapterIndex - 1) },
+                            onClick = { onGotoChapter(pageUi.chapterIndex - 1) },
                         )
                         AppSlider(
-                            value = if (state.pageCount <= 1) 0f
-                            else state.pageInChapter.toFloat() / (state.pageCount - 1),
+                            value = if (pageUi.pageCount <= 1) 0f
+                            else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
                             onValueChange = onSeekPercent,
-                            enabled = state.pageCount > 1,
+                            enabled = pageUi.pageCount > 1,
                             activeColor = barContent,
                             inactiveColor = barContent.copy(alpha = 0.2f),
                             modifier = Modifier
@@ -253,9 +255,9 @@ fun ReaderMenu(
                         )
                         ChapterTextAction(
                             label = "下一章",
-                            enabled = state.chapterIndex + 1 < state.chapterCount,
+                            enabled = pageUi.chapterIndex + 1 < session.chapterCount,
                             color = barContent,
-                            onClick = { onGotoChapter(state.chapterIndex + 1) },
+                            onClick = { onGotoChapter(pageUi.chapterIndex + 1) },
                         )
                     }
                     Spacer(Modifier.height(Dimens.gapXS))
@@ -282,7 +284,7 @@ fun ReaderMenu(
                         }
                         AppIconButton(
                             onClick = onSearchSources,
-                            enabled = state.isNetBook,
+                            enabled = session.isNetBook,
                             colors = actionColors,
                             modifier = Modifier.weight(1f),
                         ) {
@@ -290,13 +292,13 @@ fun ReaderMenu(
                         }
                         AppIconButton(
                             onClick = onToggleAutoFlip,
-                            enabled = state.settings.flipAnimation != FlipAnimation.SCROLL,
+                            enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
                             colors = actionColors,
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(
-                                if (state.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (state.autoFlipping) "停止自动翻页" else "自动翻页",
+                                if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
                             )
                         }
                         AppIconButton(
@@ -318,11 +320,11 @@ fun ReaderMenu(
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
             TocList(
-                toc = state.toc,
-                current = state.chapterIndex,
+                toc = session.toc,
+                current = pageUi.chapterIndex,
                 // 本地书正文一直在，缓存指示对它没有意义（isCached 恒为 false，
                 // 显示出来只会让每一章都像"没预加载"）
-                showCacheState = state.isNetBook,
+                showCacheState = session.isNetBook,
                 // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻
                 onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
             )
@@ -335,9 +337,9 @@ fun ReaderMenu(
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
             TypographyPanel(
-                settings = state.settings,
+                settings = session.settings,
                 onUpdate = onUpdateSettings,
-                textSelectionEnabled = state.textSelectionEnabled,
+                textSelectionEnabled = session.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
             )
         }

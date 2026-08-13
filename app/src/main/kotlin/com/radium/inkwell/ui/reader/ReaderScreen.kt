@@ -86,7 +86,9 @@ fun ReaderScreen(
     onExit: () -> Unit,
     viewModel: ReaderViewModel,
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val pageUi by viewModel.page.collectAsStateWithLifecycle()
+    val session by viewModel.session.collectAsStateWithLifecycle()
+    val overlay by viewModel.overlay.collectAsStateWithLifecycle()
     val scrollChapters by viewModel.scrollChapters.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
@@ -142,9 +144,9 @@ fun ReaderScreen(
     // 这样正文页与卷页都铺满全屏，顶部不再留一条状态栏/挖孔高度的空带（卷页时会露出来）。
     val viewport = IntSize(windowSize.width, windowSize.height)
 
-    val spec = remember(viewport, state.settings, density, cutout) {
+    val spec = remember(viewport, session.settings, density, cutout) {
         if (viewport.width <= 0 || viewport.height <= 0) null
-        else buildLayoutSpec(viewport, state.settings, density, cutout)
+        else buildLayoutSpec(viewport, session.settings, density, cutout)
     }
 
     LaunchedEffect(spec) {
@@ -154,11 +156,11 @@ fun ReaderScreen(
     }
 
     // 音量键翻页（与点击共用动画路径）
-    LaunchedEffect(state.settings.volumeKeyFlip, state.menuVisible, state.settings.flipAnimation) {
+    LaunchedEffect(session.settings.volumeKeyFlip, overlay.menuVisible, session.settings.flipAnimation) {
         // 滚动模式下没有"页"，音量键翻页无从谈起 —— 按下去只会把游标推到别处、把人转晕
-        keyBus.volumeFlipEnabled = state.settings.volumeKeyFlip &&
-            !state.menuVisible &&
-            state.settings.flipAnimation != FlipAnimation.SCROLL
+        keyBus.volumeFlipEnabled = session.settings.volumeKeyFlip &&
+            !overlay.menuVisible &&
+            session.settings.flipAnimation != FlipAnimation.SCROLL
     }
     LaunchedEffect(Unit) {
         keyBus.flipEvents.collect { flipController.requestFlip(it) }
@@ -179,25 +181,25 @@ fun ReaderScreen(
     // 系统返回：先收起暂态浮层（选字/面板/菜单），都关着才真正退出阅读页。
     // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
     BackHandler(
-        state.menuVisible || selection != null || state.sourceCandidates != null,
+        overlay.menuVisible || selection != null || overlay.sourceCandidates != null,
     ) {
         when {
             selection != null -> { selection = null; anchor = null }
-            state.sourceCandidates != null -> viewModel.dismissSourcePanel()
-            state.menuVisible -> viewModel.toggleMenu()
+            overlay.sourceCandidates != null -> viewModel.dismissSourcePanel()
+            overlay.menuVisible -> viewModel.toggleMenu()
         }
     }
 
     val activity = LocalActivity.current
-    BrightnessEffect(activity, state.settings.brightnessOverride)
-    KeepScreenOnEffect(activity, state.settings.keepScreenOn)
+    BrightnessEffect(activity, session.settings.brightnessOverride)
+    KeepScreenOnEffect(activity, session.settings.keepScreenOn)
     // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复
-    ImmersiveEffect(activity, immersive = !state.menuVisible)
+    ImmersiveEffect(activity, immersive = !overlay.menuVisible)
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(state.settings.theme.background))
+            .background(Color(session.settings.theme.background))
             // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
             // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
             // statusBarsPadding 让开状态栏，不受这里影响。
@@ -220,8 +222,8 @@ fun ReaderScreen(
          */
         var firstContentShown by remember { mutableStateOf(false) }
         var splashVisible by remember { mutableStateOf(false) }
-        LaunchedEffect(state.loading, layout) {
-            if (!state.loading && layout != null) firstContentShown = true
+        LaunchedEffect(pageUi.loading, layout) {
+            if (!pageUi.loading && layout != null) firstContentShown = true
         }
         LaunchedEffect(Unit) {
             delay(Motion.READER_SPLASH_DELAY_MS)
@@ -234,31 +236,31 @@ fun ReaderScreen(
 
         // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
         // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
-        if (state.settings.flipAnimation == FlipAnimation.SCROLL) {
-            LaunchedEffect(layout, state.chapterCount) {
-                if (layout != null && state.chapterCount > 0) viewModel.prepareScroll()
+        if (session.settings.flipAnimation == FlipAnimation.SCROLL) {
+            LaunchedEffect(layout, session.chapterCount) {
+                if (layout != null && session.chapterCount > 0) viewModel.prepareScroll()
             }
         }
 
         when {
             // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
             // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
-            state.autoChanging -> Column(
+            overlay.autoChanging -> Column(
                 Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                AppLoadingIndicator(color = Color(state.settings.theme.textColor))
+                AppLoadingIndicator(color = Color(session.settings.theme.textColor))
                 Spacer(Modifier.height(Dimens.gapXL))
                 Text(
                     "正在自动换源…",
-                    color = Color(state.settings.theme.textColor),
+                    color = Color(session.settings.theme.textColor),
                     textAlign = TextAlign.Center,
                 )
-                if (state.autoChangeTotal > 0) {
+                if (overlay.autoChangeTotal > 0) {
                     Spacer(Modifier.height(Dimens.gapS))
                     Text(
-                        "已试 ${state.autoChangeDone}/${state.autoChangeTotal} 个书源",
-                        color = Color(state.settings.theme.footerColor),
+                        "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个书源",
+                        color = Color(session.settings.theme.footerColor),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -266,14 +268,14 @@ fun ReaderScreen(
 
             // 包在 ReaderThemeScope 里：重试/换源按钮跟着**纸张主题**走，
             // 不再是米色纸面上浮着两颗 App 主题色的按钮（阅读主题与 App 主题常不一致）。
-            state.error != null -> ReaderThemeScope(state.settings.theme) {
+            pageUi.error != null -> ReaderThemeScope(session.settings.theme) {
                 Column(
                     Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        state.error!!,
-                        color = Color(state.settings.theme.textColor),
+                        pageUi.error!!,
+                        color = Color(session.settings.theme.textColor),
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(Dimens.gapXL))
@@ -281,7 +283,7 @@ fun ReaderScreen(
                     // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
                     Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                         SecondaryButton(text = "重试", onClick = { viewModel.retry() })
-                        if (state.isNetBook) {
+                        if (session.isNetBook) {
                             PrimaryButton(
                                 text = "换源",
                                 onClick = { viewModel.searchOtherSources() },
@@ -290,21 +292,21 @@ fun ReaderScreen(
                     }
                     Spacer(Modifier.height(Dimens.gapS))
                     TextButton(onClick = onExit) {
-                        Text("返回书架", color = Color(state.settings.theme.footerColor))
+                        Text("返回书架", color = Color(session.settings.theme.footerColor))
                     }
                 }
             }
             // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
             // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
             // 主题走，不然浅色书封压在深色纸上会打架。
-            state.loading || layout == null -> ReaderThemeScope(state.settings.theme) {
+            pageUi.loading || layout == null -> ReaderThemeScope(session.settings.theme) {
                 // 首屏之后的再加载（跳章、失败重试、换源重载）：splash 的一次性协程早已收场、
                 // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
                 // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
                 if (firstContentShown) {
                     AppLoadingIndicator(
                         modifier = Modifier.align(Alignment.Center),
-                        color = Color(state.settings.theme.textColor),
+                        color = Color(session.settings.theme.textColor),
                     )
                 } else AnimatedVisibility(
                     visible = splashVisible,
@@ -316,8 +318,8 @@ fun ReaderScreen(
                         // 自然尺寸居中，**不铺满** —— 书封是 3:4 缩略图，撑到全屏必糊
                         // （0.1.6-beta.3~6 那条失败路线就栽在这）。
                         BookCover(
-                            title = state.bookTitle,
-                            coverModel = state.coverPath,
+                            title = session.bookTitle,
+                            coverModel = session.coverPath,
                             modifier = Modifier.size(
                                 Dimens.readerSplashCoverWidth,
                                 Dimens.readerSplashCoverHeight,
@@ -327,16 +329,16 @@ fun ReaderScreen(
                         Spacer(Modifier.height(Dimens.gapXL))
                         // 封面只交代"在开哪本书"，还得有个东西说明"仍在工作中"，
                         // 否则慢网络下一张静止的封面像卡死了
-                        AppLoadingIndicator(color = Color(state.settings.theme.textColor))
+                        AppLoadingIndicator(color = Color(session.settings.theme.textColor))
                     }
                 }
             }
             // 滚动模式：另一条渲染路径，不走翻页容器
-            state.settings.flipAnimation == FlipAnimation.SCROLL -> {
+            session.settings.flipAnimation == FlipAnimation.SCROLL -> {
                 ScrollReader(
                     chapters = scrollChapters,
                     layout = layout,
-                    theme = state.settings.theme,
+                    theme = session.settings.theme,
                     onVisible = { chapterIndex, elementIndex ->
                         viewModel.onScrollTo(chapterIndex, elementIndex)
                     },
@@ -345,7 +347,7 @@ fun ReaderScreen(
             }
 
             else -> {
-                val page = state.page
+                val page = pageUi.page
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -353,8 +355,8 @@ fun ReaderScreen(
                         // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
                         // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
                         // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
-                        .pointerInput(state.textSelectionEnabled, page, spec) {
-                            if (!state.textSelectionEnabled || page == null) return@pointerInput
+                        .pointerInput(session.textSelectionEnabled, page, spec) {
+                            if (!session.textSelectionEnabled || page == null) return@pointerInput
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { pos ->
                                     val sel = page.selectWordAt(pos.x, pos.y, layout)
@@ -380,25 +382,25 @@ fun ReaderScreen(
                         }
                 ) {
                     PageFlipContainer(
-                        current = state.page,
-                        prev = state.prevPage,
-                        next = state.nextPage,
+                        current = pageUi.page,
+                        prev = pageUi.prevPage,
+                        next = pageUi.nextPage,
                         layout = layout,
-                        theme = state.settings.theme,
-                        animation = state.settings.flipAnimation,
+                        theme = session.settings.theme,
+                        animation = session.settings.flipAnimation,
                         animationsEnabled = animationsEnabled(),
-                        hapticOnFlip = state.settings.flipHaptic,
+                        hapticOnFlip = session.settings.flipHaptic,
                         // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
-                        gesturesEnabled = !state.menuVisible && selection == null,
+                        gesturesEnabled = !overlay.menuVisible && selection == null,
                         canFlip = { dir ->
-                            if (dir == FlipDirection.FORWARD) state.hasNext else state.hasPrev
+                            if (dir == FlipDirection.FORWARD) pageUi.hasNext else pageUi.hasPrev
                         },
                         onCommit = { viewModel.flip(it) },
                         onCenterTap = { viewModel.toggleMenu() },
                         controller = flipController,
                         selection = selection,
                     )
-                    PageInfoBar(state, layout)
+                    PageInfoBar(pageUi, session, layout)
                 }
             }
         }
@@ -409,7 +411,7 @@ fun ReaderScreen(
         // 提示条淡入淡出，跟阅读菜单浮层同一套动效（scrimEnter/Exit，均尊重系统"关闭动画"）。
         // 留住最后一次的源名：退场动画播放期间 state 已清空，也得有内容可显示。
         val lastAutoChanged = remember { mutableStateOf("") }
-        state.autoChangedTo?.let { sourceName ->
+        overlay.autoChangedTo?.let { sourceName ->
             lastAutoChanged.value = sourceName
             LaunchedEffect(sourceName) {
                 delay(AUTO_CHANGED_HINT_MS)
@@ -417,12 +419,12 @@ fun ReaderScreen(
             }
         }
         AnimatedVisibility(
-            visible = state.autoChangedTo != null,
+            visible = overlay.autoChangedTo != null,
             enter = scrimEnter(),
             exit = scrimExit(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            ReaderThemeScope(state.settings.theme) {
+            ReaderThemeScope(session.settings.theme) {
                 Surface(
                     Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     shape = MaterialTheme.shapes.medium,
@@ -450,21 +452,21 @@ fun ReaderScreen(
             }
         }
 
-        if (state.atBookEnd) {
+        if (pageUi.atBookEnd) {
             LaunchedEffect(Unit) {
                 kotlinx.coroutines.delay(1500)
                 viewModel.clearBookEnd()
             }
         }
         AnimatedVisibility(
-            visible = state.atBookEnd,
+            visible = pageUi.atBookEnd,
             enter = scrimEnter(),
             exit = scrimExit(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Text(
                 "已经是最后一页了",
-                color = Color(state.settings.theme.footerColor),
+                color = Color(session.settings.theme.footerColor),
             )
         }
 
@@ -472,11 +474,12 @@ fun ReaderScreen(
         // 从前它们读的是 App 的 MaterialTheme —— 正文是米色纸张，弹出来的面板却是 M3 的
         // 淡紫白，两套配色硬拼在一起。这里换掉这一片区域的 MaterialTheme，
         // 里头的 TabRow / Chip / Slider / 分隔线全都自动协调，不必挨个传颜色（漏一个就露馅）。
-        ReaderThemeScope(state.settings.theme) {
+        ReaderThemeScope(session.settings.theme) {
 
-        state.sourceCandidates?.let { candidates ->
+        overlay.sourceCandidates?.let { candidates ->
             ChangeSourceSheet(
-                state = state,
+                overlay = overlay,
+                currentSourceName = session.currentSourceName,
                 candidates = candidates,
                 onApplySource = { viewModel.applyChangeSource(it) },
                 onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },
@@ -506,7 +509,7 @@ fun ReaderScreen(
         }
 
         val lastToast = remember { mutableStateOf("") }
-        state.toast?.let { msg ->
+        overlay.toast?.let { msg ->
             lastToast.value = msg
             LaunchedEffect(msg) {
                 kotlinx.coroutines.delay(1800)
@@ -514,21 +517,23 @@ fun ReaderScreen(
             }
         }
         AnimatedVisibility(
-            visible = state.toast != null,
+            visible = overlay.toast != null,
             enter = scrimEnter(),
             exit = scrimExit(),
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp),
         ) {
             Text(
                 lastToast.value,
-                color = Color(state.settings.theme.footerColor),
+                color = Color(session.settings.theme.footerColor),
             )
         }
 
         // 常驻组合，可见性交给 AnimatedVisibility —— 否则退场动画根本没机会播
         ReaderMenu(
-            visible = state.menuVisible,
-            state = state,
+            visible = overlay.menuVisible,
+            session = session,
+            overlay = overlay,
+            pageUi = pageUi,
             onExit = onExit,
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },

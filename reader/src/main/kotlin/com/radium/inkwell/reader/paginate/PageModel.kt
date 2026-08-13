@@ -39,11 +39,15 @@ sealed interface PageItem {
     data class TextSlice(
         /** 指向排版元素列表（含虚拟标题元素，0 = 章节标题） */
         val elementIndex: Int,
-        val lineRange: IntRange,
+        /** 含端点。两个 Int 而不是 IntRange，避免热路径上每个切片再挂一个堆对象 */
+        val startLine: Int,
+        val endLine: Int,
         val yTopInPage: Float,
         val height: Float,
         val isTitle: Boolean,
-    ) : PageItem
+    ) : PageItem {
+        val lineRange: IntRange get() = startLine..endLine
+    }
 
     data class ImageBox(
         val elementIndex: Int,

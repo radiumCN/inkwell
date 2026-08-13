@@ -45,8 +45,10 @@ import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 程序化翻页入口（点击区域 / 音量键 / 自动翻页共用动画路径） */
 class FlipController {
@@ -60,8 +62,8 @@ class FlipController {
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
  * COVER/SLIDE 用图层位移驱动（offset），CURL 用真实触点驱动仿真卷页。
  *
- * 性能要点：拖拽路径直接写 State（不经协程）；页面位图按页预渲染为
- * 不可变位图（GPU 纹理只上传一次）；settle 用 animate() 驱动同一 State。
+ * 性能要点：拖拽路径直接写 State（不经协程）；CURL 位图在 Default 上渲成
+ * RGB_565 不可变图（主线程零开销，GPU 纹理只上传一次）；settle 用 animate() 驱动同一 State。
  */
 @Composable
 fun PageFlipContainer(
@@ -368,23 +370,23 @@ private fun CurlLayer(
     density: androidx.compose.ui.unit.Density,
     selection: TextSelection? = null,
 ) {
-    // 位图按页预渲染（页面/排版/主题变化时重建），手势开始时零合成开销
-    val curBitmap = remember(current, layout, theme) {
-        current?.let { renderPageBitmap(it, layout, theme, density) }
-    }
-    val prevBitmap = remember(prev, layout, theme) {
-        prev?.let { renderPageBitmap(it, layout, theme, density) }
-    }
-    val nextBitmap = remember(next, layout, theme) {
-        next?.let { renderPageBitmap(it, layout, theme, density) }
-    }
-    // 邻页为 null（未分页完成）时用空白页位图兜底
-    val blankBitmap = remember(layout, theme) {
-        renderPageBitmap(null, layout, theme, density)
+    // 闲时也预渲，但放到 Default：主线程不再被 remember { renderPageBitmap } 卡住。
+    // 位图是 RGB_565（见 renderPageBitmap），三张约 15MB，不是从前 ARGB 四张双倍拷贝的峰值。
+    var bitmaps by remember { mutableStateOf<CurlBitmaps?>(null) }
+    LaunchedEffect(current, prev, next, layout, theme, density) {
+        bitmaps = withContext(Dispatchers.Default) {
+            CurlBitmaps(
+                current = current?.let { renderPageBitmap(it, layout, theme, density) },
+                prev = prev?.let { renderPageBitmap(it, layout, theme, density) },
+                next = next?.let { renderPageBitmap(it, layout, theme, density) },
+                blank = renderPageBitmap(null, layout, theme, density),
+            )
+        }
     }
     val renderer = remember(size) { CurlRenderer(size.width.toFloat(), size.height.toFloat()) }
 
-    if (direction == null || curBitmap == null) {
+    val ready = bitmaps
+    if (direction == null || ready?.current == null) {
         PageCanvas(current, layout, theme, selection = selection)
         return
     }
@@ -393,12 +395,12 @@ private fun CurlLayer(
     val under: ImageBitmap
     when (direction) {
         FlipDirection.FORWARD -> {
-            front = curBitmap
-            under = nextBitmap ?: blankBitmap
+            front = ready.current
+            under = ready.next ?: ready.blank
         }
         FlipDirection.BACKWARD -> {
-            front = prevBitmap ?: blankBitmap
-            under = curBitmap
+            front = ready.prev ?: ready.blank
+            under = ready.current
         }
     }
 
@@ -416,3 +418,11 @@ private fun CurlLayer(
         }
     )
 }
+
+/** CURL 用的三页 + 空白占位。空闲时持有，手势开始零合成。 */
+private class CurlBitmaps(
+    val current: ImageBitmap?,
+    val prev: ImageBitmap?,
+    val next: ImageBitmap?,
+    val blank: ImageBitmap,
+)

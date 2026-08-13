@@ -89,11 +89,11 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawScrollItem(
             val handle = chapter.measured[item.elementIndex]?.renderHandle as? TextLayoutResult
                 ?: return
             // 元素被单独画在自己的槽里，所以纵向原点就是它自己的第一行
-            val sliceTop = handle.getLineTop(item.lineRange.first)
+            val sliceTop = handle.getLineTop(item.startLine)
             translate(left = layout.marginLeftPx, top = -sliceTop) {
                 clipRect(
                     top = sliceTop,
-                    bottom = handle.getLineBottom(item.lineRange.last),
+                    bottom = handle.getLineBottom(item.endLine),
                 ) {
                     drawIntoCanvas { canvas ->
                         handle.multiParagraph.paint(
