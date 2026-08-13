@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.core.util.htmlToPlainText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
@@ -190,12 +191,13 @@ private fun Header(
             )
         }
 
-        if (!state.intro.isNullOrBlank()) {
+        val intro = remember(state.intro) { state.intro?.htmlToPlainText().orEmpty() }
+        if (intro.isNotBlank()) {
             Column {
                 Text("简介", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(Dimens.gapXS))
                 Text(
-                    state.intro,
+                    intro,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = if (introExpanded) Int.MAX_VALUE else 4,
                     overflow = TextOverflow.Ellipsis,

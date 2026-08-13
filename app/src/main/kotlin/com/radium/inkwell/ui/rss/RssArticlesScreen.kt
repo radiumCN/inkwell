@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.rss.RssArticle
+import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
@@ -90,7 +91,10 @@ fun RssArticlesScreen(
 
 @Composable
 private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
-    val desc = article.description?.stripHtml()?.takeIf { it.isNotBlank() }
+    val desc = article.description?.htmlToPlainText()
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
     val date = article.pubDate?.takeIf { it.isNotBlank() }
     ContentListItem(
         onClick = onClick,
@@ -127,6 +131,3 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
         },
     )
 }
-
-private fun String.stripHtml(): String =
-    replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()

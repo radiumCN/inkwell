@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.room3.withWriteTransaction
 import com.radium.inkwell.core.model.BookHandle
 import com.radium.inkwell.core.model.BookParserRegistry
+import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
@@ -165,7 +166,7 @@ class BookRepository(
                 title = title,
                 author = author,
                 coverPath = coverPath,
-                intro = book.metadata.description,
+                intro = book.metadata.description?.htmlToPlainText(),
                 localPath = dest.absolutePath,
                 totalChapters = book.chapters.size,
                 addedAt = now,

@@ -12,6 +12,7 @@ import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.core.util.toHex
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
@@ -83,7 +84,7 @@ class NetBookRepository(
                     title = detail.title.ifBlank { fallback?.title.orEmpty() },
                     author = detail.author ?: fallback?.author ?: "",
                     coverPath = detail.coverUrl ?: fallback?.coverUrl,
-                    intro = detail.intro ?: fallback?.intro,
+                    intro = (detail.intro ?: fallback?.intro)?.htmlToPlainText(),
                     sourceId = sourceId,
                     bookUrl = bookUrl,
                     tocUrl = detail.tocUrl.ifBlank { bookUrl },
@@ -140,7 +141,7 @@ class NetBookRepository(
                 }
                 if (detail != null) {
                     if (coverPath.isNullOrBlank()) coverPath = detail.coverUrl
-                    if (intro.isNullOrBlank()) intro = detail.intro
+                    if (intro.isNullOrBlank()) intro = detail.intro?.htmlToPlainText()
                 }
             }
         }

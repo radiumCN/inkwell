@@ -38,6 +38,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.size.Precision
+import com.radium.inkwell.core.util.htmlToPlainText
 
 /** 空状态：图标 + 标题 + 提示 + 可选动作，全应用统一形态 */
 @Composable
@@ -276,7 +277,14 @@ fun BookListRow(
             Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
-    val supporting: (@Composable () -> Unit)? = caption?.takeIf { it.isNotBlank() }?.let {
+    val plainCaption = remember(caption) {
+        caption?.htmlToPlainText()
+            ?.replace('\n', ' ')
+            ?.replace(Regex(" {2,}"), " ")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+    val supporting: (@Composable () -> Unit)? = plainCaption?.let {
         {
             // outline 在浅色下只有约 3.9:1；书源名/最新章节是要读的信息，走令牌默认色
             Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)

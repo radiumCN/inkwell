@@ -48,6 +48,7 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
@@ -316,12 +317,13 @@ private fun Header(
             onClick = onRead,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (!book.intro.isNullOrBlank()) {
+        val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
+        if (intro.isNotBlank()) {
             Column {
                 Text("简介", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(Dimens.gapXS))
                 Text(
-                    book.intro,
+                    intro,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = if (introExpanded) Int.MAX_VALUE else 4,
                     overflow = TextOverflow.Ellipsis,
