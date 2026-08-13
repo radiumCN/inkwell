@@ -1,6 +1,9 @@
 package com.radium.inkwell.core.source.js
 
 import com.radium.inkwell.core.source.SourceHttpClient
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
@@ -13,9 +16,8 @@ import kotlin.time.Duration.Companion.seconds
  * 调用发生在引擎的抓取协程里，底层 OkHttp 又跑在 IO 线程池上，阻塞的是当前工作线程而非事件循环。
  *
  * **但 runBlocking 是叫不停的**：它起的是自己的事件循环，外层协程被取消（用户翻页、退出阅读页、
- * 换源掐掉上一轮）传不进来，这根线程只能等到请求自己了结。所以「自己了结」必须有期限 ——
- * 底层 [SourceHttpClient] 已经配了 callTimeout 兜住网络侧，这里再加一道 [timeout] 兜住整体
- * （限速等待、重试退避这些发生在 OkHttp 之外的时间它管不到）。
+ * 换源掐掉上一轮）传不进来，这根线程只能等到请求自己了结 —— 除非把外层 [Job] 绑进来，
+ * 外层一取消就 cancel 掉 runBlocking，底层 [SourceHttpClient] 再把 OkHttp Call 掐掉。
  */
 class EngineJsHttp(
     private val http: SourceHttpClient,
@@ -23,15 +25,33 @@ class EngineJsHttp(
     private val timeout: Duration = 60.seconds,
 ) : JsHttp {
 
+    private val parentJob = ThreadLocal<Job?>()
+
+    fun bindParent(job: Job?) {
+        if (job == null) parentJob.remove() else parentJob.set(job)
+    }
+
     override fun fetch(
         url: String,
         method: String,
         body: String?,
         headers: Map<String, String>,
     ): String? = runCatching {
+        val parent = parentJob.get()
         runBlocking {
-            withTimeout(timeout) {
-                http.fetch(url, method = method, body = body, headers = headers).bodyText
+            val blockingScope = this
+            val watcher = parent?.let { p ->
+                launch {
+                    p.join()
+                    blockingScope.cancel()
+                }
+            }
+            try {
+                withTimeout(timeout) {
+                    http.fetch(url, method = method, body = body, headers = headers).bodyText
+                }
+            } finally {
+                watcher?.cancel()
             }
         }
     }.getOrNull()

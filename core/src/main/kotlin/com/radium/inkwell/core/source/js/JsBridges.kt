@@ -4,6 +4,7 @@ import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
 import com.radium.inkwell.core.source.splitUrlOptions
+import com.radium.inkwell.core.util.toHex
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -30,31 +31,46 @@ interface JsHttp {
     fun removeCookie(url: String)
 }
 
-/** 带 TTL 的 KV；`cache.*` 与 `java.cache*` 用 */
+/** 带 TTL 的 KV；`cache.*` 与 `java.cache*` 用。条目上限 256，get 时过期删除，put 时顺手淘汰。 */
 class JsCache {
     private class Entry(val value: String, val expireAt: Long)
 
-    private val map = ConcurrentHashMap<String, Entry>()
+    private val lock = Any()
+    private val map = object : LinkedHashMap<String, Entry>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean =
+            size > 256
+    }
 
     /** @param saveTime 秒；<= 0 表示不过期 */
     @JvmOverloads
     fun put(key: String, value: String, saveTime: Int = 0): String {
         val expire = if (saveTime > 0) System.currentTimeMillis() + saveTime * 1000L else Long.MAX_VALUE
-        map[key] = Entry(value, expire)
+        synchronized(lock) {
+            evictExpired()
+            map[key] = Entry(value, expire)
+        }
         return value
     }
 
-    fun get(key: String): String? {
+    fun get(key: String): String? = synchronized(lock) {
         val e = map[key] ?: return null
         if (e.expireAt < System.currentTimeMillis()) {
             map.remove(key)
             return null
         }
-        return e.value
+        e.value
     }
 
     fun delete(key: String) {
-        map.remove(key)
+        synchronized(lock) { map.remove(key) }
+    }
+
+    private fun evictExpired() {
+        val now = System.currentTimeMillis()
+        val it = map.entries.iterator()
+        while (it.hasNext()) {
+            if (it.next().value.expireAt < now) it.remove()
+        }
     }
 }
 
@@ -231,7 +247,7 @@ class JavaBridge(
         digest(algorithm, str.toByteArray(Charsets.UTF_8))
 
     fun hexEncodeToString(str: String): String =
-        str.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
+        str.toByteArray(Charsets.UTF_8).toHex()
 
     fun hexDecodeToString(hex: String): String = String(hexToBytes(hex), Charsets.UTF_8)
 
@@ -298,7 +314,7 @@ class JavaBridge(
     }
 
     private fun digest(algorithm: String, bytes: ByteArray): String =
-        MessageDigest.getInstance(algorithm).digest(bytes).joinToString("") { "%02x".format(it) }
+        MessageDigest.getInstance(algorithm).digest(bytes).toHex()
 
     /** 书源里的 base64 常缺 padding 或用 URL 变体，宽松处理 */
     private fun decodeBase64(str: String): ByteArray {

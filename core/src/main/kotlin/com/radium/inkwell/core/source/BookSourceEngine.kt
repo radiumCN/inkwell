@@ -3,7 +3,9 @@ package com.radium.inkwell.core.source
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -100,20 +102,30 @@ class BookSourceEngine(
     private val renderer: PageRenderer? = null,
 ) {
 
+    private val jsHttp = com.radium.inkwell.core.source.js.EngineJsHttp(http)
     private val evaluator = RuleEvaluator(
         scriptRuntime,
-        jsHttp = com.radium.inkwell.core.source.js.EngineJsHttp(http),
+        jsHttp = jsHttp,
     )
 
     /** 已确认需要 JS 渲染的书源；后续请求直接走渲染器，省掉每次先静态空跑一遍 */
     private val needsRender = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    // 公开入口一律在 IO 线程自我确权（withContext(Dispatchers.IO)）：底层脚本 HTTP 出口
-    // （EngineJsHttp）用 runBlocking 同步等网络，若调用方恰好在主线程发起就会 ANR。这样无论
-    // 调用方在不在主线程都安全，且不必改 app/reader 的调用点。withContext(IO) 内再 runBlocking
-    // 阻塞的是 IO 线程池里的工作线程、而非同一线程，不会自锁。
-    suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
+    /**
+     * 公开入口一律在 IO 线程自我确权。并把当前 Job 绑到 [jsHttp]，好让脚本里的
+     * runBlocking 网络在外层协程取消时把 OkHttp Call 掐掉。
+     */
+    private suspend fun <T> engineIo(block: suspend () -> T): T =
         withContext(Dispatchers.IO) {
+            jsHttp.bindParent(coroutineContext[Job])
+            try {
+                block()
+            } finally {
+                jsHttp.bindParent(null)
+            }
+        }
+    suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
+        engineIo {
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
                 ?: throw SourceException("书源「${source.name}」未配置搜索规则")
             val rule = source.ruleSearch ?: throw SourceException("书源「${source.name}」未配置搜索规则")
@@ -133,7 +145,7 @@ class BookSourceEngine(
         templates.any { it != null && PAGE_VAR.containsMatchIn(it) }
 
     suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage =
-        withContext(Dispatchers.IO) {
+        engineIo {
             val item = source.explore.getOrNull(exploreIndex)
                 ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
             // Legado：发现页列表/字段规则缺省时复用搜索规则
@@ -160,7 +172,7 @@ class BookSourceEngine(
     }
 
     suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail =
-        withContext(Dispatchers.IO) {
+        engineIo {
             val url = resolveUrl(source.baseUrl, bookUrl)
             // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
             // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
@@ -211,7 +223,7 @@ class BookSourceEngine(
     }
 
     suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> =
-        withContext(Dispatchers.IO) {
+        engineIo {
             val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
             withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
                 ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
@@ -271,11 +283,17 @@ class BookSourceEngine(
         chapterUrl: String,
         otherChapterUrls: Set<String> = emptySet(),
         chapterVariable: String = "",
-    ): RemoteChapterContent = withContext(Dispatchers.IO) {
+        allowJsRender: Boolean = true,
+    ): RemoteChapterContent = engineIo {
         val rule = source.ruleContent ?: throw SourceException("书源「${source.name}」未配置正文规则")
-        withRenderFallback(source) { render ->
-            collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
-        } ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
+        val result = if (allowJsRender) {
+            withRenderFallback(source) { render ->
+                collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
+            }
+        } else {
+            collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render = false)
+        }
+        result ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
     }
 
     /** 变量表 ↔ JSON（随章节一起落库，见 ChapterEntity.variable） */
@@ -612,7 +630,8 @@ class BookSourceEngine(
         val VARS_JSON = kotlinx.serialization.json.Json
         val PAGE_VAR = Regex("\\{\\{[^}]*page[^}]*\\}\\}")
         const val MAX_TOC_PAGES = 200
-        const val MAX_CONTENT_PAGES = 50
+        /** 单章分页抓取上限。50 会让失控的 nextPage 空转近一分钟；正经分页站很少超过十几页 */
+        const val MAX_CONTENT_PAGES = 16
     }
 }
 

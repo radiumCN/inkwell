@@ -48,6 +48,24 @@ class NetReaderBookSource(
         return content
     }
 
+    override suspend fun prefetchChapter(index: Int) {
+        val chapter = chapters.getOrNull(index) ?: return
+        val url = chapter.url ?: return
+        withContext(Dispatchers.IO) { cache.read(bookId, url) }?.let { return }
+        // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
+        // 静态抓不到就放弃，等用户真翻到这一章再走 loadChapter 的渲染回退。
+        val remote = engine.getContent(
+            rule, url, chapterUrls,
+            chapterVariable = chapter.variable,
+            allowJsRender = false,
+        )
+        val content = ChapterContent(remote.elements)
+        withContext(Dispatchers.IO) {
+            cache.write(bookId, url, content)
+            chapterDao.markCached(bookId, index, true)
+        }
+    }
+
     override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
         runCatching {
             http.newCall(Request.Builder().url(resourceId).build()).execute().use { resp ->

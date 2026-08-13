@@ -38,6 +38,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -49,6 +50,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -143,7 +145,6 @@ data class ReaderSessionUi(
     val bookTitle: String = "",
     val coverPath: String? = null,
     val chapterCount: Int = 0,
-    val toc: List<TocItem> = emptyList(),
     val settings: ReaderSettings = ReaderSettings(),
     val isNetBook: Boolean = false,
     val currentSourceName: String = "",
@@ -172,7 +173,7 @@ private fun ReaderUiState.toPage() = ReaderPageUi(
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
-    bookTitle, coverPath, chapterCount, toc, settings, isNetBook, currentSourceName, textSelectionEnabled,
+    bookTitle, coverPath, chapterCount, settings, isNetBook, currentSourceName, textSelectionEnabled,
 )
 
 private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
@@ -210,7 +211,6 @@ class ReaderViewModel(
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
     private val _state = MutableStateFlow(ReaderUiState(settings = readerPrefs.settings.value))
-    val state: StateFlow<ReaderUiState> = _state.asStateFlow()
     val page: StateFlow<ReaderPageUi> = _state
         .map { it.toPage() }
         .distinctUntilChanged()
@@ -223,6 +223,14 @@ class ReaderViewModel(
         .map { it.toOverlay() }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toOverlay())
+    /**
+     * 目录单独一条流：预取落盘会反复改 isCached，不能跟 session 绑在阅读页根上，
+     * 否则整棵翻页树跟着重组。只给菜单的目录面板收集。
+     */
+    val toc: StateFlow<List<TocItem>> = _state
+        .map { it.toc }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toc)
 
     private var book: BookEntity? = null
     private var source: ReaderBookSource? = null
@@ -233,9 +241,11 @@ class ReaderViewModel(
     private var spec: LayoutSpec? = null
 
     // 分页缓存：chapterIndex → 结果；spec 变化即整体作废
-    private val paginated = LinkedHashMap<Int, Paginator.Result>()
+    private val paginated = java.util.concurrent.ConcurrentHashMap<Int, Paginator.Result>()
     private var paginateJob: Job? = null
     private val engineMutex = Mutex()
+    /** 测量层不能并发；与 [engineMutex] 拆开，邻章排版不再堵住用户正在等的那一章的 IO */
+    private val measureMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -259,13 +269,16 @@ class ReaderViewModel(
      * isCached 由 NetReaderBookSource 在正文落盘后 markCached 写库，是边读边变的；
      * 只在 loadSession 里 map 一次的话，目录里的缓存指示永远停在进书那一刻。
      */
+    @OptIn(FlowPreview::class)
     private fun observeToc() {
         viewModelScope.launch {
-            chapterDao.observeByBook(bookId).collect { chapters ->
-                _state.value = _state.value.copy(
-                    toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
-                )
-            }
+            chapterDao.observeByBook(bookId)
+                .map { chapters -> chapters.map { TocItem(it.index, it.title, it.isCached) } }
+                .distinctUntilChanged()
+                .debounce(TOC_DEBOUNCE_MS)
+                .collect { items ->
+                    _state.value = _state.value.copy(toc = items)
+                }
         }
     }
 
@@ -473,7 +486,7 @@ class ReaderViewModel(
         }
     }
 
-    fun stopAutoFlip() {
+    private fun stopAutoFlip() {
         autoFlipJob?.cancel()
         autoFlipJob = null
         _state.value = _state.value.copy(autoFlipping = false)
@@ -1038,8 +1051,10 @@ class ReaderViewModel(
                 headerHeightPx = 0f,
                 footerHeightPx = 0f,
             )
-            val result = withContext(Dispatchers.Default) {
-                Paginator(facade).paginate(chapterIndex, title, content, tall)
+            val result = measureMutex.withLock {
+                withContext(Dispatchers.Default) {
+                    Paginator(facade).paginate(chapterIndex, title, content, tall)
+                }
             }
             val page = result.chapter.pages.firstOrNull() ?: return null
 
@@ -1104,7 +1119,8 @@ class ReaderViewModel(
         }
     }
 
-    /** 滚到某章某元素：记进度、必要时续排下一章 */
+    /** 滚到某章某元素：记进度、跨章时才续排邻章 */
+    private var lastScrollChapter = Int.MIN_VALUE
     fun onScrollTo(chapterIndex: Int, elementIndex: Int) {
         val chapter = scrollCache[chapterIndex] ?: return
         val offset = chapter.charOffsets[elementIndex] ?: 0
@@ -1114,7 +1130,10 @@ class ReaderViewModel(
             chapterTitle = chapter.title,
         )
         saveProgress()
-        prepareScroll(chapterIndex)
+        if (chapterIndex != lastScrollChapter) {
+            lastScrollChapter = chapterIndex
+            prepareScroll(chapterIndex)
+        }
     }
 
     private fun renderable(result: Paginator.Result, pageIndex: Int): RenderablePage? {
@@ -1212,22 +1231,25 @@ class ReaderViewModel(
         return try {
             val content = loadPurified(src, chapterIndex)
             val title = src.chapterTitle(chapterIndex) ?: ""
-            val result = withContext(Dispatchers.Default) {
-                Paginator(facade).paginate(
-                    chapterIndex, title, content, spec,
-                    notifyAfterChar = notifyAfterChar,
-                    onPartial = { partial ->
-                        paginated[chapterIndex] = partial
-                        if (userFacing) {
-                            val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
-                                partial.chapter.pages.lastIndex
-                            } else {
-                                partial.chapter.pageIndexFor(notifyAfterChar)
+            val result = measureMutex.withLock {
+                paginated[chapterIndex]?.let { if (it.complete) return it }
+                withContext(Dispatchers.Default) {
+                    Paginator(facade).paginate(
+                        chapterIndex, title, content, spec,
+                        notifyAfterChar = notifyAfterChar,
+                        onPartial = { partial ->
+                            paginated[chapterIndex] = partial
+                            if (userFacing) {
+                                val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
+                                    partial.chapter.pages.lastIndex
+                                } else {
+                                    partial.chapter.pageIndexFor(notifyAfterChar)
+                                }
+                                showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
                             }
-                            showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
             paginated[chapterIndex] = result
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
@@ -1251,11 +1273,10 @@ class ReaderViewModel(
 
     private fun preloadNeighbors(center: Int) {
         viewModelScope.launch {
-            engineMutex.withLock {
-                // 邻章预取：失败了不弹错误、不换源，只记日志（见 ensurePaginated 的 userFacing）
-                ensurePaginated(center + 1)
-                ensurePaginated(center - 1)
-            }
+            // 邻章排版不占 engineMutex：用户翻章的 IO 不该排队等上一章量字。
+            // 测量仍走 measureMutex（facade 不能并发）。
+            ensurePaginated(center + 1)
+            ensurePaginated(center - 1)
             refreshNeighbors()
         }
         prefetchAhead(center)
@@ -1297,8 +1318,9 @@ class ReaderViewModel(
             for (i in (center + 2)..(center + 1 + ahead)) {
                 if (i >= total) break
                 if (!isActive) return@launch
-                // 已缓存的话 loadChapter 直接命中缓存，几乎不花钱；没缓存才会真去抓
-                runCatching { src.loadChapter(i) }
+                // 已缓存的话 prefetchChapter 直接命中缓存，几乎不花钱；没缓存才抓。
+                // 网络书这条路径禁止开 WebView（见 NetReaderBookSource.prefetchChapter）。
+                runCatching { src.prefetchChapter(i) }
             }
         }
     }
@@ -1309,14 +1331,34 @@ class ReaderViewModel(
         paginated.keys.retainAll { it in keep }
     }
 
+    private var saveProgressJob: Job? = null
+
     private fun saveProgress() {
+        saveProgressJob?.cancel()
+        saveProgressJob = viewModelScope.launch {
+            delay(PROGRESS_DEBOUNCE_MS)
+            persistProgress()
+        }
+    }
+
+    private suspend fun persistProgress() {
         val p = position
-        viewModelScope.launch(NonCancellable) {
+        withContext(Dispatchers.IO + NonCancellable) {
+            bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
+        }
+    }
+
+    /** 离开阅读页 / 进后台时立刻刷盘，避免防抖窗口里进程被杀丢进度 */
+    fun flushProgress() {
+        saveProgressJob?.cancel()
+        val p = position
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO + NonCancellable).launch {
             bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
         }
     }
 
     override fun onCleared() {
+        flushProgress()
         (source as? AutoCloseable)?.close()
     }
 
@@ -1334,6 +1376,12 @@ class ReaderViewModel(
          * 用户读完一页远不止 400ms。
          */
         const val PREFETCH_LEAD_IN_MS = 400L
+
+        /** 目录 isCached 刷新防抖：预取连写几章不该每章重组一次菜单 */
+        const val TOC_DEBOUNCE_MS = 400L
+
+        /** 进度写入防抖；离开阅读页走 [flushProgress] 兜住 */
+        const val PROGRESS_DEBOUNCE_MS = 400L
 
         /** 单个书源的换源搜索超时；卡住的站点不能拖住整个面板 */
         const val SOURCE_SEARCH_TIMEOUT_MS = 30_000L

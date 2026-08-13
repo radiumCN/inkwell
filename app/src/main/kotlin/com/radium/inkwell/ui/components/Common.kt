@@ -21,7 +21,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -174,22 +177,28 @@ fun BookCover(
         tonalElevation = 1.dp,
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            DefaultCover(title, placeholderChars)
+            var loaded by remember(coverModel) { mutableStateOf(false) }
+            if (!loaded) DefaultCover(title, placeholderChars)
             if (coverModel != null) {
                 // 按显示尺寸解码：列表封面 48×64dp，不能把 1000px 原图解进内存。
                 // 无界约束时退回 256 —— 比 ORIGINAL 小得多，也够 splash/详情用。
                 val w = if (constraints.hasBoundedWidth) constraints.maxWidth.coerceAtLeast(1) else 256
                 val h = if (constraints.hasBoundedHeight) constraints.maxHeight.coerceAtLeast(1) else 256
                 val context = LocalPlatformContext.current
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
+                val request = remember(coverModel, w, h, context) {
+                    ImageRequest.Builder(context)
                         .data(coverModel)
                         .size(w, h)
                         .precision(Precision.INEXACT)
-                        .build(),
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
+                    onSuccess = { loaded = true },
+                    onError = { loaded = false },
                 )
             }
         }

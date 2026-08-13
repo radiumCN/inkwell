@@ -16,11 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.render.ScrollChapter
 import com.radium.inkwell.reader.render.ScrollItemView
+import com.radium.inkwell.ui.components.Dimens
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -68,6 +68,7 @@ fun ScrollReader(
                 items(
                     count = chapter.items.size,
                     key = { i -> "${chapter.chapterIndex}:$i" },
+                    contentType = { i -> chapter.items[i]::class },
                 ) { i ->
                     ScrollItemView(
                         chapter = chapter,
@@ -78,7 +79,7 @@ fun ScrollReader(
                     )
                 }
             }
-            item { Spacer(Modifier.height(marginBottom + 48.dp)) }
+            item { Spacer(Modifier.height(marginBottom + Dimens.touchTarget)) }
         }
     }
 }

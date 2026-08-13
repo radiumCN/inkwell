@@ -105,4 +105,12 @@ class ScriptRuntimeTest {
         assertEquals("https://a.com/1", runtime.eval(script, mapOf("baseUrl" to "https://a.com/", "result" to "1")))
         assertEquals("https://b.com/2", runtime.eval(script, mapOf("baseUrl" to "https://b.com/", "result" to "2")))
     }
+
+    @Test
+    fun `child scope bindings do not leak into the next eval`() {
+        runtime.eval("var leaked = 'yes'; leaked", emptyMap())
+        assertEquals("undefined", runtime.eval("typeof leaked", emptyMap()))
+        runtime.eval("undeclaredGlobal = 1", emptyMap())
+        assertEquals("undefined", runtime.eval("typeof undeclaredGlobal", emptyMap()))
+    }
 }

@@ -88,18 +88,23 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawScrollItem(
         is PageItem.TextSlice -> {
             val handle = chapter.measured[item.elementIndex]?.renderHandle as? TextLayoutResult
                 ?: return
-            // 元素被单独画在自己的槽里，所以纵向原点就是它自己的第一行
+            val color = Color(if (item.isTitle) theme.titleColor else theme.textColor)
             val sliceTop = handle.getLineTop(item.startLine)
+            val lastLine = handle.lineCount - 1
+            val fullParagraph = item.startLine == 0 && item.endLine >= lastLine
             translate(left = layout.marginLeftPx, top = -sliceTop) {
-                clipRect(
-                    top = sliceTop,
-                    bottom = handle.getLineBottom(item.endLine),
-                ) {
+                if (fullParagraph) {
                     drawIntoCanvas { canvas ->
-                        handle.multiParagraph.paint(
-                            canvas,
-                            color = Color(if (item.isTitle) theme.titleColor else theme.textColor),
-                        )
+                        handle.multiParagraph.paint(canvas, color = color)
+                    }
+                } else {
+                    clipRect(
+                        top = sliceTop,
+                        bottom = handle.getLineBottom(item.endLine),
+                    ) {
+                        drawIntoCanvas { canvas ->
+                            handle.multiParagraph.paint(canvas, color = color)
+                        }
                     }
                 }
             }

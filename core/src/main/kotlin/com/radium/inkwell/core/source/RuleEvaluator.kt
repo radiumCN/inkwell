@@ -53,8 +53,13 @@ class RuleEvaluator(
     private val sourceStores =
         ConcurrentHashMap<String, MutableMap<String, String>>()
 
-    private val regexCache = ConcurrentHashMap<String, Regex>()
-    private fun regexOf(pattern: String): Regex = regexCache.getOrPut(pattern) { Regex(pattern) }
+    private val regexCache = object : LinkedHashMap<String, Regex>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex>?): Boolean =
+            size > 256
+    }
+    private fun regexOf(pattern: String): Regex = synchronized(regexCache) {
+        regexCache.getOrPut(pattern) { Regex(pattern) }
+    }
 
     /**
      * 给书源正则套上和净化同一道预算关卡。

@@ -55,11 +55,23 @@ class RhinoScriptRuntime(
             size > 64
     }
 
+    /**
+     * 每线程一份 initSafeStandardObjects 原型。eval 只 newObject 挂绑定，
+     * 避免每次重建 Object/Array/JSON。绑定打在子作用域上，两次 eval 不会串变量。
+     */
+    private val prototypeByThread = ThreadLocal<org.mozilla.javascript.ScriptableObject>()
+
     override fun eval(script: String, bindings: Map<String, Any?>): String? {
         val cx = factory.enterContext()
         try {
             cx.putThreadLocal(KEY_COUNT, 0L)
-            val scope: Scriptable = cx.initSafeStandardObjects()
+            val proto = prototypeByThread.get() ?: cx.initSafeStandardObjects().also {
+                prototypeByThread.set(it)
+            }
+            val scope: Scriptable = cx.newObject(proto).also {
+                it.prototype = proto
+                it.parentScope = null
+            }
             bindings.forEach { (name, value) ->
                 scope.put(name, scope, Context.javaToJS(value, scope))
             }

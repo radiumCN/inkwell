@@ -105,12 +105,14 @@ class AutoSourceSwitcher(
         val toc = engine.getToc(rule, detail.tocUrl.ifBlank { hit.bookUrl })
         if (toc.isEmpty()) return null
 
-        // 在新源的目录里定位"同一章"：优先按标题，对不上再按序号夹取
+        // 在新源的目录里定位"同一章"：剥标点后按标题对齐（与手动换源同一套），对不上再按序号夹取
         val chapter = target.chapterTitle
             ?.let { want ->
-                val norm = TitleMatch.normalize(want)
-                toc.filter { TitleMatch.normalize(it.title) == norm }
-                    .minByOrNull { kotlin.math.abs(it.index - target.chapterIndex) }
+                TitleMatch.alignChapter(
+                    want, target.chapterIndex, toc,
+                    titleOf = { it.title },
+                    indexOf = { it.index },
+                )
             }
             ?: toc[target.chapterIndex.coerceIn(0, toc.lastIndex)]
 

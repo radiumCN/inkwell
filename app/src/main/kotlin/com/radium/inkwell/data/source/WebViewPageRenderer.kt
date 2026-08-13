@@ -131,6 +131,6 @@ class WebViewPageRenderer(
 
     private companion object {
         const val POLL_INTERVAL_MS = 350L
-        const val MAX_POLLS = 40 // 与 timeoutMs 共同兜底
+        const val MAX_POLLS = 24 // 与 timeoutMs 共同兜底；连续两次稳定就提前返回
     }
 }

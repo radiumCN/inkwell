@@ -1,10 +1,12 @@
 package com.radium.inkwell.core.source
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -91,7 +93,15 @@ class SourceHttpClient(
         var attempt = 0
         while (true) {
             val request = buildRequest(httpUrl, method, body, headers, charsetOverride)
-            val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+            val call = client.newCall(request)
+            val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
+                if (cause != null) call.cancel()
+            }
+            val response = try {
+                withContext(Dispatchers.IO) { call.execute() }
+            } finally {
+                cancelHandle?.dispose()
+            }
             if (response.code in RETRY_CODES && attempt < MAX_RETRIES) {
                 response.close()
                 delay(retryBaseDelayMs shl attempt) // 指数退避：base、base*2
@@ -221,18 +231,22 @@ class SourceHttpClient(
     }
 }
 
-/** 按 host 的内存 Cookie 存储 */
+/** 按 host 的内存 Cookie 存储。host 上限 48，超出按访问顺序淘汰，避免长会话无限涨。 */
 private class MemoryCookieJar : CookieJar {
 
-    fun clear(host: String) {
-        store.remove(host)
+    private val lock = Any()
+    private val store = object : LinkedHashMap<String, MutableList<Cookie>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MutableList<Cookie>>?): Boolean =
+            size > 48
     }
 
-    private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
+    fun clear(host: String) {
+        synchronized(lock) { store.remove(host) }
+    }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        val list = store.computeIfAbsent(url.host) { mutableListOf() }
-        synchronized(list) {
+        synchronized(lock) {
+            val list = store.getOrPut(url.host) { mutableListOf() }
             cookies.forEach { c ->
                 list.removeAll { it.name == c.name && it.domain == c.domain && it.path == c.path }
                 list.add(c)
@@ -241,9 +255,9 @@ private class MemoryCookieJar : CookieJar {
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val list = store[url.host] ?: return emptyList()
-        val now = System.currentTimeMillis()
-        synchronized(list) {
+        synchronized(lock) {
+            val list = store[url.host] ?: return emptyList()
+            val now = System.currentTimeMillis()
             list.removeAll { it.expiresAt < now }
             return list.filter { it.matches(url) }
         }

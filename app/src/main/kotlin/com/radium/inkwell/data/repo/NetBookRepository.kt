@@ -12,6 +12,7 @@ import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.core.util.toHex
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 
@@ -201,9 +202,11 @@ class NetBookRepository(
         if (book == null) return 0 to 0
         val oldTitle = chapterDao.get(bookId, book.readChapterIndex)?.title
             ?: return book.readChapterIndex.coerceIn(0, toc.lastIndex) to 0
-        val normalized = normalizeTitle(oldTitle)
-        val matched = toc.filter { normalizeTitle(it.title) == normalized }
-            .minByOrNull { kotlin.math.abs(it.index - book.readChapterIndex) }
+        val matched = TitleMatch.alignChapter(
+            oldTitle, book.readChapterIndex, toc,
+            titleOf = { it.title },
+            indexOf = { it.index },
+        )
         return if (matched != null) matched.index to book.readCharOffset
         else book.readChapterIndex.coerceIn(0, toc.lastIndex) to 0
     }
@@ -257,11 +260,6 @@ class NetBookRepository(
     /** 阅读位置的真身：第几章 + 章内第几个字 */
     data class ReadAnchor(val chapterIndex: Int, val charOffset: Int)
 
-    private fun normalizeTitle(t: String): String =
-        t.replace(Regex("[\\s　（）()【】\\[\\]:：、,，.。]"), "")
-
-    private fun netBookId(sourceId: String, bookUrl: String): String {
-        val digest = MessageDigest.getInstance("MD5").digest("$sourceId|$bookUrl".toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
-    }
+    private fun netBookId(sourceId: String, bookUrl: String): String =
+        MessageDigest.getInstance("MD5").digest("$sourceId|$bookUrl".toByteArray()).toHex()
 }

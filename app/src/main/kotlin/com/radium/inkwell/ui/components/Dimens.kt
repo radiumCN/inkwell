@@ -76,8 +76,6 @@ object Dimens {
     val iconSm = 18.dp
     /** 24dp。Material 的标准图标尺寸；顶栏、菜单一律用它 */
     val iconMd = 24.dp
-    /** 32dp。较大的装饰性图标 */
-    val iconLg = 32.dp
     /** 48dp。空状态正中那个 */
     val iconXL = 48.dp
 

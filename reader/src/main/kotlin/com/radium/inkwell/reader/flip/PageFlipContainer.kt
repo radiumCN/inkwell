@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
@@ -40,13 +41,16 @@ import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.render.PageCanvas
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -95,18 +99,18 @@ fun PageFlipContainer(
     val haptic = LocalHapticFeedback.current
     // 系统「移除动画」开启时降级为无动画直切（无障碍）
     val effectiveAnim = if (!animationsEnabled) FlipAnimation.NONE else animation
-    // offset：拖拽累计位移，FORWARD ∈ [-w,0]，BACKWARD ∈ [0,w]；驱动 COVER/SLIDE 与松手裁决
-    var offset by remember { mutableFloatStateOf(0f) }
-    // CURL 的真实触点（跟手）
-    var touchX by remember { mutableFloatStateOf(0f) }
-    var touchY by remember { mutableFloatStateOf(0f) }
+    // 位移/触点用 State 对象本身传给图层，组合阶段不读 .floatValue ——
+    // 否则每一帧拖动都会重组两张 PageCanvas，跟手路径变成「每事件重绘整页」。
+    val offset = remember { mutableFloatStateOf(0f) }
+    val touchX = remember { mutableFloatStateOf(0f) }
+    val touchY = remember { mutableFloatStateOf(0f) }
     var downX by remember { mutableFloatStateOf(0f) }
     var cornerBottom by remember { mutableStateOf(true) }
     // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
     var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var settling by remember { mutableStateOf(false) }
-    var size by remember { mutableStateOf(IntSize(1, 1)) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
 
     // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
     fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
@@ -119,7 +123,6 @@ fun PageFlipContainer(
         val dir = direction ?: return
         settling = true
         val width = size.width.toFloat()
-        if (commit && hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (effectiveAnim == FlipAnimation.CURL) {
             // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
             val target = when {
@@ -130,8 +133,8 @@ fun PageFlipContainer(
             }
             val dur = if (commit) settleDuration(velocity, 200, 320) else settleDuration(velocity, 160, 240)
             // 减速曲线（≈DecelerateInterpolator）：纸张甩出后自然减速停下
-            animate(touchX, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
-                touchX = v
+            animate(touchX.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
+                touchX.floatValue = v
             }
         } else {
             val target = when {
@@ -139,16 +142,17 @@ fun PageFlipContainer(
                 else -> 0f
             }
             val dur = if (commit) settleDuration(velocity, 180, 260) else settleDuration(velocity, 140, 200)
-            animate(offset, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
-                offset = v
+            animate(offset.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
+                offset.floatValue = v
             }
         }
+        if (commit && hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (commit) {
             // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
             onCommit(dir)
         }
         direction = null
-        offset = 0f
+        offset.floatValue = 0f
         settling = false
     }
 
@@ -165,10 +169,10 @@ fun PageFlipContainer(
         // 点击翻页 = 翻整页，走竖直圆柱：触点 Y 钉到页底（与中间横划一致），别卷出斜角
         cornerBottom = true
         flatSwipe = true
-        touchY = size.height.toFloat()
+        touchY.floatValue = size.height.toFloat()
         downX = if (dir == FlipDirection.FORWARD) size.width * 0.92f else size.width * 0.08f
-        touchX = downX
-        offset = 0f
+        touchX.floatValue = downX
+        offset.floatValue = 0f
         direction = dir
         scope.launch { settle(commit = true) }
     }
@@ -223,9 +227,9 @@ fun PageFlipContainer(
                         // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
                         // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
                         flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
-                        touchY = if (flatSwipe) (if (cornerBottom) h else 0f) else down.position.y
+                        touchY.floatValue = if (flatSwipe) (if (cornerBottom) h else 0f) else down.position.y
                         downX = down.position.x
-                        touchX = down.position.x
+                        touchX.floatValue = down.position.x
                         direction = dir
                     }
 
@@ -236,10 +240,10 @@ fun PageFlipContainer(
                         if (!flippable || effectiveAnim == FlipAnimation.NONE) return@horizontalDrag
                         // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
                         // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
-                        touchY = if (flatSwipe) (if (cornerBottom) size.height.toFloat() else 0f) else change.position.y
-                        touchX = change.position.x
+                        touchY.floatValue = if (flatSwipe) (if (cornerBottom) size.height.toFloat() else 0f) else change.position.y
+                        touchX.floatValue = change.position.x
                         val range = if (dir == FlipDirection.FORWARD) -width..0f else 0f..width
-                        offset = (offset + change.positionChange().x).coerceIn(range)
+                        offset.floatValue = (offset.floatValue + change.positionChange().x).coerceIn(range)
                     }
 
                     if (!flippable) {
@@ -253,8 +257,8 @@ fun PageFlipContainer(
                     }
                     val velocity = tracker.calculateVelocity().x
                     val commit = when (dir) {
-                        FlipDirection.FORWARD -> offset < -width / 4f || velocity < -1200f
-                        FlipDirection.BACKWARD -> offset > width / 4f || velocity > 1200f
+                        FlipDirection.FORWARD -> offset.floatValue < -width / 4f || velocity < -1200f
+                        FlipDirection.BACKWARD -> offset.floatValue > width / 4f || velocity > 1200f
                     }
                     scope.launch { settle(commit, velocity) }
                 }
@@ -275,9 +279,11 @@ fun PageFlipContainer(
                 selection = selection,
                 current = current, prev = prev, next = next,
                 layout = layout, theme = theme, direction = direction,
-                // 前翻卷角完全跟手；后翻以按下点为折叠原点（起始全折叠，随位移展开）
-                touchX = if (direction == FlipDirection.BACKWARD) touchX - downX else touchX,
-                touchY = touchY, cornerBottom = cornerBottom, size = size, density = density,
+                touchX = touchX,
+                downX = downX,
+                touchY = touchY,
+                cornerBottom = cornerBottom,
+                size = size, density = density,
             )
         }
     }
@@ -292,18 +298,18 @@ private fun SlideLayers(
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
-    offset: Float,
+    offset: MutableFloatState,
     width: Float,
 ) {
     when (direction) {
         null -> PageCanvas(current, layout, theme, selection = selection)
         FlipDirection.FORWARD -> {
-            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset })
-            PageCanvas(next, layout, theme, Modifier.graphicsLayer { translationX = offset + width })
+            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue })
+            PageCanvas(next, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue + width })
         }
         FlipDirection.BACKWARD -> {
-            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset })
-            PageCanvas(prev, layout, theme, Modifier.graphicsLayer { translationX = offset - width })
+            PageCanvas(current, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue })
+            PageCanvas(prev, layout, theme, Modifier.graphicsLayer { translationX = offset.floatValue - width })
         }
     }
 }
@@ -317,7 +323,7 @@ private fun CoverLayers(
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
-    offset: Float,
+    offset: MutableFloatState,
     width: Float,
 ) {
     when (direction) {
@@ -327,7 +333,7 @@ private fun CoverLayers(
             PageCanvas(next, layout, theme)
             PageCanvas(
                 current, layout, theme,
-                Modifier.graphicsLayer { translationX = offset }.edgeShadow(),
+                Modifier.graphicsLayer { translationX = offset.floatValue }.edgeShadow(),
             )
         }
         FlipDirection.BACKWARD -> {
@@ -335,18 +341,20 @@ private fun CoverLayers(
             PageCanvas(current, layout, theme)
             PageCanvas(
                 prev, layout, theme,
-                Modifier.graphicsLayer { translationX = offset - width }.edgeShadow(),
+                Modifier.graphicsLayer { translationX = offset.floatValue - width }.edgeShadow(),
             )
         }
     }
 }
 
-/** 页面右缘 16px 渐变投影 */
+/** 页面右缘渐变投影。颜色常驻，避免 COVER 每帧 listOf */
+private val EDGE_SHADOW_COLORS = listOf(Color(0x33000000), Color.Transparent)
+
 private fun Modifier.edgeShadow(): Modifier = drawBehind {
     val shadow = 16f
     drawRect(
         brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-            colors = listOf(Color(0x33000000), Color.Transparent),
+            colors = EDGE_SHADOW_COLORS,
             startX = size.width,
             endX = size.width + shadow,
         ),
@@ -363,25 +371,39 @@ private fun CurlLayer(
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
-    touchX: Float,
-    touchY: Float,
+    touchX: MutableFloatState,
+    downX: Float,
+    touchY: MutableFloatState,
     cornerBottom: Boolean,
     size: IntSize,
     density: androidx.compose.ui.unit.Density,
     selection: TextSelection? = null,
 ) {
     // 闲时也预渲，但放到 Default：主线程不再被 remember { renderPageBitmap } 卡住。
-    // 位图是 RGB_565（见 renderPageBitmap），三张约 15MB，不是从前 ARGB 四张双倍拷贝的峰值。
+    // 位图是 RGB_565（见 renderPageBitmap），三张约 15MB。按 PageSpec 相等判断能否环形挪槽，
+    // 换下来的旧图延后 recycle，避免正画着的那一帧被回收。
     var bitmaps by remember { mutableStateOf<CurlBitmaps?>(null) }
-    LaunchedEffect(current, prev, next, layout, theme, density) {
-        bitmaps = withContext(Dispatchers.Default) {
-            CurlBitmaps(
-                current = current?.let { renderPageBitmap(it, layout, theme, density) },
-                prev = prev?.let { renderPageBitmap(it, layout, theme, density) },
-                next = next?.let { renderPageBitmap(it, layout, theme, density) },
-                blank = renderPageBitmap(null, layout, theme, density),
-            )
+    DisposableEffect(Unit) {
+        onDispose { bitmaps?.recycleAll() }
+    }
+    LaunchedEffect(current?.spec, prev?.spec, next?.spec, layout, theme, density) {
+        val old = bitmaps
+        val produced = withContext(Dispatchers.Default + NonCancellable) {
+            shiftOrRender(old, current, prev, next, layout, theme, density)
         }
+        if (!isActive) {
+            // 没交出去：只回收相对 old 新渲的那几张，共用槽不能动
+            produced.recycleFresh(old)
+            return@LaunchedEffect
+        }
+        bitmaps = produced
+        // 新图已经交给状态；等两帧再 recycle 卸下来的槽，Canvas 不会画到已回收的 Bitmap
+        kotlinx.coroutines.delay(32)
+        old?.recycleUnused(produced)
+    }
+    if (size.width <= 1 || size.height <= 1) {
+        PageCanvas(current, layout, theme, selection = selection)
+        return
     }
     val renderer = remember(size) { CurlRenderer(size.width.toFloat(), size.height.toFloat()) }
 
@@ -391,8 +413,8 @@ private fun CurlLayer(
         return
     }
 
-    val front: ImageBitmap
-    val under: ImageBitmap
+    val front: android.graphics.Bitmap
+    val under: android.graphics.Bitmap
     when (direction) {
         FlipDirection.FORWARD -> {
             front = ready.current
@@ -406,12 +428,17 @@ private fun CurlLayer(
 
     Spacer(
         Modifier.fillMaxSize().drawBehind {
+            val tx = if (direction == FlipDirection.BACKWARD) {
+                touchX.floatValue - downX
+            } else {
+                touchX.floatValue
+            }
             drawIntoCanvas { canvas ->
                 renderer.draw(
                     canvas.nativeCanvas,
-                    front.asAndroidBitmap(),
-                    under.asAndroidBitmap(),
-                    touchX, touchY, cornerBottom,
+                    front,
+                    under,
+                    tx, touchY.floatValue, cornerBottom,
                     paperColor = theme.background.toInt(),
                 )
             }
@@ -419,10 +446,106 @@ private fun CurlLayer(
     )
 }
 
-/** CURL 用的三页 + 空白占位。空闲时持有，手势开始零合成。 */
+/**
+ * 能挪槽就挪：前翻时 prev←current、current←next，只渲新的 next。
+ * 对不上（跳章、改主题）才三张全渲。blank 只在纸色/尺寸变时重做。
+ */
+private fun shiftOrRender(
+    old: CurlBitmaps?,
+    current: RenderablePage?,
+    prev: RenderablePage?,
+    next: RenderablePage?,
+    layout: LayoutSpec,
+    theme: ReaderTheme,
+    density: androidx.compose.ui.unit.Density,
+): CurlBitmaps {
+    val curSpec = current?.spec
+    val prevSpec = prev?.spec
+    val nextSpec = next?.spec
+    val themeKey = theme.background xor theme.textColor
+    val canReuseBlank = old != null && old.layout == layout && old.themeKey == themeKey
+    val blank = if (canReuseBlank) old.blank else renderPageAndroidBitmap(null, layout, theme, density)
+
+    if (old != null && curSpec != null && curSpec == old.nextSpec) {
+        // 前翻一页：旧 next 变成当前
+        return CurlBitmaps(
+            current = old.next,
+            prev = old.current,
+            next = next?.let { renderPageAndroidBitmap(it, layout, theme, density) },
+            blank = blank,
+            currentSpec = curSpec,
+            prevSpec = prevSpec,
+            nextSpec = nextSpec,
+            layout = layout,
+            themeKey = themeKey,
+        )
+    }
+    if (old != null && curSpec != null && curSpec == old.prevSpec) {
+        // 后翻一页：旧 prev 变成当前
+        return CurlBitmaps(
+            current = old.prev,
+            prev = prev?.let { renderPageAndroidBitmap(it, layout, theme, density) },
+            next = old.current,
+            blank = blank,
+            currentSpec = curSpec,
+            prevSpec = prevSpec,
+            nextSpec = nextSpec,
+            layout = layout,
+            themeKey = themeKey,
+        )
+    }
+    return CurlBitmaps(
+        current = current?.let { renderPageAndroidBitmap(it, layout, theme, density) },
+        prev = prev?.let { renderPageAndroidBitmap(it, layout, theme, density) },
+        next = next?.let { renderPageAndroidBitmap(it, layout, theme, density) },
+        blank = blank,
+        currentSpec = curSpec,
+        prevSpec = prevSpec,
+        nextSpec = nextSpec,
+        layout = layout,
+        themeKey = themeKey,
+    )
+}
+
+private fun renderPageAndroidBitmap(
+    page: RenderablePage?,
+    layout: LayoutSpec,
+    theme: ReaderTheme,
+    density: androidx.compose.ui.unit.Density,
+): android.graphics.Bitmap = renderPageBitmap(page, layout, theme, density).asAndroidBitmap()
+
+private fun recycleBitmap(bmp: android.graphics.Bitmap?) {
+    if (bmp != null && !bmp.isRecycled) bmp.recycle()
+}
+
+/** CURL 用的三页 + 空白占位。空闲时持有，手势开始零合成。位图直接是 Android Bitmap，draw 路径不再每帧 asAndroidBitmap。 */
 private class CurlBitmaps(
-    val current: ImageBitmap?,
-    val prev: ImageBitmap?,
-    val next: ImageBitmap?,
-    val blank: ImageBitmap,
-)
+    val current: android.graphics.Bitmap?,
+    val prev: android.graphics.Bitmap?,
+    val next: android.graphics.Bitmap?,
+    val blank: android.graphics.Bitmap,
+    val currentSpec: PageSpec?,
+    val prevSpec: PageSpec?,
+    val nextSpec: PageSpec?,
+    val layout: LayoutSpec,
+    val themeKey: Long,
+) {
+    fun recycleAll() {
+        recycleBitmap(current)
+        recycleBitmap(prev)
+        recycleBitmap(next)
+        recycleBitmap(blank)
+    }
+
+    fun recycleUnused(keep: CurlBitmaps) {
+        recycleFresh(keep)
+    }
+
+    /** 回收 [this] 里有、[keep] 里没有的位图 */
+    fun recycleFresh(keep: CurlBitmaps?) {
+        val live = keep?.let { setOfNotNull(it.current, it.prev, it.next, it.blank) } ?: emptySet()
+        listOfNotNull(current, prev, next, blank).distinct().forEach { bmp ->
+            if (bmp !in live) recycleBitmap(bmp)
+        }
+    }
+}

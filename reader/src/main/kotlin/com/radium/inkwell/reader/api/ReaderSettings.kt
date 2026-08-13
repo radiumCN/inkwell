@@ -21,6 +21,11 @@ data class ReaderSettings(
     /** null = 跟随系统 */
     val brightnessOverride: Float? = null,
     val keepScreenOn: Boolean = true,
+    /**
+     * 页脚是否画电池图标。默认开，和从前「进度 · 时间 · 电量」三件套一致；
+     * 关掉只少一个图标，页码和时间还在。
+     */
+    val showBattery: Boolean = true,
     val volumeKeyFlip: Boolean = true,
     /**
      * 翻页时震一下。**默认关** —— 读小说是连续翻页，每页都震很烦，而且费电。

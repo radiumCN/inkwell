@@ -48,10 +48,9 @@ fun RenderablePage.extendSelection(
     layout: LayoutSpec,
 ): TextSelection {
     val para = measured[anchor.elementIndex] ?: return anchor
-    val slice = spec.items
-        .filterIsInstance<PageItem.TextSlice>()
-        .firstOrNull { it.elementIndex == anchor.elementIndex }
-        ?: return anchor
+    val slice = spec.items.firstOrNull {
+        it is PageItem.TextSlice && it.elementIndex == anchor.elementIndex
+    } as? PageItem.TextSlice ?: return anchor
 
     val local = toParagraphLocal(slice, x, y, layout, para)
     val offset = para.offsetForPosition(local.first, local.second)
@@ -84,13 +83,13 @@ private fun RenderablePage.hitTest(
     layout: LayoutSpec,
 ): Pair<PageItem.TextSlice, Int>? {
     val contentTop = layout.marginTopPx + layout.headerHeightPx
-    val slice = spec.items
-        .filterIsInstance<PageItem.TextSlice>()
-        .firstOrNull { s ->
+    val slice = spec.items.firstOrNull { item ->
+        item is PageItem.TextSlice && run {
+            val s = item
             val top = contentTop + s.yTopInPage
             y >= top && y <= top + s.height
         }
-        ?: return null
+    } as? PageItem.TextSlice ?: return null
     val para = measured[slice.elementIndex] ?: return null
     val local = toParagraphLocal(slice, x, y, layout, para)
     return slice to para.offsetForPosition(local.first, local.second)

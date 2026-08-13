@@ -3,8 +3,6 @@
     <!-- 与 AppThemes 默认日间「暖纸」一致；深色见 values-night。 -->
     <color name="inkwell_window_background">#FFFBEB</color>
 
-    <color name="ic_launcher_background">#2B3A55</color>
-
     <!--
       可切换图标的底色。自适应图标把前景（整幅方图）缩进可见区里，四角露出的就是这一层 ——
       所以这里的值必须和那张图自己的底色一致，否则图周围会显出一圈边框。换图时顺手核一下取色。

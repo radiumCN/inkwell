@@ -21,11 +21,12 @@ interface ReaderBookSource {
     suspend fun loadChapter(index: Int): ChapterContent
     /** 图片字节；本地书走 BookHandle.loadResource，网络书按 URL 下载 */
     suspend fun loadImage(resourceId: String): ByteArray?
-}
 
-sealed interface ReaderEvent {
-    data class PageTurned(val position: ReadPosition, val pageInChapter: Int, val pageCount: Int) : ReaderEvent
-    data class ChapterEntered(val chapterIndex: Int, val title: String) : ReaderEvent
-    data class ChapterLoadFailed(val chapterIndex: Int, val error: Throwable) : ReaderEvent
-    data object BookEndReached : ReaderEvent
+    /**
+     * 往后预取用。默认等于 [loadChapter]。
+     * 网络书覆盖成「只走静态 HTTP」：预取开 WebView 会把主线程让给 Chromium，翻页跟手被抢走。
+     */
+    suspend fun prefetchChapter(index: Int): Unit {
+        loadChapter(index)
+    }
 }

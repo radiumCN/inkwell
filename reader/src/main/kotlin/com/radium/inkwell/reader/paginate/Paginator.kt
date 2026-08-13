@@ -55,7 +55,9 @@ class Paginator(private val measurer: TextMeasureFacade) {
 
         fun snapshot(complete: Boolean) = Result(
             PaginatedChapter(chapterIndex, title, pages.toList(), charOffset),
-            HashMap(measured),
+            // 完整结果不再拷测量表：paginate 返回后不会再往里写。中途回调必须拷一份，
+            // 否则 Default 线程继续 put 时，主线程若正在遍历会 ConcurrentModification。
+            if (complete) measured else HashMap(measured),
             complete,
         )
 

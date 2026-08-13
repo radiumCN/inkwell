@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -64,6 +65,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -173,6 +177,18 @@ fun ReaderScreen(
         onDispose { keyBus.volumeFlipEnabled = false }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.flushProgress()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.flushProgress()
+        }
+    }
+
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -196,10 +212,11 @@ fun ReaderScreen(
     // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复
     ImmersiveEffect(activity, immersive = !overlay.menuVisible)
 
+    val paper = remember(session.settings.theme.background) { Color(session.settings.theme.background) }
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(session.settings.theme.background))
+            .background(paper)
             // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
             // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
             // statusBarsPadding 让开状态栏，不受这里影响。
@@ -348,6 +365,8 @@ fun ReaderScreen(
 
             else -> {
                 val page = pageUi.page
+                val pageLatest = rememberUpdatedState(page)
+                val layoutLatest = rememberUpdatedState(layout)
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -355,11 +374,12 @@ fun ReaderScreen(
                         // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
                         // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
                         // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
-                        .pointerInput(session.textSelectionEnabled, page, spec) {
-                            if (!session.textSelectionEnabled || page == null) return@pointerInput
+                        .pointerInput(session.textSelectionEnabled) {
+                            if (!session.textSelectionEnabled) return@pointerInput
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { pos ->
-                                    val sel = page.selectWordAt(pos.x, pos.y, layout)
+                                    val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
+                                    val sel = p.selectWordAt(pos.x, pos.y, layoutLatest.value)
                                     if (sel != null && !sel.isEmpty) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         anchor = sel
@@ -368,9 +388,10 @@ fun ReaderScreen(
                                 },
                                 onDrag = { change, _ ->
                                     val a = anchor ?: return@detectDragGesturesAfterLongPress
+                                    val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
                                     change.consume()
-                                    selection = page.extendSelection(
-                                        a, change.position.x, change.position.y, layout,
+                                    selection = p.extendSelection(
+                                        a, change.position.x, change.position.y, layoutLatest.value,
                                     )
                                 },
                             )
@@ -534,6 +555,7 @@ fun ReaderScreen(
             session = session,
             overlay = overlay,
             pageUi = pageUi,
+            toc = viewModel.toc,
             onExit = onExit,
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },

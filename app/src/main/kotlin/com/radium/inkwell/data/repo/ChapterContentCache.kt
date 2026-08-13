@@ -2,8 +2,10 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.util.toHex
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 网络书正文磁盘缓存。
@@ -18,14 +20,19 @@ import java.security.MessageDigest
  */
 class ChapterContentCache(private val root: File) {
 
+    private val digest = ThreadLocal.withInitial { MessageDigest.getInstance("MD5") }
+    private val touched = ConcurrentHashMap.newKeySet<String>()
+
     private fun dir(bookId: String): File = File(root, bookId).apply { mkdirs() }
 
     private fun file(bookId: String, chapterUrl: String): File =
         File(dir(bookId), key(chapterUrl) + ".txt")
 
-    private fun key(chapterUrl: String): String =
-        MessageDigest.getInstance("MD5").digest(chapterUrl.toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    private fun key(chapterUrl: String): String {
+        val md = checkNotNull(digest.get())
+        md.reset()
+        return md.digest(chapterUrl.toByteArray()).toHex()
+    }
 
     fun has(bookId: String, chapterUrl: String): Boolean = file(bookId, chapterUrl).isFile
 
@@ -57,7 +64,10 @@ class ChapterContentCache(private val root: File) {
         }
         // 命中即续命：自动清理按 lastModified 算「多久没碰过」。回看旧章时必须刷新，
         // 否则「刚翻回去看」也会被当成过期缓存下一进书就删掉。
-        f.setLastModified(System.currentTimeMillis())
+        // 同一进程里同一文件只 touch 一次：预取连读会把闪存写砸在翻页动画上。
+        if (touched.add(f.absolutePath)) {
+            f.setLastModified(System.currentTimeMillis())
+        }
         return ChapterContent(elements)
     }
 

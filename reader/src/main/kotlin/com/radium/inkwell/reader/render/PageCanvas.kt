@@ -47,7 +47,11 @@ fun DrawScope.drawPage(
     theme: ReaderTheme,
     selection: TextSelection? = null,
 ) {
-    drawRect(Color(theme.background))
+    val bg = Color(theme.background)
+    val text = Color(theme.textColor)
+    val title = Color(theme.titleColor)
+    val footer = Color(theme.footerColor)
+    drawRect(bg)
     if (page == null) return
     val contentLeft = layout.marginLeftPx
     val contentTop = layout.marginTopPx + layout.headerHeightPx
@@ -61,13 +65,13 @@ fun DrawScope.drawPage(
                     drawSelection(
                         handle, item, selection,
                         left = contentLeft, top = contentTop,
-                        color = Color(theme.textColor).copy(alpha = 0.25f),
+                        color = text.copy(alpha = 0.25f),
                     )
                 }
                 drawTextSlice(
                     handle, item,
                     left = contentLeft, top = contentTop,
-                    color = Color(if (item.isTitle) theme.titleColor else theme.textColor),
+                    color = if (item.isTitle) title else text,
                 )
             }
             is PageItem.ImageBox -> {
@@ -80,7 +84,7 @@ fun DrawScope.drawPage(
                     drawFittedImage(bmp, dst)
                 } else {
                     drawRect(
-                        Color(theme.footerColor).copy(alpha = 0.15f),
+                        footer.copy(alpha = 0.15f),
                         topLeft = dst.topLeft, size = dst.size,
                     )
                 }
@@ -171,13 +175,22 @@ private fun DrawScope.drawTextSlice(
     color: Color,
 ) {
     val sliceTopInParagraph = layoutResult.getLineTop(slice.startLine)
+    val lastLine = layoutResult.lineCount - 1
+    val fullParagraph = slice.startLine == 0 && slice.endLine >= lastLine
     translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {
-        clipRect(
-            top = sliceTopInParagraph,
-            bottom = layoutResult.getLineBottom(slice.endLine),
-        ) {
+        // 整段落都在本页：clip 是空操作，paint 也不必被裁掉几百行
+        if (fullParagraph) {
             drawIntoCanvas { canvas ->
                 layoutResult.multiParagraph.paint(canvas, color = color)
+            }
+        } else {
+            clipRect(
+                top = sliceTopInParagraph,
+                bottom = layoutResult.getLineBottom(slice.endLine),
+            ) {
+                drawIntoCanvas { canvas ->
+                    layoutResult.multiParagraph.paint(canvas, color = color)
+                }
             }
         }
     }

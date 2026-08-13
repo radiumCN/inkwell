@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,7 +74,8 @@ import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
-import androidx.compose.runtime.mutableIntStateOf
+import kotlinx.coroutines.flow.StateFlow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -93,6 +95,8 @@ import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.ui.theme.argbToHsv
+import com.radium.inkwell.ui.theme.hsvToArgb
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +105,7 @@ fun ReaderMenu(
     session: ReaderSessionUi,
     overlay: ReaderOverlayUi,
     pageUi: ReaderPageUi,
+    toc: StateFlow<List<TocItem>>,
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
@@ -315,12 +320,13 @@ fun ReaderMenu(
     }
 
     if (showToc) {
+        val tocItems by toc.collectAsStateWithLifecycle()
         ModalBottomSheet(
             onDismissRequest = { showToc = false },
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
             TocList(
-                toc = session.toc,
+                toc = tocItems,
                 current = pageUi.chapterIndex,
                 // 本地书正文一直在，缓存指示对它没有意义（isCached 恒为 false，
                 // 显示出来只会让每一章都像"没预加载"）
@@ -717,13 +723,20 @@ private fun MoreTab(
     )
 
     // 外层已有 screenPadding，关 SettingGroup 水平 inset，卡宽与 Chip 对齐（同 FlipTab）。
-    SettingGroup(applyHorizontalInset = false) {
+        SettingGroup(applyHorizontalInset = false) {
         // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
         SwitchRow(
             title = "阅读时保持屏幕常亮",
             checked = settings.keepScreenOn,
             onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
             position = SettingGroupPosition.First,
+        )
+        SwitchRow(
+            title = "页脚显示电量",
+            subtitle = "阅读页右下角的电池图标。关掉后仍显示页码、进度和时间",
+            checked = settings.showBattery,
+            onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
+            position = SettingGroupPosition.Middle,
         )
 
         // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨
@@ -806,16 +819,6 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
         modifier = Modifier.padding(top = Dimens.gapXS),
     )
 }
-
-/** HSV ↔ ARGB。用 android.graphics.Color 的工具，不必自己写一遍 */
-private fun argbToHsv(argb: Long): FloatArray {
-    val out = FloatArray(3)
-    android.graphics.Color.colorToHSV(argb.toInt(), out)
-    return out
-}
-
-private fun hsvToArgb(h: Float, s: Float, v: Float): Long =
-    android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)).toLong() and 0xFFFFFFFFL
 
 /**
  * 纸张主题选择。

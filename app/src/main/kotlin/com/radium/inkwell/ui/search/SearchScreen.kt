@@ -172,7 +172,7 @@ fun SearchScreen(
                     contentPadding = ContentListDefaults.listContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
-                    items(state.results, key = { "${it.result.title}|${it.result.author}" }) { hit ->
+                    items(state.results, key = { "${it.result.sourceId}|${it.result.bookUrl}" }) { hit ->
                         val result = hit.result
                         val inShelf = bookKey(result.title, result.author) in state.shelfKeys
                         BookListRow(

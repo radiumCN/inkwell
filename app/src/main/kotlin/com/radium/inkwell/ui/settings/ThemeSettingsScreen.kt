@@ -41,7 +41,6 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
@@ -52,6 +51,9 @@ import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
 import com.radium.inkwell.ui.theme.ThemePreset
+import com.radium.inkwell.ui.theme.hsvToColor
+import com.radium.inkwell.ui.theme.toArgbLong
+import com.radium.inkwell.ui.theme.toHsv
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -103,8 +105,8 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                     onChange = { seed, bg ->
                         update(
                             config.copy(
-                                customLightSeed = seed.toArgb().toLong() and 0xFFFFFFFFL,
-                                customLightBg = bg.toArgb().toLong() and 0xFFFFFFFFL,
+                                customLightSeed = seed.toArgbLong(),
+                                customLightBg = bg.toArgbLong(),
                             )
                         )
                     },
@@ -127,8 +129,8 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                     onChange = { seed, bg ->
                         update(
                             config.copy(
-                                customDarkSeed = seed.toArgb().toLong() and 0xFFFFFFFFL,
-                                customDarkBg = bg.toArgb().toLong() and 0xFFFFFFFFL,
+                                customDarkSeed = seed.toArgbLong(),
+                                customDarkBg = bg.toArgbLong(),
                             )
                         )
                     },
@@ -239,23 +241,19 @@ private fun CustomThemeEditor(
     onChange: (seed: Color, bg: Color) -> Unit,
 ) {
     // 从当前颜色反解 HSV / 背景参数作为滑条初值
-    val seedHsv = remember(seed) {
-        FloatArray(3).also { android.graphics.Color.colorToHSV(seed.toArgb(), it) }
-    }
+    val seedHsv = remember(seed) { seed.toHsv() }
     var hue by remember { androidx.compose.runtime.mutableFloatStateOf(seedHsv[0]) }
     var sat by remember { androidx.compose.runtime.mutableFloatStateOf(seedHsv[1]) }
     var value by remember { androidx.compose.runtime.mutableFloatStateOf(seedHsv[2]) }
-    val bgHsv = remember(background) {
-        FloatArray(3).also { android.graphics.Color.colorToHSV(background.toArgb(), it) }
-    }
+    val bgHsv = remember(background) { background.toHsv() }
     // 背景：色相固定暖色系，用「暖度=饱和度」「明度」两个参数
     var bgWarmth by remember { androidx.compose.runtime.mutableFloatStateOf(bgHsv[1]) }
     var bgValue by remember { androidx.compose.runtime.mutableFloatStateOf(bgHsv[2]) }
 
-    fun currentSeed() = Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, value)))
+    fun currentSeed() = hsvToColor(hue, sat, value)
     fun currentBg(): Color {
         val v = if (dark) bgValue.coerceIn(0f, 0.25f) else bgValue.coerceIn(0.85f, 1f)
-        return Color(android.graphics.Color.HSVToColor(floatArrayOf(45f, bgWarmth.coerceIn(0f, 0.12f), v)))
+        return hsvToColor(45f, bgWarmth.coerceIn(0f, 0.12f), v)
     }
 
     val previewScheme = AppThemes.schemeFrom(currentSeed(), currentBg(), dark)

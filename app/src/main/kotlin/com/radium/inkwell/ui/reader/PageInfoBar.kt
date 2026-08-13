@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.reader
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
@@ -14,7 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,31 +35,61 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.radium.inkwell.reader.paginate.LayoutSpec
-import kotlinx.coroutines.delay
+import com.radium.inkwell.ui.components.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
  * 页眉章节名 + 页脚信息层。
- * 左下：章内页码；右下：全书进度百分比 · 时间 · 电池图标。
+ * 左下：章内页码；右下：全书进度百分比 · 时间 ·（可选）电池图标。
  */
 @Composable
 fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec) {
     val density = LocalDensity.current
     val context = LocalContext.current
-    val footerColor = Color(session.settings.theme.footerColor)
+    val footerColor = remember(session.settings.theme.footerColor) {
+        Color(session.settings.theme.footerColor)
+    }
     val footerNumStyle = remember { TextStyle(fontSize = FOOTER_SP, fontFeatureSettings = "tnum") }
+    val showBattery = session.settings.showBattery
 
     var time by remember { mutableStateOf(currentTime()) }
-    var battery by remember { mutableIntStateOf(readBattery(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            time = currentTime()
-            battery = readBattery(context)
-            delay(30_000)
+    // 关掉电量时连 sticky BATTERY_CHANGED 都不读，少一次系统广播。
+    var battery by remember { mutableIntStateOf(if (showBattery) readBattery(context) else 100) }
+
+    // 整点/每分钟系统会发 TIME_TICK，不必自己 30s 轮询。
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                time = currentTime()
+            }
         }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(Intent.ACTION_TIME_TICK),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    DisposableEffect(context, showBattery) {
+        if (!showBattery) return@DisposableEffect onDispose {}
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                battery = batteryPercent(intent) ?: battery
+            }
+        }
+        val sticky = ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        battery = batteryPercent(sticky) ?: battery
+        onDispose { context.unregisterReceiver(receiver) }
     }
 
     // 全书阅读进度：章节 + 章内页比例
@@ -116,8 +148,10 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
                 color = footerColor,
                 style = footerNumStyle,
             )
-            Spacer(Modifier.width(8.dp))
-            BatteryIndicator(level = battery, color = footerColor)
+            if (showBattery) {
+                Spacer(Modifier.width(Dimens.gapS))
+                BatteryIndicator(level = battery, color = footerColor)
+            }
         }
     }
 }
@@ -165,10 +199,19 @@ private fun BatteryIndicator(level: Int, color: Color) {
 private fun currentTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
-private fun readBattery(context: android.content.Context): Int {
-    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        ?: return 100
+private fun readBattery(context: Context): Int {
+    val intent = ContextCompat.registerReceiver(
+        context,
+        null,
+        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+        ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
+    return batteryPercent(intent) ?: 100
+}
+
+private fun batteryPercent(intent: Intent?): Int? {
+    intent ?: return null
     val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
     val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-    return if (level >= 0 && scale > 0) level * 100 / scale else 100
+    return if (level >= 0 && scale > 0) level * 100 / scale else null
 }

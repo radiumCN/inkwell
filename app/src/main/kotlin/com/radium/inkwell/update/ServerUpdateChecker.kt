@@ -85,10 +85,4 @@ class ServerUpdateChecker(
         ),
         browserUrl = asset.sourceUrl.ifBlank { null },
     )
-
-    companion object {
-        /** @deprecated 用 [InkwellServer.BASE] —— 中转服务器不只服务于更新，反馈也走它 */
-        @Deprecated("改用 InkwellServer.BASE", ReplaceWith("InkwellServer.BASE"))
-        const val BASE = InkwellServer.BASE
-    }
 }

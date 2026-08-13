@@ -1,5 +1,6 @@
 package com.radium.inkwell.update
 
+import com.radium.inkwell.core.util.toHex
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -29,7 +30,7 @@ class UpdateInstallerTest {
     fun tearDown() = server.shutdown()
 
     private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
 
     @Test
     fun `download verifies matching sha256 and writes the file`() = runBlocking {

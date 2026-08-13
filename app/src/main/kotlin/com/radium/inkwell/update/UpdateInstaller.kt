@@ -5,6 +5,7 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import com.radium.inkwell.core.util.toHex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -55,7 +56,7 @@ class UpdateInstaller(private val http: OkHttpClient) {
                     }
                 }
             }
-            val actual = md.digest().joinToString("") { "%02x".format(it) }
+            val actual = md.digest().toHex()
             if (!actual.equals(install.sha256, ignoreCase = true)) {
                 out.delete()
                 throw IOException("文件校验失败（sha256 不一致）")

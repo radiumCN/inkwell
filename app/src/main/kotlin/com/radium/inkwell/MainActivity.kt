@@ -7,7 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
@@ -41,7 +41,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             }
         }
         setContent {
-            val themeConfig by appPrefs.themeConfig.collectAsState(initial = ThemeConfig())
+            val themeConfig by appPrefs.themeConfig.collectAsStateWithLifecycle(initialValue = ThemeConfig())
             val systemDark = isSystemInDarkTheme()
             // 状态栏/导航栏图标明暗、以及 Activity 窗体底色，都跟随「当前生效的 App 主题」。
             // 用户强制了日/夜或换了纯黑等预设时，只靠 values-night 的默认暖黑盖不住；
