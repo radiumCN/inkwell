@@ -28,6 +28,7 @@ import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -52,6 +53,7 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.settingsPageColor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExploreScreen(
@@ -77,7 +79,10 @@ fun ExploreScreen(
         if (nearEnd) viewModel.loadMore()
     }
 
+    // 与搜索/书架同一套浅色灰底白卡，避免默认 surface 白底从书行圆角缝里透出来
+    val pageColor = settingsPageColor()
     Scaffold(
+        containerColor = pageColor,
         topBar = {
             // 留经典窄栏：标题位是个可点的书源切换按钮，两段式会把这个控件摊到大标题的位置上
             TopAppBar(
@@ -95,6 +100,10 @@ fun ExploreScreen(
                 navigationIcon = {
                     BackButton(onClick = onBack)
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = pageColor,
+                    scrolledContainerColor = pageColor,
+                ),
             )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },

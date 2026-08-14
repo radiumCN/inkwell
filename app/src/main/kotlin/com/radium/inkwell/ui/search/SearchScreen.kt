@@ -32,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -58,6 +59,7 @@ import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
+import com.radium.inkwell.ui.components.settingsPageColor
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -114,7 +116,11 @@ fun SearchScreen(
         if (nearEnd) viewModel.loadMore()
     }
 
+    // 与书架/设置同一套画布：浅色灰底白卡。默认 Scaffold 是 surface 白底，
+    // 结果行圆角缝里会透出一块白板，像每条结果后面垫了一层白背景。
+    val pageColor = settingsPageColor()
     Scaffold(
+        containerColor = pageColor,
         topBar = {
             // 留经典窄栏：标题位放的是输入框。换成 AppTopBar 的两段式，输入框会被摊到
             // 大标题那一行的位置上，它自己的高度与字号跟大标题的排版打架
@@ -136,6 +142,10 @@ fun SearchScreen(
                         Icon(Icons.Default.Search, contentDescription = "搜索")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = pageColor,
+                    scrolledContainerColor = pageColor,
+                ),
             )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },

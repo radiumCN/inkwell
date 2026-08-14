@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LoadingIndicatorDefaults
+import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -257,7 +258,12 @@ internal fun colorIndex(title: String): Int {
     return ((h % COVER_PALETTE.size) + COVER_PALETTE.size) % COVER_PALETTE.size
 }
 
-/** 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点 */
+/**
+ * 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点。
+ *
+ * 默认白卡（[settingsStackListColors]）。调用页必须铺灰底 [settingsPageColor]，
+ * 否则白卡坐在默认 `surface` 白画布上，圆角缝里会透出一块白板 —— 搜索页曾经就是这样。
+ */
 @Composable
 fun BookListRow(
     title: String,
@@ -271,6 +277,7 @@ fun BookListRow(
     trailingEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    colors: ListItemColors = settingsStackListColors(),
 ) {
     val overline: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
@@ -326,6 +333,7 @@ fun BookListRow(
         supportingContent = supporting,
         // 48×64 书封：用 Comfortable，Compact 会贴边
         contentPadding = ContentListDefaults.ComfortablePadding,
+        colors = colors,
         content = {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
         },
