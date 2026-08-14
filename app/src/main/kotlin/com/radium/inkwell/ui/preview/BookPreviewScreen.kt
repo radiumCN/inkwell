@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.preview
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,10 +74,20 @@ fun BookPreviewScreen(
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         when {
-            state.loading -> LoadingState(
-                Modifier.padding(padding),
-                label = "正在获取详情与目录…",
-            )
+            state.loading -> Box(Modifier.fillMaxSize().padding(padding)) {
+                LoadingState(label = state.loadingLabel)
+                // 卡在某个源上时别只能干等：有别的书源就给出换源，不必等超时
+                if (state.sources.size > 1) {
+                    TextButton(
+                        onClick = { sourcePickerOpen = true },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(Dimens.gapXL),
+                    ) {
+                        Text("换个书源试试（共 ${state.sources.size} 个）")
+                    }
+                }
+            }
 
             // 从前这里手搓了一份错误屏（还漏掉了图标）；收敛到共享 ErrorState。
             // 一个源挂了不该让人卡死 —— 有别的书源就给出「换个书源」的出口。

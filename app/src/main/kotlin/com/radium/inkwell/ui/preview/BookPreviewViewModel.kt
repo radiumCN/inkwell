@@ -12,6 +12,8 @@ import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -40,6 +42,8 @@ data class BookPreviewUiState(
     /** 有这本书的所有书源（供换源）；带名称，光有网址没人认得出是哪个源 */
     val sources: List<SourceOption> = emptyList(),
     val currentSource: Int = 0,
+    /** 加载中的说明；试第二个源时换成「正在尝试其他书源」 */
+    val loadingLabel: String = "正在获取详情与目录…",
 )
 
 /**
@@ -166,6 +170,11 @@ class BookPreviewViewModel(
                     intro = r.intro,
                     sources = sourceOptions(),
                     currentSource = current,
+                    loadingLabel = if (index != tryIndices.first()) {
+                        "正在尝试其他书源…"
+                    } else {
+                        "正在获取详情与目录…"
+                    },
                 )
                 val rule = sourceRepo.getRule(r.sourceId)
                 if (rule == null) {
@@ -174,14 +183,33 @@ class BookPreviewViewModel(
                     continue
                 }
                 lastRuleName = rule.name
+                // 超时必须跟 fetch 脱钩：withTimeoutOrNull { fetch() } 会等被取消的 fetch
+                // 真正停下来。书源 JS / 灾难性正则不理会取消，这一等就是「一直加载」。
+                // 丢到旁边的 async 里，超时只取消 await，页面立刻试下一个；
+                // TimeoutCancellationException 是 CancellationException 的子类，
+                // 当成整页取消往外抛会让 loading 停在 true（WebView 渲染超时就会这样）。
+                val deferred = async {
+                    try {
+                        Result.success(netBookRepo.fetchDetailAndToc(rule, r.bookUrl))
+                    } catch (e: TimeoutCancellationException) {
+                        Result.failure(e)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Result.failure(e)
+                    }
+                }
+                val outcome = withTimeoutOrNull(DETAIL_TIMEOUT_MS) { deferred.await() }
+                if (outcome == null) {
+                    deferred.cancel()
+                    lastError = "书源响应超时"
+                    continue
+                }
+                val fetched = outcome.getOrElse { e ->
+                    lastError = e.message?.take(120) ?: "加载失败"
+                    null
+                } ?: continue
                 try {
-                    val fetched = withTimeoutOrNull(DETAIL_TIMEOUT_MS) {
-                        netBookRepo.fetchDetailAndToc(rule, r.bookUrl)
-                    }
-                    if (fetched == null) {
-                        lastError = "书源响应超时"
-                        continue
-                    }
                     val (d, toc) = fetched
                     if (toc.isEmpty()) {
                         lastError = "目录解析为空"
@@ -270,10 +298,10 @@ class BookPreviewViewModel(
 
     companion object {
         /**
-         * 详情+目录两个请求。比搜索单源 30s 略紧：最多试 [MAX_SOURCE_TRIES] 个源，
-         * 卡太宽三个源串起来会超过一分钟，用户以为一直在转圈。
+         * 详情+目录两个请求。对齐正文 15s：再宽三个源串起来会超过一分钟。
+         * 超时后立刻试下一个，不等挂死的 JS/正则自己结束。
          */
-        private const val DETAIL_TIMEOUT_MS = 20_000L
+        private const val DETAIL_TIMEOUT_MS = 15_000L
         private const val MAX_SOURCE_TRIES = 3
     }
 }
