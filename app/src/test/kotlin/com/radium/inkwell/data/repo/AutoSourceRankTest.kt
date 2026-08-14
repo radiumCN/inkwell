@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.SearchRuleSet
 import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlin.test.Test
@@ -185,5 +186,42 @@ class AutoSourceRankTest {
             AutoSourceSwitcher.rank(sources, exclude = null).map { it.id },
             AutoSourceSwitcher.rank(sources, exclude = null, bookHits = emptyMap()).map { it.id },
         )
+    }
+
+    // ---------- 搜索多源：打开 / 加入时先用谁 ----------
+
+    private fun hit(id: String) = SearchResult(
+        title = "书",
+        bookUrl = "http://x/$id",
+        sourceId = id,
+    )
+
+    @Test
+    fun `搜索多源按校验和响应快慢排，没测过耗时的不当最快`() {
+        val ranked = AutoSourceSwitcher.rankSearchResults(
+            listOf(hit("failed"), hit("untimed"), hit("fast"), hit("slow")),
+            listOf(
+                src("failed", CheckStatus.FAILED, respondTime = 50),
+                src("untimed", CheckStatus.OK, respondTime = -1),
+                src("fast", CheckStatus.OK, respondTime = 200),
+                src("slow", CheckStatus.OK, respondTime = 4000),
+            ),
+        )
+        assertEquals(listOf("fast", "slow", "untimed", "failed"), ranked.map { it.sourceId })
+    }
+
+    @Test
+    fun `搜索结果里没有元数据的源按未校验、未测速处理`() {
+        val ranked = AutoSourceSwitcher.rankSearchResults(
+            listOf(hit("unknown"), hit("ok")),
+            listOf(src("ok", CheckStatus.OK, respondTime = 300)),
+        )
+        assertEquals(listOf("ok", "unknown"), ranked.map { it.sourceId })
+    }
+
+    @Test
+    fun `只有一个源时保持原样`() {
+        val only = listOf(hit("a"))
+        assertEquals(only, AutoSourceSwitcher.rankSearchResults(only, emptyList()))
     }
 }

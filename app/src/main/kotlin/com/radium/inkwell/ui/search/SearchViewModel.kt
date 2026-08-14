@@ -6,6 +6,7 @@ import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchPage
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
@@ -15,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +44,11 @@ data class SearchHit(val results: List<SearchResult>) {
     val result: SearchResult
         get() = results.firstOrNull { !it.wordCount.isNullOrBlank() || !it.kind.isNullOrBlank() }
             ?: results.first()
+    /**
+     * 打开详情 / 加入书架时优先用的源。[results] 按书源健康度排过之后即第一条；
+     * 和 [result] 分开，是因为副标题要字数，打开却要快的活源。
+     */
+    val preferred: SearchResult get() = results.first()
     val origins: Set<String> get() = results.mapTo(LinkedHashSet()) { it.sourceId }
 }
 
@@ -70,6 +77,11 @@ data class SearchUiState(
     /** 换排序也 +1，同样滚回顶部 —— 否则人还停在旧位置，不知道列表已经重排了 */
     val sortId: Int = 0,
     val sort: SearchSort = SearchSort.RELEVANCE,
+    /**
+     * 进了详情页后后台搜索被掐掉。不自动接着搜 —— 返回列表后由用户点「继续搜索」。
+     * 自动恢复会跟详情页抢网，刚打开的书又开始转圈。
+     */
+    val searchPaused: Boolean = false,
     /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入" */
     val shelfKeys: Set<Pair<String, String>> = emptySet(),
 )
@@ -89,9 +101,36 @@ class SearchViewModel(
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
     private var sortJob: Job? = null
+    private var addJob: Job? = null
     /** 防抖发布：每个源回来就全量重排+刷 UI 会把主线程打满 */
     private var publishJob: Job? = null
     private val hitsMutex = Mutex()
+
+    /**
+     * 本轮搜索时的书源健康度。打开详情 / 加入时按它挑源；
+     * 用 [BookSourceRepository.getEnabledForSwitch] 一次拿齐，避免列表点一下再查一遍库。
+     */
+    private var sourceMeta: List<BookSourceRepository.EnabledSource> = emptyList()
+
+    private val pendingIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val moreAcc = java.util.Collections.synchronizedList(mutableListOf<BookSourceRule>())
+    private var roundRules: List<BookSourceRule> = emptyList()
+    private var inFlightPage: Int = 1
+    private val doneCounter = AtomicInteger(0)
+    /** 每一轮搜索 +1。被 cancel 的旧协程 finally 里不许再动下一轮的 pending / moreAcc */
+    private var roundGen: Int = 0
+
+    /** 暂停时拍下还没跑完的源；返回列表后 [resumeSearch] 接着跑，不重开一轮、不清已有结果 */
+    private var paused: PausedSearch? = null
+
+    private data class PausedSearch(
+        val remaining: List<BookSourceRule>,
+        val alreadyMore: List<BookSourceRule>,
+        val fetchPage: Int,
+        val keyword: String,
+        val searchId: Int,
+        val sort: SearchSort,
+    )
 
     /**
      * 列表滚动位置放 ViewModel 里 —— 离开搜索 entry 会拆掉 Composable，
@@ -162,6 +201,7 @@ class SearchViewModel(
     fun search() {
         val keyword = _state.value.query.trim()
         if (keyword.isEmpty()) return
+        paused = null
         searchJob?.cancel()
         sortJob?.cancel()
         publishJob?.cancel()
@@ -169,8 +209,9 @@ class SearchViewModel(
         // 刚清空的 hits，串进新搜索列表
         pagingJob?.cancel()
         searchJob = viewModelScope.launch {
-            val enabled = sourceRepo.getEnabledRules()
-            val rules = enabled.filter { it.search != null }
+            val enabled = sourceRepo.getEnabledForSwitch()
+            sourceMeta = enabled
+            val rules = enabled.map { it.rule }.filter { it.search != null }
             if (rules.isEmpty()) {
                 // 区分"没有书源"和"启用的都是仅发现页的源"，后者曾误导用户以为启用没生效
                 messages.emit(
@@ -181,46 +222,163 @@ class SearchViewModel(
                 return@launch
             }
             hitsMutex.withLock { hits.clear() }
+            moreAcc.clear()
+            pagingRules = emptyList()
+            doneCounter.set(0)
             val sort = _state.value.sort
             val searchId = _state.value.searchId + 1
-            val done = AtomicInteger(0)
+            inFlightPage = 1
             _state.value = _state.value.copy(
-                searching = true, results = emptyList(),
+                searching = true,
+                searchPaused = false,
+                results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
                 page = 1, hasMore = false, loadingMore = false,
                 searchId = searchId,
             )
-            val limiter = Semaphore(8) // 并发上限
-            val more = rules.map { rule ->
-                async {
-                    limiter.withPermit {
-                        val page = searchPage(rule, keyword, page = 1)
-                        hitsMutex.withLock { merge(page?.items.orEmpty()) }
-                        val d = done.incrementAndGet()
-                        // 进度条立刻动；列表重排防抖，避免 N 源 × 全量 Collator 打爆主线程
-                        // update 避免与 schedulePublish 并发 copy 时把 results 盖回旧快照
-                        _state.update { it.copy(doneCount = d) }
-                        schedulePublish(keyword, sort, searchId)
-                        rule.takeIf { page?.hasMore == true }
-                    }
-                }
-            }.awaitAll().filterNotNull()
-            pagingRules = more
-            // 收尾强制发一版最终排序，别停在防抖窗口里的半截
-            publishJob?.cancel()
-            val snapshot = hitsMutex.withLock { hits.values.toList() }
-            val sorted = withContext(Dispatchers.Default) {
-                ordered(snapshot, keyword, sort)
-            }
-            if (_state.value.searchId == searchId) {
-                _state.value = _state.value.copy(
-                    results = sorted,
-                    searching = false,
-                    hasMore = more.isNotEmpty(),
-                    doneCount = done.get(),
-                )
-            }
+            searchRound(rules, keyword, page = 1, sort, searchId, countProgress = true)
+            finishRound(searchId, keyword, sort, fetchPage = 1)
         }
+    }
+
+    /**
+     * 进详情页时掐掉还在飞的搜索。先拍下没跑完的源再 cancel ——
+     * 协程的 finally 会把 pending 清掉，cancel 后再读就只剩空的，返回来没法继续。
+     * 不自动 resume：详情页还在加载，后台接着搜会跟它抢网。
+     */
+    fun pauseSearch() {
+        val s = _state.value
+        if (!s.searching && !s.loadingMore) return
+        val remaining = roundRules.filter { it.id in pendingIds }
+        paused = PausedSearch(
+            remaining = remaining,
+            alreadyMore = moreAcc.toList(),
+            fetchPage = inFlightPage,
+            keyword = s.query.trim(),
+            searchId = s.searchId,
+            sort = s.sort,
+        ).takeIf { remaining.isNotEmpty() }
+        // 让还在飞的旧协程别再往 moreAcc / pending 里写；searchId 没变，已完成的 merge 仍可进 hits
+        roundGen++
+        searchJob?.cancel()
+        pagingJob?.cancel()
+        publishJob?.cancel()
+        _state.update {
+            it.copy(
+                searching = false,
+                loadingMore = false,
+                searchPaused = remaining.isNotEmpty(),
+                // 暂停期间不准翻页：pagingRules 可能还是上一轮残留，和当前关键词对不上
+                hasMore = false,
+            )
+        }
+        val searchId = s.searchId
+        val keyword = s.query.trim()
+        val sort = s.sort
+        viewModelScope.launch {
+            val snapshot = hitsMutex.withLock { hits.values.toList() }
+            val sorted = withContext(Dispatchers.Default) { ordered(snapshot, keyword, sort) }
+            if (_state.value.searchId != searchId) return@launch
+            _state.update { it.copy(results = sorted) }
+        }
+    }
+
+    fun resumeSearch() {
+        val p = paused ?: return
+        paused = null
+        if (p.fetchPage == 1) {
+            searchJob?.cancel()
+            searchJob = viewModelScope.launch { resumeRound(p) }
+        } else {
+            pagingJob?.cancel()
+            pagingJob = viewModelScope.launch { resumeRound(p) }
+        }
+    }
+
+    private suspend fun resumeRound(p: PausedSearch) {
+        moreAcc.clear()
+        moreAcc.addAll(p.alreadyMore)
+        inFlightPage = p.fetchPage
+        _state.update {
+            it.copy(
+                searching = p.fetchPage == 1,
+                loadingMore = p.fetchPage > 1,
+                searchPaused = false,
+            )
+        }
+        searchRound(p.remaining, p.keyword, p.fetchPage, p.sort, p.searchId, countProgress = p.fetchPage == 1)
+        finishRound(p.searchId, p.keyword, p.sort, p.fetchPage)
+    }
+
+    /** 打开详情前把多源结果按健康度排好，预览页用第一条当代表源 */
+    fun rankedResults(results: List<SearchResult>): List<SearchResult> =
+        AutoSourceSwitcher.rankSearchResults(results, sourceMeta)
+
+    private suspend fun searchRound(
+        rules: List<BookSourceRule>,
+        keyword: String,
+        page: Int,
+        sort: SearchSort,
+        searchId: Int,
+        countProgress: Boolean,
+    ) = coroutineScope {
+        val gen = ++roundGen
+        roundRules = rules.toList()
+        pendingIds.clear()
+        pendingIds.addAll(roundRules.map { it.id })
+        val limiter = Semaphore(8)
+        roundRules.map { rule ->
+            async {
+                try {
+                    limiter.withPermit {
+                        val pageResult = searchPage(rule, keyword, page)
+                        if (_state.value.searchId != searchId) return@withPermit
+                        if (countProgress) {
+                            hitsMutex.withLock { merge(pageResult?.items.orEmpty()) }
+                            if (gen != roundGen) return@withPermit
+                            val d = doneCounter.incrementAndGet()
+                            _state.update { it.copy(doneCount = d) }
+                            schedulePublish(keyword, sort, searchId)
+                            if (pageResult?.hasMore == true) moreAcc += rule
+                        } else {
+                            val gotNew = hitsMutex.withLock {
+                                val before = hits.size
+                                merge(pageResult?.items.orEmpty())
+                                hits.size > before
+                            }
+                            if (gen != roundGen) return@withPermit
+                            if (gotNew) schedulePublish(keyword, sort, searchId)
+                            if (pageResult?.hasMore == true && gotNew) moreAcc += rule
+                        }
+                    }
+                } finally {
+                    if (gen == roundGen) pendingIds.remove(rule.id)
+                }
+            }
+        }.awaitAll()
+    }
+
+    private suspend fun finishRound(
+        searchId: Int,
+        keyword: String,
+        sort: SearchSort,
+        fetchPage: Int,
+    ) {
+        publishJob?.cancel()
+        val snapshot = hitsMutex.withLock { hits.values.toList() }
+        val sorted = withContext(Dispatchers.Default) { ordered(snapshot, keyword, sort) }
+        val more = moreAcc.toList()
+        pagingRules = more
+        if (_state.value.searchId != searchId) return
+        _state.value = _state.value.copy(
+            results = sorted,
+            searching = false,
+            loadingMore = false,
+            searchPaused = false,
+            hasMore = more.isNotEmpty(),
+            page = fetchPage,
+            doneCount = doneCounter.get(),
+        )
     }
 
     /**
@@ -267,30 +425,36 @@ class SearchViewModel(
         keyword: String,
         sort: SearchSort,
     ): List<SearchHit> {
+        val ranked = items.map { rankHit(it) }
         val collator = Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY }
         return when (sort) {
-            SearchSort.RELEVANCE -> items.sortedWith(
+            SearchSort.RELEVANCE -> ranked.sortedWith(
                 compareBy<SearchHit> { tier(it.result, keyword) }
                     .thenByDescending { it.origins.size },
             )
-            SearchSort.WORD_COUNT -> items.sortedWith(
+            SearchSort.WORD_COUNT -> ranked.sortedWith(
                 compareByDescending<SearchHit> { wordCountOf(it) }
                     .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
-            SearchSort.TITLE_PINYIN -> items.sortedWith(
+            SearchSort.TITLE_PINYIN -> ranked.sortedWith(
                 compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
                     .thenByDescending { it.origins.size },
             )
-            SearchSort.AUTHOR_PINYIN -> items.sortedWith(
+            SearchSort.AUTHOR_PINYIN -> ranked.sortedWith(
                 compareBy(collator) { hit: SearchHit ->
                     hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
                 }.thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
-            SearchSort.UPDATE_TIME -> items.sortedWith(
+            SearchSort.UPDATE_TIME -> ranked.sortedWith(
                 compareByDescending<SearchHit> { updateEpochOf(it) }
                     .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
         }
+    }
+
+    private fun rankHit(hit: SearchHit): SearchHit {
+        if (hit.results.size <= 1) return hit
+        return SearchHit(AutoSourceSwitcher.rankSearchResults(hit.results, sourceMeta))
     }
 
     /**
@@ -339,72 +503,68 @@ class SearchViewModel(
 
     fun loadMore() {
         val s = _state.value
-        if (s.searching || s.loadingMore || !s.hasMore || pagingRules.isEmpty()) return
+        if (s.searching || s.loadingMore || s.searchPaused || !s.hasMore || pagingRules.isEmpty()) return
         val keyword = s.query.trim()
         val next = s.page + 1
         val sort = s.sort
+        val rules = pagingRules.toList()
         pagingJob?.cancel()
         publishJob?.cancel()
         val searchId = s.searchId
         pagingJob = viewModelScope.launch {
+            moreAcc.clear()
+            inFlightPage = next
             _state.value = _state.value.copy(loadingMore = true)
-            val limiter = Semaphore(8)
-            val still = pagingRules.map { rule ->
-                async {
-                    limiter.withPermit {
-                        val page = searchPage(rule, keyword, page = next)
-                        val gotNew = hitsMutex.withLock {
-                            val before = hits.size
-                            merge(page?.items.orEmpty())
-                            hits.size > before
-                        }
-                        if (gotNew) schedulePublish(keyword, sort, searchId)
-                        // 这一页没带来新书 = 这个源翻到头了（不少站点越界会一直回吐最后一页）
-                        rule.takeIf { page?.hasMore == true && gotNew }
-                    }
-                }
-            }.awaitAll().filterNotNull()
-            pagingRules = still
-            publishJob?.cancel()
-            val snapshot = hitsMutex.withLock { hits.values.toList() }
-            val sorted = withContext(Dispatchers.Default) {
-                ordered(snapshot, keyword, sort)
-            }
-            if (_state.value.searchId == searchId) {
-                _state.value = _state.value.copy(
-                    results = sorted,
-                    loadingMore = false,
-                    page = next,
-                    hasMore = still.isNotEmpty(),
-                )
-            }
+            searchRound(rules, keyword, next, sort, searchId, countProgress = false)
+            finishRound(searchId, keyword, sort, next)
         }
     }
 
-    fun addToShelf(result: SearchResult) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(addingUrl = result.bookUrl)
-            val rule = sourceRepo.getRule(result.sourceId)
-            if (rule == null) {
-                _state.value = _state.value.copy(addingUrl = null)
-                messages.emit("书源不存在")
-                return@launch
+    fun addToShelf(hit: SearchHit) {
+        addJob?.cancel()
+        addJob = viewModelScope.launch {
+            val ranked = rankedResults(hit.results)
+            val rowUrl = hit.result.bookUrl
+            _state.update { it.copy(addingUrl = rowUrl) }
+            try {
+                var lastMsg: String? = null
+                for (r in ranked.take(MAX_ADD_TRIES)) {
+                    val rule = sourceRepo.getRule(r.sourceId)
+                    if (rule == null) {
+                        lastMsg = "书源不存在"
+                        continue
+                    }
+                    val outcome = try {
+                        withTimeoutOrNull(ADD_TIMEOUT_MS) { netBookRepo.addToShelf(r, rule) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Result.failure(e)
+                    }
+                    val cancelled = outcome?.exceptionOrNull() as? CancellationException
+                    if (cancelled != null) throw cancelled
+                    when {
+                        outcome == null -> lastMsg = "书源响应超时"
+                        outcome.isSuccess -> {
+                            messages.emit("已加入书架")
+                            return@launch
+                        }
+                        else -> lastMsg = outcome.exceptionOrNull()?.message
+                    }
+                }
+                messages.emit("加入失败: ${lastMsg?.take(80) ?: "没有能用的书源"}")
+            } finally {
+                _state.update { s -> if (s.addingUrl == rowUrl) s.copy(addingUrl = null) else s }
             }
-            netBookRepo.addToShelf(result, rule)
-                .onSuccess {
-                    _state.value = _state.value.copy(addingUrl = null)
-                    messages.emit("已加入书架")
-                }
-                .onFailure {
-                    _state.value = _state.value.copy(addingUrl = null)
-                    messages.emit("加入失败: ${it.message?.take(80)}")
-                }
         }
     }
 
     companion object {
         private const val SEARCH_TIMEOUT_MS = 30_000L
         private const val PUBLISH_DEBOUNCE_MS = 250L
+        /** 详情+目录两个请求；三个源串起来不超过一分钟 */
+        private const val ADD_TIMEOUT_MS = 20_000L
+        private const val MAX_ADD_TRIES = 3
     }
 }
 

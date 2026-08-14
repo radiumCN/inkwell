@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -140,18 +142,23 @@ fun SearchScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             AnimatedVisibility(
-                visible = state.searching,
+                visible = state.searching || state.searchPaused,
                 enter = expandEnter(),
                 exit = expandExit(),
             ) {
-                DeterminateProgressBar(
-                    progress = {
-                        if (state.sourceCount == 0) 0f
-                        else state.doneCount.toFloat() / state.sourceCount
-                    },
-                )
+                Column {
+                    DeterminateProgressBar(
+                        progress = {
+                            if (state.sourceCount == 0) 0f
+                            else state.doneCount.toFloat() / state.sourceCount
+                        },
+                    )
+                    if (state.searchPaused) {
+                        SearchPauseBar(onResume = viewModel::resumeSearch)
+                    }
+                }
             }
-            if (state.results.isEmpty() && !state.searching) {
+            if (state.results.isEmpty() && !state.searching && !state.searchPaused) {
                 EmptyState(
                     icon = Icons.Default.Search,
                     title = "按已启用的规则搜索",
@@ -163,6 +170,7 @@ fun SearchScreen(
                 SearchSortBar(
                     count = state.results.size,
                     sort = state.sort,
+                    searching = state.searching,
                     onOpenSort = { showSortPicker = true },
                 )
                 // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来
@@ -186,16 +194,21 @@ fun SearchScreen(
                             caption = buildString {
                                 if (hit.origins.size > 1) append("${hit.origins.size} 个书源 · ")
                                 else append("来源: ")
-                                append(result.sourceId)
+                                append(hit.preferred.sourceId)
                                 result.kind?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                             },
-                            coverModel = result.coverUrl,
+                            coverModel = hit.preferred.coverUrl ?: result.coverUrl,
                             // 已在书架就显示"已加入"且不可点，不再让人重复加
                             trailingLabel = if (inShelf) "已加入" else "加入",
                             trailingLoading = state.addingUrl == result.bookUrl,
                             trailingEnabled = !inShelf,
-                            onTrailing = { viewModel.addToShelf(result) },
-                            onClick = { onOpenPreview(hit.results) },
+                            onTrailing = { viewModel.addToShelf(hit) },
+                            onClick = {
+                                // 进详情就停搜：后台还在打上百个源的话，详情页会一直转圈。
+                                // 返回后不自动接着搜，由用户点「继续搜索」。
+                                viewModel.pauseSearch()
+                                onOpenPreview(viewModel.rankedResults(hit.results))
+                            },
                         )
                     }
                     if (state.loadingMore) {
@@ -244,6 +257,7 @@ fun SearchScreen(
 private fun SearchSortBar(
     count: Int,
     sort: SearchSort,
+    searching: Boolean,
     onOpenSort: () -> Unit,
 ) {
     Row(
@@ -253,7 +267,7 @@ private fun SearchSortBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (count == 0) "搜索中…" else "共 $count 本",
+            if (count == 0 && searching) "搜索中…" else "共 $count 本",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -279,5 +293,36 @@ private fun SearchSortBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/**
+ * 进详情后搜索被掐掉：进度条冻在当时的位置，给一个手动「继续」而不是返回就自动接着打。
+ * 密度和 [SearchSortBar] 同一套，避免进度条底下突然冒出一块 40dp 按钮。
+ */
+@Composable
+private fun SearchPauseBar(onResume: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "搜索已暂停",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "继续搜索",
+            Modifier
+                .clickable(role = Role.Button, onClick = onResume)
+                .heightIn(min = Dimens.touchTarget)
+                .wrapContentHeight(Alignment.CenterVertically)
+                .padding(horizontal = Dimens.gapXS),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }

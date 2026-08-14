@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** 换源候选：书源名称 + 网址 */
 data class SourceOption(val id: String, val name: String)
@@ -86,15 +88,24 @@ class BookPreviewViewModel(
     private val bookRepo: BookRepository,
 ) : ViewModel() {
 
-    /** 当前用的是第几个书源 */
+    /** 当前用的是第几个书源；[ordered] 已按健康度排过，0 就是优先试的那个 */
     private var current = 0
+    private var ordered: List<SearchResult> = candidates
+    private var didRank = false
+    /** 只有首次加载才自动试后面的源；用户手动换源就尊重他的选择 */
+    private var autoTryOthers = true
 
-    private val result: SearchResult get() = candidates[current]
+    private val result: SearchResult get() = ordered[current]
+
+    private fun sourceOptions() = ordered.map {
+        SourceOption(id = it.sourceId, name = it.sourceName.ifBlank { it.sourceId })
+    }
 
     /** 换到另一个书源重新加载 —— 一个源挂了不该让人卡死在报错页 */
     fun switchSource(index: Int) {
-        if (index !in candidates.indices || index == current) return
+        if (index !in ordered.indices || index == current) return
         current = index
+        autoTryOthers = false
         detail = null
         load()
     }
@@ -128,53 +139,93 @@ class BookPreviewViewModel(
         // 快速换源时掐掉上一个源的慢请求：否则它后到会把旧源详情盖在新源标签下
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            // 详情还没到手时先用搜索结果占位，页面不至于空着
+            if (!didRank) {
+                ordered = AutoSourceSwitcher.rankSearchResults(
+                    candidates,
+                    sourceRepo.getEnabledForSwitch(),
+                )
+                didRank = true
+                current = 0
+            }
+            val tryIndices = if (autoTryOthers) {
+                ordered.indices.drop(current).take(MAX_SOURCE_TRIES)
+            } else {
+                listOf(current)
+            }
+            var lastError: String? = null
+            var lastRuleName = ""
+            for (index in tryIndices) {
+                current = index
+                val r = ordered[index]
+                // 详情还没到手时先用搜索结果占位，页面不至于空着
+                _state.value = BookPreviewUiState(
+                    loading = true,
+                    title = r.title,
+                    author = r.author.orEmpty(),
+                    coverUrl = r.coverUrl,
+                    intro = r.intro,
+                    sources = sourceOptions(),
+                    currentSource = current,
+                )
+                val rule = sourceRepo.getRule(r.sourceId)
+                if (rule == null) {
+                    lastError = "书源不存在或已被删除"
+                    lastRuleName = r.sourceName
+                    continue
+                }
+                lastRuleName = rule.name
+                try {
+                    val fetched = withTimeoutOrNull(DETAIL_TIMEOUT_MS) {
+                        netBookRepo.fetchDetailAndToc(rule, r.bookUrl)
+                    }
+                    if (fetched == null) {
+                        lastError = "书源响应超时"
+                        continue
+                    }
+                    val (d, toc) = fetched
+                    if (toc.isEmpty()) {
+                        lastError = "目录解析为空"
+                        continue
+                    }
+                    detail = d
+                    val title = d.title.ifBlank { r.title }
+                    val author = d.author ?: r.author.orEmpty()
+                    _state.value = _state.value.copy(
+                        loading = false,
+                        error = null,
+                        sourceName = rule.name,
+                        title = title,
+                        author = author,
+                        coverUrl = d.coverUrl ?: r.coverUrl,
+                        intro = d.intro ?: r.intro,
+                        chapters = toc,
+                        // 按 书名+作者 判断，而不是只认当前书源的 (sourceId,bookUrl)：同一本书跨书源
+                        // 合并、代表书源每次搜索可能不同，只认当前源会漏判成"未加入"
+                        inShelf = bookRepo.shelfBookIdByKey(title, author) != null,
+                        currentSource = current,
+                        sources = sourceOptions(),
+                    )
+                    return@launch
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = e.message?.take(120) ?: "加载失败"
+                }
+            }
+            // 自动试源全失败：回到质量最好的那个，重试从它再走一遍
+            if (autoTryOthers) current = 0
+            val r = ordered.getOrNull(current)
             _state.value = BookPreviewUiState(
-                loading = true,
-                title = result.title,
-                author = result.author.orEmpty(),
-                coverUrl = result.coverUrl,
-                intro = result.intro,
-                sources = candidates.map {
-                    SourceOption(id = it.sourceId, name = it.sourceName.ifBlank { it.sourceId })
-                },
+                loading = false,
+                error = lastError ?: "加载失败",
+                sourceName = lastRuleName,
+                title = r?.title.orEmpty(),
+                author = r?.author.orEmpty(),
+                coverUrl = r?.coverUrl,
+                intro = r?.intro,
+                sources = sourceOptions(),
                 currentSource = current,
             )
-            val rule = sourceRepo.getRule(result.sourceId)
-            if (rule == null) {
-                _state.value = _state.value.copy(loading = false, error = "书源不存在或已被删除")
-                return@launch
-            }
-            runCatching {
-                netBookRepo.fetchDetailAndToc(rule, result.bookUrl)
-            }.onSuccess { (d, toc) ->
-                detail = d
-                val title = d.title.ifBlank { result.title }
-                val author = d.author ?: result.author.orEmpty()
-                _state.value = _state.value.copy(
-                    loading = false,
-                    error = null,
-                    sourceName = rule.name,
-                    title = title,
-                    author = author,
-                    coverUrl = d.coverUrl ?: result.coverUrl,
-                    intro = d.intro ?: result.intro,
-                    chapters = toc,
-                    // 按 书名+作者 判断，而不是只认当前书源的 (sourceId,bookUrl)：同一本书跨书源
-                    // 合并、代表书源每次搜索可能不同，只认当前源会漏判成"未加入"
-                    inShelf = bookRepo.shelfBookIdByKey(title, author) != null,
-                )
-            }.onFailure { e ->
-                // 上面那句 cancel 的取消也会落到这里（runCatching 连 CancellationException 一起吞）。
-                // 不摘出来的话，换源时旧协程会把"加载失败"和 loading=false 写到新源头上 ——
-                // 新源明明正常，页面却停在报错上
-                if (e is CancellationException) throw e
-                _state.value = _state.value.copy(
-                    loading = false,
-                    sourceName = rule.name,
-                    error = e.message?.take(120) ?: "加载失败",
-                )
-            }
         }
     }
 
@@ -210,9 +261,19 @@ class BookPreviewViewModel(
         return netBookRepo.addToShelf(result.sourceId, result.bookUrl, d, s.chapters, fallback = result)
             .onSuccess { _state.value = _state.value.copy(busy = false, inShelf = true) }
             .onFailure {
+                if (it is CancellationException) throw it
                 _state.value = _state.value.copy(busy = false)
                 messages.emit("加入书架失败: ${it.message?.take(80)}")
             }
             .getOrNull()
+    }
+
+    companion object {
+        /**
+         * 详情+目录两个请求。比搜索单源 30s 略紧：最多试 [MAX_SOURCE_TRIES] 个源，
+         * 卡太宽三个源串起来会超过一分钟，用户以为一直在转圈。
+         */
+        private const val DETAIL_TIMEOUT_MS = 20_000L
+        private const val MAX_SOURCE_TRIES = 3
     }
 }

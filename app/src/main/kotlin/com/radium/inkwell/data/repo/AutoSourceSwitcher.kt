@@ -147,12 +147,36 @@ class AutoSourceSwitcher(
                 compareBy(
                     { hitRank(bookHits[it.rule.id]) },
                     { statusRank(it.checkStatus) },
-                    // 没测过耗时的排在测过的后面，而不是当成 0 排最前
-                    { if (it.respondTime > 0) it.respondTime else Long.MAX_VALUE },
+                    { respondTimeKey(it.respondTime) },
                     { it.sortOrder },
                 )
             )
             .map { it.rule }
+
+        /**
+         * 搜索命中里挑「先打开 / 先加入」的源。
+         *
+         * 同一本书多个源时，代表条目从前是「谁先搜回来谁排前」或「谁带了字数」——
+         * 那个源常常是慢站或已失效，详情页和「加入」就会一直转圈。
+         * 这里复用自动换源同一套校验状态 + 响应耗时；这些源都已经搜到这本书了，
+         * 所以不再套 [hitRank]。
+         *
+         * 库里没有元数据的源按未校验、未测速处理，而不是当成最快。
+         */
+        internal fun rankSearchResults(
+            results: List<SearchResult>,
+            sources: List<BookSourceRepository.EnabledSource>,
+        ): List<SearchResult> {
+            if (results.size <= 1) return results
+            val byId = sources.associateBy { it.rule.id }
+            return results.sortedWith(
+                compareBy(
+                    { statusRank(byId[it.sourceId]?.checkStatus ?: CheckStatus.UNCHECKED) },
+                    { respondTimeKey(byId[it.sourceId]?.respondTime ?: -1L) },
+                    { byId[it.sourceId]?.sortOrder ?: Int.MAX_VALUE },
+                ),
+            )
+        }
 
         /**
          * 按书维度的信号**压在全局健康度之前**：一个又快又健康、但根本没有这本书的源，
@@ -173,6 +197,10 @@ class AutoSourceSwitcher(
             CheckStatus.UNCHECKED -> 1
             else -> 2 // FAILED
         }
+
+        /** 没测过耗时的排在测过的后面，而不是当成 0 排最前 */
+        private fun respondTimeKey(respondTime: Long) =
+            if (respondTime > 0) respondTime else Long.MAX_VALUE
 
         /** 与换源搜索同样限流：几百个源一起发请求只会集体超时或被站点限流 */
         const val CONCURRENCY = 8

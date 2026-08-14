@@ -37,9 +37,13 @@ class NetBookRepository(
     }
 
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
-    suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = runCatching {
+    suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = try {
         val (detail, toc) = fetchDetailAndToc(rule, result.bookUrl)
-        persist(rule.id, result.bookUrl, detail, toc, fallback = result)
+        Result.success(persist(rule.id, result.bookUrl, detail, toc, fallback = result))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     /** 详情与目录已在预览页抓到时直接入库，避免重复请求 */
@@ -49,8 +53,12 @@ class NetBookRepository(
         detail: RemoteBookDetail,
         toc: List<RemoteChapter>,
         fallback: SearchResult? = null,
-    ): Result<String> = runCatching {
-        persist(sourceId, bookUrl, detail, toc, fallback)
+    ): Result<String> = try {
+        Result.success(persist(sourceId, bookUrl, detail, toc, fallback))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     /** 该书是否已在书架；在则返回 bookId */
