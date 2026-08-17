@@ -39,7 +39,7 @@ class UpdateInstaller(private val http: OkHttpClient) {
         val req = Request.Builder().url(install.url).build()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("下载失败: HTTP ${resp.code}")
-            val body = resp.body ?: throw IOException("下载失败: 空响应")
+            val body = resp.body
             val total = install.size.takeIf { it > 0 } ?: body.contentLength()
             val md = MessageDigest.getInstance("SHA-256")
             body.byteStream().use { input ->

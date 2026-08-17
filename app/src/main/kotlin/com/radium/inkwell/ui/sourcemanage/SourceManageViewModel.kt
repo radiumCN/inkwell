@@ -432,7 +432,7 @@ class SourceManageViewModel(
                     http.newCall(Request.Builder().url(url.trim()).build())
                         .execute().use { resp ->
                             check(resp.isSuccessful) { "HTTP ${resp.code}" }
-                            resp.body?.string().orEmpty()
+                            resp.body.string()
                         }
                 }
             }

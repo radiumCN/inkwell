@@ -1,13 +1,12 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.2.6"
+inkwell = "0.2.7-beta.1"
 agp = "9.3.1"
-kotlin = "2.3.21"
+kotlin = "2.4.10"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
-# 它目前最高支持 Kotlin 2.3.x —— 这也是 kotlin 升不到 2.4 的原因，
-# lint 会建议 2.4.x，别信：Kotlin 2.4 名下一个 KSP 都没有，Room 的注解处理会崩。
-# 复核过（2026-08）：symbol-processing-api 最新就是 2.3.11，2.4.x 一个都没发。
-# 想升 Kotlin 2.4 就得先等 KSP，或者把 Room 换成非 KSP 方案 —— 别只改 kotlin 那一行。
+# 2.3.10 起已兼容 Kotlin 2.4 的默认 module name（`${group}:${name}` 里的冒号）。
+# 复核过（2026-08-17）：KSP 最新仍是 2.3.11，没有 2.4.x 号；跟 Kotlin 2.4.10 搭配即可。
+# lint 若建议 Kotlin 2.4.20-RC，别跟 —— 等正式版。
 ksp = "2.3.11"
 coroutines = "1.11.0"
 serialization = "1.11.0"
@@ -19,14 +18,16 @@ serialization = "1.11.0"
 # 稳定 BOM 只收稳定版，永远给不到 alpha，所以启用 Expressive 就必须离开稳定 BOM。
 #
 # 为什么换整个 BOM，而不是只把 material3 单钉成 alpha：单钉也拦不住 —— material3 1.5.0-alpha
-# 要求 foundation/ui/animation 1.12.x，会把稳定 BOM 的 1.11.4 直接顶掉，栈照样进预发布，
-# 只是变成"toml 写 1.11.4、实际跑 1.12.0-beta01"。换 alpha BOM 反而更稳：它统一钉 rc01。
-composeBom = "2026.07.01"
+# 要求 foundation/ui/animation 跟它走（2026.08.00 是 1.13.0-alpha01），会把稳定 BOM 的
+# 1.12.x 直接顶掉，栈照样进预发布，只是变成「toml 写稳定号、实际跑 alpha」。
+# 换 alpha BOM 反而更稳：它把整栈钉在同一快照。升 BOM 前先读 material3 1.5.0-alpha 的
+# breaking change，别盲升。
+composeBom = "2026.08.00"
 activityCompose = "1.13.0"
 # Navigation 3（与 Nav2 navigation-compose 不兼容，整图迁移）
 navigation3 = "1.2.0-alpha07"
 # Material 3 Adaptive + Nav3 ListDetailSceneStrategy
-material3Adaptive = "1.3.0-rc01"
+material3Adaptive = "1.3.0"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
 lifecycle = "2.11.0"
@@ -38,8 +39,12 @@ lifecycle = "2.11.0"
 room = "3.0.1"
 datastore = "1.3.0-alpha10"
 koin = "4.2.2"
-okhttp = "5.4.0"
+okhttp = "5.5.0"
 jsoup = "1.23.1"
+# Jsoup 1.23 的 API 带着 jspecify @Nullable，但 jsoup 自己是 provided，不会传递过来。
+# Kotlin 2.4 禁止推断带不可见声明的类型 —— 不把注解放进编译 classpath，
+# `selectFirst(...)?.let { }` 这种推断就会炸。compileOnly：只给编译器看，不进包。
+jspecify = "1.0.1"
 rhino = "1.9.1"
 juniversalchardet = "2.5.0"
 jsonPath = "3.0.0"
@@ -53,7 +58,7 @@ coil = "3.5.0"
 # 用预发布不是图新：稳定版 1.4.1 不认 AGP 9，配置期就炸
 # （"Module `:app` is not a supported android module"），1.5.0 线才支持。
 # 别"顺手降回稳定版"。它只跑在构建期和 :baselineprofile 模块里，**不进包**，风险到此为止。
-benchmark = "1.5.0-beta01"
+benchmark = "1.5.0-rc01"
 profileinstaller = "1.4.1"
 uiautomator = "2.4.0"
 junit = "4.13.2"
@@ -103,6 +108,7 @@ okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTest" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }
 juniversalchardet = { module = "com.github.albfernandez:juniversalchardet", version.ref = "juniversalchardet" }
 json-path = { module = "com.jayway.jsonpath:json-path", version.ref = "jsonPath" }

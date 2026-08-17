@@ -13,6 +13,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.jsoup)
+    // 见 libs.versions.toml 的 jspecify 注释：补上 Jsoup 没传过来的注解，给 Kotlin 2.4 推断用
+    compileOnly(libs.jspecify)
     implementation(libs.rhino)
     implementation(libs.juniversalchardet)
     implementation(libs.json.path)

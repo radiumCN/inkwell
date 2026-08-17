@@ -110,7 +110,7 @@ class SourceHttpClient(
             }
             response.use { resp ->
                 if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: $url")
-                val bytes = withContext(Dispatchers.IO) { resp.body?.bytes() ?: ByteArray(0) }
+                val bytes = withContext(Dispatchers.IO) { resp.body.bytes() }
                 val charset = detectCharset(charsetOverride, resp.header("Content-Type"), bytes)
                 return FetchedPage(
                     finalUrl = resp.request.url.toString(),

@@ -69,7 +69,7 @@ class NetReaderBookSource(
     override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
         runCatching {
             http.newCall(Request.Builder().url(resourceId).build()).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.bytes() else null
+                if (resp.isSuccessful) resp.body.bytes() else null
             }
         }.getOrNull()
     }

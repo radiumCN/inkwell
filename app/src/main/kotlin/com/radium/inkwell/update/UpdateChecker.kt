@@ -95,7 +95,7 @@ class UpdateChecker(
         http.newCall(request).execute().use { resp ->
             if (resp.code == 404) return null
             check(resp.isSuccessful) { "HTTP ${resp.code}" }
-            return resp.body?.string().orEmpty()
+            return resp.body.string()
         }
     }
 

@@ -89,7 +89,7 @@ class FeedbackRepository(
             http.newCall(req).execute().use { resp ->
                 when (resp.code) {
                     201 -> {
-                        val dto = json.decodeFromString<Response>(resp.body?.string().orEmpty())
+                        val dto = json.decodeFromString<Response>(resp.body.string())
                         FeedbackResult.Success(dto.issue, dto.url)
                     }
                     400 -> FeedbackResult.InvalidContent

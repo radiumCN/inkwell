@@ -40,7 +40,7 @@ class ServerUpdateChecker(
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 when (resp.code) {
                     200 -> {
-                        val dto = json.decodeFromString<Dto>(resp.body?.string().orEmpty())
+                        val dto = json.decodeFromString<Dto>(resp.body.string())
                         // has_update 由服务端权威判定（传了 current 才有）；缺省时保守当作无更新
                         if (dto.hasUpdate == true) CheckResult.Available(dto.toUpdateInfo())
                         else CheckResult.UpToDate

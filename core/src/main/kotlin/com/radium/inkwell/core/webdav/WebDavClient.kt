@@ -71,7 +71,7 @@ class WebDavClient(
         resp.use {
             return when {
                 it.code == 404 || it.code == 409 -> null
-                it.isSuccessful -> withContext(Dispatchers.IO) { it.body?.bytes() }
+                it.isSuccessful -> withContext(Dispatchers.IO) { it.body.bytes() }
                 else -> throw WebDavException(it.code, "GET 失败: ${it.code}")
             }
         }
@@ -90,7 +90,7 @@ class WebDavClient(
             if (!it.isSuccessful && it.code != 207) {
                 throw WebDavException(it.code, "PROPFIND 失败: ${it.code}")
             }
-            val xml = withContext(Dispatchers.IO) { it.body?.string() } ?: return emptyList()
+            val xml = withContext(Dispatchers.IO) { it.body.string() }
             return parseHrefs(xml, path)
         }
     }
