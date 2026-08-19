@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +18,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -37,10 +35,13 @@ import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.CompactTextArea
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.settingsPageColor
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedbackScreen(
@@ -80,32 +81,29 @@ fun FeedbackScreen(
                 .imePadding()
                 .padding(Dimens.screenPadding)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
         ) {
-            OutlinedTextField(
-                value = state.content,
-                onValueChange = viewModel::setContent,
-                label = { Text("遇到了什么问题") },
-                placeholder = { Text("第一行会成为标题，尽量写得具体些：\n什么操作触发的、是必现还是偶发") },
-                // 不 singleLine：反馈天然是多行的，挤在一行里没法写清楚
-                modifier = Modifier.fillMaxWidth().heightIn(min = Dimens.textAreaMinHeight),
-                isError = state.overLimit,
-                supportingText = {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
+                CompactTextArea(
+                    value = state.content,
+                    onValueChange = viewModel::setContent,
+                    placeholder = "遇到了什么问题",
+                    isError = state.overLimit,
                     // 字数实时可见，别等提交被拒才发现白写了
-                    Text(
-                        "${state.content.length} / ${FeedbackRepository.MAX_CONTENT_LENGTH}",
-                        color = if (state.overLimit) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-            )
+                    supportingText = "${state.content.length} / ${FeedbackRepository.MAX_CONTENT_LENGTH}",
+                )
+                // 提示放框外：写进 placeholder 的话一落笔就消失，第一行当标题这件事就看不见了
+                Text(
+                    "第一行会成为标题，尽量写得具体些：什么操作触发的、是必现还是偶发",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
-            OutlinedTextField(
+            CompactTextField(
                 value = state.contact,
                 onValueChange = viewModel::setContact,
-                label = { Text("联系方式（选填）") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                placeholder = "联系方式（选填）",
             )
 
             // 这条警告不能省，也不能只写在副标题里：反馈会变成公开仓库里的一条 issue，

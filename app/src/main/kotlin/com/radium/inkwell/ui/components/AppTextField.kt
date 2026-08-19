@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
@@ -134,7 +136,7 @@ fun SearchField(
     )
 }
 
-/** 紧凑单行输入框：44dp 高、bodyMedium 字号、Expressive tonal 底色，对话框/表单行内使用 */
+/** 紧凑单行输入框：40dp 高、bodyMedium 字号、Expressive tonal 底色，对话框/表单行内使用 */
 @Composable
 fun CompactTextField(
     value: String,
@@ -173,4 +175,73 @@ fun CompactTextField(
             }
         },
     )
+}
+
+/**
+ * 多行紧凑输入：与 [CompactTextField] 同一套 tonal 填充，高度取 [Dimens.textAreaMinHeight]。
+ *
+ * 整页长文从前用 M3 `OutlinedTextField`：描边框和对话框/搜索框的填充框对不齐。
+ * 也不能把 [CompactTextField] 拉高凑合 —— 那条是按 40dp 垂直居中的单行框，拉高后
+ * placeholder 浮在正中，长文输入看起来像个被撑开的搜索框。
+ *
+ * 圆角故意走 [MaterialTheme.shapes.large]，不用 [TextFieldDefaults.roundedShape]：
+ * `roundedShape` 按高度一半算胶囊，160dp 高的框会变成两头大圆。
+ */
+@Composable
+fun CompactTextArea(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    supportingText: String? = null,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val style = rememberTonalFieldStyle(
+        interactionSource,
+        shape = MaterialTheme.shapes.large,
+    )
+    val textStyle = MaterialTheme.typography.bodyMedium.copy(color = style.content)
+    Column(modifier.fillMaxWidth()) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = false,
+            textStyle = textStyle,
+            cursorBrush = SolidColor(style.cursor),
+            interactionSource = interactionSource,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = Dimens.textAreaMinHeight)
+                .background(style.container, style.shape),
+            decorationBox = { innerTextField ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = Dimens.textAreaMinHeight)
+                        .padding(Dimens.gapM),
+                    contentAlignment = Alignment.TopStart,
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = textStyle,
+                            color = style.placeholder,
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+        )
+        if (supportingText != null) {
+            // 字数之类跟在框外，对齐 M3 的 supportingText，避免和正文抢框内最后一行
+            Text(
+                supportingText,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isError) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Dimens.gapM, top = Dimens.gapXS),
+            )
+        }
+    }
 }

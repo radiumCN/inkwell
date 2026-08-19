@@ -82,7 +82,8 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 图标按钮 | `AppIconButton`（`AppButtons.kt`）；顶栏返回键一律 `BackButton`。**别裸写 `IconButton`** —— 裸写的落到不带 `shapes` 的旧重载，按下去没有 Expressive 的圆角形变，同一条顶栏上就分成两派手感 |
 | 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Expressive `MediumFlexibleTopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏。四类例外仍用经典窄栏，理由写在 `AppTopBar` 的 KDoc 与各页注释里（标题位是交互控件的搜索页/发现页、带多选态的书架与书源管理） |
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（M3 `TextField` 最小 56dp 塞不下），但配色形状取 `TextFieldDefaults.roundedShape` / `tonalColors()`，别自己发明底色 |
-| 带 label 的整页表单输入 | 直接用 M3 `OutlinedTextField`（封装层暂无带 label 变体）。对话框里的短输入走 `CompactTextField`，别再塞描边框 |
+| 多行文本输入 | `CompactTextArea`（同文件）：同一套 tonal 色，高度 `textAreaMinHeight`，圆角走 `shapes.large`。**不要**用 `roundedShape` —— 那是按高度一半算的胶囊，160dp 高的框会变成两头大圆 |
+| 带 label 的整页表单输入 | WebDAV / 净化规则等仍用 M3 `OutlinedTextField`（封装层暂无带 label 变体）。意见反馈这类无 label 的整页输入走 `CompactTextArea` / `CompactTextField`，别再塞描边框 |
 | 滑块 | `AppSlider`（`AppSlider.kt`）：挂官方 `Slider`，自绘细轨 + 圆点（槽高对齐 M3 `TrackHeight`）。`activeColor` 只给阅读器浮层（纸色背景）用 |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`）；单个独立 chip 用 `AppFilterChip`（同样为了按压形变的那个重载） |
 | 列表行密度 | 默认 `CompactPadding`；带封面/大图标的行（`BookListRow`、书架列表、`AppIconSheet`）用 `ComfortablePadding` |
