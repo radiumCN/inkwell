@@ -2,19 +2,9 @@ package com.radium.inkwell.ui.settings
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -23,11 +13,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.DeterminateProgressBar
-import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.update.CheckResult
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateInfo
@@ -84,69 +73,53 @@ internal fun rememberUpdateCheckState(snackbar: SnackbarHostState): UpdateCheckS
     val dialog: @Composable () -> Unit = {
         update?.let { info ->
             val direct = info.directInstall
-            AlertDialog(
+            AppAlertDialog(
                 onDismissRequest = { if (!downloading) update = null },
-                title = {
-                    Text("发现新版本 v${info.latestVersion}" + if (info.isPrerelease) "（测试版）" else "")
+                title = "发现新版本 v${info.latestVersion}" + if (info.isPrerelease) "（测试版）" else "",
+                text = info.notes.ifBlank { "暂无更新说明" },
+                confirmText = when {
+                    direct != null -> "下载并安装"
+                    info.browserIsApk -> "下载 APK"
+                    else -> "查看 Release"
                 },
-                text = {
-                    Column(
-                        Modifier.heightIn(max = Dimens.dialogBodyMaxHeight)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Text(
-                            info.notes.ifBlank { "暂无更新说明" },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        if (downloading) {
-                            Spacer(Modifier.height(Dimens.gapM))
-                            DeterminateProgressBar(
-                                progress = { downloadProgress },
-                            )
-                            Text(
-                                "正在下载并校验… ${(downloadProgress * 100).toInt()}%",
-                                Modifier.padding(top = Dimens.gapXS),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
+                dismissText = "以后再说",
+                confirmLoading = downloading,
+                dismissEnabled = !downloading,
+                onConfirm = {
                     if (direct != null) {
-                        TextButton(
-                            enabled = !downloading,
-                            onClick = {
-                                downloading = true
-                                downloadProgress = 0f
-                                scope.launch {
-                                    runCatching {
-                                        val apk = updateManager.downloadAndVerify(
-                                            direct, context.cacheDir,
-                                        ) { downloadProgress = it }
-                                        if (updateManager.install(context, apk)) {
-                                            update = null
-                                        } else {
-                                            snackbar.showSnackbar("请先在系统里授予「安装未知应用」权限，再重试")
-                                        }
-                                    }.onFailure {
-                                        snackbar.showSnackbar("下载失败: ${it.message?.take(80)}")
-                                    }
-                                    downloading = false
+                        downloading = true
+                        downloadProgress = 0f
+                        scope.launch {
+                            runCatching {
+                                val apk = updateManager.downloadAndVerify(
+                                    direct, context.cacheDir,
+                                ) { downloadProgress = it }
+                                if (updateManager.install(context, apk)) {
+                                    update = null
+                                } else {
+                                    snackbar.showSnackbar("请先在系统里授予「安装未知应用」权限，再重试")
                                 }
-                            },
-                        ) { Text(if (downloading) "下载中…" else "下载并安装") }
-                    } else {
-                        TextButton(onClick = {
-                            info.browserUrl?.let {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                            }.onFailure {
+                                snackbar.showSnackbar("下载失败: ${it.message?.take(80)}")
                             }
-                            update = null
-                        }) { Text(if (info.browserIsApk) "下载 APK" else "查看 Release") }
+                            downloading = false
+                        }
+                    } else {
+                        info.browserUrl?.let {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                        }
+                        update = null
                     }
                 },
-                dismissButton = {
-                    TextButton(enabled = !downloading, onClick = { update = null }) { Text("以后再说") }
+                content = {
+                    if (downloading) {
+                        DeterminateProgressBar(progress = { downloadProgress })
+                        Text(
+                            "正在下载并校验… ${(downloadProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 },
             )
         }

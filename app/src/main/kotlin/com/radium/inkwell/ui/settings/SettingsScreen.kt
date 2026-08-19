@@ -6,13 +6,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -26,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.Dimens
@@ -225,27 +224,19 @@ fun SettingsScreen(
     }
 
     if (confirmClearCache) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { confirmClearCache = false },
-            title = { Text("清除正文缓存") },
-            text = {
-                Text(
-                    "将删除已下载的 ${formatSize(cacheBytes)} 章节正文。" +
-                        "书架、阅读进度和书源都不受影响，下次阅读时如需正文会重新加载。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmClearCache = false
-                    scope.launch {
-                        withContext(Dispatchers.IO) { cache.clearAll() }
-                        refreshCacheSize()
-                        snackbar.showSnackbar("已清除正文缓存")
-                    }
-                }) { Text("清除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClearCache = false }) { Text("取消") }
+            title = "清除正文缓存",
+            text = "将删除已下载的 ${formatSize(cacheBytes)} 章节正文。" +
+                "书架、阅读进度和书源都不受影响，下次阅读时如需正文会重新加载。",
+            confirmText = "清除",
+            onConfirm = {
+                confirmClearCache = false
+                scope.launch {
+                    withContext(Dispatchers.IO) { cache.clearAll() }
+                    refreshCacheSize()
+                    snackbar.showSnackbar("已清除正文缓存")
+                }
             },
         )
     }

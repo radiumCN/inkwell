@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -29,6 +28,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
@@ -36,7 +36,6 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -121,18 +120,14 @@ fun ReplaceRuleScreen(
     }
 
     pendingDelete?.let { rule ->
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除规则") },
-            text = { Text("删除「${rule.name}」？已缓存的章节不会重新净化，需要清除正文缓存后重读。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.delete(rule)
-                    pendingDelete = null
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            title = "删除规则",
+            text = "删除「${rule.name}」？已缓存的章节不会重新净化，需要清除正文缓存后重读。",
+            confirmText = "删除",
+            onConfirm = {
+                viewModel.delete(rule)
+                pendingDelete = null
             },
         )
     }

@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -57,7 +56,6 @@ import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -73,8 +71,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.animationsEnabled
@@ -606,53 +605,40 @@ fun BookshelfScreen(
             groupTarget = null
             groupInput = ""
         }
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { dismissGroupTarget() },
-            title = { Text("设置分组") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = groupInput,
-                        onValueChange = { groupInput = it },
-                        label = { Text("分组名") },
-                        placeholder = { Text("留空则移出分组") },
-                        singleLine = true,
+            title = "设置分组",
+            confirmText = "确定",
+            onConfirm = {
+                viewModel.assignGroup(book.id, groupInput)
+                dismissGroupTarget()
+            },
+            content = {
+                CompactTextField(
+                    value = groupInput,
+                    onValueChange = { groupInput = it },
+                    placeholder = "分组名，留空则移出",
+                )
+                if (groups.isNotEmpty()) {
+                    ChipRow(
+                        options = groups,
+                        selectedIndex = groups.indexOf(groupInput),
+                        onSelect = { groupInput = groups[it] },
                     )
-                    if (groups.isNotEmpty()) {
-                        ChipRow(
-                            options = groups,
-                            selectedIndex = groups.indexOf(groupInput),
-                            onSelect = { groupInput = groups[it] },
-                            modifier = Modifier.padding(top = Dimens.gapS),
-                        )
-                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.assignGroup(book.id, groupInput)
-                    dismissGroupTarget()
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { dismissGroupTarget() }) { Text("取消") }
             },
         )
     }
 
     deleteTarget?.let { book ->
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除书籍") },
-            text = { Text("确定从书架删除《${book.title}》吗？本地文件与缓存将一并删除。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteBook(book.id)
-                    deleteTarget = null
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            title = "删除书籍",
+            text = "确定从书架删除《${book.title}》吗？本地文件与缓存将一并删除。",
+            confirmText = "删除",
+            onConfirm = {
+                viewModel.deleteBook(book.id)
+                deleteTarget = null
             },
         )
     }
@@ -662,57 +648,42 @@ fun BookshelfScreen(
             showGroupAssign = false
             groupInput = ""
         }
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { dismissGroupAssign() },
-            title = { Text("设置分组") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = groupInput,
-                        onValueChange = { groupInput = it },
-                        label = { Text("分组名") },
-                        placeholder = { Text("留空则移出分组") },
-                        singleLine = true,
+            title = "设置分组",
+            confirmText = "确定",
+            onConfirm = {
+                val name = groupInput
+                dismissGroupAssign()
+                viewModel.assignGroupSelected(name)
+            },
+            content = {
+                CompactTextField(
+                    value = groupInput,
+                    onValueChange = { groupInput = it },
+                    placeholder = "分组名，留空则移出",
+                )
+                if (groups.isNotEmpty()) {
+                    // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
+                    ChipRow(
+                        options = groups,
+                        selectedIndex = groups.indexOf(groupInput),
+                        onSelect = { groupInput = groups[it] },
                     )
-                    if (groups.isNotEmpty()) {
-                        // 已有分组一键选中，省得每次手打（还容易打错，打错就多出一个组）
-                        ChipRow(
-                            options = groups,
-                            selectedIndex = groups.indexOf(groupInput),
-                            onSelect = { groupInput = groups[it] },
-                            modifier = Modifier.padding(top = Dimens.gapS),
-                        )
-                    }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val name = groupInput
-                    dismissGroupAssign()
-                    viewModel.assignGroupSelected(name)
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { dismissGroupAssign() }) { Text("取消") }
             },
         )
     }
 
     if (confirmBatchDelete) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { confirmBatchDelete = false },
-            title = { Text("删除书籍") },
-            text = {
-                Text("确定从书架删除选中的 ${selected.size} 本吗？本地文件与缓存将一并删除。")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteSelected()
-                    confirmBatchDelete = false
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmBatchDelete = false }) { Text("取消") }
+            title = "删除书籍",
+            text = "确定从书架删除选中的 ${selected.size} 本吗？本地文件与缓存将一并删除。",
+            confirmText = "删除",
+            onConfirm = {
+                viewModel.deleteSelected()
+                confirmBatchDelete = false
             },
         )
     }

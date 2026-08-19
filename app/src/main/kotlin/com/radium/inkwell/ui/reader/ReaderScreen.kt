@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -43,6 +42,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
@@ -584,35 +584,29 @@ fun ReaderScreen(
     }
 
     if (addShelfPrompt) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { if (!settlingShelf) addShelfPrompt = false },
-            title = { Text("加入书架") },
-            text = { Text("要把《${session.bookTitle}》加入书架吗？") },
-            confirmButton = {
-                TextButton(
-                    enabled = !settlingShelf,
-                    onClick = {
-                        settlingShelf = true
-                        scope.launch {
-                            viewModel.commitToShelf()
-                            addShelfPrompt = false
-                            onExit()
-                        }
-                    },
-                ) { Text("加入") }
+            title = "加入书架",
+            text = "要把《${session.bookTitle}》加入书架吗？",
+            confirmText = "加入",
+            dismissText = "不加入",
+            confirmEnabled = !settlingShelf,
+            dismissEnabled = !settlingShelf,
+            onConfirm = {
+                settlingShelf = true
+                scope.launch {
+                    viewModel.commitToShelf()
+                    addShelfPrompt = false
+                    onExit()
+                }
             },
-            dismissButton = {
-                TextButton(
-                    enabled = !settlingShelf,
-                    onClick = {
-                        settlingShelf = true
-                        scope.launch {
-                            viewModel.discardUnshelved()
-                            addShelfPrompt = false
-                            onExit()
-                        }
-                    },
-                ) { Text("不加入") }
+            onDismiss = {
+                settlingShelf = true
+                scope.launch {
+                    viewModel.discardUnshelved()
+                    addShelfPrompt = false
+                    onExit()
+                }
             },
         )
     }

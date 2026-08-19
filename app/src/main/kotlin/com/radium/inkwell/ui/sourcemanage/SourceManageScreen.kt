@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Source
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,12 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.ui.components.ChipRow
@@ -61,8 +55,10 @@ import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.AppFilterChip
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSlider
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.BackButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -72,8 +68,6 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.settingsPageColor
@@ -379,45 +373,39 @@ fun SourceManageScreen(
     if (showCheckOptions) {
         var draft by remember { mutableStateOf(options) }
         val target = if (selected.isEmpty()) sources.size else selected.size
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showCheckOptions = false },
-            title = { Text("校验 $target 个书源") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(
-                        value = draft.keyword,
-                        onValueChange = { draft = draft.copy(keyword = it) },
-                        label = { Text("搜索关键词") },
-                        supportingText = { Text("要一个几乎每个站都搜得出结果的常见词") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(Dimens.gapS))
-                    CheckItemRow("校验详情页", draft.checkDetail) { draft = draft.copy(checkDetail = it) }
-                    CheckItemRow("校验目录", draft.checkToc) { draft = draft.copy(checkToc = it) }
-                    CheckItemRow("校验正文", draft.checkContent) { draft = draft.copy(checkContent = it) }
-                    Spacer(Modifier.height(Dimens.gapS))
-                    Text(
-                        "单源超时 ${draft.timeoutMs / 1000} 秒",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    AppSlider(
-                        value = (draft.timeoutMs / 1000).toFloat(),
-                        onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
-                        valueRange = 15f..180f,
-                        steps = 10,
-                    )
-                }
+            title = "校验 $target 个书源",
+            confirmText = "开始校验",
+            onConfirm = {
+                viewModel.setOptions(draft)
+                showCheckOptions = false
+                viewModel.validate(selected)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.setOptions(draft)
-                    showCheckOptions = false
-                    viewModel.validate(selected)
-                }) { Text("开始校验") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCheckOptions = false }) { Text("取消") }
+            content = {
+                CompactTextField(
+                    value = draft.keyword,
+                    onValueChange = { draft = draft.copy(keyword = it) },
+                    placeholder = "搜索关键词",
+                )
+                Text(
+                    "要一个几乎每个站都搜得出结果的常见词",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CheckItemRow("校验详情页", draft.checkDetail) { draft = draft.copy(checkDetail = it) }
+                CheckItemRow("校验目录", draft.checkToc) { draft = draft.copy(checkToc = it) }
+                CheckItemRow("校验正文", draft.checkContent) { draft = draft.copy(checkContent = it) }
+                Text(
+                    "单源超时 ${draft.timeoutMs / 1000} 秒",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                AppSlider(
+                    value = (draft.timeoutMs / 1000).toFloat(),
+                    onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
+                    valueRange = 15f..180f,
+                    steps = 10,
+                )
             },
         )
     }
@@ -454,61 +442,47 @@ fun SourceManageScreen(
             showGroupAssign = false
             groupInput = ""
         }
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { dismissGroupAssign() },
-            title = { Text("设置分组") },
-            text = {
-                OutlinedTextField(
+            title = "设置分组",
+            confirmText = "确定",
+            onConfirm = {
+                val name = groupInput
+                dismissGroupAssign()
+                viewModel.setGroup(name)
+            },
+            content = {
+                CompactTextField(
                     value = groupInput,
                     onValueChange = { groupInput = it },
-                    label = { Text("分组名") },
-                    placeholder = { Text("留空则移出分组") },
-                    singleLine = true,
+                    placeholder = "分组名，留空则移出",
                 )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val name = groupInput
-                    dismissGroupAssign()
-                    viewModel.setGroup(name)
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { dismissGroupAssign() }) { Text("取消") }
             },
         )
     }
 
     if (confirmBatchDelete) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { confirmBatchDelete = false },
-            title = { Text("删除书源") },
-            text = { Text("确定删除选中的 ${selected.size} 个书源吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmBatchDelete = false
-                    viewModel.deleteSelected()
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmBatchDelete = false }) { Text("取消") }
+            title = "删除书源",
+            text = "确定删除选中的 ${selected.size} 个书源吗？",
+            confirmText = "删除",
+            onConfirm = {
+                confirmBatchDelete = false
+                viewModel.deleteSelected()
             },
         )
     }
 
     if (confirmDeleteInvalid) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { confirmDeleteInvalid = false },
-            title = { Text("删除失效书源") },
-            text = { Text("确定删除全部 $failedCount 个失效书源吗？此操作不可撤销。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDeleteInvalid = false
-                    viewModel.deleteInvalid()
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDeleteInvalid = false }) { Text("取消") }
+            title = "删除失效书源",
+            text = "确定删除全部 $failedCount 个失效书源吗？此操作不可撤销。",
+            confirmText = "删除",
+            onConfirm = {
+                confirmDeleteInvalid = false
+                viewModel.deleteInvalid()
             },
         )
     }
@@ -519,53 +493,35 @@ fun SourceManageScreen(
             showUrlImport = false
             importUrl = ""
         }
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { dismissUrlImport() },
-            title = { Text("从 URL 导入书源") },
-            text = {
-                Column {
-                    Text(
-                        "支持 Inkwell 与 Legado（阅读）格式的书源 JSON 链接",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedTextField(
-                        value = importUrl,
-                        onValueChange = { importUrl = it },
-                        label = { Text("书源 JSON 链接") },
-                        placeholder = { Text("https://…/sources.json") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Dimens.gapS),
-                    )
-                }
+            title = "从 URL 导入书源",
+            text = "支持 Inkwell 与 Legado（阅读）格式的书源 JSON 链接",
+            confirmText = "导入",
+            confirmEnabled = importUrl.isNotBlank(),
+            onConfirm = {
+                viewModel.importFromUrl(importUrl)
+                dismissUrlImport()
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.importFromUrl(importUrl)
-                    dismissUrlImport()
-                }) { Text("导入") }
-            },
-            dismissButton = {
-                TextButton(onClick = { dismissUrlImport() }) { Text("取消") }
+            content = {
+                CompactTextField(
+                    value = importUrl,
+                    onValueChange = { importUrl = it },
+                    placeholder = "https://…/sources.json",
+                )
             },
         )
     }
 
     deleteTarget?.let { source ->
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除书源") },
-            text = { Text("确定删除「${source.name}」吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.delete(source.id)
-                    deleteTarget = null
-                }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            title = "删除书源",
+            text = "确定删除「${source.name}」吗？",
+            confirmText = "删除",
+            onConfirm = {
+                viewModel.delete(source.id)
+                deleteTarget = null
             },
         )
     }
