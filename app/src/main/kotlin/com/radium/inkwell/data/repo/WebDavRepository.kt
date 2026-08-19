@@ -92,7 +92,10 @@ class WebDavRepository(
     private suspend fun buildLocalPayload(): BackupPayload = BackupPayload(
         deviceId = prefs.deviceId(),
         exportedAt = System.currentTimeMillis(),
-        books = bookDao.getAll().map { b ->
+        // 试读未上架不进备份：从没成为用户书架上的书，同步出去只会在别的设备
+        // 冒出一本看不见的书，或在用户点「不加入」之后变成凭空墓碑。
+        // 墓碑仍要带走（inShelf 可能是 false —— 删过又试读过），合并靠它表达「删过」。
+        books = bookDao.getAll().filter { it.inShelf || it.deleted }.map { b ->
             BackupBook(
                 id = b.id, type = b.type, title = b.title, author = b.author,
                 intro = b.intro,
@@ -153,6 +156,9 @@ class WebDavRepository(
                         readAt = b.readAt, updatedAt = b.updatedAt,
                         groupName = b.groupName, hidden = b.hidden,
                         deleted = b.deleted,
+                        // 备份里的都是真正上过架的书（或墓碑）。本地若还是试读行，
+                        // 被远端一份活书盖过来时必须上架，否则书架上永远看不见。
+                        inShelf = !b.deleted,
                     )
                 )
             } else {
@@ -170,6 +176,7 @@ class WebDavRepository(
                         groupName = b.groupName, hidden = b.hidden,
                         // 墓碑也要落地：别把别的设备删掉的书当成新书插回来
                         deleted = b.deleted,
+                        inShelf = !b.deleted,
                     )
                 )
             }

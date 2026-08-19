@@ -120,6 +120,11 @@ data class ReaderUiState(
      * 静默换掉的话，用户只会觉得"这书怎么突然变了"，根本想不到是 App 干的。
      */
     val autoChangedTo: String? = null,
+    /**
+     * 是否已在书架。默认 true：进书前还没读到书行时不要误弹「加入书架」。
+     * 预览直读落库为试读后这里会变成 false，退出时再问。
+     */
+    val inShelf: Boolean = true,
 )
 
 /**
@@ -149,6 +154,8 @@ data class ReaderSessionUi(
     val isNetBook: Boolean = false,
     val currentSourceName: String = "",
     val textSelectionEnabled: Boolean = true,
+    /** 未上架的试读：退出阅读时提示是否加入书架 */
+    val inShelf: Boolean = true,
 )
 
 data class ReaderOverlayUi(
@@ -173,7 +180,7 @@ private fun ReaderUiState.toPage() = ReaderPageUi(
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
-    bookTitle, coverPath, chapterCount, settings, isNetBook, currentSourceName, textSelectionEnabled,
+    bookTitle, coverPath, chapterCount, settings, isNetBook, currentSourceName, textSelectionEnabled, inShelf,
 )
 
 private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
@@ -293,7 +300,11 @@ class ReaderViewModel(
             // splash 的书名/封面第一时间交出去：下面 WebDAV 无目录的冷路径要先抓一次目录
             // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
-            _state.value = _state.value.copy(bookTitle = b.title, coverPath = b.coverPath)
+            _state.value = _state.value.copy(
+                bookTitle = b.title,
+                coverPath = b.coverPath,
+                inShelf = b.inShelf && !b.deleted,
+            )
             var chapters = chapterDao.getByBook(bookId)
             var currentSourceName = ""
             val src = if (b.type == BookType.NET) {
@@ -329,6 +340,7 @@ class ReaderViewModel(
                 toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
                 isNetBook = b.type == BookType.NET,
                 currentSourceName = currentSourceName,
+                inShelf = b.inShelf && !b.deleted,
                 error = null,
             )
             // 网络书：首章加载别等清理。进度之前且超龄的正文缓存顺手清掉，目录 isCached 一并 sync。
@@ -1332,8 +1344,26 @@ class ReaderViewModel(
     }
 
     private var saveProgressJob: Job? = null
+    /** 试读选择不加入后不要再把进度写回 —— 那一行马上要被清掉 */
+    private var skipProgressFlush = false
+
+    /** 试读结束：正式上架。调用方等它完成再退页，避免和丢弃竞态。 */
+    suspend fun commitToShelf() = withContext(NonCancellable) {
+        val p = position
+        bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
+        bookRepo.commitToShelf(bookId)
+        book = book?.copy(inShelf = true, deleted = false)
+        _state.value = _state.value.copy(inShelf = true)
+    }
+
+    /** 试读结束：不上架。墓碑试读只清目录；新试读真删，不留同步墓碑。 */
+    suspend fun discardUnshelved() = withContext(NonCancellable) {
+        skipProgressFlush = true
+        bookRepo.discardUnshelved(bookId)
+    }
 
     private fun saveProgress() {
+        if (skipProgressFlush) return
         saveProgressJob?.cancel()
         saveProgressJob = viewModelScope.launch {
             delay(PROGRESS_DEBOUNCE_MS)
@@ -1342,6 +1372,7 @@ class ReaderViewModel(
     }
 
     private suspend fun persistProgress() {
+        if (skipProgressFlush) return
         val p = position
         withContext(Dispatchers.IO + NonCancellable) {
             bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
@@ -1350,6 +1381,7 @@ class ReaderViewModel(
 
     /** 离开阅读页 / 进后台时立刻刷盘，避免防抖窗口里进程被杀丢进度 */
     fun flushProgress() {
+        if (skipProgressFlush) return
         saveProgressJob?.cancel()
         val p = position
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO + NonCancellable).launch {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -21,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -79,6 +81,7 @@ import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
@@ -193,16 +196,27 @@ fun ReaderScreen(
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
     val haptic = LocalHapticFeedback.current
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    var addShelfPrompt by remember { mutableStateOf(false) }
+    var settlingShelf by remember { mutableStateOf(false) }
+
+    // 预览直读还没上架：退出先问要不要加入，而不是默默留在书架上。
+    val requestExit: () -> Unit = {
+        if (session.inShelf) onExit() else addShelfPrompt = true
+    }
 
     // 系统返回：先收起暂态浮层（选字/面板/菜单），都关着才真正退出阅读页。
     // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
+    // 试读未上架时再拦一层，弹出加入书架的确认。
     BackHandler(
-        overlay.menuVisible || selection != null || overlay.sourceCandidates != null,
+        overlay.menuVisible || selection != null || overlay.sourceCandidates != null ||
+            (!session.inShelf && !addShelfPrompt),
     ) {
         when {
             selection != null -> { selection = null; anchor = null }
             overlay.sourceCandidates != null -> viewModel.dismissSourcePanel()
             overlay.menuVisible -> viewModel.toggleMenu()
+            else -> addShelfPrompt = true
         }
     }
 
@@ -308,7 +322,7 @@ fun ReaderScreen(
                         }
                     }
                     Spacer(Modifier.height(Dimens.gapS))
-                    TextButton(onClick = onExit) {
+                    TextButton(onClick = requestExit) {
                         Text("返回书架", color = Color(session.settings.theme.footerColor))
                     }
                 }
@@ -556,7 +570,7 @@ fun ReaderScreen(
             overlay = overlay,
             pageUi = pageUi,
             toc = viewModel.toc,
-            onExit = onExit,
+            onExit = requestExit,
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
@@ -567,6 +581,40 @@ fun ReaderScreen(
         )
 
         }
+    }
+
+    if (addShelfPrompt) {
+        AlertDialog(
+            onDismissRequest = { if (!settlingShelf) addShelfPrompt = false },
+            title = { Text("加入书架") },
+            text = { Text("要把《${session.bookTitle}》加入书架吗？") },
+            confirmButton = {
+                TextButton(
+                    enabled = !settlingShelf,
+                    onClick = {
+                        settlingShelf = true
+                        scope.launch {
+                            viewModel.commitToShelf()
+                            addShelfPrompt = false
+                            onExit()
+                        }
+                    },
+                ) { Text("加入") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !settlingShelf,
+                    onClick = {
+                        settlingShelf = true
+                        scope.launch {
+                            viewModel.discardUnshelved()
+                            addShelfPrompt = false
+                            onExit()
+                        }
+                    },
+                ) { Text("不加入") }
+            },
+        )
     }
 }
 

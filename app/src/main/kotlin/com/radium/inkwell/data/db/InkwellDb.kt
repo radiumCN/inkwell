@@ -27,7 +27,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -159,6 +159,16 @@ abstract class InkwellDb : RoomDatabase() {
                       AND bookId NOT IN (SELECT id FROM book WHERE deleted = 0)
                     """.trimIndent(),
                 )
+            }
+        }
+
+        /**
+         * 试读未上架。从预览直接读也要落库（阅读器靠书行+目录），但不能因此出现在书架上。
+         * 只加列、默认 1 —— 老数据都是用户加过或导入过的，原样留在书架。
+         */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN inShelf INTEGER NOT NULL DEFAULT 1")
             }
         }
 

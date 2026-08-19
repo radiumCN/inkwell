@@ -80,6 +80,7 @@ object BookPreviewCandidates {
 
 /**
  * 网络书籍预览页：先看简介与目录，再决定加书架或直接读。
+ * 「直接读」只落库供翻页，不上书架；退出阅读时再问要不要留下。
  *
  * [result] 是搜索/发现给出的那条结果。不少 JSON API 书源的「详情页」其实只是目录接口，
  * 解析不出书名/作者/封面 —— 这些字段一律回落到它。
@@ -265,7 +266,7 @@ class BookPreviewViewModel(
                 messages.emit("已在书架")
                 return@launch
             }
-            if (ensureInShelf() != null) messages.emit("已加入书架")
+            if (persistBook(inShelf = true) != null) messages.emit("已加入书架")
         }
     }
 
@@ -274,24 +275,35 @@ class BookPreviewViewModel(
         viewModelScope.launch {
             val s = _state.value
             // 已在书架（可能是别的书源加的）就直接开那本，不再入库一份重复的
-            val bookId = bookRepo.shelfBookIdByKey(s.title, s.author) ?: ensureInShelf() ?: return@launch
+            val bookId = bookRepo.shelfBookIdByKey(s.title, s.author)
+                ?: persistBook(inShelf = false)
+                ?: return@launch
             if (chapterIndex >= 0) netBookRepo.setReadPosition(bookId, chapterIndex)
             _openReader.emit(bookId)
         }
     }
 
-    /** 入库（已在书架则直接返回其 bookId）；失败发消息并返回 null */
-    private suspend fun ensureInShelf(): String? {
+    /** 入库；[inShelf] = 正式加架。失败发消息并返回 null */
+    private suspend fun persistBook(inShelf: Boolean): String? {
         val s = _state.value
         if (s.busy) return null
         val d = detail ?: return null
         _state.value = s.copy(busy = true)
-        return netBookRepo.addToShelf(result.sourceId, result.bookUrl, d, s.chapters, fallback = result)
-            .onSuccess { _state.value = _state.value.copy(busy = false, inShelf = true) }
+        return netBookRepo.addToShelf(
+            result.sourceId, result.bookUrl, d, s.chapters,
+            fallback = result,
+            inShelf = inShelf,
+        )
+            .onSuccess {
+                _state.value = _state.value.copy(busy = false, inShelf = inShelf || _state.value.inShelf)
+            }
             .onFailure {
                 if (it is CancellationException) throw it
                 _state.value = _state.value.copy(busy = false)
-                messages.emit("加入书架失败: ${it.message?.take(80)}")
+                messages.emit(
+                    if (inShelf) "加入书架失败: ${it.message?.take(80)}"
+                    else "无法开始阅读: ${it.message?.take(80)}",
+                )
             }
             .getOrNull()
     }

@@ -67,4 +67,11 @@ data class BookEntity(
      * 所有面向用户的查询都要过滤掉 deleted = 1。
      */
     val deleted: Boolean = false,
+    /**
+     * 是否在书架上。阅读器要靠书行+目录才能翻页，所以从预览「直接读」也必须先落库；
+     * 但那不是用户点了「加入书架」。false = 试读：书架列表不显示，退出阅读再问要不要留下。
+     *
+     * 默认 true：老数据、导入、显式加架都是真正在架上的书。只有预览直读会写成 false。
+     */
+    val inShelf: Boolean = true,
 )

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookDao {
-    @Query("SELECT * FROM book WHERE deleted = 0 ORDER BY readAt DESC, addedAt DESC")
+    @Query("SELECT * FROM book WHERE deleted = 0 AND inShelf = 1 ORDER BY readAt DESC, addedAt DESC")
     fun observeAll(): Flow<List<BookEntity>>
 
     @Query("SELECT * FROM book WHERE id = :id")
@@ -45,8 +45,8 @@ interface BookDao {
     @Query("SELECT * FROM book")
     suspend fun getAll(): List<BookEntity>
 
-    /** 不含墓碑。与 [observeAll] 同一套过滤，供「这本书是不是已经在架上」这类判定用 */
-    @Query("SELECT * FROM book WHERE deleted = 0")
+    /** 不含墓碑、不含试读未上架。与 [observeAll] 同一套过滤，供「这本书是不是已经在架上」判定用 */
+    @Query("SELECT * FROM book WHERE deleted = 0 AND inShelf = 1")
     suspend fun getAllVisible(): List<BookEntity>
 
     @Query("UPDATE book SET groupName = :group WHERE id = :id")

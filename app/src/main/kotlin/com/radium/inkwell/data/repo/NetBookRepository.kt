@@ -39,7 +39,7 @@ class NetBookRepository(
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
     suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = try {
         val (detail, toc) = fetchDetailAndToc(rule, result.bookUrl)
-        Result.success(persist(rule.id, result.bookUrl, detail, toc, fallback = result))
+        Result.success(persist(rule.id, result.bookUrl, detail, toc, fallback = result, inShelf = true))
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -53,8 +53,13 @@ class NetBookRepository(
         detail: RemoteBookDetail,
         toc: List<RemoteChapter>,
         fallback: SearchResult? = null,
+        /**
+         * true = 用户点了「加入书架」；false = 预览直读，落库供阅读器翻页，但不出现在书架上。
+         * 退出阅读时再问要不要留下。已在架的书不会被降成试读。
+         */
+        inShelf: Boolean = true,
     ): Result<String> = try {
-        Result.success(persist(sourceId, bookUrl, detail, toc, fallback))
+        Result.success(persist(sourceId, bookUrl, detail, toc, fallback, inShelf))
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -76,11 +81,17 @@ class NetBookRepository(
         detail: RemoteBookDetail,
         toc: List<RemoteChapter>,
         fallback: SearchResult?,
+        inShelf: Boolean,
     ): String {
         check(toc.isNotEmpty()) { "目录解析为空" }
         val bookId = netBookId(sourceId, bookUrl)
         val now = System.currentTimeMillis()
         val existing = bookDao.getById(bookId)
+        val flags = resolveShelfFlags(
+            existingInShelf = existing?.inShelf,
+            existingDeleted = existing?.deleted,
+            requestedInShelf = inShelf,
+        )
         val (readIndex, readOffset) = alignProgress(bookId, existing, toc)
         val entities = buildToc(bookId, toc)
         // 书行与目录一起落库：中途被杀不会留下「有书行没目录」的半成品
@@ -111,7 +122,8 @@ class NetBookRepository(
                     groupName = existing?.groupName ?: "",
                     hidden = existing?.hidden ?: false,
                     newChapterCount = existing?.newChapterCount ?: 0,
-                    // deleted 刻意**不**继承：走到这一步就是用户又把它加回书架，墓碑正该被抹掉
+                    deleted = flags.deleted,
+                    inShelf = flags.inShelf,
                 )
             )
             replaceToc(bookId, entities)
@@ -271,4 +283,29 @@ class NetBookRepository(
 
     private fun netBookId(sourceId: String, bookUrl: String): String =
         MessageDigest.getInstance("MD5").digest("$sourceId|$bookUrl".toByteArray()).toHex()
+}
+
+/** 试读入库 vs 正式加架时，inShelf / deleted 怎么落。 */
+data class ShelfFlags(val inShelf: Boolean, val deleted: Boolean)
+
+/**
+ * 决定落库后的在架/墓碑状态。
+ *
+ * - 显式加架：一定上架，并抹掉墓碑（用户又把它加回来了）。
+ * - 预览直读：新书不上架；已在架的不降成试读；若行还是墓碑，保持墓碑且不上架
+ *   （删过的书试读不该自己冒回书架，退出时再问）。
+ */
+fun resolveShelfFlags(
+    existingInShelf: Boolean?,
+    existingDeleted: Boolean?,
+    requestedInShelf: Boolean,
+): ShelfFlags {
+    val inShelf = when {
+        requestedInShelf -> true
+        existingInShelf == null -> false
+        existingDeleted == true -> false
+        else -> existingInShelf
+    }
+    val deleted = if (inShelf) false else (existingDeleted ?: false)
+    return ShelfFlags(inShelf, deleted)
 }
