@@ -201,17 +201,27 @@ fun ReaderMenu(
             //
             // 层次交给顶栏/底栏的阴影就够了。这也是纸书的道理：把书页调暗，
             // 并不能让压在上面的书签更像书签。
+            val dismissTap = remember { MutableInteractionSource() }
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     // 无涟漪：这是块半屏的空白，点它只是"关掉菜单"。带 ripple 的话
-                    // 一点下去整个屏幕中央泛起一道全屏涟漪，非常吓人
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDismiss,
-                    )
+                    // 一点下去整个屏幕中央泛起一道全屏涟漪，非常吓人。
+                    // 只在菜单真正开着时拦截。visible 已是 false、退场动画还在播时
+                    // 若 clickable 仍留着，会把底下的翻页手势吃掉一小段——就是关菜单后
+                    // 短暂翻不了页的原因。
+                    .then(
+                        if (visible) {
+                            Modifier.clickable(
+                                interactionSource = dismissTap,
+                                indication = null,
+                                onClick = onDismiss,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
             )
 
             // 底栏。与顶栏同规格：不投阴影，只用一根发丝分隔线 ——
