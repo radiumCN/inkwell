@@ -1,6 +1,7 @@
 package com.radium.inkwell.reader.flip
 
 import com.radium.inkwell.reader.api.FlipDirection
+import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.RenderablePage
 
@@ -9,6 +10,9 @@ import com.radium.inkwell.reader.render.RenderablePage
  * https://github.com/HapeLee/legado-with-MD3
  *
  * [pageOffset] 以内容区顶端为 0。手指下滑为正（露出上一页），上滑为负。
+ * 这个符号跟 [androidx.compose.foundation.gestures.scrollable] 默认一致：
+ * `reverseDirection = false` 时，正 delta 就是手指沿轴向正方向（竖直＝下滑），
+ * 不要再取一次负号，否则手势和阅读方向对反。
  * 越过 `-currentHeight` 就翻到下一页并带回偏移；大于 0 就翻到上一页。
  * 标题/进度跟当前页走，不再从列表可见项反推章号。
  */
@@ -55,6 +59,14 @@ fun carryScrollOffset(
         null -> step.pageOffset
     }
 }
+
+/** 正文带顶边：页眉小标题画在这条线上面 */
+fun scrollContentTop(layout: LayoutSpec): Float =
+    layout.marginTopPx + layout.headerHeightPx
+
+/** 正文带底边：页脚进度/时间画在这条线下面 */
+fun scrollContentBottom(layout: LayoutSpec): Float =
+    layout.viewportHeightPx - layout.marginBottomPx - layout.footerHeightPx
 
 /** 本页正文实际高度（最后一项底），不是视口高 —— 按视口叠会在页底留一道空白 */
 fun pageContentHeight(page: RenderablePage?): Float {

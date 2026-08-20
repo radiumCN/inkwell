@@ -1,6 +1,7 @@
 package com.radium.inkwell.reader.flip
 
 import com.radium.inkwell.reader.api.FlipDirection
+import com.radium.inkwell.reader.paginate.LayoutSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -75,5 +76,25 @@ class ScrollPageMathTest {
         )
         assertNull(step.flip)
         assertEquals(-400f, step.pageOffset)
+    }
+
+    @Test
+    fun `正文带夹在页眉和页脚之间`() {
+        val spec = LayoutSpec(
+            viewportWidthPx = 1080,
+            viewportHeightPx = 2000,
+            marginLeftPx = 40f,
+            marginTopPx = 100f,
+            marginRightPx = 40f,
+            marginBottomPx = 80f,
+            headerHeightPx = 26f,
+            footerHeightPx = 18f,
+            fontSizePx = 20f,
+            lineHeightPx = 32f,
+            paragraphSpacingPx = 8f,
+        )
+        assertEquals(126f, scrollContentTop(spec))
+        assertEquals(1902f, scrollContentBottom(spec))
+        assertEquals(spec.contentHeightPx, scrollContentBottom(spec) - scrollContentTop(spec))
     }
 }
