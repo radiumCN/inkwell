@@ -31,6 +31,22 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 data class ScrollJump(val chapterIndex: Int, val charOffset: Int)
 
 /**
+ * 当前视口里「正在读」的位置，以及屏顶/屏底落到哪一章。
+ *
+ * 进度必须跟 [chapterIndex] 走；邻章预排得看 [lastVisibleChapter] —— 屏顶还停在上一章
+ * 时，正文大半已经是下一章了，只报屏顶会既对不上标题、也滑到窗口末尾就没了。
+ */
+data class ScrollVisibleReport(
+    val chapterIndex: Int,
+    val elementIndex: Int,
+    val firstVisibleChapter: Int,
+    val lastVisibleChapter: Int,
+)
+
+/** LazyColumn 可见项的几何；抽出来好单测锚点，不绑 Compose 运行时 */
+internal data class VisibleSlot(val index: Int, val offset: Int, val size: Int)
+
+/**
  * 滚动阅读：正文连续排成一列，不切页。
  *
  * 列表项是**排版元素**（段落/标题/图片），不是页 —— 页与页堆叠起来，每屏底部都会留一道
@@ -47,7 +63,7 @@ fun ScrollReader(
     theme: ReaderTheme,
     jump: ScrollJump?,
     onJumpConsumed: () -> Unit,
-    onVisible: (chapterIndex: Int, elementIndex: Int) -> Unit,
+    onVisible: (ScrollVisibleReport) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -99,13 +115,20 @@ fun ScrollReader(
     }
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val visible = info.visibleItemsInfo.map { VisibleSlot(it.index, it.offset, it.size) }
+            visibleReport(
+                chapters = chaptersLatest.value,
+                visible = visible,
+                viewportStart = info.viewportStartOffset,
+                viewportEnd = info.viewportEndOffset,
+            )
+        }
             .distinctUntilChanged()
-            .collect { flat ->
-                if (ignoreVisible[0] || jumpLatest.value != null) return@collect
-                locate(chaptersLatest.value, flat)?.let { (chapterIndex, elementIndex) ->
-                    onVisibleLatest.value(chapterIndex, elementIndex)
-                }
+            .collect { report ->
+                if (report == null || ignoreVisible[0] || jumpLatest.value != null) return@collect
+                onVisibleLatest.value(report)
             }
     }
 
@@ -192,6 +215,79 @@ internal fun elementIndexForOffset(chapter: ScrollChapter, charOffset: Int): Int
 internal fun itemElementIndex(item: PageItem): Int = when (item) {
     is PageItem.TextSlice -> item.elementIndex
     is PageItem.ImageBox -> item.elementIndex
+}
+
+/**
+ * 阅读锚点：视口上方 [fraction] 处那一项。
+ * 用 firstVisible 会把「上一章还剩几行顶在屏顶」当成当前章。
+ */
+internal fun pickAnchorIndex(
+    visible: List<VisibleSlot>,
+    viewportStart: Int,
+    viewportEnd: Int,
+    fraction: Float = 0.3f,
+): Int? {
+    if (visible.isEmpty()) return null
+    val span = (viewportEnd - viewportStart).coerceAtLeast(0)
+    val anchorY = viewportStart + span * fraction
+    return visible.firstOrNull { it.offset + it.size > anchorY }?.index
+        ?: visible.last().index
+}
+
+/** 把可见几何换成进度章 + 窗口两端章。屏底留白算窗口最后一章，好触发预排下一章 */
+internal fun visibleReport(
+    chapters: List<ScrollChapter>,
+    visible: List<VisibleSlot>,
+    viewportStart: Int,
+    viewportEnd: Int,
+): ScrollVisibleReport? {
+    if (chapters.isEmpty()) return null
+    val anchor = pickAnchorIndex(visible, viewportStart, viewportEnd) ?: return null
+    val reading = locate(chapters, anchor) ?: run {
+        val last = chapters.last()
+        val lastItem = last.items.lastOrNull() ?: return null
+        last.chapterIndex to itemElementIndex(lastItem)
+    }
+    val firstChapter = visible.firstOrNull()?.let { locate(chapters, it.index)?.first }
+        ?: chapters.first().chapterIndex
+    val lastChapter = visible.lastOrNull()?.let { locate(chapters, it.index)?.first }
+        ?: chapters.last().chapterIndex
+    return ScrollVisibleReport(
+        chapterIndex = reading.first,
+        elementIndex = reading.second,
+        firstVisibleChapter = firstChapter,
+        lastVisibleChapter = lastChapter,
+    )
+}
+
+/**
+ * 窗口只留 center±1。屏底已经压在窗口最后一章、或屏顶压在窗口第一章时，
+ * 必须提前把邻章排进来 —— 进度章号可能还停在上一章，不能只看锚点。
+ */
+internal fun scrollPrefetchCenter(
+    firstVisibleChapter: Int,
+    lastVisibleChapter: Int,
+    windowFirst: Int?,
+    windowLast: Int?,
+    chapterCount: Int,
+    nextCached: Boolean,
+    prevCached: Boolean,
+): Int? {
+    if (windowLast != null &&
+        lastVisibleChapter >= windowLast &&
+        lastVisibleChapter + 1 < chapterCount &&
+        !nextCached
+    ) {
+        return lastVisibleChapter
+    }
+    if (windowFirst != null &&
+        firstVisibleChapter <= windowFirst &&
+        firstVisibleChapter > 0 &&
+        !prevCached
+    ) {
+        return firstVisibleChapter
+    }
+    return null
 }
 
 /**

@@ -1178,27 +1178,55 @@ class ReaderViewModel(
         if (jump != null) {
             _scrollJump.value = jump
             lastScrollChapter = jump.chapterIndex
+            lastScrollWindowRequest = jump.chapterIndex
         }
+        val generation = ++scrollWindowGeneration
         viewModelScope.launch {
             engineMutex.withLock {
+                if (generation != scrollWindowGeneration) return@withLock
                 // center 是用户正在看的那一章；上下邻章只是预排，失败不该打扰用户
                 val chapter = ensureScroll(center, userFacing = true) ?: return@withLock
+                if (generation != scrollWindowGeneration) return@withLock
                 ensureScroll(center - 1)
                 ensureScroll(center + 1)
+                if (generation != scrollWindowGeneration) return@withLock
                 publishScrollWindow(center)
-                _state.value = _state.value.copy(
-                    loading = false,
-                    error = null,
-                    chapterIndex = center,
-                    chapterTitle = chapter.title,
-                )
+                // 邻章预排不要改标题：屏底已经到下一章、锚点还在上一章时，
+                // 这里若写成 center，菜单会提前跳章；标题只由 onScrollTo 按视口锚点报。
+                _state.value = if (jump != null) {
+                    _state.value.copy(
+                        loading = false,
+                        error = null,
+                        chapterIndex = center,
+                        chapterTitle = chapter.title,
+                    )
+                } else {
+                    _state.value.copy(loading = false, error = null)
+                }
             }
         }
     }
 
     /** 滚到某章某元素：记进度、跨章时才续排邻章 */
     private var lastScrollChapter = Int.MIN_VALUE
-    fun onScrollTo(chapterIndex: Int, elementIndex: Int) {
+    private var lastScrollWindowRequest = Int.MIN_VALUE
+    private var scrollWindowGeneration = 0
+
+    fun onScrollTo(report: ScrollVisibleReport) {
+        onScrollTo(
+            chapterIndex = report.chapterIndex,
+            elementIndex = report.elementIndex,
+            firstVisibleChapter = report.firstVisibleChapter,
+            lastVisibleChapter = report.lastVisibleChapter,
+        )
+    }
+
+    fun onScrollTo(
+        chapterIndex: Int,
+        elementIndex: Int,
+        firstVisibleChapter: Int = chapterIndex,
+        lastVisibleChapter: Int = chapterIndex,
+    ) {
         // 跳章还没落到列表上：首帧常停在窗口里的上一章，这时候记进度会把人拽回去
         if (_scrollJump.value != null) return
         val chapter = scrollCache[chapterIndex] ?: return
@@ -1209,10 +1237,27 @@ class ReaderViewModel(
             chapterTitle = chapter.title,
         )
         saveProgress()
-        if (chapterIndex != lastScrollChapter) {
-            lastScrollChapter = chapterIndex
-            prepareScroll(chapterIndex)
+        val window = _scrollChapters.value
+        val edge = scrollPrefetchCenter(
+            firstVisibleChapter = firstVisibleChapter,
+            lastVisibleChapter = lastVisibleChapter,
+            windowFirst = window.firstOrNull()?.chapterIndex,
+            windowLast = window.lastOrNull()?.chapterIndex,
+            chapterCount = _state.value.chapterCount,
+            nextCached = scrollCache[lastVisibleChapter + 1] != null,
+            prevCached = scrollCache[firstVisibleChapter - 1] != null,
+        )
+        when {
+            edge != null -> requestScrollWindow(edge)
+            chapterIndex != lastScrollChapter -> requestScrollWindow(chapterIndex)
         }
+        lastScrollChapter = chapterIndex
+    }
+
+    private fun requestScrollWindow(center: Int) {
+        if (center == lastScrollWindowRequest) return
+        lastScrollWindowRequest = center
+        prepareScroll(center)
     }
 
     private fun renderable(result: Paginator.Result, pageIndex: Int): RenderablePage? {

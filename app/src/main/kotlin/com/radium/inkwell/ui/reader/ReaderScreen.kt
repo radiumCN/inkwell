@@ -375,9 +375,7 @@ fun ReaderScreen(
                     theme = session.settings.theme,
                     jump = scrollJump,
                     onJumpConsumed = { viewModel.consumeScrollJump() },
-                    onVisible = { chapterIndex, elementIndex ->
-                        viewModel.onScrollTo(chapterIndex, elementIndex)
-                    },
+                    onVisible = { viewModel.onScrollTo(it) },
                     onCenterTap = { viewModel.toggleMenu() },
                 )
             }

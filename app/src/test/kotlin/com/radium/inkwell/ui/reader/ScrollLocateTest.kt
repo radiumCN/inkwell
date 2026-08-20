@@ -97,4 +97,117 @@ class ScrollLocateTest {
         val trimmed = listOf(chapter(5, 3), chapter(6, 1))
         assertEquals(-2, leadingItemDelta(window, trimmed))
     }
+
+    @Test
+    fun `屏顶还是上一章时锚点取视口三成处`() {
+        val visible = listOf(
+            VisibleSlot(4, -200, 250),
+            VisibleSlot(5, 50, 80),
+            VisibleSlot(6, 130, 400),
+            VisibleSlot(7, 530, 400),
+        )
+        assertEquals(6, pickAnchorIndex(visible, 0, 800))
+    }
+
+    @Test
+    fun `锚点仍在第一项时不要跳到下一项`() {
+        val visible = listOf(
+            VisibleSlot(4, -50, 500),
+            VisibleSlot(5, 450, 400),
+        )
+        assertEquals(4, pickAnchorIndex(visible, 0, 800))
+    }
+
+    @Test
+    fun `空可见列表没有锚点`() {
+        assertNull(pickAnchorIndex(emptyList(), 0, 800))
+    }
+
+    @Test
+    fun `屏顶上一章、正文已是下一章时进度跟下一章`() {
+        val window = listOf(chapter(41, 2), chapter(42, 4), chapter(43, 4))
+        val visible = listOf(
+            VisibleSlot(6, -100, 150),
+            VisibleSlot(7, 50, 80),
+            VisibleSlot(8, 130, 400),
+            VisibleSlot(9, 530, 300),
+        )
+        val report = visibleReport(window, visible, 0, 800)
+        assertEquals(ScrollVisibleReport(43, 1, 42, 43), report)
+    }
+
+    @Test
+    fun `屏底留白算窗口最后一章`() {
+        val window = listOf(chapter(41, 2), chapter(42, 2), chapter(43, 2))
+        val visible = listOf(
+            VisibleSlot(5, 0, 400),
+            VisibleSlot(6, 400, 200),
+            VisibleSlot(7, 600, 80),
+        )
+        val report = visibleReport(window, visible, 0, 800)
+        assertEquals(43, report?.lastVisibleChapter)
+        assertEquals(43, report?.chapterIndex)
+    }
+
+    @Test
+    fun `屏底压在窗口末章且下一章未缓存时预排这一章`() {
+        assertEquals(
+            43,
+            scrollPrefetchCenter(
+                firstVisibleChapter = 42,
+                lastVisibleChapter = 43,
+                windowFirst = 41,
+                windowLast = 43,
+                chapterCount = 80,
+                nextCached = false,
+                prevCached = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `下一章已经在窗口里就不要再预排`() {
+        assertNull(
+            scrollPrefetchCenter(
+                firstVisibleChapter = 42,
+                lastVisibleChapter = 43,
+                windowFirst = 42,
+                windowLast = 44,
+                chapterCount = 80,
+                nextCached = true,
+                prevCached = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `书末一章没有下一章可预排`() {
+        assertNull(
+            scrollPrefetchCenter(
+                firstVisibleChapter = 78,
+                lastVisibleChapter = 79,
+                windowFirst = 77,
+                windowLast = 79,
+                chapterCount = 80,
+                nextCached = false,
+                prevCached = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `屏顶压在窗口首章且上一章未缓存时预排这一章`() {
+        assertEquals(
+            42,
+            scrollPrefetchCenter(
+                firstVisibleChapter = 42,
+                lastVisibleChapter = 43,
+                windowFirst = 42,
+                windowLast = 44,
+                chapterCount = 80,
+                nextCached = true,
+                prevCached = false,
+            ),
+        )
+    }
 }
