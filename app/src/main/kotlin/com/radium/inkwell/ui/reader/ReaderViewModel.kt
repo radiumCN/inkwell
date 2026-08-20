@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.reader.render.ScrollChapter
+import com.radium.inkwell.reader.render.flattenPagesForScroll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
@@ -407,14 +408,6 @@ class ReaderViewModel(
         this.spec = spec
         paginateJob?.cancel()
         paginateJob = viewModelScope.launch {
-            if (_state.value.settings.flipAnimation == FlipAnimation.SCROLL) {
-                // 滚动模式不走分页缓存：showPosition 会按「这一章有没有分页结果」把
-                // loading 拉成 true，ScrollReader 被卸掉，列表滑不动、跳章也看不见。
-                scrollCache.clear()
-                _scrollChapters.value = emptyList()
-                prepareScroll(position.chapterIndex, jumpTo = ScrollJump(position.chapterIndex, position.charOffset))
-                return@launch
-            }
             engineMutex.withLock {
                 paginated.clear()
                 showPosition(position)
@@ -452,10 +445,6 @@ class ReaderViewModel(
     fun gotoChapter(index: Int, charOffset: Int = 0) {
         val count = _state.value.chapterCount
         if (index !in 0 until count) return
-        if (_state.value.settings.flipAnimation == FlipAnimation.SCROLL) {
-            gotoScrollChapter(index, charOffset)
-            return
-        }
         _state.value = _state.value.copy(loading = paginated[index] == null)
         viewModelScope.launch {
             engineMutex.withLock {
@@ -1112,7 +1101,8 @@ class ReaderViewModel(
                     Paginator(facade).paginate(chapterIndex, title, content, tall)
                 }
             }
-            val page = result.chapter.pages.firstOrNull() ?: return null
+            val items = flattenPagesForScroll(result.chapter.pages)
+            if (items.isEmpty() && result.chapter.pages.isEmpty()) return null
 
             // elementIndex → 章内字符偏移。元素表与 Paginator 里一致：标题在最前，正文依次跟上
             val offsets = HashMap<Int, Int>()
@@ -1127,7 +1117,7 @@ class ReaderViewModel(
             ScrollChapter(
                 chapterIndex = chapterIndex,
                 title = title,
-                items = page.items,
+                items = items,
                 measured = result.measured,
                 charOffsets = offsets,
             ).also { scrollCache[chapterIndex] = it }
@@ -1258,6 +1248,27 @@ class ReaderViewModel(
         if (center == lastScrollWindowRequest) return
         lastScrollWindowRequest = center
         prepareScroll(center)
+    }
+
+    /**
+     * 列表已经滑不动：按窗口两端续章。不看 lastScrollWindowRequest ——
+     * 进度回调被跳章闸住时，那个标记会停在进来的章号上，再按它去重就永远续不上。
+     */
+    fun onScrollNeedMore(forward: Boolean) {
+        val window = _scrollChapters.value
+        if (window.isEmpty()) return
+        val count = _state.value.chapterCount
+        if (forward) {
+            val last = window.last().chapterIndex
+            if (last + 1 >= count) return
+            if (window.any { it.chapterIndex == last + 1 }) return
+            prepareScroll(last)
+        } else {
+            val first = window.first().chapterIndex
+            if (first <= 0) return
+            if (window.any { it.chapterIndex == first - 1 }) return
+            prepareScroll(first)
+        }
     }
 
     private fun renderable(result: Paginator.Result, pageIndex: Int): RenderablePage? {

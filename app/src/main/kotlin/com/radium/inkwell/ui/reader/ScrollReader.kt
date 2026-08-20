@@ -64,6 +64,7 @@ fun ScrollReader(
     jump: ScrollJump?,
     onJumpConsumed: () -> Unit,
     onVisible: (ScrollVisibleReport) -> Unit,
+    onNeedMore: (forward: Boolean) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -77,8 +78,15 @@ fun ScrollReader(
     val chaptersLatest = rememberUpdatedState(chapters)
     val jumpLatest = rememberUpdatedState(jump)
     val onVisibleLatest = rememberUpdatedState(onVisible)
+    val onNeedMoreLatest = rememberUpdatedState(onNeedMore)
     val onJumpConsumedLatest = rememberUpdatedState(onJumpConsumed)
-    if (jump != null) ignoreVisible[0] = true
+
+    // 闸只能在 effect 里开关。写在组合函数体里的话，跳章期间任意一次重组都会把
+    // ignoreVisible 重新打回 true；effect 不再跑，进度和续章就再也报不出来 ——
+    // 标题停在跳进来的那一章，窗口也不再往后加，滑到章末就像卡死。
+    LaunchedEffect(jump) {
+        if (jump == null) ignoreVisible[0] = false
+    }
 
     // 落位和报进度拆开：报进度若跟 chapters 绑在一起，窗口一更新就会用还没补正的下标
     // 去报「上一章」，ViewModel 再预排、再插、再报 —— 整本书往前一路滚。
@@ -129,6 +137,26 @@ fun ScrollReader(
             .collect { report ->
                 if (report == null || ignoreVisible[0] || jumpLatest.value != null) return@collect
                 onVisibleLatest.value(report)
+            }
+    }
+
+    // 续章不走进度闸：跳章把 onVisible 挡住时，人已经滑到列表尽头，必须仍能把下一章接上。
+    // 两头都滑不动不续 —— 窗口里的章一屏装得下，一边加一边裁会让整本书自己往前跑。
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            Triple(
+                listState.canScrollForward,
+                listState.canScrollBackward,
+                listState.layoutInfo.totalItemsCount,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { (canForward, canBackward, total) ->
+                if (total <= 2) return@collect
+                when (shouldExtendScroll(canForward, canBackward)) {
+                    1 -> onNeedMoreLatest.value(true)
+                    -1 -> onNeedMoreLatest.value(false)
+                }
             }
     }
 
@@ -288,6 +316,16 @@ internal fun scrollPrefetchCenter(
         return firstVisibleChapter
     }
     return null
+}
+
+/**
+ * 列表已经顶到头/底、且另一头还能滑：该续章了。
+ * 1 = 往后，-1 = 往前，0 = 不动。
+ */
+internal fun shouldExtendScroll(canScrollForward: Boolean, canScrollBackward: Boolean): Int = when {
+    !canScrollForward && canScrollBackward -> 1
+    !canScrollBackward && canScrollForward -> -1
+    else -> 0
 }
 
 /**

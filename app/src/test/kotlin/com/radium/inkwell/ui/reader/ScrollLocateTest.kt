@@ -196,6 +196,14 @@ class ScrollLocateTest {
     }
 
     @Test
+    fun `滑到列表底且还能往回滑才续下一章`() {
+        assertEquals(1, shouldExtendScroll(canScrollForward = false, canScrollBackward = true))
+        assertEquals(-1, shouldExtendScroll(canScrollForward = true, canScrollBackward = false))
+        assertEquals(0, shouldExtendScroll(canScrollForward = true, canScrollBackward = true))
+        assertEquals(0, shouldExtendScroll(canScrollForward = false, canScrollBackward = false))
+    }
+
+    @Test
     fun `屏顶压在窗口首章且上一章未缓存时预排这一章`() {
         assertEquals(
             42,

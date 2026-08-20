@@ -75,6 +75,7 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.flip.FlipController
 import com.radium.inkwell.reader.flip.PageFlipContainer
+import com.radium.inkwell.reader.flip.ScrollPageReader
 import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.reader.measure.SystemFontRegistry
 import com.radium.inkwell.reader.paginate.LayoutSpec
@@ -96,8 +97,6 @@ fun ReaderScreen(
     val pageUi by viewModel.page.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
     val overlay by viewModel.overlay.collectAsStateWithLifecycle()
-    val scrollChapters by viewModel.scrollChapters.collectAsStateWithLifecycle()
-    val scrollJump by viewModel.scrollJump.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -166,9 +165,7 @@ fun ReaderScreen(
     // 音量键翻页（与点击共用动画路径）
     LaunchedEffect(session.settings.volumeKeyFlip, overlay.menuVisible, session.settings.flipAnimation) {
         // 滚动模式下没有"页"，音量键翻页无从谈起 —— 按下去只会把游标推到别处、把人转晕
-        keyBus.volumeFlipEnabled = session.settings.volumeKeyFlip &&
-            !overlay.menuVisible &&
-            session.settings.flipAnimation != FlipAnimation.SCROLL
+        keyBus.volumeFlipEnabled = session.settings.volumeKeyFlip && !overlay.menuVisible
     }
     LaunchedEffect(Unit) {
         keyBus.flipEvents.collect { flipController.requestFlip(it) }
@@ -266,16 +263,6 @@ fun ReaderScreen(
             splashVisible = false
         }
 
-        // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
-        // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
-        if (session.settings.flipAnimation == FlipAnimation.SCROLL) {
-            // 只在进入滚动模式 / 章数就绪时跳一次。视口变化走 onLayoutReady，别绑 layout，
-            // 否则改字号会把正在滑的位置拽回进度点。
-            LaunchedEffect(session.chapterCount) {
-                if (session.chapterCount > 0) viewModel.prepareScroll(jumpToCurrent = true)
-            }
-        }
-
         when {
             // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
             // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
@@ -367,17 +354,25 @@ fun ReaderScreen(
                     }
                 }
             }
-            // 滚动模式：另一条渲染路径，不走翻页容器
+            // 滚动：与仿真同一套分页。越过页高就 flip，标题跟当前页走。
             session.settings.flipAnimation == FlipAnimation.SCROLL -> {
-                ScrollReader(
-                    chapters = scrollChapters,
-                    layout = layout,
-                    theme = session.settings.theme,
-                    jump = scrollJump,
-                    onJumpConsumed = { viewModel.consumeScrollJump() },
-                    onVisible = { viewModel.onScrollTo(it) },
-                    onCenterTap = { viewModel.toggleMenu() },
-                )
+                Box(Modifier.fillMaxSize()) {
+                    ScrollPageReader(
+                        current = pageUi.page,
+                        prev = pageUi.prevPage,
+                        next = pageUi.nextPage,
+                        layout = layout,
+                        theme = session.settings.theme,
+                        hasPrev = pageUi.hasPrev,
+                        hasNext = pageUi.hasNext,
+                        gesturesEnabled = !overlay.menuVisible &&
+                            !overlay.readerSheetOpen &&
+                            overlay.sourceCandidates == null,
+                        onFlip = { viewModel.flip(it) },
+                        onCenterTap = { viewModel.toggleMenu() },
+                    )
+                    PageInfoBar(pageUi, session, layout)
+                }
             }
 
             else -> {

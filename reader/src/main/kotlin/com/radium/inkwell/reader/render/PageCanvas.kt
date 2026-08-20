@@ -48,13 +48,27 @@ fun DrawScope.drawPage(
     selection: TextSelection? = null,
 ) {
     val bg = Color(theme.background)
+    drawRect(bg)
+    if (page == null) return
+    val contentTop = layout.marginTopPx + layout.headerHeightPx
+    drawPageItems(page, layout, theme, originY = contentTop, selection = selection)
+}
+
+/**
+ * 只画正文项。[originY] 是本页内容区顶边，滚动模式用它把下一页接在当前页正文底下，
+ * 而不是再叠一整屏（页底空白会裂开）。
+ */
+fun DrawScope.drawPageItems(
+    page: RenderablePage,
+    layout: LayoutSpec,
+    theme: ReaderTheme,
+    originY: Float,
+    selection: TextSelection? = null,
+) {
     val text = Color(theme.textColor)
     val title = Color(theme.titleColor)
     val footer = Color(theme.footerColor)
-    drawRect(bg)
-    if (page == null) return
     val contentLeft = layout.marginLeftPx
-    val contentTop = layout.marginTopPx + layout.headerHeightPx
     page.spec.items.forEach { item ->
         when (item) {
             is PageItem.TextSlice -> {
@@ -64,20 +78,20 @@ fun DrawScope.drawPage(
                 if (selection != null && selection.elementIndex == item.elementIndex) {
                     drawSelection(
                         handle, item, selection,
-                        left = contentLeft, top = contentTop,
+                        left = contentLeft, top = originY,
                         color = text.copy(alpha = 0.25f),
                     )
                 }
                 drawTextSlice(
                     handle, item,
-                    left = contentLeft, top = contentTop,
+                    left = contentLeft, top = originY,
                     color = if (item.isTitle) title else text,
                 )
             }
             is PageItem.ImageBox -> {
                 val bmp = page.images[item.elementIndex]
                 val dst = Rect(
-                    Offset(contentLeft + item.left, contentTop + item.top),
+                    Offset(contentLeft + item.left, originY + item.top),
                     Size(item.width, item.height),
                 )
                 if (bmp != null) {
