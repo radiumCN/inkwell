@@ -1330,7 +1330,8 @@ class ReaderViewModel(
             atBookEnd = false,
         )
         saveProgress()
-        if (pageIndex == result.chapter.pages.lastIndex || pageIndex == 0) {
+        // 滚动一次惯性就能甩过好几页，临近章末再预取会来不及，倒数第二页就开始排邻章。
+        if (pageIndex <= 1 || pageIndex >= result.chapter.pages.lastIndex - 1) {
             preloadNeighbors(chapterIndex)
         }
     }

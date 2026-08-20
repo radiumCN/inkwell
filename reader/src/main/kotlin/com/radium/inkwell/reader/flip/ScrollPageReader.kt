@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,18 +51,60 @@ fun ScrollPageReader(
     var pendingFlip by remember { mutableStateOf<FlipDirection?>(null) }
     val currentLatest = rememberUpdatedState(current)
     val prevLatest = rememberUpdatedState(prev)
+    val nextLatest = rememberUpdatedState(next)
     val layoutLatest = rememberUpdatedState(layout)
     val hasPrevLatest = rememberUpdatedState(hasPrev)
     val hasNextLatest = rememberUpdatedState(hasNext)
     val onFlipLatest = rememberUpdatedState(onFlip)
 
+    val leftover = remember { mutableFloatStateOf(0f) }
+    var leftoverChain by remember { mutableIntStateOf(0) }
     val pageKey = current?.spec?.chapterIndex to current?.spec?.pageIndexInChapter
-    LaunchedEffect(pageKey) {
-        if (pendingFlip != null) {
-            pendingFlip = null
+    var seenPageKey by remember { mutableStateOf(pageKey) }
+    if (pageKey != seenPageKey) {
+        seenPageKey = pageKey
+        // 先落到新页顶，避免沿用上一页坐标系把新页推到画面外。
+        offset.floatValue = 0f
+    }
+    val nextReady = next != null
+    val prevReady = prev != null
+    LaunchedEffect(pageKey, nextReady, prevReady) {
+        val extra = leftover.floatValue
+        val chained = pendingFlip
+        if (chained == null) {
+            leftover.floatValue = 0f
             return@LaunchedEffect
         }
-        offset.floatValue = 0f
+        leftover.floatValue = 0f
+        pendingFlip = null
+        if (extra == 0f) return@LaunchedEffect
+        if (leftoverChain >= 8) {
+            leftover.floatValue = 0f
+            return@LaunchedEffect
+        }
+        leftoverChain++
+        val spec = layoutLatest.value
+        val curH = pageContentHeight(currentLatest.value).let {
+            if (it <= 0f) spec.contentHeightPx else it
+        }
+        val prevH = pageContentHeight(prevLatest.value)
+        val nextH = pageContentHeight(nextLatest.value)
+        val step = consumeScroll(
+            pageOffset = 0f,
+            dragDelta = extra,
+            currentHeight = curH,
+            prevHeight = prevH,
+            nextHeight = nextH,
+            hasPrev = hasPrevLatest.value,
+            hasNext = hasNextLatest.value,
+            viewportHeight = spec.contentHeightPx,
+        )
+        offset.floatValue = step.drawOffset
+        if (step.flip != null) {
+            leftover.floatValue = step.leftover
+            pendingFlip = step.flip
+            onFlipLatest.value(step.flip)
+        }
     }
 
     val scrollableState = rememberScrollableState { composeDelta ->
@@ -71,26 +114,29 @@ fun ScrollPageReader(
         val curH = pageContentHeight(currentLatest.value).let {
             if (it <= 0f) spec.contentHeightPx else it
         }
-        val prevH = pageContentHeight(prevLatest.value).let {
-            if (it <= 0f) spec.contentHeightPx else it
-        }
-        val step = applyScrollDrag(
-            pageOffset = offset.floatValue,
+        val prevH = pageContentHeight(prevLatest.value)
+        val nextH = pageContentHeight(nextLatest.value)
+        leftoverChain = 0
+        val before = offset.floatValue
+        val step = consumeScroll(
+            pageOffset = before,
             dragDelta = drag,
             currentHeight = curH,
+            prevHeight = prevH,
+            nextHeight = nextH,
             hasPrev = hasPrevLatest.value,
             hasNext = hasNextLatest.value,
             viewportHeight = spec.contentHeightPx,
         )
-        val nextOffset = carryScrollOffset(step, curH, prevH)
-        val appliedDrag = step.pageOffset - offset.floatValue
-        offset.floatValue = nextOffset
+        offset.floatValue = step.drawOffset
         if (step.flip != null) {
+            leftover.floatValue = step.leftover
             pendingFlip = step.flip
             onFlipLatest.value(step.flip)
             return@rememberScrollableState composeDelta
         }
-        if (drag == 0f) 0f else composeDelta * (appliedDrag / drag)
+        val applied = step.drawOffset - before
+        if (drag == 0f) 0f else composeDelta * (applied / drag)
     }
 
     Box(
