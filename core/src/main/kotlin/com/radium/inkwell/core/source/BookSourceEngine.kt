@@ -333,14 +333,8 @@ class BookSourceEngine(
             val ctx = pageContext(fetched, varsOf(source), js)
             val html = evalField("content", "content", rule.content, ctx)
             if (html != null) {
-                // 每页单独转换，图片相对路径按该页最终 URL 解析为绝对 URL
                 val body = Jsoup.parseBodyFragment(html, fetched.finalUrl).body()
-                val converter = HtmlToElements(resolveImage = { img ->
-                    img.attr("abs:src")
-                        .ifBlank { resolveUrl(fetched.finalUrl, img.attr("src")) }
-                        .ifBlank { null }
-                })
-                elements += converter.convert(body)
+                elements += HtmlToElements().convert(body)
             }
             url = rule.nextContentUrl
                 ?.let { evalUrlField("content", "nextPage", it, ctx) }

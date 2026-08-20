@@ -57,6 +57,26 @@ class HtmlToElementsTest {
         assertEquals(listOf("第一段", "第二段"), paras)
     }
 
+    /** 正文里的图不当元素、也不占位；前后文本仍按原分段切开 */
+    @Test
+    fun `img 和 svg image 直接抹掉`() {
+        val els = HtmlToElements().convert(
+            Jsoup.parse(
+                "<p>前段</p><img src=\"/a.jpg\" alt=\"插图\"><p>后段</p>" +
+                    "<svg><image href=\"/b.png\"/></svg>",
+            ).body(),
+        )
+        assertEquals(emptyList(), els.filterIsInstance<ContentElement.Image>())
+        assertEquals(listOf("前段", "后段"), els.filterIsInstance<ContentElement.Paragraph>().map { it.text })
+    }
+
+    /** 段内插图当边界切开，避免「前文+后文」粘成一句 */
+    @Test
+    fun `段内 img 切开前后文本`() {
+        val paras = paragraphs("<p>前文<img src=\"x.jpg\"/>后文</p>")
+        assertEquals(listOf("前文", "后文"), paras)
+    }
+
     /** `<br>` 分段的源不受影响 */
     @Test
     fun `br 分段的源保持原样`() {

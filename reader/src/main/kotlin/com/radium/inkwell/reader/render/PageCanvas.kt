@@ -64,34 +64,42 @@ fun DrawScope.drawPageItems(
     theme: ReaderTheme,
     originY: Float,
     selection: TextSelection? = null,
+    /** 滚动叠页：没图的占位不画，后面的字上移，避免半屏空白 */
+    collapseMissingImages: Boolean = false,
 ) {
     val text = Color(theme.textColor)
     val title = Color(theme.titleColor)
     val footer = Color(theme.footerColor)
     val contentLeft = layout.marginLeftPx
+    var collapse = 0f
     page.spec.items.forEach { item ->
         when (item) {
             is PageItem.TextSlice -> {
                 val handle = page.measured[item.elementIndex]?.renderHandle as? TextLayoutResult
                     ?: return@forEach
+                val top = originY - collapse
                 // 高亮先画，文字后画 —— 否则半透明的色块会盖在字上
                 if (selection != null && selection.elementIndex == item.elementIndex) {
                     drawSelection(
                         handle, item, selection,
-                        left = contentLeft, top = originY,
+                        left = contentLeft, top = top,
                         color = text.copy(alpha = 0.25f),
                     )
                 }
                 drawTextSlice(
                     handle, item,
-                    left = contentLeft, top = originY,
+                    left = contentLeft, top = top,
                     color = if (item.isTitle) title else text,
                 )
             }
             is PageItem.ImageBox -> {
                 val bmp = page.images[item.elementIndex]
+                if (collapseMissingImages && bmp == null) {
+                    collapse += item.height
+                    return@forEach
+                }
                 val dst = Rect(
-                    Offset(contentLeft + item.left, originY + item.top),
+                    Offset(contentLeft + item.left, originY + item.top - collapse),
                     Size(item.width, item.height),
                 )
                 if (bmp != null) {

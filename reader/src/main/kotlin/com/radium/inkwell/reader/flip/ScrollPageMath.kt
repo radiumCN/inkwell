@@ -72,13 +72,32 @@ fun scrollContentBottom(layout: LayoutSpec): Float =
     layout.viewportHeightPx - layout.marginBottomPx - layout.footerHeightPx
 
 /** 本页正文实际高度（最后一项底），不是视口高 —— 按视口叠会在页底留一道空白 */
-fun pageContentHeight(page: RenderablePage?): Float {
-    val items = page?.spec?.items.orEmpty()
+fun pageContentHeight(page: RenderablePage?): Float = scrollPageHeight(page)
+
+/**
+ * 滚动叠页高度。没加载出来的图不占位：阅读页现在不会把图填进 [RenderablePage.images]，
+ * 分页却按整屏宽的 4:3 留了一大块，叠下一页时就会在正文底下空出半屏。
+ * 上滑把后面的字拖上来，下滑又藏回去 —— 就是这块空白在进进出出。
+ */
+fun scrollPageHeight(page: RenderablePage?): Float {
+    if (page == null) return 0f
+    val items = page.spec.items
     if (items.isEmpty()) return 0f
-    return items.maxOf { item ->
+    var bottom = 0f
+    var collapse = 0f
+    for (item in items) {
         when (item) {
-            is PageItem.TextSlice -> item.yTopInPage + item.height
-            is PageItem.ImageBox -> item.top + item.height
+            is PageItem.TextSlice -> {
+                bottom = maxOf(bottom, item.yTopInPage + item.height - collapse)
+            }
+            is PageItem.ImageBox -> {
+                if (page.images[item.elementIndex] != null) {
+                    bottom = maxOf(bottom, item.top + item.height - collapse)
+                } else {
+                    collapse += item.height
+                }
+            }
         }
     }
+    return bottom
 }

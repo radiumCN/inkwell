@@ -190,11 +190,12 @@ class ChapterContentCache(private val root: File) {
          * v3：@textNodes 从前用 text()+trim() 取文本，换行被压成空格、段首全角缩进被剥掉，
          * 段落结构在规则求值阶段就没了。改动的是 LegadoSelector 而不是 HtmlToElements ——
          * 正是「范围是整条链」这句话要拦住的情况。
+         * v4：HtmlToElements 不再把 img / image 收成正文元素（分页空框、滚动半页空白）。
          *
          * 用 [ESCAPE] 打头，保证撞不上任何正文：真以 ESCAPE 开头的段落会被
          * escapeIfAmbiguous 再加一层前缀。老缓存没有这一行，读时自然对不上、当没缓存。
          */
-        const val FORMAT_VERSION = "\u0001V3"
+        const val FORMAT_VERSION = "\u0001V4"
 
         const val IMG_PREFIX = "IMG:"
         const val HEAD_PREFIX = "H"

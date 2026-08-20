@@ -2,6 +2,9 @@ package com.radium.inkwell.reader.flip
 
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
+import com.radium.inkwell.reader.paginate.PageSpec
+import com.radium.inkwell.reader.render.RenderablePage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -142,6 +145,26 @@ class ScrollPageMathTest {
         assertNull(step.flip)
         assertEquals(-200f, step.drawOffset, 0.01f)
         assertEquals(0f, step.leftover)
+    }
+
+    @Test
+    fun `没加载的图不撑开滚动页高`() {
+        val page = RenderablePage(
+            spec = PageSpec(
+                chapterIndex = 0,
+                pageIndexInChapter = 5,
+                items = listOf(
+                    PageItem.TextSlice(1, 0, 1, 0f, 80f, isTitle = false),
+                    PageItem.ImageBox(2, "img:1", 0f, 80f, 300f, 800f),
+                    PageItem.TextSlice(3, 0, 0, 880f, 40f, isTitle = false),
+                ),
+                startCharOffset = 0,
+                endCharOffset = 20,
+            ),
+            measured = emptyMap(),
+        )
+        // 800px 空图收掉后，两段字挨在一起
+        assertEquals(120f, scrollPageHeight(page), 0.01f)
     }
 
     @Test

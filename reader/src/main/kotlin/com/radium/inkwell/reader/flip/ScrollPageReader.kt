@@ -84,11 +84,11 @@ fun ScrollPageReader(
         }
         leftoverChain++
         val spec = layoutLatest.value
-        val curH = pageContentHeight(currentLatest.value).let {
-            if (it <= 0f) spec.contentHeightPx else it
+        val curH = scrollPageHeight(currentLatest.value).let {
+            if (it <= 0f) 1f else it
         }
-        val prevH = pageContentHeight(prevLatest.value)
-        val nextH = pageContentHeight(nextLatest.value)
+        val prevH = scrollPageHeight(prevLatest.value)
+        val nextH = scrollPageHeight(nextLatest.value)
         val step = consumeScroll(
             pageOffset = 0f,
             dragDelta = extra,
@@ -111,11 +111,11 @@ fun ScrollPageReader(
         // scrollable 默认 reverseDirection=false：正 delta = 手指下滑，与 pageOffset 同号。
         val drag = composeDelta
         val spec = layoutLatest.value
-        val curH = pageContentHeight(currentLatest.value).let {
-            if (it <= 0f) spec.contentHeightPx else it
+        val curH = scrollPageHeight(currentLatest.value).let {
+            if (it <= 0f) 1f else it
         }
-        val prevH = pageContentHeight(prevLatest.value)
-        val nextH = pageContentHeight(nextLatest.value)
+        val prevH = scrollPageHeight(prevLatest.value)
+        val nextH = scrollPageHeight(nextLatest.value)
         leftoverChain = 0
         val before = offset.floatValue
         val step = consumeScroll(
@@ -148,8 +148,8 @@ fun ScrollPageReader(
                 val cur = current ?: return@drawBehind
                 val contentTop = scrollContentTop(layout)
                 val contentBottom = scrollContentBottom(layout)
-                val curH = pageContentHeight(cur).let {
-                    if (it <= 0f) layout.contentHeightPx else it
+                val curH = scrollPageHeight(cur).let {
+                    if (it <= 0f) 1f else it
                 }
                 val y = offset.floatValue
                 // 只在正文带里画。页眉/页脚是 PageInfoBar 的固定层，字滑进去会盖住章节名和时间。
@@ -159,15 +159,24 @@ fun ScrollPageReader(
                     right = size.width.toFloat(),
                     bottom = contentBottom,
                 ) {
-                    drawPageItems(cur, layout, theme, originY = y + contentTop)
+                    drawPageItems(
+                        cur, layout, theme, originY = y + contentTop,
+                        collapseMissingImages = true,
+                    )
                     next?.let { nxt ->
-                        drawPageItems(nxt, layout, theme, originY = y + contentTop + curH)
+                        drawPageItems(
+                            nxt, layout, theme, originY = y + contentTop + curH,
+                            collapseMissingImages = true,
+                        )
                     }
                     prev?.let { prv ->
-                        val prevH = pageContentHeight(prv).let {
-                            if (it <= 0f) layout.contentHeightPx else it
+                        val prevH = scrollPageHeight(prv).let {
+                            if (it <= 0f) 1f else it
                         }
-                        drawPageItems(prv, layout, theme, originY = y + contentTop - prevH)
+                        drawPageItems(
+                            prv, layout, theme, originY = y + contentTop - prevH,
+                            collapseMissingImages = true,
+                        )
                     }
                 }
             }

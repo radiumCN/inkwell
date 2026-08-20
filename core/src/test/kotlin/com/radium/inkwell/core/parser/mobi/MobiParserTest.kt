@@ -1,9 +1,9 @@
 package com.radium.inkwell.core.parser.mobi
 
-import com.radium.inkwell.core.model.BookHandle
 import com.radium.inkwell.core.model.ContentElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import java.io.File
@@ -29,12 +29,9 @@ class MobiParserTest {
             assertEquals(expectTitle, book.metadata.title)
             assertTrue(book.chapters.size > 5, "$name 章节数只有 ${book.chapters.size}")
             assertTrue(book.toc.isNotEmpty(), "$name 目录为空")
-            for (idx in listOf(0, book.chapters.size - 1)) {
-                assertTrue(
-                    book.loadChapter(idx).elements.isNotEmpty(),
-                    "$name 第 $idx 章内容为空",
-                )
-            }
+            // 首尾章在 Gutenberg KF8 里常是整页插图，抹掉后允许空；能 load 不炸即可
+            book.loadChapter(0)
+            book.loadChapter(book.chapters.lastIndex)
             // 至少有一章有实际文本段落
             assertTrue(
                 (0 until book.chapters.size).any { idx ->
@@ -63,28 +60,14 @@ class MobiParserTest {
     }
 
     @Test
-    fun `kf8 first and last chapters have paragraphs`() {
-        MobiParser().open(fixture("pg84-kf8.mobi")).use { book ->
-            for (idx in listOf(0, book.chapters.size - 1)) {
-                val texts = book.loadChapter(idx).elements.filter {
-                    it is ContentElement.Paragraph || it is ContentElement.Heading || it is ContentElement.Image
-                }
-                assertTrue(texts.isNotEmpty(), "第 $idx 章无内容")
-            }
-        }
-    }
-
-    @Test
-    fun `kf8 images resolve to pdb records`() {
+    fun `kf8 cover loads and chapter images are dropped`() {
         MobiParser().open(fixture("pg11-kf8.mobi")).use { book ->
             assertNotNull(book.metadata.cover, "封面缺失")
             assertTrue(book.metadata.cover!!.data.size > 100)
-
-            val image = firstImage(book)
-            assertNotNull(image, "全书未解析出插图")
-            val blob = book.loadResource(image.resourceId)
-            assertNotNull(blob, "插图 ${image.resourceId} 加载失败")
-            assertTrue(blob.mimeType!!.startsWith("image/"))
+            val hasInlineImage = (0 until book.chapters.size).any { idx ->
+                book.loadChapter(idx).elements.any { it is ContentElement.Image }
+            }
+            assertFalse(hasInlineImage, "正文里不应再留下插图元素")
         }
     }
 
@@ -99,11 +82,4 @@ class MobiParserTest {
         }
     }
 
-    private fun firstImage(book: BookHandle): ContentElement.Image? {
-        for (idx in 0 until book.chapters.size) {
-            book.loadChapter(idx).elements.filterIsInstance<ContentElement.Image>().firstOrNull()
-                ?.let { return it }
-        }
-        return null
-    }
 }

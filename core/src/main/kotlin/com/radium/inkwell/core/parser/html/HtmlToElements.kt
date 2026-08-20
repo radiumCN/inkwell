@@ -7,14 +7,12 @@ import org.jsoup.nodes.TextNode
 
 /**
  * HTML → 段落流转换器。EPUB 章节、MOBI 正文、书源抓取的正文三方共用。
- * CSS 全部丢弃，只保留段落 / 标题 / 图片 / 分隔线结构。
+ * CSS 全部丢弃，只保留段落 / 标题 / 分隔线。
  *
- * @param resolveImage 把 img 的 src 原值转换为统一模型的 resourceId
- *（EPUB 中解析为 zip 内路径，MOBI 中是 recindex，书源中是绝对 URL）
+ * `<img>` / `<image>` / svg 内嵌图直接抹掉：产品只排文本，收进来会让分页按
+ * 整栏宽 4:3 留空框，滚动时半页空白。封面走元数据，不走正文元素。
  */
-class HtmlToElements(
-    private val resolveImage: (Element) -> String? = { it.attr("src").ifBlank { null } },
-) {
+class HtmlToElements {
 
     fun convert(body: Element): List<ContentElement> {
         val out = mutableListOf<ContentElement>()
@@ -44,12 +42,7 @@ class HtmlToElements(
                         val text = node.text().trim()
                         if (text.isNotEmpty()) out += ContentElement.Heading(level, text)
                     }
-                    "img", "image" -> {
-                        flushText()
-                        resolveImage(node)?.let {
-                            out += ContentElement.Image(it, node.attr("alt").ifBlank { null })
-                        }
-                    }
+                    "img", "image" -> flushText()
                     "hr" -> {
                         flushText()
                         out += ContentElement.Divider
@@ -61,12 +54,8 @@ class HtmlToElements(
                         flushText()
                     }
                     "script", "style", "head", "svg", "table" -> {
-                        // svg 内的 image 单独处理；table 退化为逐格文本
-                        if (node.tagName() == "svg") {
-                            node.select("image").forEach { img ->
-                                resolveImage(img)?.let { out += ContentElement.Image(it, null) }
-                            }
-                        } else if (node.tagName() == "table") {
+                        // table 退化为逐格文本；svg 整块丢掉（里面的 image 也不收）
+                        if (node.tagName() == "table") {
                             node.select("td, th").forEach { cell ->
                                 val t = cell.text().trim()
                                 if (t.isNotEmpty()) out += ContentElement.Paragraph(t)

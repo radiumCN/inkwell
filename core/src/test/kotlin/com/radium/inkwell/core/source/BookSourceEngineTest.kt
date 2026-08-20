@@ -101,9 +101,8 @@ class BookSourceEngineTest {
         )
         // 广告行被净化规则删除
         assertTrue(paras.none { it.text.contains("本站广告") })
-        // 图片 resourceId 为绝对 URL
-        val img = content.elements.filterIsInstance<ContentElement.Image>().single()
-        assertEquals("$base/img/scene.jpg", img.resourceId)
+        // 正文图抹掉，不进元素、不占分页空框
+        assertTrue(content.elements.none { it is ContentElement.Image })
     }
 
     @Test
