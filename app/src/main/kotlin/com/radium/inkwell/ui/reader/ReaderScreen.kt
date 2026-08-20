@@ -97,6 +97,7 @@ fun ReaderScreen(
     val session by viewModel.session.collectAsStateWithLifecycle()
     val overlay by viewModel.overlay.collectAsStateWithLifecycle()
     val scrollChapters by viewModel.scrollChapters.collectAsStateWithLifecycle()
+    val scrollJump by viewModel.scrollJump.collectAsStateWithLifecycle()
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -268,8 +269,10 @@ fun ReaderScreen(
         // 排版一就绪就排滚动模式的章节。不能放在下面的 SCROLL 分支里：
         // 初始 loading=true 时那个分支根本走不到，prepareScroll 永远不会被调用 —— 死锁。
         if (session.settings.flipAnimation == FlipAnimation.SCROLL) {
-            LaunchedEffect(layout, session.chapterCount) {
-                if (layout != null && session.chapterCount > 0) viewModel.prepareScroll()
+            // 只在进入滚动模式 / 章数就绪时跳一次。视口变化走 onLayoutReady，别绑 layout，
+            // 否则改字号会把正在滑的位置拽回进度点。
+            LaunchedEffect(session.chapterCount) {
+                if (session.chapterCount > 0) viewModel.prepareScroll(jumpToCurrent = true)
             }
         }
 
@@ -370,6 +373,8 @@ fun ReaderScreen(
                     chapters = scrollChapters,
                     layout = layout,
                     theme = session.settings.theme,
+                    jump = scrollJump,
+                    onJumpConsumed = { viewModel.consumeScrollJump() },
                     onVisible = { chapterIndex, elementIndex ->
                         viewModel.onScrollTo(chapterIndex, elementIndex)
                     },
@@ -426,7 +431,13 @@ fun ReaderScreen(
                         animationsEnabled = animationsEnabled(),
                         hapticOnFlip = session.settings.flipHaptic,
                         // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
-                        gesturesEnabled = !overlay.menuVisible && selection == null,
+                        // 菜单、目录/设置 sheet、换源面板任一个开着都停手势。
+                        // sheet 关掉后 pointerInput 因 key 变化重建，避免 ModalBottomSheet
+                        // 把 down 留下、此后拖拽翻页全没反应。
+                        gesturesEnabled = !overlay.menuVisible &&
+                            !overlay.readerSheetOpen &&
+                            overlay.sourceCandidates == null &&
+                            selection == null,
                         canFlip = { dir ->
                             if (dir == FlipDirection.FORWARD) pageUi.hasNext else pageUi.hasPrev
                         },
@@ -578,6 +589,7 @@ fun ReaderScreen(
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onDismiss = { viewModel.toggleMenu() },
+            onReaderSheetOpen = { viewModel.setReaderSheetOpen(it) },
         )
 
         }

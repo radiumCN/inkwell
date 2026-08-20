@@ -21,6 +21,7 @@ import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.TitleMatch
+import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReadPosition
 import com.radium.inkwell.reader.api.ReaderBookSource
@@ -121,6 +122,12 @@ data class ReaderUiState(
      */
     val autoChangedTo: String? = null,
     /**
+     * 阅读菜单上的目录 / 设置 sheet 是否正开着。
+     * 翻页手势得跟着关：sheet 一出来就把 pointerInput 停掉，关掉后再开，
+     * 否则 ModalBottomSheet 容易把 down 留下、此后拖拽翻页全没反应。
+     */
+    val readerSheetOpen: Boolean = false,
+    /**
      * 是否已在书架。默认 true：进书前还没读到书行时不要误弹「加入书架」。
      * 预览直读落库为试读后这里会变成 false，退出时再问。
      */
@@ -172,6 +179,7 @@ data class ReaderOverlayUi(
     val autoChangeDone: Int = 0,
     val autoChangeTotal: Int = 0,
     val autoChangedTo: String? = null,
+    val readerSheetOpen: Boolean = false,
 )
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
@@ -185,7 +193,8 @@ private fun ReaderUiState.toSession() = ReaderSessionUi(
 
 private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
     menuVisible, toast, autoFlipping, sourceCandidates, searchingSources, changingSource,
-    sourcesDone, sourcesTotal, checkAuthor, autoChanging, autoChangeDone, autoChangeTotal, autoChangedTo,
+    sourcesDone, sourcesTotal, checkAuthor, autoChanging, autoChangeDone, autoChangeTotal,
+    autoChangedTo, readerSheetOpen,
 )
 
 /**
@@ -398,6 +407,14 @@ class ReaderViewModel(
         this.spec = spec
         paginateJob?.cancel()
         paginateJob = viewModelScope.launch {
+            if (_state.value.settings.flipAnimation == FlipAnimation.SCROLL) {
+                // 滚动模式不走分页缓存：showPosition 会按「这一章有没有分页结果」把
+                // loading 拉成 true，ScrollReader 被卸掉，列表滑不动、跳章也看不见。
+                scrollCache.clear()
+                _scrollChapters.value = emptyList()
+                prepareScroll(position.chapterIndex, jumpTo = ScrollJump(position.chapterIndex, position.charOffset))
+                return@launch
+            }
             engineMutex.withLock {
                 paginated.clear()
                 showPosition(position)
@@ -435,12 +452,39 @@ class ReaderViewModel(
     fun gotoChapter(index: Int, charOffset: Int = 0) {
         val count = _state.value.chapterCount
         if (index !in 0 until count) return
+        if (_state.value.settings.flipAnimation == FlipAnimation.SCROLL) {
+            gotoScrollChapter(index, charOffset)
+            return
+        }
         _state.value = _state.value.copy(loading = paginated[index] == null)
         viewModelScope.launch {
             engineMutex.withLock {
                 showPosition(ReadPosition(index, charOffset))
             }
         }
+    }
+
+    /**
+     * 滚动模式的跳章。不能复用 [showPosition]：
+     * 那条路径按分页缓存决定 loading，滚动模式的 [paginated] 经常是空的，
+     * loading=true 会把 [ScrollReader] 卸掉；即便没卸，列表也不会自己滚到新章。
+     */
+    private fun gotoScrollChapter(index: Int, charOffset: Int) {
+        position = ReadPosition(index, if (charOffset == Int.MAX_VALUE) 0 else charOffset)
+        lastScrollChapter = index
+        _state.value = _state.value.copy(
+            chapterIndex = index,
+            chapterTitle = scrollCache[index]?.title ?: _state.value.chapterTitle,
+            loading = false,
+            error = null,
+            atBookEnd = false,
+        )
+        prepareScroll(index, jumpTo = ScrollJump(index, charOffset))
+    }
+
+    fun setReaderSheetOpen(open: Boolean) {
+        if (_state.value.readerSheetOpen == open) return
+        _state.value = _state.value.copy(readerSheetOpen = open)
     }
 
     fun seekToPercent(percent: Float) {
@@ -1086,10 +1130,7 @@ class ReaderViewModel(
                 items = page.items,
                 measured = result.measured,
                 charOffsets = offsets,
-            ).also {
-                scrollCache[chapterIndex] = it
-                trimScrollWindow(center = position.chapterIndex, alsoKeep = chapterIndex)
-            }
+            ).also { scrollCache[chapterIndex] = it }
         } catch (e: CancellationException) {
             // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
             throw e
@@ -1104,36 +1145,62 @@ class ReaderViewModel(
     }
 
     /**
-     * 只留当前章前后各一章：一章的 TextLayoutResult 很占内存，整本书攒下来会 OOM。
-     * alsoKeep 是刚排好的那一章 —— 跳章时 position 还停在旧章，只按旧章裁的话，
-     * 刚排好的目标章会被当场剔掉。
+     * 只留 [center] 前后各一章，并一次交给列表。
+     * 每排好一章就发布的话，上一章会插到列表头，下标还在原地，进度回调当成「翻到了上一章」，
+     * 再预排、再插、再回调 —— 整本书往前一路滚。
      */
-    private fun trimScrollWindow(center: Int, alsoKeep: Int) {
-        val keep = setOf(center - 1, center, center + 1, alsoKeep)
-        val drop = scrollCache.keys.filterNot { it in keep }
-        drop.forEach { scrollCache.remove(it) }
+    private fun publishScrollWindow(center: Int) {
+        val keep = setOf(center - 1, center, center + 1)
+        scrollCache.keys.filterNot { it in keep }.forEach { scrollCache.remove(it) }
         _scrollChapters.value = scrollCache.values.sortedBy { it.chapterIndex }
     }
 
     private val _scrollChapters = MutableStateFlow<List<ScrollChapter>>(emptyList())
     val scrollChapters: StateFlow<List<ScrollChapter>> = _scrollChapters.asStateFlow()
 
-    /** 进入滚动模式 / 跳章时：把当前章及邻章排好 */
-    fun prepareScroll(center: Int = position.chapterIndex) {
+    private val _scrollJump = MutableStateFlow<ScrollJump?>(null)
+    val scrollJump: StateFlow<ScrollJump?> = _scrollJump.asStateFlow()
+
+    fun consumeScrollJump() {
+        _scrollJump.value = null
+    }
+
+    /**
+     * 进入滚动模式 / 跳章时：把当前章及邻章排好。
+     * [jumpTo] 非空时列表滚到该位置 —— 不传的话只预排邻章，别把用户正在滑的位置拽回去。
+     */
+    fun prepareScroll(
+        center: Int = position.chapterIndex,
+        jumpTo: ScrollJump? = null,
+        jumpToCurrent: Boolean = false,
+    ) {
+        val jump = jumpTo ?: if (jumpToCurrent) ScrollJump(center, position.charOffset) else null
+        if (jump != null) {
+            _scrollJump.value = jump
+            lastScrollChapter = jump.chapterIndex
+        }
         viewModelScope.launch {
             engineMutex.withLock {
                 // center 是用户正在看的那一章；上下邻章只是预排，失败不该打扰用户
-                ensureScroll(center, userFacing = true) ?: return@withLock
-                _state.value = _state.value.copy(loading = false, error = null)
+                val chapter = ensureScroll(center, userFacing = true) ?: return@withLock
+                ensureScroll(center - 1)
+                ensureScroll(center + 1)
+                publishScrollWindow(center)
+                _state.value = _state.value.copy(
+                    loading = false,
+                    error = null,
+                    chapterIndex = center,
+                    chapterTitle = chapter.title,
+                )
             }
-            engineMutex.withLock { ensureScroll(center - 1) }
-            engineMutex.withLock { ensureScroll(center + 1) }
         }
     }
 
     /** 滚到某章某元素：记进度、跨章时才续排邻章 */
     private var lastScrollChapter = Int.MIN_VALUE
     fun onScrollTo(chapterIndex: Int, elementIndex: Int) {
+        // 跳章还没落到列表上：首帧常停在窗口里的上一章，这时候记进度会把人拽回去
+        if (_scrollJump.value != null) return
         val chapter = scrollCache[chapterIndex] ?: return
         val offset = chapter.charOffsets[elementIndex] ?: 0
         position = ReadPosition(chapterIndex, offset)

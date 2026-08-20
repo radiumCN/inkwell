@@ -48,6 +48,7 @@ import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.isActive
@@ -61,6 +62,11 @@ class FlipController {
         requests.tryEmit(direction)
     }
 }
+
+/** 相对屏宽：走过这么多就算翻过去（越小越灵敏） */
+private const val COMMIT_DISTANCE_FRACTION = 8f
+/** 甩页速度阈值（px/s）。1200 对平移/覆盖偏狠，轻轻一滑会回弹 */
+private const val COMMIT_VELOCITY_PX = 700f
 
 /**
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
@@ -111,6 +117,8 @@ fun PageFlipContainer(
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var settling by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    val settleJob = remember { arrayOf<Job?>(null) }
+    val settleGen = remember { intArrayOf(0) }
 
     // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
     fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
@@ -119,10 +127,17 @@ fun PageFlipContainer(
         return (maxMs - (maxMs - minMs) * t).toInt()
     }
 
-    suspend fun settle(commit: Boolean, velocity: Float = 0f) {
+    fun resetFlipState() {
+        direction = null
+        offset.floatValue = 0f
+        settling = false
+    }
+
+    suspend fun settle(commit: Boolean, velocity: Float = 0f, gen: Int = settleGen[0]) {
         val dir = direction ?: return
         settling = true
         val width = size.width.toFloat()
+        try {
         if (effectiveAnim == FlipAnimation.CURL) {
             // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
             val target = when {
@@ -151,18 +166,31 @@ fun PageFlipContainer(
             // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
             onCommit(dir)
         }
-        direction = null
-        offset.floatValue = 0f
-        settling = false
+        } finally {
+            // 只复位自己这一轮。新一轮 settle 已经加过 gen 的话，这里动 direction 会把新动画掐死
+            if (gen == settleGen[0]) resetFlipState()
+        }
+    }
+
+    fun launchSettle(commit: Boolean, velocity: Float = 0f) {
+        settleGen[0] += 1
+        val gen = settleGen[0]
+        settleJob[0]?.cancel()
+        settleJob[0] = scope.launch { settle(commit, velocity, gen) }
     }
 
     fun startProgrammaticFlip(dir: FlipDirection) {
-        if (direction != null || settling) return
         if (!canFlip(dir)) {
+            settleGen[0] += 1
+            settleJob[0]?.cancel()
+            resetFlipState()
             if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
             return
         }
         if (effectiveAnim == FlipAnimation.NONE) {
+            settleGen[0] += 1
+            settleJob[0]?.cancel()
+            resetFlipState()
             onCommit(dir)
             return
         }
@@ -174,11 +202,18 @@ fun PageFlipContainer(
         touchX.floatValue = downX
         offset.floatValue = 0f
         direction = dir
-        scope.launch { settle(commit = true) }
+        launchSettle(commit = true)
     }
 
     LaunchedEffect(controller) {
         controller.requests.collect { startProgrammaticFlip(it) }
+    }
+    LaunchedEffect(gesturesEnabled) {
+        if (!gesturesEnabled) {
+            settleGen[0] += 1
+            settleJob[0]?.cancel()
+            resetFlipState()
+        }
     }
 
     Box(
@@ -256,11 +291,17 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val velocity = tracker.calculateVelocity().x
+                    // 走过 1/8 屏或甩得够快就算翻过去。从前是 1/4 + 1200px/s，
+                    // 平移/覆盖跟手幅度小，轻轻一滑经常回弹，看起来像没反应。
                     val commit = when (dir) {
-                        FlipDirection.FORWARD -> offset.floatValue < -width / 4f || velocity < -1200f
-                        FlipDirection.BACKWARD -> offset.floatValue > width / 4f || velocity > 1200f
+                        FlipDirection.FORWARD ->
+                            offset.floatValue < -width / COMMIT_DISTANCE_FRACTION ||
+                                velocity < -COMMIT_VELOCITY_PX
+                        FlipDirection.BACKWARD ->
+                            offset.floatValue > width / COMMIT_DISTANCE_FRACTION ||
+                                velocity > COMMIT_VELOCITY_PX
                     }
-                    scope.launch { settle(commit, velocity) }
+                    launchSettle(commit, velocity)
                 }
             },
     ) {

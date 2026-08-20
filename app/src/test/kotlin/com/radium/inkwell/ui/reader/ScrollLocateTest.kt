@@ -55,4 +55,46 @@ class ScrollLocateTest {
     fun `末尾留白落在所有元素之后，返回 null`() {
         assertNull(locate(chapters, 7))
     }
+
+    @Test
+    fun `flatIndex 是 locate 的反函数`() {
+        assertEquals(1, flatIndexOf(chapters, 3, 0))
+        assertEquals(4, flatIndexOf(chapters, 3, 3))
+        assertEquals(5, flatIndexOf(chapters, 4, 0))
+        assertEquals(6, flatIndexOf(chapters, 4, 1))
+        assertNull(flatIndexOf(chapters, 9, 0))
+    }
+
+    @Test
+    fun `字符偏移落到对应段，MAX_VALUE 落章末`() {
+        val chapter = chapter(3, 4).let {
+            ScrollChapter(
+                chapterIndex = it.chapterIndex,
+                title = it.title,
+                items = it.items,
+                measured = it.measured,
+                charOffsets = mapOf(0 to 0, 1 to 10, 2 to 25, 3 to 40),
+            )
+        }
+        assertEquals(0, elementIndexForOffset(chapter, 0))
+        assertEquals(1, elementIndexForOffset(chapter, 10))
+        assertEquals(1, elementIndexForOffset(chapter, 18))
+        assertEquals(3, elementIndexForOffset(chapter, 40))
+        assertEquals(3, elementIndexForOffset(chapter, Int.MAX_VALUE))
+    }
+
+    @Test
+    fun `前面插入上一章时下标要加上去`() {
+        val current = listOf(chapter(5, 3))
+        val withPrev = listOf(chapter(4, 2), chapter(5, 3))
+        assertEquals(2, leadingItemDelta(current, withPrev))
+        assertEquals(0, leadingItemDelta(emptyList(), current))
+    }
+
+    @Test
+    fun `前面裁掉上一章时下标要减`() {
+        val window = listOf(chapter(4, 2), chapter(5, 3), chapter(6, 1))
+        val trimmed = listOf(chapter(5, 3), chapter(6, 1))
+        assertEquals(-2, leadingItemDelta(window, trimmed))
+    }
 }

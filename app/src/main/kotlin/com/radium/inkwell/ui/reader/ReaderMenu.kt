@@ -114,6 +114,7 @@ fun ReaderMenu(
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onDismiss: () -> Unit,
+    onReaderSheetOpen: (Boolean) -> Unit,
 ) {
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -125,6 +126,9 @@ fun ReaderMenu(
             showToc = false
             showSettings = false
         }
+    }
+    LaunchedEffect(showToc, showSettings) {
+        onReaderSheetOpen(showToc || showSettings)
     }
 
     // 菜单栏跟随阅读主题的纸张色。从前用 MaterialTheme.surface（白色），
