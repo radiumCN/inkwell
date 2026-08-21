@@ -64,16 +64,6 @@ class FlipController {
     }
 }
 
-/** 相对屏宽：走过这么多就算翻过去（越小越灵敏） */
-private const val COMMIT_DISTANCE_FRACTION = 8f
-/** 甩页速度阈值（px/s）。1200 对平移/覆盖偏狠，轻轻一滑会回弹 */
-private const val COMMIT_VELOCITY_PX = 700f
-/**
- * 开始跟手所需的水平位移。系统 touchSlop 约 18dp，斜着短甩经常过不了，
- * 中间区域就被当成开菜单。
- */
-private const val FLIP_SLOP_DP = 10f
-
 /**
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
  * COVER/SLIDE 用图层位移驱动（offset），CURL 用真实触点驱动仿真卷页。
@@ -261,7 +251,7 @@ fun PageFlipContainer(
                         val dx = last.position.x - down.position.x
                         val dy = last.position.y - down.position.y
                         val action = classifyReleaseBeforeSlop(
-                            dx, dy, tracker.calculateVelocity().x, flipSlopPx, COMMIT_VELOCITY_PX,
+                            dx, dy, tracker.calculateVelocity().x, flipSlopPx, FLIP_COMMIT_VELOCITY_PX,
                         )
                         when (action) {
                             is FlipReleaseBeforeSlop.Flick -> {
@@ -286,6 +276,7 @@ fun PageFlipContainer(
                     // 连翻：收尾动画还在播时下一刀直接接手，不再丢掉这次拖拽。
                     if (settling || direction != null) interruptSettle()
                     val flippable = canFlip(dir)
+                    val width = size.width.toFloat()
                     // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
                     // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
                     // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
@@ -304,11 +295,15 @@ fun PageFlipContainer(
                         flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
                         touchY.floatValue = if (flatSwipe) (if (cornerBottom) h else 0f) else down.position.y
                         downX = down.position.x
-                        touchX.floatValue = down.position.x
+                        // 用当前触点，不是落点：快甩过 slop 时手指已经走出去一截。
+                        touchX.floatValue = drag.position.x
+                        // 过 slop 之前的位移也要算进 offset。快甩整段都发生在 horizontalDrag 之前，
+                        // 不种上的话 offset≈0，松手当回弹，页不变。
+                        offset.floatValue = seedFlipOffset(
+                            drag.position.x - down.position.x, dir, width,
+                        )
                         direction = dir
                     }
-
-                    val width = size.width.toFloat()
                     horizontalDrag(drag.id) { change ->
                         tracker.addPosition(change.uptimeMillis, change.position)
                         change.consume()
@@ -331,16 +326,7 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val velocity = tracker.calculateVelocity().x
-                    // 走过 1/8 屏或甩得够快就算翻过去。从前是 1/4 + 1200px/s，
-                    // 平移/覆盖跟手幅度小，轻轻一滑经常回弹，看起来像没反应。
-                    val commit = when (dir) {
-                        FlipDirection.FORWARD ->
-                            offset.floatValue < -width / COMMIT_DISTANCE_FRACTION ||
-                                velocity < -COMMIT_VELOCITY_PX
-                        FlipDirection.BACKWARD ->
-                            offset.floatValue > width / COMMIT_DISTANCE_FRACTION ||
-                                velocity > COMMIT_VELOCITY_PX
-                    }
+                    val commit = shouldCommitHorizontalFlip(offset.floatValue, velocity, width, dir)
                     launchSettle(commit, velocity)
                 }
             },

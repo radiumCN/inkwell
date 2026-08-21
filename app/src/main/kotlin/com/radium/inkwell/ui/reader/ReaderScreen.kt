@@ -582,6 +582,15 @@ fun ReaderScreen(
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onDismiss = { viewModel.toggleMenu() },
+            onSwipePage = { dir ->
+                // 先关菜单再翻：菜单开着时 gesturesEnabled=false，会把正在播的 settle 掐掉。
+                viewModel.dismissMenu()
+                if (session.settings.flipAnimation == FlipAnimation.SCROLL) {
+                    viewModel.flip(dir)
+                } else {
+                    flipController.requestFlip(dir)
+                }
+            },
             onReaderSheetOpen = { viewModel.setReaderSheetOpen(it) },
         )
 

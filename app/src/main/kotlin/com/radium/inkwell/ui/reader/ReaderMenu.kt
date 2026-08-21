@@ -72,7 +72,7 @@ import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.ui.components.topBarEnter
 import com.radium.inkwell.ui.components.topBarExit
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.flow.StateFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,8 +93,10 @@ import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.reader.api.FlipAnimation
+import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.flip.FLIP_SLOP_DP
 import com.radium.inkwell.ui.theme.argbToHsv
 import com.radium.inkwell.ui.theme.hsvToArgb
 
@@ -114,6 +116,7 @@ fun ReaderMenu(
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onDismiss: () -> Unit,
+    onSwipePage: (FlipDirection) -> Unit,
     onReaderSheetOpen: (Boolean) -> Unit,
 ) {
     var showToc by remember { mutableStateOf(false) }
@@ -193,7 +196,7 @@ fun ReaderMenu(
                 }
             }
 
-            // 中央区域：**透明**，只承接"点一下关掉菜单"。
+            // 中央区域：**透明**。点一下关菜单；按当前翻页方向滑一下 = 关并翻一页。
             //
             // 这里原来压了一层 18% 的黑色蒙层，想表达"菜单是盖上来的一层"。
             // 代价是正文被压暗：同一张米色纸，顶栏是亮米色、正文成了灰绿，
@@ -201,26 +204,24 @@ fun ReaderMenu(
             //
             // 层次交给顶栏/底栏的阴影就够了。这也是纸书的道理：把书页调暗，
             // 并不能让压在上面的书签更像书签。
-            val dismissTap = remember { MutableInteractionSource() }
+            val density = LocalDensity.current
+            val slopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    // 无涟漪：这是块半屏的空白，点它只是"关掉菜单"。带 ripple 的话
-                    // 一点下去整个屏幕中央泛起一道全屏涟漪，非常吓人。
-                    // 只在菜单真正开着时拦截。visible 已是 false、退场动画还在播时
-                    // 若 clickable 仍留着，会把底下的翻页手势吃掉一小段——就是关菜单后
-                    // 短暂翻不了页的原因。
-                    .then(
-                        if (visible) {
-                            Modifier.clickable(
-                                interactionSource = dismissTap,
-                                indication = null,
-                                onClick = onDismiss,
-                            )
-                        } else {
-                            Modifier
-                        },
+                    // 无涟漪：这是块半屏的空白。目录/设置/换源开着时不拦截，
+                    // 否则跟面板里的列表抢手势。visible 已是 false 时也不挂 ——
+                    // 退场动画还在播若仍吃手势，关完会短暂翻不了页。
+                    .menuBodyGesture(
+                        enabled = visible &&
+                            !showToc &&
+                            !showSettings &&
+                            overlay.sourceCandidates == null,
+                        vertical = session.settings.flipAnimation == FlipAnimation.SCROLL,
+                        slopPx = slopPx,
+                        onTap = onDismiss,
+                        onFlip = onSwipePage,
                     ),
             )
 

@@ -493,6 +493,12 @@ class ReaderViewModel(
         _state.value = _state.value.copy(menuVisible = !_state.value.menuVisible)
     }
 
+    /** 滑一下关菜单并翻页时用这个，别 [toggleMenu]：菜单已关会反过来打开。 */
+    fun dismissMenu() {
+        if (!_state.value.menuVisible) return
+        _state.value = _state.value.copy(menuVisible = false)
+    }
+
     /** UI 层按 App 主题模式 + 系统日夜算出后调这个，阅读纸张随之切日/夜槽 */
     fun setDarkActive(dark: Boolean) = readerPrefs.setDarkActive(dark)
 
