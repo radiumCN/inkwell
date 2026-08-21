@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +27,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -36,6 +36,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
@@ -67,6 +68,11 @@ class FlipController {
 private const val COMMIT_DISTANCE_FRACTION = 8f
 /** 甩页速度阈值（px/s）。1200 对平移/覆盖偏狠，轻轻一滑会回弹 */
 private const val COMMIT_VELOCITY_PX = 700f
+/**
+ * 开始跟手所需的水平位移。系统 touchSlop 约 18dp，斜着短甩经常过不了，
+ * 中间区域就被当成开菜单。
+ */
+private const val FLIP_SLOP_DP = 10f
 
 /**
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
@@ -103,6 +109,7 @@ fun PageFlipContainer(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
+    val flipSlopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
     // 系统「移除动画」开启时降级为无动画直切（无障碍）
     val effectiveAnim = if (!animationsEnabled) FlipAnimation.NONE else animation
     // 位移/触点用 State 对象本身传给图层，组合阶段不读 .floatValue ——
@@ -179,6 +186,13 @@ fun PageFlipContainer(
         settleJob[0] = scope.launch { settle(commit, velocity, gen) }
     }
 
+    /** 下一刀接手：先抬 gen，旧 settle 的 finally 才不会把新 direction 清掉 */
+    fun interruptSettle() {
+        settleGen[0] += 1
+        settleJob[0]?.cancel()
+        resetFlipState()
+    }
+
     fun startProgrammaticFlip(dir: FlipDirection) {
         if (!canFlip(dir)) {
             settleGen[0] += 1
@@ -220,31 +234,57 @@ fun PageFlipContainer(
         modifier
             .fillMaxSize()
             .onSizeChanged { size = it }
-            .pointerInput(gesturesEnabled, effectiveAnim) {
+            .pointerInput(gesturesEnabled, effectiveAnim, flipSlopPx) {
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
+                    var last = down
+                    var drag: PointerInputChange? = null
                     var dragDir: FlipDirection? = null
-                    val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
-                        dragDir = if (over < 0) FlipDirection.FORWARD else FlipDirection.BACKWARD
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        last = change
+                        if (!change.pressed) break
+                        val dx = change.position.x - down.position.x
+                        val dy = change.position.y - down.position.y
+                        val dir = passedFlipSlop(dx, dy, flipSlopPx) ?: continue
                         change.consume()
+                        drag = change
+                        dragDir = dir
+                        break
                     }
-                    if (drag == null) {
-                        // 松手未越过 slop = 点击
-                        if (!settling && direction == null) {
-                            val x = down.position.x
-                            when {
-                                x < size.width / 3f -> startProgrammaticFlip(FlipDirection.BACKWARD)
-                                x > size.width * 2 / 3f -> startProgrammaticFlip(FlipDirection.FORWARD)
-                                else -> onCenterTap()
+                    if (drag == null || dragDir == null) {
+                        val dx = last.position.x - down.position.x
+                        val dy = last.position.y - down.position.y
+                        val action = classifyReleaseBeforeSlop(
+                            dx, dy, tracker.calculateVelocity().x, flipSlopPx, COMMIT_VELOCITY_PX,
+                        )
+                        when (action) {
+                            is FlipReleaseBeforeSlop.Flick -> {
+                                interruptSettle()
+                                startProgrammaticFlip(action.direction)
                             }
+                            FlipReleaseBeforeSlop.Tap -> {
+                                if (!settling && direction == null) {
+                                    val x = down.position.x
+                                    when {
+                                        x < size.width / 3f -> startProgrammaticFlip(FlipDirection.BACKWARD)
+                                        x > size.width * 2 / 3f -> startProgrammaticFlip(FlipDirection.FORWARD)
+                                        else -> onCenterTap()
+                                    }
+                                }
+                            }
+                            FlipReleaseBeforeSlop.Ignore -> Unit
                         }
                         return@awaitEachGesture
                     }
-                    val dir = dragDir ?: return@awaitEachGesture
-                    if (settling || direction != null) return@awaitEachGesture
+                    val dir = dragDir
+                    // 连翻：收尾动画还在播时下一刀直接接手，不再丢掉这次拖拽。
+                    if (settling || direction != null) interruptSettle()
                     val flippable = canFlip(dir)
                     // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
                     // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
@@ -320,6 +360,7 @@ fun PageFlipContainer(
                 selection = selection,
                 current = current, prev = prev, next = next,
                 layout = layout, theme = theme, direction = direction,
+                offset = offset,
                 touchX = touchX,
                 downX = downX,
                 touchY = touchY,
@@ -412,6 +453,7 @@ private fun CurlLayer(
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
+    offset: MutableFloatState,
     touchX: MutableFloatState,
     downX: Float,
     touchY: MutableFloatState,
@@ -449,8 +491,15 @@ private fun CurlLayer(
     val renderer = remember(size) { CurlRenderer(size.width.toFloat(), size.height.toFloat()) }
 
     val ready = bitmaps
-    if (direction == null || ready?.current == null) {
+    if (direction == null) {
         PageCanvas(current, layout, theme, selection = selection)
+        return
+    }
+    // 页图还在 Default 上烤：先平移跟手，避免画面冻住像滑不动。
+    if (ready?.current == null) {
+        SlideLayers(
+            selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+        )
         return
     }
 
