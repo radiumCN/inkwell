@@ -82,6 +82,30 @@ class FlipGestureMathTest {
     }
 
     @Test
+    fun `过了 slop 的短促一甩即使位移不够也提交`() {
+        assertEquals(
+            true,
+            shouldCommitHorizontalFlip(
+                -25f, -100f, width = 1080f, FlipDirection.FORWARD, elapsedMs = 120L,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldCommitHorizontalFlip(
+                -25f, -100f, width = 1080f, FlipDirection.FORWARD, elapsedMs = 400L,
+            ),
+        )
+    }
+
+    @Test
+    fun `抬手才过 slop 且速度为 0 也按甩页`() {
+        val action = classifyReleaseBeforeSlop(
+            dx = -40f, dy = 4f, velocityX = 0f, slop = 10f, flickVelocity = 700f,
+        )
+        assertEquals(FlipReleaseBeforeSlop.Flick(FlipDirection.FORWARD), action)
+    }
+
+    @Test
     fun `过不了 slop 的竖向快甩按速度翻页`() {
         val action = classifyReleaseBeforeSlopVertical(
             dx = 2f, dy = -8f, velocityY = -800f, slop = 10f, flickVelocity = 700f,
