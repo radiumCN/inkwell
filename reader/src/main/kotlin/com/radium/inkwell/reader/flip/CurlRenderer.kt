@@ -96,6 +96,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
         ).toFloat()
 
+        // 先铺满纸色。折页路径盖不住的缝、以及 clip 漏出来的像素，
+        // 否则会透出底层或未清的缓冲，整屏发褐发紫。
+        canvas.drawColor(paperColor)
         // legado onDraw 顺序：前页区 → 下页区+投影 → 前页折痕投影 → 背面。
         // 拖动帧也画三片阴影：关掉会变成「纸片平移」，不像在卷。跟手靠触点只在
         // drawBehind 里读，不靠少画阴影。

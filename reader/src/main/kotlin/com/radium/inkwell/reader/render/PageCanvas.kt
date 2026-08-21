@@ -129,11 +129,12 @@ fun PageCanvas(
 /**
  * 把一页渲染为位图（仿真卷页需要对整页做几何变形）。
  *
- * 画在一张可变 ARGB 底图上，再拷成 **RGB_565 不可变**图：纸色页不透明，阴影在
- * CurlRenderer 里另画，不需要页图 alpha。565 是 ARGB 的一半，也更吃 CPU/GPU 缓存。
- * 拷完立刻 recycle 底图，避免峰值双份全屏 ARGB（1080×2400 一张约 10MB）。
+ * 画在一张可变 ARGB 底图上，再拷成 **不可变 ARGB_8888**：纸色页不透明，阴影在
+ * CurlRenderer 里另画。从前拷 RGB_565 省一半内存，米色纸少了蓝通道精度，
+ * 翻页瞬间整页发褐发紫，松手回到 [PageCanvas] 又正常。
  *
  * 不可变：HWUI 对可变位图每帧重新上传 GPU 纹理，是仿真翻页掉帧的主因。
+ * 拷完立刻 recycle 底图，避免峰值双份全屏 ARGB。
  */
 fun renderPageBitmap(
     page: RenderablePage?,
@@ -143,8 +144,9 @@ fun renderPageBitmap(
 ): ImageBitmap {
     val width = layout.viewportWidthPx.coerceAtLeast(1)
     val height = layout.viewportHeightPx.coerceAtLeast(1)
+    val srgb = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
     val software = android.graphics.Bitmap.createBitmap(
-        width, height, android.graphics.Bitmap.Config.ARGB_8888,
+        width, height, android.graphics.Bitmap.Config.ARGB_8888, /* hasAlpha = */ false, srgb,
     )
     CanvasDrawScope().draw(
         density,
@@ -154,10 +156,10 @@ fun renderPageBitmap(
     ) {
         drawPage(page, layout, theme)
     }
-    val compact = software.copy(android.graphics.Bitmap.Config.RGB_565, /* isMutable = */ false)
-    if (compact != null) {
+    val immutable = software.copy(android.graphics.Bitmap.Config.ARGB_8888, /* isMutable = */ false)
+    if (immutable != null) {
         software.recycle()
-        return compact.asImageBitmap()
+        return immutable.asImageBitmap()
     }
     return software.asImageBitmap()
 }

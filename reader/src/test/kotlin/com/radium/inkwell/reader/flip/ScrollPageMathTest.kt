@@ -29,7 +29,7 @@ class ScrollPageMathTest {
     }
 
     @Test
-    fun `下滑越过 0 就翻上一页`() {
+    fun `下滑未超过上一页高只露出上一页`() {
         val step = consumeScroll(
             pageOffset = -5f,
             dragDelta = 10f,
@@ -40,9 +40,26 @@ class ScrollPageMathTest {
             hasNext = true,
             viewportHeight = 800f,
         )
+        assertNull(step.flip)
+        assertEquals(5f, step.drawOffset, 0.01f)
+        assertEquals(0f, step.leftover)
+    }
+
+    @Test
+    fun `下滑越过上一页高才翻上一页`() {
+        val step = consumeScroll(
+            pageOffset = 70f,
+            dragDelta = 20f,
+            currentHeight = 100f,
+            prevHeight = 80f,
+            nextHeight = 80f,
+            hasPrev = true,
+            hasNext = true,
+            viewportHeight = 800f,
+        )
         assertEquals(FlipDirection.BACKWARD, step.flip)
-        assertEquals(0f, step.drawOffset, 0.01f)
-        assertEquals(-75f, step.leftover, 0.01f)
+        assertEquals(80f, step.drawOffset, 0.01f)
+        assertEquals(10f, step.leftover, 0.01f)
     }
 
     @Test

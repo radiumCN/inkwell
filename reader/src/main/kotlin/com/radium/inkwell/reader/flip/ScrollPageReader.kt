@@ -63,48 +63,45 @@ fun ScrollPageReader(
     var seenPageKey by remember { mutableStateOf(pageKey) }
     if (pageKey != seenPageKey) {
         seenPageKey = pageKey
-        // 先落到新页顶，避免沿用上一页坐标系把新页推到画面外。
-        offset.floatValue = 0f
+        // 换页当帧就把 leftover 接上。先归零再等 LaunchedEffect 补，中间会闪一帧页顶。
+        val extra = leftover.floatValue
+        val incoming = pendingFlip
+        leftover.floatValue = 0f
+        pendingFlip = null
+        if (incoming == null || extra == 0f) {
+            offset.floatValue = 0f
+        } else if (leftoverChain >= 8) {
+            offset.floatValue = 0f
+        } else {
+            leftoverChain++
+            val curH = scrollPageHeight(current).let { if (it <= 0f) 1f else it }
+            val step = consumeScroll(
+                pageOffset = 0f,
+                dragDelta = extra,
+                currentHeight = curH,
+                prevHeight = scrollPageHeight(prev),
+                nextHeight = scrollPageHeight(next),
+                hasPrev = hasPrev,
+                hasNext = hasNext,
+                viewportHeight = layout.contentHeightPx,
+            )
+            offset.floatValue = step.drawOffset
+            leftover.floatValue = step.leftover
+            pendingFlip = step.flip
+        }
     }
     val nextReady = next != null
     val prevReady = prev != null
-    LaunchedEffect(pageKey, nextReady, prevReady) {
-        val extra = leftover.floatValue
-        val chained = pendingFlip
-        if (chained == null) {
-            leftover.floatValue = 0f
-            return@LaunchedEffect
-        }
-        leftover.floatValue = 0f
-        pendingFlip = null
-        if (extra == 0f) return@LaunchedEffect
+    LaunchedEffect(pageKey, nextReady, prevReady, pendingFlip) {
+        val chained = pendingFlip ?: return@LaunchedEffect
         if (leftoverChain >= 8) {
             leftover.floatValue = 0f
+            pendingFlip = null
             return@LaunchedEffect
         }
         leftoverChain++
-        val spec = layoutLatest.value
-        val curH = scrollPageHeight(currentLatest.value).let {
-            if (it <= 0f) 1f else it
-        }
-        val prevH = scrollPageHeight(prevLatest.value)
-        val nextH = scrollPageHeight(nextLatest.value)
-        val step = consumeScroll(
-            pageOffset = 0f,
-            dragDelta = extra,
-            currentHeight = curH,
-            prevHeight = prevH,
-            nextHeight = nextH,
-            hasPrev = hasPrevLatest.value,
-            hasNext = hasNextLatest.value,
-            viewportHeight = spec.contentHeightPx,
-        )
-        offset.floatValue = step.drawOffset
-        if (step.flip != null) {
-            leftover.floatValue = step.leftover
-            pendingFlip = step.flip
-            onFlipLatest.value(step.flip)
-        }
+        pendingFlip = null
+        onFlipLatest.value(chained)
     }
 
     val scrollableState = rememberScrollableState { composeDelta ->

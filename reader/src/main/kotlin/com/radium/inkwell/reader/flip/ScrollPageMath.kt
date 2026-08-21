@@ -13,7 +13,8 @@ import com.radium.inkwell.reader.render.RenderablePage
  * 这个符号跟 [androidx.compose.foundation.gestures.scrollable] 默认一致：
  * `reverseDirection = false` 时，正 delta 就是手指沿轴向正方向（竖直＝下滑），
  * 不要再取一次负号，否则手势和阅读方向对反。
- * 越过 `-currentHeight` 就翻到下一页并带回偏移；大于 0 就翻到上一页。
+ * 越过 `-currentHeight` 就翻到下一页并带回偏移；越过 `+prevHeight` 才翻到上一页。
+ * `0 … prevHeight` 只露出上一页，不立刻提交 —— 刚过 0 就翻会先弹回页顶再补 leftover，字会跳。
  * 标题/进度跟当前页走，不再从列表可见项反推章号。
  *
  * 一次手势吃掉的位移：快滑/惯性一次能甩过好几页，但画面上只有 prev/cur/next。
@@ -42,8 +43,15 @@ fun consumeScroll(
         if (!hasPrev) {
             return ScrollConsume(0f, null, 0f)
         }
-        val leftover = if (prevHeight > 0f) offset - prevHeight.coerceAtLeast(1f) else 0f
-        return ScrollConsume(0f, FlipDirection.BACKWARD, leftover)
+        // 上一页还没画出来：不能把当前页往下拽出空洞。
+        if (prevHeight <= 0f) {
+            return ScrollConsume(0f, FlipDirection.BACKWARD, offset)
+        }
+        val prevH = prevHeight.coerceAtLeast(1f)
+        if (offset > prevH) {
+            return ScrollConsume(prevH, FlipDirection.BACKWARD, offset - prevH)
+        }
+        return ScrollConsume(offset, null, 0f)
     }
     // 下一页还没画出来：不能把当前页推走露出空洞。长页仍可滑到页底对齐视口。
     if (nextHeight <= 0f) {

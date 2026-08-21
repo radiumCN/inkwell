@@ -73,7 +73,7 @@ private const val COMMIT_VELOCITY_PX = 700f
  * COVER/SLIDE 用图层位移驱动（offset），CURL 用真实触点驱动仿真卷页。
  *
  * 性能要点：拖拽路径直接写 State（不经协程）；CURL 位图在 Default 上渲成
- * RGB_565 不可变图（主线程零开销，GPU 纹理只上传一次）；settle 用 animate() 驱动同一 State。
+ * 不可变 ARGB 图（主线程零开销，GPU 纹理只上传一次）；settle 用 animate() 驱动同一 State。
  */
 @Composable
 fun PageFlipContainer(
@@ -421,7 +421,7 @@ private fun CurlLayer(
     selection: TextSelection? = null,
 ) {
     // 闲时也预渲，但放到 Default：主线程不再被 remember { renderPageBitmap } 卡住。
-    // 位图是 RGB_565（见 renderPageBitmap），三张约 15MB。按 PageSpec 相等判断能否环形挪槽，
+    // 位图是不可变 ARGB（见 renderPageBitmap）。按 PageSpec 相等判断能否环形挪槽，
     // 换下来的旧图延后 recycle，避免正画着的那一帧被回收。
     var bitmaps by remember { mutableStateOf<CurlBitmaps?>(null) }
     DisposableEffect(Unit) {
