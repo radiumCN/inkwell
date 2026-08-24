@@ -1,14 +1,15 @@
 # Inkwell · 墨水
 
-> 一款克制、专注的 Android 文本阅读器 —— 暖纸质感、仿真翻页、进度永不丢失。本地 txt / EPUB / MOBI(AZW3) 阅读 · 可选自定义规则 · WebDAV 跨端同步。
+> 一款克制、专注的文本阅读器 —— 暖纸质感、仿真翻页、进度永不丢失。本地 txt / EPUB / MOBI(AZW3) 阅读 · 可选自定义规则 · WebDAV 跨端同步。Android 客户端无需账号；[网页版](https://book.skylark.run) 需登录注册后使用。
 
 ![platform](https://img.shields.io/badge/Android-15%2B%20(minSdk%2035)-3DDC84?logo=android&logoColor=white)
+[![web](https://img.shields.io/badge/Web-book.skylark.run-111111)](https://book.skylark.run)
 ![kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white)
 ![compose](https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4)
 ![license](https://img.shields.io/badge/License-MIT-blue)
 [![release](https://img.shields.io/github/v/release/radiumCN/inkwell?display_name=tag)](https://github.com/radiumCN/inkwell/releases)
 
-Inkwell 用 Jetpack Compose 从零写成，没有广告、没有账号、没有推送。排版引擎全自绘、进度以「章节 + 章内偏移」为真身，改字号也不丢位置；书架、进度与用户配置可通过 WebDAV 单文件同步，书籍文件不上云。**默认不内置任何第三方内容或访问规则**；规则如需使用，均由用户自行导入并对其合法性负责（见下方免责声明）。
+Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号、没有推送。排版引擎全自绘、进度以「章节 + 章内偏移」为真身，改字号也不丢位置；书架、进度与用户配置可通过 WebDAV 单文件同步，书籍文件不上云。另有[网页版](https://book.skylark.run)，使用书架与阅读需先登录注册，与 App 填同一套 WebDAV 即可同步。**默认不内置任何第三方内容或访问规则**；规则如需使用，均由用户自行导入并对其合法性负责（见下方免责声明）。
 
 ## ✨ 功能特性
 
@@ -30,6 +31,7 @@ Inkwell 用 Jetpack Compose 从零写成，没有广告、没有账号、没有�
 
 **同步与维护**
 - WebDAV 单文件（`inkwell/backup.json.gz`）增量同步，字段级 Last-Write-Wins 合并（进度按 `readAt`、元数据按 `updatedAt`）；凭据经系统密钥库加密存放。
+- [网页版](https://book.skylark.run)（需登录注册）：书架、书源与阅读；与 App 共用同一套 WebDAV，读写同一份备份文件。
 - 应用内更新检查，稳定 / 测试双通道。
 - 一键清理正文缓存（不影响书架与阅读进度）。
 
@@ -113,6 +115,7 @@ Inkwell 用 Jetpack Compose 从零写成，没有广告、没有账号、没有�
 ## 📦 下载与发布
 
 - **下载**：前往 [Releases](https://github.com/radiumCN/inkwell/releases) 获取签名 APK。应用内「设置 → 检查更新」也可直接拉取。
+- **网页版**：打开 [book.skylark.run](https://book.skylark.run)。官网可直接浏览；使用书架与阅读需登录注册。与 App 填同一套 WebDAV 即可同步进度、书源与设置。
 - **发版流程**：改 `gradle/libs.versions.toml` 的 `inkwell` 版本号 → 提交 → 打**带注解**的 tag（`git tag -a vX.Y.Z`）→ 推送 tag。CI 校验 tag 与版本号一致后自动构建签名 APK 并发布 Release。
 - **Release 正文取自 tag 注解本身**，且应用内更新弹窗按**纯文本**渲染 —— tag 注解请写纯文本、不要用 Markdown。
 - 带 `-` 后缀的 tag（如 `v0.1.9-beta.7`）会标为预发布，只推测试渠道。
@@ -145,7 +148,7 @@ Inkwell 用 Jetpack Compose 从零写成，没有广告、没有账号、没有�
 
 1. 本软件主要功能运行于用户本地设备，不设立用于提供阅读内容服务的自有内容服务器。
 2. 本软件不会主动收集、上传或存储用户的阅读正文、规则列表、浏览记录或其他个人隐私数据用于运营分析。
-3. 用户主动启用的功能（例如 WebDAV 备份同步、应用内检查更新、意见反馈）会在用户操作或明确配置的前提下，与用户指定的服务器或公开仓库发生必要的网络通信；相关凭据与数据的安全由用户自行妥善保管。
+3. 用户主动启用的功能（例如 WebDAV 备份同步、应用内检查更新、意见反馈）会在用户操作或明确配置的前提下，与用户指定的服务器或公开仓库发生必要的网络通信；相关凭据与数据的安全由用户自行妥善保管。网页版需登录注册，账号与阅读数据由网页服务处理，与 Android 客户端无账号体系相互独立。
 4. 部分网络、存储或同步权限，仅用于实现本地阅读、备份同步或用户主动触发的更新与反馈等功能。
 
 ### 五、知识产权保护
