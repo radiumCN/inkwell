@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,11 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -27,9 +28,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
@@ -48,6 +47,7 @@ import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.renderPageBitmap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -63,6 +63,13 @@ class FlipController {
         requests.tryEmit(direction)
     }
 }
+
+/** 收尾被打断时本地挪一格 prev/cur/next，等 ViewModel 换页追上再丢。 */
+private data class HeldPages(
+    val current: RenderablePage?,
+    val prev: RenderablePage?,
+    val next: RenderablePage?,
+)
 
 /**
  * 翻页容器：手势判向 → 跟手拖拽 → 松手按位移/速度裁决 commit/回滚。
@@ -116,6 +123,21 @@ fun PageFlipContainer(
     var size by remember { mutableStateOf(IntSize.Zero) }
     val settleJob = remember { arrayOf<Job?>(null) }
     val settleGen = remember { intArrayOf(0) }
+    // 收尾动画还在飞时下一刀按上屏幕：必须先把这一页提交掉。
+    // 只 cancel + 复位的话，纸会弹回当前页，连翻就像翻不动。
+    val inFlightCommitDir = remember { arrayOf<FlipDirection?>(null) }
+    var heldPages by remember { mutableStateOf<HeldPages?>(null) }
+    val currentLatest = rememberUpdatedState(current)
+    val prevLatest = rememberUpdatedState(prev)
+    val nextLatest = rememberUpdatedState(next)
+    SideEffect {
+        if (heldPages != null && current?.spec != null && current.spec == heldPages?.current?.spec) {
+            heldPages = null
+        }
+    }
+    val shownCurrent = heldPages?.current ?: current
+    val shownPrev = heldPages?.prev ?: prev
+    val shownNext = heldPages?.next ?: next
 
     // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
     fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
@@ -128,6 +150,26 @@ fun PageFlipContainer(
         direction = null
         offset.floatValue = 0f
         settling = false
+    }
+
+    fun holdAfterCommit(dir: FlipDirection) {
+        val cur = currentLatest.value
+        val prv = prevLatest.value
+        val nxt = nextLatest.value
+        val shifted = when (dir) {
+            FlipDirection.FORWARD -> nxt?.let { HeldPages(current = it, prev = cur, next = null) }
+            FlipDirection.BACKWARD -> prv?.let { HeldPages(current = it, prev = null, next = cur) }
+        }
+        if (shifted != null) heldPages = shifted
+    }
+
+    /** 把还在飞的那一刀落地。ViewModel 换页比重组慢一拍，先本地挪 prev/cur/next，避免弹回旧页。 */
+    fun consumeInFlightCommit() {
+        val dir = inFlightCommitDir[0] ?: return
+        inFlightCommitDir[0] = null
+        holdAfterCommit(dir)
+        if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        onCommit(dir)
     }
 
     suspend fun settle(commit: Boolean, velocity: Float = 0f, gen: Int = settleGen[0]) {
@@ -158,26 +200,34 @@ fun PageFlipContainer(
                 offset.floatValue = v
             }
         }
-        if (commit && hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (commit) {
             // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
+            inFlightCommitDir[0] = null
+            holdAfterCommit(dir)
+            if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onCommit(dir)
         }
         } finally {
             // 只复位自己这一轮。新一轮 settle 已经加过 gen 的话，这里动 direction 会把新动画掐死
-            if (gen == settleGen[0]) resetFlipState()
+            if (gen == settleGen[0]) {
+                inFlightCommitDir[0] = null
+                resetFlipState()
+            }
         }
     }
 
     fun launchSettle(commit: Boolean, velocity: Float = 0f) {
+        consumeInFlightCommit()
         settleGen[0] += 1
         val gen = settleGen[0]
         settleJob[0]?.cancel()
+        inFlightCommitDir[0] = if (commit) direction else null
         settleJob[0] = scope.launch { settle(commit, velocity, gen) }
     }
 
-    /** 下一刀接手：先抬 gen，旧 settle 的 finally 才不会把新 direction 清掉 */
+    /** 下一刀接手：该翻过去的立刻提交，再清动画。只清不提交会把纸弹回来。 */
     fun interruptSettle() {
+        consumeInFlightCommit()
         settleGen[0] += 1
         settleJob[0]?.cancel()
         resetFlipState()
@@ -185,19 +235,16 @@ fun PageFlipContainer(
 
     fun startProgrammaticFlip(dir: FlipDirection) {
         if (!canFlip(dir)) {
-            settleGen[0] += 1
-            settleJob[0]?.cancel()
-            resetFlipState()
+            interruptSettle()
             if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
             return
         }
         if (effectiveAnim == FlipAnimation.NONE) {
-            settleGen[0] += 1
-            settleJob[0]?.cancel()
-            resetFlipState()
+            interruptSettle()
             onCommit(dir)
             return
         }
+        interruptSettle()
         // 点击翻页 = 翻整页，走竖直圆柱：触点 Y 钉到页底（与中间横划一致），别卷出斜角
         cornerBottom = true
         flatSwipe = true
@@ -213,11 +260,7 @@ fun PageFlipContainer(
         controller.requests.collect { startProgrammaticFlip(it) }
     }
     LaunchedEffect(gesturesEnabled) {
-        if (!gesturesEnabled) {
-            settleGen[0] += 1
-            settleJob[0]?.cancel()
-            resetFlipState()
-        }
+        if (!gesturesEnabled) interruptSettle()
     }
 
     Box(
@@ -228,26 +271,114 @@ fun PageFlipContainer(
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
+                    // 收尾还在播时手指再按上来：先把这一页落下，再让这一刀跟手。
+                    // 否则 cancel 会把纸弹回当前页，连翻就像没翻。
+                    val pressedDuringSettle = settling || inFlightCommitDir[0] != null
+                    if (pressedDuringSettle) interruptSettle()
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
                     var last = down
-                    var drag: PointerInputChange? = null
                     var dragDir: FlipDirection? = null
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        last = change
-                        if (!change.pressed) break
-                        val dx = change.position.x - down.position.x
-                        val dy = change.position.y - down.position.y
-                        val dir = passedFlipSlop(dx, dy, flipSlopPx) ?: continue
-                        change.consume()
-                        drag = change
-                        dragDir = dir
-                        break
+                    var following = false
+                    // 快甩时位移经常整段落在抬手那一帧。必须先判 slop 再看 pressed ——
+                    // 先因 UP 跳出的话，offset 几乎是 0，松手当回弹，中间还会被当成开菜单。
+                    // 也不走 horizontalDrag：它不把 UP 交给回调，抬手位移和速度都会丢；
+                    // 若 UP 已经发生，它还会一直等下一个事件，仿真就停在半页。
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            last = change
+                            val dx = change.position.x - down.position.x
+                            val dy = change.position.y - down.position.y
+                            if (dragDir == null) {
+                                val dir = passedFlipSlop(dx, dy, flipSlopPx)
+                                if (dir == null) {
+                                    if (!change.pressed) break
+                                    continue
+                                }
+                                change.consume()
+                                dragDir = dir
+                                // 连翻：收尾还在播时下一刀接手。先把上一页提交掉，再跟手。
+                                if (settling || direction != null || inFlightCommitDir[0] != null) {
+                                    interruptSettle()
+                                }
+                                val flippable = canFlip(dir)
+                                val width = size.width.toFloat()
+                                // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
+                                // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
+                                // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
+                                if (flippable && effectiveAnim != FlipAnimation.NONE) {
+                                    val h = size.height.toFloat()
+                                    // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
+                                    // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
+                                    cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
+                                    // 从屏幕**中间那一带**起手 = 想翻整页，不是揪角。这时把触点 Y 钉到卷角所在的
+                                    // 页边（不跟手指的 Y），折痕于是接近竖直、页面绕竖轴卷过去 —— 真书翻页的样子。
+                                    // 只有从上/下三分之一起手才让 Y 跟手，卷出斜的揪角效果。
+                                    //
+                                    // 从前一律跟手，中间横划就卷出一条贯穿全页的大斜折（"天差地别"那张图）。
+                                    // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
+                                    // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
+                                    flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
+                                    touchY.floatValue = if (flatSwipe) {
+                                        if (cornerBottom) h else 0f
+                                    } else {
+                                        change.position.y
+                                    }
+                                    downX = down.position.x
+                                    touchX.floatValue = change.position.x
+                                    offset.floatValue = seedFlipOffset(dx, dir, width)
+                                    direction = dir
+                                    following = true
+                                }
+                                if (!change.pressed) break
+                                continue
+                            }
+                            change.consume()
+                            if (following) {
+                                val width = size.width.toFloat()
+                                val dir = dragDir ?: break
+                                // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
+                                // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
+                                touchY.floatValue = if (flatSwipe) {
+                                    if (cornerBottom) size.height.toFloat() else 0f
+                                } else {
+                                    change.position.y
+                                }
+                                touchX.floatValue = change.position.x
+                                // 用相对落点的总位移，不累加 positionChange：UP 没有 delta，累加会少最后一截。
+                                offset.floatValue = seedFlipOffset(
+                                    change.position.x - down.position.x, dir, width,
+                                )
+                            }
+                            if (!change.pressed) break
+                        }
+                    } catch (e: CancellationException) {
+                        // pointerInput 被掐时别把 direction 晾着：仿真会停在半页，此后点击也不翻。
+                        if (following && direction != null && !settling) {
+                            val dir = direction
+                            if (dir != null && canFlip(dir)) {
+                                val width = size.width.toFloat()
+                                val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
+                                if (shouldCommitHorizontalFlip(
+                                        offset.floatValue,
+                                        tracker.calculateVelocity().x,
+                                        width,
+                                        dir,
+                                        elapsed,
+                                    )
+                                ) {
+                                    holdAfterCommit(dir)
+                                    onCommit(dir)
+                                }
+                            }
+                            resetFlipState()
+                        }
+                        throw e
                     }
-                    if (drag == null || dragDir == null) {
+                    if (dragDir == null) {
                         val dx = last.position.x - down.position.x
                         val dy = last.position.y - down.position.y
                         val action = classifyReleaseBeforeSlop(
@@ -259,7 +390,7 @@ fun PageFlipContainer(
                                 startProgrammaticFlip(action.direction)
                             }
                             FlipReleaseBeforeSlop.Tap -> {
-                                if (!settling && direction == null) {
+                                if (!pressedDuringSettle && !settling && direction == null) {
                                     val x = down.position.x
                                     when {
                                         x < size.width / 3f -> startProgrammaticFlip(FlipDirection.BACKWARD)
@@ -273,52 +404,12 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir
-                    // 连翻：收尾动画还在播时下一刀直接接手，不再丢掉这次拖拽。
-                    if (settling || direction != null) interruptSettle()
                     val flippable = canFlip(dir)
                     val width = size.width.toFloat()
-                    // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
-                    // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
-                    // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
-                    if (flippable && effectiveAnim != FlipAnimation.NONE) {
-                        val h = size.height.toFloat()
-                        // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
-                        // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
-                        cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
-                        // 从屏幕**中间那一带**起手 = 想翻整页，不是揪角。这时把触点 Y 钉到卷角所在的
-                        // 页边（不跟手指的 Y），折痕于是接近竖直、页面绕竖轴卷过去 —— 真书翻页的样子。
-                        // 只有从上/下三分之一起手才让 Y 跟手，卷出斜的揪角效果。
-                        //
-                        // 从前一律跟手，中间横划就卷出一条贯穿全页的大斜折（"天差地别"那张图）。
-                        // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
-                        // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
-                        flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
-                        touchY.floatValue = if (flatSwipe) (if (cornerBottom) h else 0f) else down.position.y
-                        downX = down.position.x
-                        // 用当前触点，不是落点：快甩过 slop 时手指已经走出去一截。
-                        touchX.floatValue = drag.position.x
-                        // 过 slop 之前的位移也要算进 offset。快甩整段都发生在 horizontalDrag 之前，
-                        // 不种上的话 offset≈0，松手当回弹，页不变。
-                        offset.floatValue = seedFlipOffset(
-                            drag.position.x - down.position.x, dir, width,
-                        )
-                        direction = dir
-                    }
-                    horizontalDrag(drag.id) { change ->
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        change.consume()
-                        if (!flippable || effectiveAnim == FlipAnimation.NONE) return@horizontalDrag
-                        // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
-                        // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
-                        touchY.floatValue = if (flatSwipe) (if (cornerBottom) size.height.toFloat() else 0f) else change.position.y
-                        touchX.floatValue = change.position.x
-                        val range = if (dir == FlipDirection.FORWARD) -width..0f else 0f..width
-                        offset.floatValue = (offset.floatValue + change.positionChange().x).coerceIn(range)
-                    }
-
                     if (!flippable) {
                         // 书首/书末：无动画，前翻到底时提示
                         if (dir == FlipDirection.FORWARD) onCommit(dir)
+                        if (following) resetFlipState()
                         return@awaitEachGesture
                     }
                     if (effectiveAnim == FlipAnimation.NONE) {
@@ -326,7 +417,10 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val velocity = tracker.calculateVelocity().x
-                    val commit = shouldCommitHorizontalFlip(offset.floatValue, velocity, width, dir)
+                    val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
+                    val commit = shouldCommitHorizontalFlip(
+                        offset.floatValue, velocity, width, dir, elapsed,
+                    )
                     launchSettle(commit, velocity)
                 }
             },
@@ -335,16 +429,16 @@ fun PageFlipContainer(
             // 滚动模式根本不该走到这里 —— 它是另一条渲染路径，由 ReaderScreen 分流。
             // 万一走到了（比如设置迁移遗漏），静态画当前页，总好过崩溃或白屏。
             FlipAnimation.NONE, FlipAnimation.SCROLL ->
-                PageCanvas(current, layout, theme, selection = selection)
+                PageCanvas(shownCurrent, layout, theme, selection = selection)
             FlipAnimation.SLIDE -> SlideLayers(
-                selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.COVER -> CoverLayers(
-                selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
+                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.CURL -> CurlLayer(
                 selection = selection,
-                current = current, prev = prev, next = next,
+                current = shownCurrent, prev = shownPrev, next = shownNext,
                 layout = layout, theme = theme, direction = direction,
                 offset = offset,
                 touchX = touchX,
