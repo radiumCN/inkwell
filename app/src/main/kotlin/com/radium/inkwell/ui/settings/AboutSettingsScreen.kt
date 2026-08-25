@@ -26,6 +26,9 @@ import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.update.UpdateChecker
 
+/** 网页版 / 官网，与 README 里的 book.skylark.run 同一处 */
+private const val SITE_URL = "https://book.skylark.run"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutSettingsScreen(
@@ -75,6 +78,14 @@ fun AboutSettingsScreen(
                 SettingRow(
                     title = "开源许可",
                     value = "MIT License",
+                    position = SettingGroupPosition.Middle,
+                )
+                SettingRow(
+                    title = "官网（web）",
+                    value = SITE_URL,
+                    onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SITE_URL)))
+                    },
                     position = SettingGroupPosition.Middle,
                 )
                 SettingRow(
