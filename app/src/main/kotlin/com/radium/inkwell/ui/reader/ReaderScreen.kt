@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.reader
 
 import android.app.Activity
+import android.content.ClipData
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -29,9 +30,9 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.AnnotatedString
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.selectWordAt
@@ -193,7 +194,7 @@ fun ReaderScreen(
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
     val haptic = LocalHapticFeedback.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var addShelfPrompt by remember { mutableStateOf(false) }
     var settlingShelf by remember { mutableStateOf(false) }
@@ -531,8 +532,11 @@ fun ReaderScreen(
             SelectionToolbar(
                 selectedText = sel.text,
                 onCopy = {
-                    clipboard.setText(AnnotatedString(sel.text))
-                    selection = null; anchor = null
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("selection", sel.text)))
+                        selection = null
+                        anchor = null
+                    }
                 },
                 onPurify = {
                     viewModel.purifySelection(sel.text)

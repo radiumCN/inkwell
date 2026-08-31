@@ -25,7 +25,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlaylistAddCheck
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -162,7 +162,7 @@ fun SourceManageScreen(
                             Icon(Icons.Default.SelectAll, contentDescription = "全选")
                         }
                         AppIconButton(onClick = { viewModel.validate(selected) }) {
-                            Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验")
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验")
                         }
                         AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
@@ -226,7 +226,7 @@ fun SourceManageScreen(
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
                         AppIconButton(onClick = { showCheckOptions = true }) {
-                            Icon(Icons.Default.PlaylistAddCheck, contentDescription = "校验书源")
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验书源")
                         }
                     }
                     AppIconButton(onClick = { showSortPicker = true }) {

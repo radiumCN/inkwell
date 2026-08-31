@@ -746,17 +746,19 @@ class ReaderViewModel(
 
     private fun recordHit(sourceId: String, hit: Boolean, bookUrl: String?) {
         // 记忆是纯粹的加速手段，写失败了不该影响换源本身 —— 顶多下次少一点先验
-        viewModelScope.launch(NonCancellable) {
-            runCatching {
-                hitDao.upsert(
-                    BookSourceHitEntity(
-                        bookId = bookId,
-                        sourceId = sourceId,
-                        hit = hit,
-                        bookUrl = bookUrl,
-                        checkedAt = System.currentTimeMillis(),
-                    ),
-                )
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                runCatching {
+                    hitDao.upsert(
+                        BookSourceHitEntity(
+                            bookId = bookId,
+                            sourceId = sourceId,
+                            hit = hit,
+                            bookUrl = bookUrl,
+                            checkedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
             }
         }
     }
