@@ -17,22 +17,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class OfficialAuthPage { LOGIN, REGISTER, RESET }
-
-enum class OfficialLoginMode { PASSWORD, CODE }
-
 data class WebDavUiState(
     val provider: WebDavProvider = WebDavProvider.CUSTOM,
     val officialConnected: Boolean = false,
     val officialEmail: String = "",
-    val officialAuthPage: OfficialAuthPage = OfficialAuthPage.LOGIN,
-    val officialLoginMode: OfficialLoginMode = OfficialLoginMode.PASSWORD,
     val registrationOpen: Boolean = true,
     val officialDavUrl: String = OfficialWebDav.DAV,
-    val login: String = "",
     val email: String = "",
-    val username: String = "",
-    val accountPassword: String = "",
     val code: String = "",
     val codeWait: Int = 0,
     val url: String = "",
@@ -83,7 +74,6 @@ class WebDavViewModel(
                 configured = c.isConfigured,
                 lastSyncAt = c.lastSyncAt,
                 autoSync = c.autoSync,
-                login = c.officialEmail,
                 email = c.officialEmail,
             )
             official.publicConfig().onSuccess { cfg ->
@@ -91,9 +81,6 @@ class WebDavViewModel(
                     it.copy(
                         registrationOpen = cfg.registrationEnabled,
                         officialDavUrl = cfg.webdavUrl.ifBlank { OfficialWebDav.DAV },
-                        officialAuthPage = if (!cfg.registrationEnabled &&
-                            it.officialAuthPage == OfficialAuthPage.REGISTER
-                        ) OfficialAuthPage.LOGIN else it.officialAuthPage,
                     )
                 }
             }
@@ -129,18 +116,7 @@ class WebDavViewModel(
 
     fun dismissSwitchToCustom() = _state.update { it.copy(confirmSwitchToCustom = false) }
 
-    fun setOfficialAuthPage(page: OfficialAuthPage) {
-        _state.update { it.copy(officialAuthPage = page, code = "") }
-    }
-
-    fun setOfficialLoginMode(mode: OfficialLoginMode) {
-        _state.update { it.copy(officialLoginMode = mode, code = "") }
-    }
-
-    fun setLogin(v: String) = _state.update { it.copy(login = v) }
     fun setEmail(v: String) = _state.update { it.copy(email = v) }
-    fun setUsername(v: String) = _state.update { it.copy(username = v) }
-    fun setAccountPassword(v: String) = _state.update { it.copy(accountPassword = v) }
     fun setCode(v: String) = _state.update { it.copy(code = v) }
     fun setUrl(v: String) = _state.update { it.copy(url = v) }
     fun setDavUsername(v: String) = _state.update { it.copy(davUsername = v) }
@@ -154,20 +130,13 @@ class WebDavViewModel(
     fun sendCode() {
         val s = _state.value
         if (s.busy || s.codeWait > 0) return
-        val email = when {
-            s.officialAuthPage == OfficialAuthPage.LOGIN && s.officialLoginMode == OfficialLoginMode.CODE -> s.email
-            else -> s.email
-        }.trim()
+        val email = s.email.trim()
         if (email.isBlank()) {
             viewModelScope.launch { messages.emit("请填写邮箱") }
             return
         }
         runAuth {
-            val result = when (s.officialAuthPage) {
-                OfficialAuthPage.REGISTER -> official.sendRegisterCode(email)
-                OfficialAuthPage.RESET -> official.sendResetCode(email)
-                OfficialAuthPage.LOGIN -> official.sendLoginCode(email)
-            }
+            val result = official.sendLoginCode(email)
             if (result.isSuccess) {
                 startCooldown()
                 messages.emit("验证码已发送")
@@ -181,23 +150,7 @@ class WebDavViewModel(
         val s = _state.value
         if (s.busy) return
         runAuth {
-            val result = when (s.officialAuthPage) {
-                OfficialAuthPage.REGISTER -> official.register(
-                    s.username.trim(),
-                    s.email.trim(),
-                    s.accountPassword,
-                    s.code.trim(),
-                )
-                OfficialAuthPage.RESET -> official.resetPassword(
-                    s.email.trim(),
-                    s.code.trim(),
-                    s.accountPassword,
-                )
-                OfficialAuthPage.LOGIN -> when (s.officialLoginMode) {
-                    OfficialLoginMode.PASSWORD -> official.login(s.login.trim(), s.accountPassword)
-                    OfficialLoginMode.CODE -> official.loginWithCode(s.email.trim(), s.code.trim())
-                }
-            }
+            val result = official.loginWithCode(s.email.trim(), s.code.trim())
             if (result.isSuccess) {
                 val c = prefs.config.first()
                 _state.update {
@@ -208,7 +161,6 @@ class WebDavViewModel(
                         davUsername = c.username,
                         davPassword = c.password,
                         configured = true,
-                        accountPassword = "",
                         code = "",
                     )
                 }

@@ -197,82 +197,14 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
 
 @Composable
 private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
-    val pages = buildList {
-        add(OfficialAuthPage.LOGIN)
-        if (state.registrationOpen) add(OfficialAuthPage.REGISTER)
-        add(OfficialAuthPage.RESET)
-    }
-    val labels = pages.map {
-        when (it) {
-            OfficialAuthPage.LOGIN -> "登录"
-            OfficialAuthPage.REGISTER -> "注册"
-            OfficialAuthPage.RESET -> "找回密码"
-        }
-    }
-    ChipRow(
-        options = labels,
-        selectedIndex = pages.indexOf(state.officialAuthPage).coerceAtLeast(0),
-        onSelect = { viewModel.setOfficialAuthPage(pages[it]) },
-    )
-    when (state.officialAuthPage) {
-        OfficialAuthPage.LOGIN -> OfficialLoginForm(state, viewModel)
-        OfficialAuthPage.REGISTER -> OfficialRegisterForm(state, viewModel)
-        OfficialAuthPage.RESET -> OfficialResetForm(state, viewModel)
-    }
-    OfficialPrivacyNote()
-}
-
-@Composable
-private fun OfficialLoginForm(state: WebDavUiState, viewModel: WebDavViewModel) {
-    ChipRow(
-        options = listOf("密码", "验证码"),
-        selectedIndex = if (state.officialLoginMode == OfficialLoginMode.PASSWORD) 0 else 1,
-        onSelect = {
-            viewModel.setOfficialLoginMode(if (it == 0) OfficialLoginMode.PASSWORD else OfficialLoginMode.CODE)
+    Text(
+        if (state.registrationOpen) {
+            "用邮箱收取验证码即可。没有账号会自动开通。"
+        } else {
+            "暂未开放新账号，已有账号仍可用邮箱验证码登录。"
         },
-    )
-    if (state.officialLoginMode == OfficialLoginMode.PASSWORD) {
-        OutlinedTextField(
-            value = state.login,
-            onValueChange = viewModel::setLogin,
-            label = { Text("用户名或邮箱") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        SecretField(
-            value = state.accountPassword,
-            onValueChange = viewModel::setAccountPassword,
-            label = "登录密码",
-        )
-    } else {
-        OutlinedTextField(
-            value = state.email,
-            onValueChange = viewModel::setEmail,
-            label = { Text("邮箱") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        CodeRow(state, viewModel)
-    }
-    PrimaryButton(
-        text = "登录并开启同步",
-        onClick = viewModel::submitOfficial,
-        enabled = !state.busy,
-        loading = state.testing,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun OfficialRegisterForm(state: WebDavUiState, viewModel: WebDavViewModel) {
-    OutlinedTextField(
-        value = state.username,
-        onValueChange = viewModel::setUsername,
-        label = { Text("用户名") },
-        placeholder = { Text("字母开头，3-32 位") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
         value = state.email,
@@ -282,44 +214,15 @@ private fun OfficialRegisterForm(state: WebDavUiState, viewModel: WebDavViewMode
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
         modifier = Modifier.fillMaxWidth(),
     )
-    SecretField(
-        value = state.accountPassword,
-        onValueChange = viewModel::setAccountPassword,
-        label = "登录密码",
-    )
     CodeRow(state, viewModel)
     PrimaryButton(
-        text = "注册并开启同步",
+        text = "验证并开启同步",
         onClick = viewModel::submitOfficial,
         enabled = !state.busy,
         loading = state.testing,
         modifier = Modifier.fillMaxWidth(),
     )
-}
-
-@Composable
-private fun OfficialResetForm(state: WebDavUiState, viewModel: WebDavViewModel) {
-    OutlinedTextField(
-        value = state.email,
-        onValueChange = viewModel::setEmail,
-        label = { Text("邮箱") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    CodeRow(state, viewModel)
-    SecretField(
-        value = state.accountPassword,
-        onValueChange = viewModel::setAccountPassword,
-        label = "新登录密码",
-    )
-    PrimaryButton(
-        text = "重置并开启同步",
-        onClick = viewModel::submitOfficial,
-        enabled = !state.busy,
-        loading = state.testing,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    OfficialPrivacyNote()
 }
 
 @Composable
@@ -401,7 +304,7 @@ private fun SyncFooter(state: WebDavUiState) {
 private fun OfficialPrivacyNote() {
     Text(
         "每位用户独立存储空间，互不可见。传输使用 HTTPS，凭据保存在本机。\n" +
-            "备份文件尚未端到端加密。书籍正文与本地文件不会上传。",
+            "未注册的邮箱验证后会自动开通账号。备份文件尚未端到端加密。书籍正文与本地文件不会上传。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -459,8 +362,11 @@ private fun SecretField(
 private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    // 反馈必须画在弹层里：页面 Snackbar 被对话框挡住，点了像没反应。
+    var copiedLabel by remember { mutableStateOf<String?>(null) }
     suspend fun copy(label: String, value: String) {
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, value)))
+        copiedLabel = label
     }
     AppAlertDialog(
         onDismissRequest = onDismiss,
@@ -470,14 +376,27 @@ private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
         dismissText = null,
         onConfirm = onDismiss,
     ) {
-        CopyRow("地址", state.url.ifBlank { state.officialDavUrl }) { scope.launch { copy("地址", it) } }
-        CopyRow("用户名", state.davUsername) { scope.launch { copy("用户名", it) } }
-        CopyRow("应用码", state.davPassword) { scope.launch { copy("应用码", it) } }
+        CopyRow("地址", state.url.ifBlank { state.officialDavUrl }, copiedLabel == "地址") {
+            scope.launch { copy("地址", it) }
+        }
+        CopyRow("用户名", state.davUsername, copiedLabel == "用户名") {
+            scope.launch { copy("用户名", it) }
+        }
+        CopyRow("应用码", state.davPassword, copiedLabel == "应用码") {
+            scope.launch { copy("应用码", it) }
+        }
+        if (copiedLabel != null) {
+            Text(
+                "已复制$copiedLabel",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
 @Composable
-private fun CopyRow(label: String, value: String, onCopy: (String) -> Unit) {
+private fun CopyRow(label: String, value: String, copied: Boolean, onCopy: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         Text(
@@ -486,7 +405,7 @@ private fun CopyRow(label: String, value: String, onCopy: (String) -> Unit) {
             color = MaterialTheme.colorScheme.onSurface,
         )
         SecondaryButton(
-            text = "复制$label",
+            text = if (copied) "已复制" else "复制$label",
             onClick = { onCopy(value) },
             enabled = value.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
