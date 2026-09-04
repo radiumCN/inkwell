@@ -369,6 +369,7 @@ fun ReaderScreen(
                         gesturesEnabled = !overlay.menuVisible &&
                             !overlay.readerSheetOpen &&
                             overlay.sourceCandidates == null,
+                        clickToFlip = session.settings.scrollClickToFlip,
                         onFlip = { viewModel.flip(it) },
                         onCenterTap = { viewModel.toggleMenu() },
                     )

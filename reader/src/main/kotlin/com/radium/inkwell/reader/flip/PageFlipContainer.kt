@@ -391,12 +391,8 @@ fun PageFlipContainer(
                             }
                             FlipReleaseBeforeSlop.Tap -> {
                                 if (!pressedDuringSettle && !settling && direction == null) {
-                                    val x = down.position.x
-                                    when {
-                                        x < size.width / 3f -> startProgrammaticFlip(FlipDirection.BACKWARD)
-                                        x > size.width * 2 / 3f -> startProgrammaticFlip(FlipDirection.FORWARD)
-                                        else -> onCenterTap()
-                                    }
+                                    val dir = tapFlipDirection(down.position.x, size.width.toFloat())
+                                    if (dir != null) startProgrammaticFlip(dir) else onCenterTap()
                                 }
                             }
                             FlipReleaseBeforeSlop.Ignore -> Unit

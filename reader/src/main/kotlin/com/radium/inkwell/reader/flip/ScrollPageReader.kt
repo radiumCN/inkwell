@@ -42,6 +42,8 @@ fun ScrollPageReader(
     hasPrev: Boolean,
     hasNext: Boolean,
     gesturesEnabled: Boolean,
+    /** 点左右三分之一是否跳整页。滚动默认关，避免误触丢掉页内偏移。 */
+    clickToFlip: Boolean = false,
     onFlip: (FlipDirection) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
@@ -56,6 +58,7 @@ fun ScrollPageReader(
     val hasPrevLatest = rememberUpdatedState(hasPrev)
     val hasNextLatest = rememberUpdatedState(hasNext)
     val onFlipLatest = rememberUpdatedState(onFlip)
+    val clickToFlipLatest = rememberUpdatedState(clickToFlip)
 
     val leftover = remember { mutableFloatStateOf(0f) }
     var leftoverChain by remember { mutableIntStateOf(0) }
@@ -184,24 +187,23 @@ fun ScrollPageReader(
                 // 默认 false：正 delta = 手指下滑，和 pageOffset 同号。verticalScroll 会把这个翻掉，这里别学。
                 reverseDirection = false,
             )
-            .pointerInput(gesturesEnabled, size) {
+            .pointerInput(gesturesEnabled, size, clickToFlip) {
                 if (!gesturesEnabled) return@pointerInput
                 detectTapGestures { pos ->
-                    val w = size.width.toFloat().coerceAtLeast(1f)
-                    when {
-                        pos.x < w / 3f -> {
-                            if (hasPrevLatest.value) {
-                                pendingFlip = FlipDirection.BACKWARD
-                                onFlipLatest.value(FlipDirection.BACKWARD)
-                            }
-                        }
-                        pos.x > w * 2f / 3f -> {
-                            if (hasNextLatest.value) {
-                                pendingFlip = FlipDirection.FORWARD
-                                onFlipLatest.value(FlipDirection.FORWARD)
-                            }
-                        }
-                        else -> onCenterTap()
+                    val dir = tapFlipDirection(
+                        pos.x, size.width.toFloat(), enabled = clickToFlipLatest.value,
+                    )
+                    if (dir == null) {
+                        onCenterTap()
+                        return@detectTapGestures
+                    }
+                    val can = when (dir) {
+                        FlipDirection.BACKWARD -> hasPrevLatest.value
+                        FlipDirection.FORWARD -> hasNextLatest.value
+                    }
+                    if (can) {
+                        pendingFlip = dir
+                        onFlipLatest.value(dir)
                     }
                 }
             },

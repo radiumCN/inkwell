@@ -114,6 +114,22 @@ class FlipGestureMathTest {
     }
 
     @Test
+    fun `点击左中右三分区对应翻页或菜单`() {
+        assertEquals(FlipDirection.BACKWARD, tapFlipDirection(100f, width = 900f))
+        assertNull(tapFlipDirection(450f, width = 900f))
+        assertEquals(FlipDirection.FORWARD, tapFlipDirection(800f, width = 900f))
+        assertNull(tapFlipDirection(300f, width = 900f))
+        assertNull(tapFlipDirection(600f, width = 900f))
+    }
+
+    @Test
+    fun `关掉点击翻页时左右也只当菜单`() {
+        assertNull(tapFlipDirection(100f, width = 900f, enabled = false))
+        assertNull(tapFlipDirection(800f, width = 900f, enabled = false))
+        assertNull(tapFlipDirection(450f, width = 900f, enabled = false))
+    }
+
+    @Test
     fun `明显竖滑不当点击`() {
         val action = classifyReleaseBeforeSlop(
             dx = 2f, dy = 30f, velocityX = 50f, slop = 10f, flickVelocity = 700f,

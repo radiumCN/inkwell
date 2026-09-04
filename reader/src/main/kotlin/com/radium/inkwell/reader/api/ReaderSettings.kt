@@ -32,6 +32,12 @@ data class ReaderSettings(
      * 想要"落定"手感的人再开。
      */
     val flipHaptic: Boolean = false,
+    /**
+     * 滚动模式下，点屏幕左右三分之一是否跳整页。
+     * **默认关** —— 滚动的主交互是上下滑；点边会丢掉当前页内偏移、整页跳走，容易误触。
+     * 仿真/覆盖/平移不受这项影响（点左右翻页仍是它们的主操作）。
+     */
+    val scrollClickToFlip: Boolean = false,
     /** 自动翻页间隔（秒）；每页停留这么久后自动往下翻 */
     val autoFlipSeconds: Int = 15,
     /**

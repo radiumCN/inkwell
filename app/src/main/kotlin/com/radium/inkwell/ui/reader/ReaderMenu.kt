@@ -694,7 +694,8 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
         onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
     )
 
-    // 滚动模式没有"页"，这两项无从谈起 —— 与其留在那儿让人调了没反应，不如藏起来
+    // 滚动模式没有"页"，自动翻页 / 音量键 / 震动无从谈起 —— 与其留在那儿让人调了没反应，不如藏起来。
+    // 点击左右跳整页则反过来：仿真里是主操作，滚动里默认关，单独给开关。
     if (settings.flipAnimation != FlipAnimation.SCROLL) {
         SectionLabel("自动翻页间隔")
         ChipRow(
@@ -718,6 +719,16 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
                 checked = settings.flipHaptic,
                 onCheckedChange = { onUpdate(settings.copy(flipHaptic = it)) },
                 position = SettingGroupPosition.Last,
+            )
+        }
+    } else {
+        SettingGroup(applyHorizontalInset = false) {
+            SwitchRow(
+                title = "点击左右翻页",
+                subtitle = "打开后点屏幕左右可跳整页；默认关，点击只唤出菜单",
+                checked = settings.scrollClickToFlip,
+                onCheckedChange = { onUpdate(settings.copy(scrollClickToFlip = it)) },
+                position = SettingGroupPosition.Alone,
             )
         }
     }

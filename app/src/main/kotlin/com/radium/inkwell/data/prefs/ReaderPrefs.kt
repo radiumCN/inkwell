@@ -56,6 +56,7 @@ class ReaderPrefs(private val context: Context) {
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
+        val SCROLL_CLICK_TO_FLIP = booleanPreferencesKey("scroll_click_to_flip")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
         val FONT_ID = stringPreferencesKey("font_id")
@@ -106,6 +107,7 @@ class ReaderPrefs(private val context: Context) {
             showBattery = p[Keys.SHOW_BATTERY] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
+            scrollClickToFlip = p[Keys.SCROLL_CLICK_TO_FLIP] ?: false,
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
         )
@@ -148,6 +150,7 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.SHOW_BATTERY] = settings.showBattery
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
+            p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
         }
@@ -228,6 +231,7 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "show_battery" to s.showBattery.toString(),
             "volume_key_flip" to s.volumeKeyFlip.toString(),
             "flip_haptic" to s.flipHaptic.toString(),
+            "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
         ),
@@ -272,6 +276,7 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             showBattery = v["show_battery"]?.toBooleanStrictOrNull() ?: base.showBattery,
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
             flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
+            scrollClickToFlip = v["scroll_click_to_flip"]?.toBooleanStrictOrNull() ?: base.scrollClickToFlip,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
             preloadChapters = v["preload_chapters"]?.toIntOrNull() ?: base.preloadChapters,
         )

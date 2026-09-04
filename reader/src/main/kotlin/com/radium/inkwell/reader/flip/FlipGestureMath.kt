@@ -95,6 +95,20 @@ fun classifyReleaseBeforeSlopVertical(
     return FlipReleaseBeforeSlop.Tap
 }
 
+/**
+ * 点击落点对应的翻页方向。左三分之一上一页、右三分之一下一页，中间 null（开菜单）。
+ * [enabled] 为 false 时一律 null —— 滚动模式默认如此，避免误触整页跳。
+ */
+fun tapFlipDirection(x: Float, width: Float, enabled: Boolean = true): FlipDirection? {
+    if (!enabled) return null
+    val w = width.coerceAtLeast(1f)
+    return when {
+        x < w / 3f -> FlipDirection.BACKWARD
+        x > w * 2f / 3f -> FlipDirection.FORWARD
+        else -> null
+    }
+}
+
 /** 相对落点的总位移种进 offset。快甩时 UP 没有 positionChange，累加会少最后一截。 */
 fun seedFlipOffset(dx: Float, direction: FlipDirection, width: Float): Float {
     val w = width.coerceAtLeast(1f)
