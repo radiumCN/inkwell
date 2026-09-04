@@ -285,16 +285,16 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
 private fun SyncFooter(state: WebDavUiState) {
     if (state.lastSyncAt > 0) {
         Text(
-            "上次同步: " + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
+            "上次同步：" + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
                 .format(Date(state.lastSyncAt)),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
     Text(
-        "同步内容：书架与阅读进度、书源（含原文）、订阅源、净化替换规则、阅读排版与应用设置。\n" +
-            "不同步：本地书籍文件、已缓存的章节正文 —— 换设备后本地书需重新导入文件。\n" +
-            "冲突按“新者胜”合并：书与书源逐条比时间戳，设置整块比。",
+        "会同步：书架、阅读进度、书源、订阅源、净化规则，以及阅读与应用设置。\n" +
+            "不会同步：本地书的文件和已缓存的章节。换设备后，本地书需要重新导入。\n" +
+            "两边都改过时，以较新的为准。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -303,8 +303,7 @@ private fun SyncFooter(state: WebDavUiState) {
 @Composable
 private fun OfficialPrivacyNote() {
     Text(
-        "每位用户独立存储空间，互不可见。传输使用 HTTPS，凭据保存在本机。\n" +
-            "未注册的邮箱验证后会自动开通账号。备份文件尚未端到端加密。书籍正文与本地文件不会上传。",
+        "每位用户独立空间，互不可见。传输走 HTTPS，登录凭据只保存在本机。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
