@@ -79,6 +79,14 @@ class WebDavClientTest {
     }
 
     @Test
+    fun `root collection keeps trailing slash`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(207).setBody("""<?xml version="1.0"?>
+            <d:multistatus xmlns:d="DAV:"></d:multistatus>"""))
+        client.list("")
+        assertEquals("/dav/", server.takeRequest().path)
+    }
+
+    @Test
     fun `propfind parses multistatus children`() = runTest {
         val xml = """<?xml version="1.0"?>
             <d:multistatus xmlns:d="DAV:">

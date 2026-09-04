@@ -99,7 +99,10 @@ class WebDavClient(
     suspend fun check(): Result<Unit> = runCatching { list("") }.map { }
 
     private fun request(path: String): Request.Builder {
-        val url = if (path.isBlank()) base else "$base/${path.trimStart('/')}"
+        // 集合根必须带尾斜杠。官方盘 Nginx 对 /dav 会 301 到 /dav/，
+        // 部分客户端跟着跳时会把 PROPFIND 收成 GET，再 405。子路径保持无斜杠。
+        val trimmed = path.trim('/')
+        val url = if (trimmed.isEmpty()) "$base/" else "$base/$trimmed"
         return Request.Builder()
             .url(url)
             // UTF-8 而非默认 ISO-8859-1：中文用户名/密码在默认编码下会被替换成 ?，恒 401
