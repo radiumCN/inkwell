@@ -57,7 +57,11 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
         // 先把升级前留下的明文口令换成密文，再同步 —— 顺序要紧：同步会读口令，
         // 两件事都在这一个协程里顺序做，不会撞在一起。
         appScope.launch {
-            runCatching { koin.get<WebDavPrefs>().migrateSecrets() }
+            runCatching {
+                val webDavPrefs = koin.get<WebDavPrefs>()
+                webDavPrefs.migrateSecrets()
+                webDavPrefs.migrateOfficialDavUrl()
+            }
             autoSync(koin)
         }
 

@@ -15,11 +15,12 @@ import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.data.net.OfficialWebDav
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
+import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.prefs.exportForBackup
 import com.radium.inkwell.data.prefs.importFromBackup
-import com.radium.inkwell.data.prefs.WebDavPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -47,7 +48,8 @@ class WebDavRepository(
     suspend fun sync(): Result<String> = runCatching {
         val config = prefs.config.first()
         check(config.isConfigured) { "尚未配置 WebDAV" }
-        val client = WebDavClient(config.url, config.username, config.password)
+        val url = if (OfficialWebDav.isLegacyDav(config.url)) OfficialWebDav.DAV else config.url
+        val client = WebDavClient(url, config.username, config.password)
 
         // 先建目录再读：首次同步时 inkwell/ 还不存在，直接 GET 备份文件，
         // 坚果云对「父目录不存在」回的是 409 而不是 404 —— 同步就一次都成不了。

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.radium.inkwell.data.net.OfficialWebDav
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -77,6 +78,16 @@ class WebDavPrefs(
         val stored = context.webDavDataStore.data.first()[Keys.PASSWORD] ?: return
         if (!cipher.read(stored).needsMigration) return
         context.webDavDataStore.edit { it[Keys.PASSWORD] = cipher.encrypt(stored) }
+    }
+
+    /**
+     * 官方 DAV 根从 api 主机迁到站点主机。已连上的用户 DataStore 里还是旧 URL，
+     * 不改写的话冷启动同步会 404。自备盘填了别的地址不动。
+     */
+    suspend fun migrateOfficialDavUrl() {
+        val stored = context.webDavDataStore.data.first()[Keys.URL] ?: return
+        if (!OfficialWebDav.isLegacyDav(stored)) return
+        context.webDavDataStore.edit { it[Keys.URL] = OfficialWebDav.DAV }
     }
 
     suspend fun setAutoSync(on: Boolean) {

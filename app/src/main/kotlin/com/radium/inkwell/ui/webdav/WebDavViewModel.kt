@@ -68,7 +68,7 @@ class WebDavViewModel(
                 provider = provider,
                 officialConnected = c.isOfficialConnected,
                 officialEmail = c.officialEmail,
-                url = c.url,
+                url = OfficialWebDav.resolveDavUrl(c.url).takeIf { c.url.isNotBlank() }.orEmpty(),
                 davUsername = c.username,
                 davPassword = c.password,
                 configured = c.isConfigured,
@@ -80,7 +80,7 @@ class WebDavViewModel(
                 _state.update {
                     it.copy(
                         registrationOpen = cfg.registrationEnabled,
-                        officialDavUrl = cfg.webdavUrl.ifBlank { OfficialWebDav.DAV },
+                        officialDavUrl = OfficialWebDav.resolveDavUrl(cfg.webdavUrl),
                     )
                 }
             }
@@ -157,7 +157,7 @@ class WebDavViewModel(
                     it.copy(
                         officialConnected = true,
                         officialEmail = c.officialEmail,
-                        url = c.url,
+                        url = OfficialWebDav.resolveDavUrl(c.url),
                         davUsername = c.username,
                         davPassword = c.password,
                         configured = true,

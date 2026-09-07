@@ -44,7 +44,7 @@ class OfficialWebDavRepository(
             val issued = withFreshAccess { access -> issueAppPassword(access) }
             val config = prefs.config.first()
             check(issued.secret.isNotBlank()) { "服务端未返回应用码" }
-            val url = config.url.ifBlank { OfficialWebDav.DAV }
+            val url = OfficialWebDav.resolveDavUrl(config.url)
             WebDavClient(url, config.username, issued.secret).check().getOrThrow()
             prefs.saveOfficial(
                 url = url,
@@ -82,9 +82,7 @@ class OfficialWebDavRepository(
         return try {
             val session = auth()
             val me = api.me(session.tokens.accessToken)
-            val davUrl = me.webdavUrl.ifBlank { OfficialWebDav.DAV }.let { url ->
-                if (url.endsWith("/")) url else "$url/"
-            }
+            val davUrl = OfficialWebDav.resolveDavUrl(me.webdavUrl)
             val username = me.webdavUser.ifBlank { session.user.username }
             val issued = issueAppPassword(session.tokens.accessToken)
             check(issued.secret.isNotBlank()) { "服务端未返回应用码" }

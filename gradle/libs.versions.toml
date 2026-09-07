@@ -1,7 +1,7 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.3.1"
-agp = "9.3.2"
+inkwell = "0.3.2-beta.1"
+agp = "9.4.0"
 kotlin = "2.4.10"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
 # 2.3.10 起已兼容 Kotlin 2.4 的默认 module name（`${group}:${name}` 里的冒号）。
@@ -50,7 +50,7 @@ juniversalchardet = "2.5.0"
 jsonPath = "3.0.0"
 xpath = "2.5.5"
 biometric = "1.4.0-alpha07"
-coil = "3.6.0"
+coil = "3.6.2"
 # Baseline Profile：把热方法在**安装时**就 AOT 编译好。没有它，全新安装后 ART 先解释执行、
 # 边跑边 JIT —— 实测同一台机器反复进书，卡顿从 65ms 一路降到 16ms，那条下降曲线就是 JIT
 # 在热身。而真实用户每次都是"第一次"，永远吃不到热身后的那个数。
