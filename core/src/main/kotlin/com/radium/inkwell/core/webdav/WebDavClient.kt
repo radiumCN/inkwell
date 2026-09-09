@@ -1,5 +1,6 @@
 package com.radium.inkwell.core.webdav
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -12,7 +13,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
@@ -96,7 +96,15 @@ class WebDavClient(
     }
 
     /** 连接与认证探活 */
-    suspend fun check(): Result<Unit> = runCatching { list("") }.map { }
+    suspend fun check(): Result<Unit> = try {
+        list("")
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        // 用户在测试连接转圈时退出页面：这是取消，别包成「连接失败」吞掉
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 
     private fun request(path: String): Request.Builder {
         // 集合根必须带尾斜杠。官方盘 Nginx 对 /dav 会 301 到 /dav/，
@@ -119,7 +127,8 @@ class WebDavClient(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    cont.resume(response)
+                    // 响应到达与取消撞车时把它关掉，别让连接泄漏在池外
+                    cont.resume(response) { _, _, _ -> response.close() }
                 }
             })
         }

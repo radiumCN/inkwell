@@ -102,7 +102,11 @@ class AutoSourceSwitcher(
             ?: return null
 
         val detail = engine.getDetail(rule, hit.bookUrl)
-        val toc = engine.getToc(rule, detail.tocUrl.ifBlank { hit.bookUrl })
+        val toc = engine.getToc(
+            rule, detail.tocUrl.ifBlank { hit.bookUrl },
+            bookUrl = hit.bookUrl, bookTitle = detail.title.ifBlank { hit.title },
+            bookAuthor = detail.author ?: hit.author.orEmpty(),
+        )
         if (toc.isEmpty()) return null
 
         // 在新源的目录里定位"同一章"：剥标点后按标题对齐（与手动换源同一套），对不上再按序号夹取
@@ -122,6 +126,10 @@ class AutoSourceSwitcher(
             chapterUrl = chapter.url,
             otherChapterUrls = toc.asSequence().map { it.url }.toSet(),
             chapterVariable = chapter.variable,
+            chapterTitle = chapter.title,
+            chapterIndex = chapter.index,
+            bookUrl = hit.bookUrl,
+            bookTitle = detail.title.ifBlank { hit.title },
         )
         if (content.elements.isEmpty()) return null
 

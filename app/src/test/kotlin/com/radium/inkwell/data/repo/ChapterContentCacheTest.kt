@@ -60,11 +60,17 @@ class ChapterContentCacheTest {
     /**
      * 标题与分隔符必须原样存回。丢掉它们会让「首次分页」（走网络，含 Heading/Divider）与
      * 「二次分页」（走缓存）的页边界和 charOffset 对不上，恢复阅读位置就会漂到别的页。
+     *
+     * 图片则**读时跳过**：解析器早已不产出图片元素（产品只排文本），老缓存里的 `IMG:` 行
+     * 读回来只会变成一个永远填不上的灰色占位框。
      */
     @Test
-    fun `往返保留标题、分隔符与图片`() {
+    fun `往返保留标题与分隔符，跳过历史遗留的图片行`() {
         cache.write("b1", "https://ex.com/1.html", content)
-        assertEquals(content.elements, cache.read("b1", "https://ex.com/1.html")?.elements)
+        assertEquals(
+            content.elements.filterNot { it is ContentElement.Image },
+            cache.read("b1", "https://ex.com/1.html")?.elements,
+        )
     }
 
     /**

@@ -77,7 +77,14 @@ class KeystoreSecretCipher(
         String(cipher.doFinal(ctPart.unB64()), Charsets.UTF_8)
     }.getOrNull()
 
-    /** 取密钥；没有就现生一把。生成是幂等的 —— 已存在时直接复用，否则会把旧密文全变成解不开 */
+    /**
+     * 取密钥；没有就现生一把。生成是幂等的 —— 已存在时直接复用，否则会把旧密文全变成解不开。
+     *
+     * 加锁：首次启动时 `migrateSecrets`（Application 协程）与用户在设置页点「保存」可能同时
+     * 首次 encrypt，两边都查到「没有」、都 generateKey —— Keystore 里后生的那把把先生的顶掉，
+     * 先写进库的密文从此永远解不开，表现为「刚配好的 WebDAV 下次启动就要重新登录」。
+     */
+    @Synchronized
     private fun key(): SecretKey {
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (store.getEntry(alias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }

@@ -229,11 +229,20 @@ class SourceManageViewModel(
                 var lastError: String? = null
                 for (chapter in probes) {
                     val chars = runCatching {
-                        engine.getContent(rule, chapter.url, urls, chapter.variable)
+                        engine.getContent(
+                            rule, chapter.url, urls, chapter.variable,
+                            chapterTitle = chapter.title, chapterIndex = chapter.index,
+                        )
                             .elements
                             .filterIsInstance<ContentElement.Paragraph>()
                             .sumOf { it.text.length }
-                    }.getOrElse { lastError = it.message; 0 }
+                    }.getOrElse {
+                        // 取消（含外层 withTimeout 到点）必须放出去给外层那段判定：吞在这里的话，
+                        // 超时的源会被写成「正文为空」而不是超时，用户取消校验也会被记成失效。
+                        if (it is CancellationException) throw it
+                        lastError = it.message
+                        0
+                    }
                     if (chars > best) best = chars
                     if (best >= SHORT_CONTENT_CHARS) break
                 }
@@ -314,8 +323,13 @@ class SourceManageViewModel(
         viewModelScope.launch {
             runCatching {
                 val text = sourceRepo.exportJson(ids)
-                val file = java.io.File(context.cacheDir, "inkwell-sources.json")
-                withContext(Dispatchers.IO) { file.writeText(text) }
+                // 落在 cacheDir/export/ 下：FileProvider 只把这个子目录交出去（file_paths.xml），
+                // 别让分享面板拿到的 URI 能够到 cacheDir 里的其他东西（下载的安装包、图片缓存）
+                val file = java.io.File(java.io.File(context.cacheDir, "export"), "inkwell-sources.json")
+                withContext(Dispatchers.IO) {
+                    file.parentFile?.mkdirs()
+                    file.writeText(text)
+                }
                 file
             }.onSuccess { file ->
                 _exportFile.emit(file)

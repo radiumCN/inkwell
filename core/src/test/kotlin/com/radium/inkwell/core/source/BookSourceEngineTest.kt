@@ -380,6 +380,10 @@ class BookSourceEngineTest {
                 path == "/dup/1" -> html(DUP_NAV)
                 path == "/dup/2" -> html(DUP_LAST)
                 path.startsWith("/list/") -> html(EXPLORE_PAGE)
+                path == "/s" || path.startsWith("/s?") -> html(SEARCH_PAGE)
+                path == "/mp/toc" -> html(MP_TOC_1)
+                path == "/mp/toc2" -> html(MP_TOC_2)
+                path == "/mp/toc3" -> html(MP_TOC_3)
                 path == "/gbk/chap" -> MockResponse()
                     .setBody(Buffer().write(GBK_CHAP.toByteArray(charset("GBK"))))
                     .setHeader("Content-Type", "text/html")
@@ -422,6 +426,84 @@ class BookSourceEngineTest {
         assertEquals("章节ID=c101", (c1.elements.first() as ContentElement.Paragraph).text)
         val c2 = engine().getContent(src, toc[1].url, chapterVariable = toc[1].variable)
         assertEquals("章节ID=c202", (c2.elements.first() as ContentElement.Paragraph).text)
+    }
+
+    @Test
+    fun `nextTocUrl 页码列表会抓全部页而不是停在第一个地址`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"分页目录",
+             "ruleToc":{"chapterList":"ul.chapters li a","chapterName":"text","chapterUrl":"href",
+               "nextTocUrl":"class.pages@tag.a@href"}}
+        """.trimIndent()
+        val toc = engine().getToc(BookSourceRule.fromJson(json), "$base/mp/toc")
+        assertEquals(listOf("一", "二", "三"), toc.map { it.title })
+    }
+
+    @Test
+    fun `nextTocUrl 的 JS 数组会拆成多个地址`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"JS分页",
+             "ruleToc":{"chapterList":"ul.chapters li a","chapterName":"text","chapterUrl":"href",
+               "nextTocUrl":"<js>['$base/mp/toc2','$base/mp/toc3']</js>"}}
+        """.trimIndent()
+        val toc = engine().getToc(BookSourceRule.fromJson(json), "$base/mp/toc")
+        assertEquals(listOf("一", "二", "三"), toc.map { it.title })
+    }
+
+    @Test
+    fun `详情 init 的 put 能被后续字段 get 到`() = runBlocking {
+        val json = sourceJson(base)
+            .replace("\"ruleBookInfo\": {", "\"ruleBookInfo\": { \"init\": \"@put:{\\\"n\\\":\\\"h1@text\\\"}\",")
+            .replace("\"name\": \"h1@text\",", "\"name\": \"@get:{n}\",")
+        val detail = engine().getDetail(BookSourceRule.fromJson(json), "$base/book/1")
+        assertEquals("魔道修真", detail.title)
+    }
+
+    @Test
+    fun `详情后写的规则能读到已经填好的 book name`() = runBlocking {
+        val json = sourceJson(base).replace(
+            "\"coverUrl\": \"div.cover img@src\",",
+            "\"coverUrl\": \"<js>book.name+'.jpg'</js>\",",
+        )
+        val detail = engine().getDetail(BookSourceRule.fromJson(json), "$base/book/1")
+        val cover = java.net.URLDecoder.decode(detail.coverUrl!!, Charsets.UTF_8)
+        assertTrue(cover.endsWith("魔道修真.jpg"), "实际: ${detail.coverUrl}")
+    }
+
+    @Test
+    fun `正文脚本能读到传入的章节标题`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"章名",
+             "ruleContent":{"content":"<js>'标题='+chapter.title</js>"}}
+        """.trimIndent()
+        val content = engine().getContent(
+            BookSourceRule.fromJson(json), "$base/chap/1",
+            chapterTitle = "第一章 山村少年",
+        )
+        assertEquals(
+            "标题=第一章 山村少年",
+            (content.elements.first() as ContentElement.Paragraph).text,
+        )
+    }
+
+    @Test
+    fun `UTF8 POST 搜索会编码表单值里的特殊字符`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"POST站",
+             "searchUrl":"/s,{\"method\":\"POST\",\"body\":\"q={{key}}\"}",
+             "ruleSearch":{"bookList":"div.result","name":"h3 a@text","bookUrl":"h3 a@href"}}
+        """.trimIndent()
+        engine().search(BookSourceRule.fromJson(json), "A&B")
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("q=A%26B", req.body.readUtf8())
+    }
+
+    @Test
+    fun `encodeKeyInFormTemplate 给 key 加上 encode 管道`() {
+        assertEquals("q={{key|encode}}", encodeKeyInFormTemplate("q={{key}}", null))
+        assertEquals("q={{key|encode:gbk}}", encodeKeyInFormTemplate("q={{key}}", "gbk"))
+        assertEquals("""{"q":"{{key}}"}""", encodeKeyInFormTemplate("""{"q":"{{key}}"}""", "UTF-8"))
     }
 
     private companion object {
@@ -543,6 +625,24 @@ class BookSourceEngineTest {
 
         const val LOOP_B = """<html><body><div id="content"><p>乙页内容。</p></div>
             <a id="next" href="/loop/a">下一页</a></body></html>"""
+
+        const val MP_TOC_1 = """<html><body><ul class="chapters">
+            <li><a href="/mp/c1">一</a></li>
+            </ul><div class="pages">
+            <a href="/mp/toc">1</a><a href="/mp/toc2">2</a><a href="/mp/toc3">3</a>
+            </div></body></html>"""
+
+        const val MP_TOC_2 = """<html><body><ul class="chapters">
+            <li><a href="/mp/c2">二</a></li>
+            </ul><div class="pages">
+            <a href="/mp/toc">1</a><a href="/mp/toc2">2</a><a href="/mp/toc3">3</a>
+            </div></body></html>"""
+
+        const val MP_TOC_3 = """<html><body><ul class="chapters">
+            <li><a href="/mp/c3">三</a></li>
+            </ul><div class="pages">
+            <a href="/mp/toc">1</a><a href="/mp/toc2">2</a><a href="/mp/toc3">3</a>
+            </div></body></html>"""
 
         const val EXPLORE_PAGE = """<html><body>
             <div class="result"><h3><a href="/book/9">发现书一</a></h3></div>

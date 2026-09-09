@@ -32,7 +32,10 @@ class NetBookRepository(
         bookUrl: String,
     ): Pair<RemoteBookDetail, List<RemoteChapter>> {
         val detail = engine.getDetail(rule, bookUrl)
-        val toc = engine.getToc(rule, detail.tocUrl.ifBlank { bookUrl })
+        val toc = engine.getToc(
+            rule, detail.tocUrl.ifBlank { bookUrl },
+            bookUrl = bookUrl, bookTitle = detail.title, bookAuthor = detail.author.orEmpty(),
+        )
         return detail to toc
     }
 
@@ -133,7 +136,12 @@ class NetBookRepository(
 
     /** 刷新目录（追更）。返回**新增的章节数**（0 = 已经是最新的） */
     suspend fun refreshToc(book: BookEntity, rule: BookSourceRule): Result<Int> = runCatching {
-        val toc = engine.getToc(rule, book.tocUrl ?: book.bookUrl ?: error("缺少目录地址"))
+        val toc = engine.getToc(
+            rule, book.tocUrl ?: book.bookUrl ?: error("缺少目录地址"),
+            bookUrl = book.bookUrl.orEmpty(),
+            bookTitle = book.title,
+            bookAuthor = book.author.orEmpty(),
+        )
         check(toc.isNotEmpty()) { "目录解析为空" }
         // 网络往返可能长达数分钟，其间用户可能已经进书读了几页（进度/readAt/红点都变了）。
         // 用传入的旧快照整行 copy 会把这些变化抹掉，所以在写库前重新读一次最新行为基准。

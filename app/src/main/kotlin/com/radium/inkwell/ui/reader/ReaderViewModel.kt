@@ -1382,6 +1382,8 @@ class ReaderViewModel(
                         chapterIndex, title, content, spec,
                         notifyAfterChar = notifyAfterChar,
                         onPartial = { partial ->
+                            // 排到一半视口/字号已经换了：这份是按旧 spec 排的，别塞进缓存
+                            if (spec != this@ReaderViewModel.spec) return@paginate
                             paginated[chapterIndex] = partial
                             if (userFacing) {
                                 val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
@@ -1395,6 +1397,11 @@ class ReaderViewModel(
                     )
                 }
             }
+            // 排版期间 onLayoutReady 换了 spec（改字号、旋转）：这份结果是按**旧**视口排的，
+            // 写回去就会被开头那句 `if (it.complete) return it` 当成有效缓存复用 —— 页面按旧宽度
+            // 裁字或留大片空白，直到再换一次设置才好。丢掉，让调用方按新 spec 重排。
+            // 邻章预取几乎必踩：网络书拉下一章要一两秒，用户这时点 A+ 是很自然的事。
+            if (spec != this.spec) return null
             paginated[chapterIndex] = result
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
             // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。

@@ -114,15 +114,13 @@ class BookSourceEngine(
     /**
      * 公开入口一律在 IO 线程自我确权。并把当前 Job 绑到 [jsHttp]，好让脚本里的
      * runBlocking 网络在外层协程取消时把 OkHttp Call 掐掉。
+     *
+     * 绑定走协程上下文元素而不是 set/remove：block 里第一次挂起后恢复到哪根 IO 线程
+     * 不由我们定，裸 ThreadLocal 会在换线程后失联（详见 [EngineJsHttp.bindingTo]）。
      */
     private suspend fun <T> engineIo(block: suspend () -> T): T =
         withContext(Dispatchers.IO) {
-            jsHttp.bindParent(coroutineContext[Job])
-            try {
-                block()
-            } finally {
-                jsHttp.bindParent(null)
-            }
+            withContext(jsHttp.bindingTo(coroutineContext[Job])) { block() }
         }
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
         engineIo {
@@ -192,11 +190,20 @@ class BookSourceEngine(
             return RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
         }
         val fetched = fetchPage(source, url, "detail", render)
-        val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, bookUrl = url))
+        val js = jsContextOf(source, bookUrl = url)
+        val ctx = pageContext(fetched, varsOf(source), js)
+        // Legado 先跑 init（常见 @put:{n,a,k}），后面字段才能 @get:{n}
+        if (!info.init.isNullOrBlank()) {
+            evalField("detail", "init", info.init, ctx)
+        }
         val title = evalField("detail", "title", info.name, ctx)
         val author = evalField("detail", "author", info.author, ctx)
+        js.book.name = title.orEmpty()
+        js.book.author = author.orEmpty()
         val cover = evalUrlField("detail", "coverUrl", info.coverUrl, ctx)
         val intro = evalField("detail", "intro", info.intro, ctx)
+        js.book.coverUrl = cover.orEmpty()
+        js.book.intro = intro.orEmpty()
         val tocRule = evalUrlField("detail", "tocUrl", info.tocUrl, ctx)?.takeIf { it.isNotBlank() }
 
         // 一个字段都没匹配上 → 这一页大概率是 JS 渲染的，返回 null 交给渲染兜底重试。
@@ -222,11 +229,18 @@ class BookSourceEngine(
         )
     }
 
-    suspend fun getToc(source: BookSourceRule, tocUrl: String): List<RemoteChapter> =
+    suspend fun getToc(
+        source: BookSourceRule,
+        tocUrl: String,
+        bookUrl: String = "",
+        bookTitle: String = "",
+        bookAuthor: String = "",
+    ): List<RemoteChapter> =
         engineIo {
             val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
-            withRenderFallback(source) { render -> collectToc(source, rule, tocUrl, render) }
-                ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
+            withRenderFallback(source) { render ->
+                collectToc(source, rule, tocUrl, render, bookUrl, bookTitle, bookAuthor)
+            } ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
         }
 
     private suspend fun collectToc(
@@ -234,20 +248,31 @@ class BookSourceEngine(
         rule: TocRuleSet,
         tocUrl: String,
         render: Boolean,
+        bookUrl: String,
+        bookTitle: String,
+        bookAuthor: String,
     ): List<RemoteChapter>? {
         // Legado：chapterList 前导 `-` 表示整体倒序
         val listRaw = rule.chapterList.orEmpty().trim()
         val reverse = listRaw.startsWith("-")
         val listRule = if (reverse) listRaw.substring(1) else listRaw
         val collected = mutableListOf<Triple<String, String, String>>()
-        var url: String? = resolveUrl(source.baseUrl, tocUrl)
+        val seenChap = HashSet<String>()
+        val pending = ArrayDeque<String>()
+        resolveUrl(source.baseUrl, tocUrl).takeIf { it.isNotBlank() }?.let { pending.add(it) }
         val visited = HashSet<String>()
         var pages = 0
-        // nextPage 循环：上限 + visited 防环
-        while (url != null && pages < MAX_TOC_PAGES && visited.add(url)) {
+        // nextTocUrl 在 Legado 里可以一次吐出全部页码（.pages a@href / option@value / JS 数组）。
+        // 从前只取第一个：第一个常是「当前页」，visited 一撞就停，目录只剩第一页。
+        while (pending.isNotEmpty() && pages < MAX_TOC_PAGES) {
+            val url = pending.removeFirst()
+            if (!visited.add(url)) continue
             pages++
             val fetched = fetchPage(source, url, "toc", render)
-            val ctx = pageContext(fetched, varsOf(source), jsContextOf(source, tocUrl = url))
+            val ctx = pageContext(
+                fetched, varsOf(source),
+                jsContextOf(source, bookUrl = bookUrl, tocUrl = tocUrl, bookName = bookTitle, bookAuthor = bookAuthor),
+            )
             for (item in evalList("toc", listRule, ctx)) {
                 // 每个章节项一份变量表：@put 存的参数属于这一章，不能串到别的章节上
                 val itemCtx = item.copy(js = item.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap()))
@@ -255,14 +280,17 @@ class BookSourceEngine(
                 val chapUrl = evalUrlField("toc", "url", rule.chapterUrl, itemCtx)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { resolveUrl(fetched.finalUrl, it) }
-                if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank()) {
+                if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank() && seenChap.add(chapUrl)) {
                     collected += Triple(title, chapUrl, encodeVars(itemCtx.js.scriptVars))
                 }
             }
-            url = rule.nextTocUrl
-                ?.let { evalUrlField("toc", "nextPage", it, ctx) }
-                ?.takeIf { it.isNotBlank() }
-                ?.let { resolveUrl(fetched.finalUrl, it) }
+            val nexts = rule.nextTocUrl
+                ?.let { evalUrlFields("toc", "nextPage", it, ctx) }
+                .orEmpty()
+            for (n in nexts) {
+                val resolved = resolveUrl(fetched.finalUrl, n)
+                if (resolved.isNotBlank() && resolved !in visited) pending.add(resolved)
+            }
         }
         if (collected.isEmpty()) return null
         val ordered = if (reverse) collected.asReversed() else collected
@@ -284,14 +312,24 @@ class BookSourceEngine(
         otherChapterUrls: Set<String> = emptySet(),
         chapterVariable: String = "",
         allowJsRender: Boolean = true,
+        chapterTitle: String = "",
+        chapterIndex: Int = 0,
+        bookUrl: String = "",
+        bookTitle: String = "",
     ): RemoteChapterContent = engineIo {
         val rule = source.ruleContent ?: throw SourceException("书源「${source.name}」未配置正文规则")
         val result = if (allowJsRender) {
             withRenderFallback(source) { render ->
-                collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render)
+                collectContent(
+                    source, rule, chapterUrl, otherChapterUrls, chapterVariable, render,
+                    chapterTitle, chapterIndex, bookUrl, bookTitle,
+                )
             }
         } else {
-            collectContent(source, rule, chapterUrl, otherChapterUrls, chapterVariable, render = false)
+            collectContent(
+                source, rule, chapterUrl, otherChapterUrls, chapterVariable, render = false,
+                chapterTitle, chapterIndex, bookUrl, bookTitle,
+            )
         }
         result ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
     }
@@ -314,6 +352,10 @@ class BookSourceEngine(
         otherChapterUrls: Set<String>,
         chapterVariable: String,
         render: Boolean,
+        chapterTitle: String,
+        chapterIndex: Int,
+        bookUrl: String,
+        bookTitle: String,
     ): RemoteChapterContent? {
         // 净化：源级(replaceRegex) 在前、用户的通用规则在后；正则预编译
         val sourcePurifier = Purifier.strict(parseReplaceRegex(rule.replaceRegex))
@@ -328,8 +370,14 @@ class BookSourceEngine(
             pages++
             val fetched = fetchPage(source, url, "content", render)
             // 目录阶段存下的变量在这里喂回脚本：正文规则的 @get:{k} / java.get(k) 靠它
-            val js = jsContextOf(source, chapterUrl = url)
-                .copy(scriptVars = decodeVars(chapterVariable))
+            val js = jsContextOf(
+                source,
+                bookUrl = bookUrl,
+                bookName = bookTitle,
+                chapterUrl = url,
+                chapterTitle = chapterTitle,
+                chapterIndex = chapterIndex,
+            ).copy(scriptVars = decodeVars(chapterVariable))
             val ctx = pageContext(fetched, varsOf(source), js)
             val html = evalField("content", "content", rule.content, ctx)
             if (html != null) {
@@ -427,7 +475,10 @@ class BookSourceEngine(
         // 编码只有拿到 charset 选项后才知道，补上 encode 管道。
         charset?.lowercase()?.takeIf { it != "utf-8" && it != "utf8" }?.let { cs ->
             rawUrl = rawUrl.replace("{{key}}", "{{key|encode:$cs}}")
-            body = body?.replace("{{key}}", "{{key|encode:$cs}}")
+        }
+        // POST 的 {{key}} 必须在拼进表单之前编码。展开后再按 `&` 切会把「A&B」切成两个字段。
+        if (method.equals("POST", ignoreCase = true)) {
+            body = body?.let { encodeKeyInFormTemplate(it, charset) }
         }
 
         val url = resolveUrl(source.baseUrl, evaluator.expandTemplate(rawUrl, urlCtx))
@@ -466,7 +517,11 @@ class BookSourceEngine(
             stage = stage,
             url = target,
             method = method,
-            body = body?.let { expandTemplate(it, vars) },
+            body = body?.let { raw ->
+                val templated =
+                    if (method.equals("POST", ignoreCase = true)) encodeKeyInFormTemplate(raw, charset) else raw
+                expandTemplate(templated, vars)
+            },
             headers = mergeHeaders(source.headers, headers, vars),
             charset = charset,
             rateLimit = source.rateLimit,
@@ -532,13 +587,23 @@ class BookSourceEngine(
         bookUrl: String = "",
         tocUrl: String = "",
         chapterUrl: String = "",
+        bookName: String = "",
+        bookAuthor: String = "",
+        chapterTitle: String = "",
+        chapterIndex: Int = 0,
     ) = JsContext(
         sourceKey = source.id,
         book = com.radium.inkwell.core.source.js.BookBridge(
+            name = bookName,
+            author = bookAuthor,
             bookUrl = bookUrl,
             tocUrl = tocUrl,
         ),
-        chapter = com.radium.inkwell.core.source.js.ChapterBridge(url = chapterUrl),
+        chapter = com.radium.inkwell.core.source.js.ChapterBridge(
+            title = chapterTitle,
+            url = chapterUrl,
+            index = chapterIndex,
+        ),
     )
 
     private fun parseListPage(
@@ -593,14 +658,19 @@ class BookSourceEngine(
      * URL 字段求值：只取首个非空匹配。
      * 文本字段多匹配时换行拼接是合理的（如多段简介），但地址字段绝不能拼 ——
      * 页面上下两处导航常各有一个「下一章」，拼起来会得到一个必然 404 的废地址。
+     *
+     * 目录翻页 [evalUrlFields] 例外：Legado 的 nextTocUrl 就是「全部页码」，必须全收。
      */
-    private fun evalUrlField(stage: String, name: String, rule: String?, ctx: EvalContext): String? {
-        if (rule.isNullOrBlank()) return null
+    private fun evalUrlField(stage: String, name: String, rule: String?, ctx: EvalContext): String? =
+        evalUrlFields(stage, name, rule, ctx).firstOrNull()
+
+    /** nextTocUrl：全部非空地址。JS 返回 JSON 数组时拆开，避免整段当一个废 URL。 */
+    private fun evalUrlFields(stage: String, name: String, rule: String?, ctx: EvalContext): List<String> {
+        if (rule.isNullOrBlank()) return emptyList()
         return try {
-            val value = evaluator.evalToStrings(LegadoRuleAnalyzer.analyze(rule), ctx)
-                .firstOrNull { it.isNotBlank() }
-            trace?.onRule(RuleTrace(stage, name, rule, value?.take(200)))
-            value
+            val values = flattenUrlResults(evaluator.evalToStrings(LegadoRuleAnalyzer.analyze(rule), ctx))
+            trace?.onRule(RuleTrace(stage, name, rule, values.joinToString(" | ").take(200)))
+            values
         } catch (e: Exception) {
             trace?.onRule(RuleTrace(stage, name, rule, null, e.message))
             throw e
@@ -626,6 +696,39 @@ class BookSourceEngine(
         const val MAX_TOC_PAGES = 200
         /** 单章分页抓取上限。50 会让失控的 nextPage 空转近一分钟；正经分页站很少超过十几页 */
         const val MAX_CONTENT_PAGES = 16
+
+        /**
+         * JS 的 `list.push` 经 Rhino 会 stringify 成 `["/p2","/p3"]`，evalToStrings 只拿到这一段。
+         * 换行分隔的多地址同样拆开。
+         */
+        fun flattenUrlResults(values: List<String>): List<String> {
+            val out = ArrayList<String>()
+            for (v in values) {
+                val t = v.trim()
+                if (t.isEmpty()) continue
+                if (t.startsWith("[") && t.endsWith("]")) {
+                    val arr = runCatching { VARS_JSON.parseToJsonElement(t) }.getOrNull()
+                        as? kotlinx.serialization.json.JsonArray
+                    if (arr != null) {
+                        var any = false
+                        for (el in arr) {
+                            val s = (el as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                            if (s.isNotEmpty()) {
+                                out += s
+                                any = true
+                            }
+                        }
+                        if (any) continue
+                    }
+                }
+                if ('\n' in t) {
+                    t.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { out += it }
+                } else {
+                    out += t
+                }
+            }
+            return out
+        }
     }
 }
 
@@ -646,6 +749,20 @@ internal fun parseReplaceRegex(raw: String?): List<PurifyRule> {
         val replacement = if (sep < 0) "" else t.substring(sep + 2).removeSuffix("###")
         if (pattern.isBlank()) null else PurifyRule(pattern = pattern, replacement = replacement, isRegex = true)
     }
+}
+
+/**
+ * 把 POST 表单模板里尚未带管道的 `{{key}}` / `{{keyword}}` 改成 `{{key|encode}}`。
+ * 必须在展开之前做：展开后再按 `&` 切，关键词里的 `&` 已经变成字段分隔符了。
+ */
+internal fun encodeKeyInFormTemplate(body: String, charsetName: String?): String {
+    val t = body.trim()
+    if (t.startsWith("{") || t.startsWith("[")) return body
+    val cs = charsetName?.lowercase()
+    val pipe = if (cs.isNullOrBlank() || cs == "utf-8" || cs == "utf8") "encode" else "encode:$cs"
+    return body
+        .replace("{{key}}", "{{key|$pipe}}")
+        .replace("{{keyword}}", "{{keyword|$pipe}}")
 }
 
 /**

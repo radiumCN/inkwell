@@ -25,10 +25,70 @@ import javax.crypto.spec.SecretKeySpec
 /** 书源脚本能发的 HTTP 请求；由引擎注入，脚本里以 `java.ajax(...)` 等形式调用 */
 interface JsHttp {
     /** 同步抓取（脚本是同步的，只能阻塞）；失败返回 null */
-    fun fetch(url: String, method: String = "GET", body: String? = null, headers: Map<String, String> = emptyMap()): String?
+    fun fetch(url: String, method: String = "GET", body: String? = null, headers: Map<String, String> = emptyMap()): StrResponse?
     fun cookieOf(url: String): String
     fun setCookie(url: String, cookie: String)
     fun removeCookie(url: String)
+}
+
+/**
+ * Legado `connect/get/post/head` 的返回值。
+ *
+ * 脚本习惯写 `java.get(url).body()` / `.statusCode()` / `.headers('Location')`。
+ * 从前这里直接返回 String，一调 `.body()` 就 TypeError，整段 JS 挂掉。
+ * [toString] 等于 body，纯拼接 / `String(resp)` 仍能当文本用。
+ */
+class StrResponse(
+    val bodyText: String = "",
+    val status: Int = 0,
+    val finalUrl: String = "",
+    val headerMap: Map<String, List<String>> = emptyMap(),
+    val cookieStr: String = "",
+) {
+    fun body(): String = bodyText
+    fun errorBody(): String = bodyText
+    fun code(): Int = status
+    fun statusCode(): Int = status
+    fun url(): String = finalUrl
+    fun cookie(): String = cookieStr
+
+    /** 抖音小说等：`java.get(url,{}).headers('Location')[0]` */
+    fun headers(name: String): Array<String> {
+        val values = headerMap.entries
+            .firstOrNull { it.key.equals(name, ignoreCase = true) }
+            ?.value
+            .orEmpty()
+        return values.toTypedArray()
+    }
+
+    override fun toString(): String = bodyText
+
+    companion object {
+        fun empty(): StrResponse = StrResponse()
+    }
+}
+
+/**
+ * 脚本里回过头用规则语法抽当前页（`java.getString(rule)`）。
+ * 求值器注入；单测不注入时这些方法返回空，缺方法本身不会把脚本打死。
+ */
+interface JsRuleQuery {
+    fun getString(rule: String): String
+    fun getStringList(rule: String): Array<String>
+    fun getElement(rule: String): JsElement?
+    fun getElements(rule: String): Array<JsElement>
+}
+
+/**
+ * 包装 Jsoup 节点给脚本用。不把 `org.jsoup.nodes.Element` 直接交出去 ——
+ * ClassShutter 不会放行 jsoup 包，脚本一调 `.text()` 就会被挡。
+ */
+class JsElement(private val el: org.jsoup.nodes.Element) {
+    fun text(): String = el.text()
+    fun html(): String = el.html()
+    fun outerHtml(): String = el.outerHtml()
+    fun attr(name: String): String = el.attr(name)
+    override fun toString(): String = el.outerHtml()
 }
 
 /** 带 TTL 的 KV；`cache.*` 与 `java.cache*` 用。条目上限 256，get 时过期删除，put 时顺手淘汰。 */
@@ -166,6 +226,7 @@ class JavaBridge(
     private val http: JsHttp?,
     private val cache: JsCache,
     private val vars: MutableMap<String, String>,
+    private val query: JsRuleQuery? = null,
 ) {
 
     // ---- 网络 ----
@@ -175,11 +236,11 @@ class JavaBridge(
      * 且**失败时返回错误文本而不是 null** —— 书源脚本普遍直接写 `java.ajax(url).match(…)`，
      * 返回 null 会在 JS 里抛 TypeError，把整条脚本连同书源一起搞死（思路客、大文学等一批源就死在这）。
      */
-    fun ajax(url: String): String = fetchWithOptions(url, "GET", null, emptyMap())
+    fun ajax(url: String): String = fetchWithOptions(url, "GET", null, emptyMap()).body()
 
-    fun connect(url: String): String = fetchWithOptions(url, "GET", null, emptyMap())
+    fun connect(url: String): StrResponse = fetchWithOptions(url, "GET", null, emptyMap())
 
-    fun connect(url: String, header: String?): String =
+    fun connect(url: String, header: String?): StrResponse =
         fetchWithOptions(url, "GET", null, parseHeaders(header))
 
     private fun fetchWithOptions(
@@ -187,7 +248,7 @@ class JavaBridge(
         method: String,
         body: String?,
         headers: Map<String, String>,
-    ): String {
+    ): StrResponse {
         val split = splitUrlOptions(url)
         val bare = split?.first ?: url
         val opt = split?.second
@@ -196,7 +257,7 @@ class JavaBridge(
             method = opt?.method ?: method,
             body = opt?.body ?: body,
             headers = headers + opt?.headers.orEmpty(),
-        ) ?: ""
+        ) ?: StrResponse.empty()
     }
 
     // ---- 交互（我们没有 UI 回调，作空实现）----
@@ -209,14 +270,24 @@ class JavaBridge(
 
     fun getVerificationCode(url: String): String = ""
 
-    fun get(url: String, headers: Map<*, *>?): String =
+    fun get(url: String, headers: Map<*, *>?): StrResponse =
         fetchWithOptions(url, "GET", null, toStringMap(headers))
 
-    fun post(url: String, body: String?, headers: Map<*, *>?): String =
+    fun post(url: String, body: String?, headers: Map<*, *>?): StrResponse =
         fetchWithOptions(url, "POST", body, toStringMap(headers))
 
-    fun head(url: String, headers: Map<*, *>?): String? =
-        http?.fetch(url, method = "HEAD", headers = toStringMap(headers))
+    fun head(url: String, headers: Map<*, *>?): StrResponse =
+        fetchWithOptions(url, "HEAD", null, toStringMap(headers))
+
+    // ---- 用规则语法回抽当前页（混合写法：先 JS 判断再用 CSS）----
+
+    fun getString(rule: String): String = query?.getString(rule).orEmpty()
+
+    fun getStringList(rule: String): Array<String> = query?.getStringList(rule) ?: emptyArray()
+
+    fun getElement(rule: String): JsElement? = query?.getElement(rule)
+
+    fun getElements(rule: String): Array<JsElement> = query?.getElements(rule) ?: emptyArray()
 
     // ---- 变量（同一条抓取链路内传值）----
 

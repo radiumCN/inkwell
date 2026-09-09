@@ -1,12 +1,14 @@
 package com.radium.inkwell.core.source
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resumeWithException
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -15,6 +17,8 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okio.Buffer
 import java.io.IOException
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
@@ -27,6 +31,8 @@ class FetchedPage(
     val statusCode: Int,
     val bodyText: String,
     val detectedCharset: String,
+    /** 响应头（同名多值保留）；脚本里的 `StrResponse.headers(name)` 靠它 */
+    val headers: Map<String, List<String>> = emptyMap(),
 )
 
 /**
@@ -85,6 +91,12 @@ class SourceHttpClient(
         headers: Map<String, String> = emptyMap(),
         charsetOverride: String? = null,
         rateLimit: RateLimitRule? = null,
+        /**
+         * 引擎抓页面失败要抛（调用方当「这页没有」）。
+         * 脚本里的 `java.get(url).statusCode()` 却是先拿响应再自己判断，
+         * 4xx/5xx 也得把 body/code 交出去，不能在这里打死整段 JS。
+         */
+        throwOnHttpError: Boolean = true,
     ): FetchedPage {
         val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
         if (rateLimit != null && rateLimit.intervalMs > 0) {
@@ -93,15 +105,7 @@ class SourceHttpClient(
         var attempt = 0
         while (true) {
             val request = buildRequest(httpUrl, method, body, headers, charsetOverride)
-            val call = client.newCall(request)
-            val cancelHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
-                if (cause != null) call.cancel()
-            }
-            val response = try {
-                withContext(Dispatchers.IO) { call.execute() }
-            } finally {
-                cancelHandle?.dispose()
-            }
+            val response = execute(client.newCall(request))
             if (response.code in RETRY_CODES && attempt < MAX_RETRIES) {
                 response.close()
                 delay(retryBaseDelayMs shl attempt) // 指数退避：base、base*2
@@ -109,17 +113,61 @@ class SourceHttpClient(
                 continue
             }
             response.use { resp ->
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: $url")
-                val bytes = withContext(Dispatchers.IO) { resp.body.bytes() }
+                if (throwOnHttpError && !resp.isSuccessful) throw IOException("HTTP ${resp.code}: $url")
+                val bytes = withContext(Dispatchers.IO) { readBounded(resp, url) }
                 val charset = detectCharset(charsetOverride, resp.header("Content-Type"), bytes)
                 return FetchedPage(
                     finalUrl = resp.request.url.toString(),
                     statusCode = resp.code,
                     bodyText = String(bytes, charset),
                     detectedCharset = charset.name(),
+                    headers = resp.headers.toMultimap(),
                 )
             }
         }
+    }
+
+    /**
+     * 发请求，**取消立刻掐掉 Call**。
+     *
+     * 从前是 `withContext(IO) { call.execute() }` 配 `Job.invokeOnCompletion { call.cancel() }`。
+     * 那个回调只在 Job **完成**时触发，而被 `execute()` 阻塞着的协程在请求回来之前完成不了 ——
+     * 外层取消（翻页、退出、换源）传不进来，Call 要跑满 45 秒 callTimeout 才放线程。
+     * 书源脚本那条路更糟：EngineJsHttp 的 runBlocking 等的就是这里，整根 IO 线程跟着陪。
+     * 改成 enqueue + [suspendCancellableCoroutine]，取消走 `invokeOnCancellation`，是 cancelling
+     * 一进入就触发的那种；同时不再为「等响应」额外占一根 IO 线程。
+     */
+    private suspend fun execute(call: Call): Response =
+        suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    // 恢复与取消撞车时把响应关掉，别让连接泄漏在池外
+                    cont.resume(response) { _, _, _ -> response.close() }
+                }
+            })
+        }
+
+    /**
+     * 有上限地读响应体。书源指向的是任意第三方 URL：规则写错指到大文件直链、或恶意源
+     * 放一个 gzip 炸弹（透明解压后体积不受 Content-Length 约束），`bytes()` 整读会把进程
+     * 直接打 OOM —— 后面还要 `String(bytes)` 与 Jsoup 各复制一份。正文页再长也远够不着这个数。
+     */
+    private fun readBounded(resp: Response, url: String): ByteArray {
+        val declared = resp.body.contentLength()
+        if (declared > MAX_BODY_BYTES) throw IOException("响应过大（${declared shr 20} MB）: $url")
+        val source = resp.body.source()
+        val sink = Buffer()
+        while (true) {
+            val read = source.read(sink, READ_CHUNK)
+            if (read == -1L) break
+            if (sink.size > MAX_BODY_BYTES) throw IOException("响应过大（超过 ${MAX_BODY_BYTES shr 20} MB）: $url")
+        }
+        return sink.readByteArray()
     }
 
     private fun buildRequest(
@@ -213,6 +261,13 @@ class SourceHttpClient(
 
         private val RETRY_CODES = setOf(403, 429)
         private const val MAX_RETRIES = 2
+
+        /**
+         * 单次响应体上限。整本书最长的正文页（连载几万字 + 满页广告脚本）也就几百 KB，
+         * 目录页最长的一类（几千章一页列完）约 1～2 MB；16 MB 是十倍余量，见 [readBounded]。
+         */
+        private const val MAX_BODY_BYTES = 16L * 1024 * 1024
+        private const val READ_CHUNK = 64L * 1024
 
         /**
          * 超时。小说站普遍慢，压太紧会把能用的源判死，所以比常规 API 客户端宽一档；

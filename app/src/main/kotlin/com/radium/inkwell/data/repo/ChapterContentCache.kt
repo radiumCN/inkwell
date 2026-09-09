@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 以**章节 URL** 而非序号为 key：站点在前面插入章节（公告章、防盗章）后目录整体后移，
  * 若按序号存取，第 5 章会读出旧的第 5 章正文 —— 缓存必须跟着章节走，而不是跟着槽位走。
  *
- * 行格式：普通段落直接一行；`H<级别>:` 标题；`IMG:` 图片 URL；`---` 分隔符。
+ * 行格式：普通段落直接一行；`H<级别>:` 标题；`IMG:` 图片 URL（历史遗留，读时跳过）；`---` 分隔符。
  * 标题与分隔符必须原样存回：分页器对它们的处理和普通段落不同（标题另一套字号、
  * 分隔符占 1 个字符偏移），丢掉会让「首次分页」与「读缓存后分页」的页边界和
  * charOffset 对不上，恢复阅读位置就会漂。
@@ -52,7 +52,10 @@ class ChapterContentCache(private val root: File) {
                 line.startsWith(ESCAPE) -> ContentElement.Paragraph(line.substring(ESCAPE.length))
                 line.isBlank() -> null
                 line == DIVIDER -> ContentElement.Divider
-                line.startsWith(IMG_PREFIX) -> ContentElement.Image(line.removePrefix(IMG_PREFIX))
+                // 产品只排文本：解析器早已不再产出图片元素，这一行只会来自很老的缓存。
+                // 读回成 Image 的话分页器会给它留一个 4:3 的灰色占位框（翻页模式不折叠），
+                // 而图永远不会加载 —— 直接跳过。写侧的 IMG_PREFIX 分支保留只为 when 穷尽。
+                line.startsWith(IMG_PREFIX) -> null
                 // 标题只认 `H<数字>:`。从前是「H 开头且含冒号」，会把 "He said: ..." 这类
                 // 英文段落误判成标题、冒号前整段丢失。
                 HEAD_REGEX.matchAt(line, 0) != null -> ContentElement.Heading(

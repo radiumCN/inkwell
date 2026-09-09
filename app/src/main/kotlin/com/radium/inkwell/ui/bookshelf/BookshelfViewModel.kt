@@ -178,6 +178,18 @@ class BookshelfViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    init {
+        // 正筛着的分组没了（删光了这组的书、或把它们都移去别组）→ 回到「全部」。
+        // 否则 _group 指着一个筛选条上已经不存在的名字：书列表空着、chip 一个也不亮，
+        // 用户只看到「书架突然空了」。
+        viewModelScope.launch {
+            groups.collect { gs ->
+                val g = _group.value
+                if (g != null && g != UNGROUPED && g !in gs) _group.value = null
+            }
+        }
+    }
+
     // ---- 隐藏 ----
 
     /**

@@ -63,6 +63,39 @@ class PaginatorTest {
     }
 
     @Test
+    fun `heading keeps with next - pushed when fewer than two body lines fit below it`() {
+        // 8 行正文占 320px，剩 80px：小标题 1 行（行高 40*1.15=46）放得下，但它下面只剩 34px，
+        // 连一行正文都塞不进 → 标题整体推到第二页，与正文同页
+        val content = ChapterContent(
+            listOf(
+                ContentElement.Paragraph(cjk(120)), // 8 行
+                ContentElement.Heading(level = 2, text = "第二节"),
+                ContentElement.Paragraph(cjk(30)), // 2 行
+            )
+        )
+        val result = paginator.paginate(0, "", content, spec())
+        assertEquals(2, result.chapter.pages.size)
+        val p1 = result.chapter.pages[1].items
+        assertTrue((p1[0] as PageItem.TextSlice).isTitle, "标题应开在第二页页首")
+        assertTrue(!(p1[1] as PageItem.TextSlice).isTitle, "正文紧随其后")
+        assertEquals(0f, (p1[0] as PageItem.TextSlice).yTopInPage)
+    }
+
+    @Test
+    fun `heading stays when two body lines fit below it`() {
+        // 5 行正文占 200px，剩 200px：标题 46 + 正文 2 行 80 = 126 放得下 → 不推
+        val content = ChapterContent(
+            listOf(
+                ContentElement.Paragraph(cjk(75)), // 5 行
+                ContentElement.Heading(level = 2, text = "第二节"),
+                ContentElement.Paragraph(cjk(30)),
+            )
+        )
+        val result = paginator.paginate(0, "", content, spec())
+        assertEquals(1, result.chapter.pages.size)
+    }
+
+    @Test
     fun `image never splits - pushed to next page`() {
         // 9 行文本占 360px，剩 40px；图片占位高 225px 放不下 → 推第二页
         val content = ChapterContent(

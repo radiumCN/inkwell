@@ -84,6 +84,15 @@ class LegadoRuleAnalyzerTest {
             ctx(mapOf("baseUrl" to "https://ex.com/", "page" to "3"))))
     }
 
+    /** {{baseUrl}} 是当前页地址（Legado 语义），不是引擎塞进 vars 的站点根 */
+    @Test fun `template baseUrl prefers the page url over the site root in vars`() {
+        val page = EvalContext(
+            Jsoup.parse(html, "https://ex.com/book/1"), null, "https://ex.com/book/1",
+            mapOf("baseUrl" to "https://ex.com/"),
+        )
+        assertEquals("https://ex.com/book/1", str("{{baseUrl}}", page))
+    }
+
     // ---- ## 替换 ----
 
     @Test fun `hash regex replace on result`() {
@@ -122,6 +131,8 @@ class LegadoRuleAnalyzerTest {
             js = JsContext())
         ev.evalToString(LegadoRuleAnalyzer.analyze("class.book@data-id@put:{\"bid\":\"@data-id\"}"), item)
         assertEquals("42", item.js.scriptVars["bid"])
+        // 整段 `@get:{k}` 是取值，不是选择器
+        assertEquals("42", ev.evalToString(LegadoRuleAnalyzer.analyze("@get:{bid}"), item))
     }
 
     // ---- 降级：不认识的东西不抛错 ----

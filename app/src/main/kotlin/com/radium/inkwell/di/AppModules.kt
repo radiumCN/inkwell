@@ -111,7 +111,7 @@ val appModule = module {
     single { ReplaceRuleRepository(get()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
-    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get()) }
+    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 

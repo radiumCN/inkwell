@@ -92,7 +92,7 @@ data class SearchRuleSet(
     val bookUrl: String? = null,
 )
 
-/** 详情页规则（Legado ruleBookInfo）；[init] 预处理暂不支持 */
+/** 详情页规则（Legado ruleBookInfo）；[init] 在其余字段之前求值（常见 `@put`） */
 @Serializable
 data class BookInfoRuleSet(
     val init: String? = null,

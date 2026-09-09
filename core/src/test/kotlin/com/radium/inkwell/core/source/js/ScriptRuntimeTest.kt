@@ -99,6 +99,38 @@ class ScriptRuntimeTest {
     }
 
     @Test
+    fun `strToBytes byte array is not blocked by the shutter`() {
+        assertEquals("2", withBridge("""java.strToBytes('ab').length"""))
+    }
+
+    @Test
+    fun `connect returns StrResponse with body code and headers`() {
+        val http = object : JsHttp {
+            override fun fetch(
+                url: String,
+                method: String,
+                body: String?,
+                headers: Map<String, String>,
+            ) = StrResponse(
+                bodyText = "ok",
+                status = 302,
+                finalUrl = "https://b.com",
+                headerMap = mapOf("Location" to listOf("https://b.com/x")),
+                cookieStr = "a=1",
+            )
+            override fun cookieOf(url: String) = ""
+            override fun setCookie(url: String, cookie: String) = Unit
+            override fun removeCookie(url: String) = Unit
+        }
+        val java = JavaBridge(http, JsCache(), mutableMapOf())
+        fun eval(script: String) = runtime.eval(script, mapOf("java" to java))
+        assertEquals("ok", eval("java.connect('u').body()"))
+        assertEquals("302", eval("String(java.connect('u').statusCode())"))
+        assertEquals("https://b.com/x", eval("java.connect('u').headers('Location')[0]"))
+        assertEquals("ok", eval("java.ajax('u')"))
+    }
+
+    @Test
     fun `same script can be evaluated twice after compile cache`() {
         // 编译缓存不能把第二次变成「作用域脏了 / 绑错变量」
         val script = "baseUrl + result"
@@ -112,5 +144,17 @@ class ScriptRuntimeTest {
         assertEquals("undefined", runtime.eval("typeof leaked", emptyMap()))
         runtime.eval("undeclaredGlobal = 1", emptyMap())
         assertEquals("undefined", runtime.eval("typeof undeclaredGlobal", emptyMap()))
+    }
+
+    /**
+     * 顶层变量隔得住，原型链也得隔得住：一个书源改了 String.prototype，下一个书源不能中招。
+     * 标准对象是 sealed 的 —— 改动要么抛错、要么无效，总之不会留到下一次 eval。
+     */
+    @Test
+    fun `builtin prototypes cannot be polluted across evals`() {
+        runCatching { runtime.eval("String.prototype.replace = function() { return 'hacked' }; 1", emptyMap()) }
+        assertEquals("b", runtime.eval("'a'.replace('a', 'b')", emptyMap()))
+        runCatching { runtime.eval("Object.prototype.injected = 42; 1", emptyMap()) }
+        assertEquals("undefined", runtime.eval("typeof ({}).injected", emptyMap()))
     }
 }

@@ -39,7 +39,12 @@ class NetReaderBookSource(
         // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
         withContext(Dispatchers.IO) { cache.read(bookId, url) }?.let { return it }
         // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
-        val remote = engine.getContent(rule, url, chapterUrls, chapterVariable = chapter.variable)
+        val remote = engine.getContent(
+            rule, url, chapterUrls,
+            chapterVariable = chapter.variable,
+            chapterTitle = chapter.title.orEmpty(),
+            chapterIndex = index,
+        )
         val content = ChapterContent(remote.elements)
         withContext(Dispatchers.IO) {
             cache.write(bookId, url, content)
@@ -58,6 +63,8 @@ class NetReaderBookSource(
             rule, url, chapterUrls,
             chapterVariable = chapter.variable,
             allowJsRender = false,
+            chapterTitle = chapter.title.orEmpty(),
+            chapterIndex = index,
         )
         val content = ChapterContent(remote.elements)
         withContext(Dispatchers.IO) {

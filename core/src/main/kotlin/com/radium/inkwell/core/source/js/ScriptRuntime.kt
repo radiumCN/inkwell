@@ -58,6 +58,12 @@ class RhinoScriptRuntime(
     /**
      * 每线程一份 initSafeStandardObjects 原型。eval 只 newObject 挂绑定，
      * 避免每次重建 Object/Array/JSON。绑定打在子作用域上，两次 eval 不会串变量。
+     *
+     * 原型**必须 sealed**：子作用域只隔得住顶层变量，`String.prototype.replace = …` 这种写法
+     * 顺着原型链改的是共享的那份，同一线程上后面跑的**别的书源**脚本全跟着中招 ——
+     * 而且哪个源改的、什么时候改的，事后无从查起。封死后这类赋值抛 TypeError，
+     * 只影响写它的那一个源。代价：极少数在脚本里给内建原型打补丁的书源会失效，
+     * Rhino 自带的 ES2015+ 内建方法已经覆盖了它们打补丁的常见目的。
      */
     private val prototypeByThread = ThreadLocal<org.mozilla.javascript.ScriptableObject>()
 
@@ -65,7 +71,7 @@ class RhinoScriptRuntime(
         val cx = factory.enterContext()
         try {
             cx.putThreadLocal(KEY_COUNT, 0L)
-            val proto = prototypeByThread.get() ?: cx.initSafeStandardObjects().also {
+            val proto = prototypeByThread.get() ?: cx.initSafeStandardObjects(null, true).also {
                 prototypeByThread.set(it)
             }
             val scope: Scriptable = cx.newObject(proto).also {
@@ -129,7 +135,9 @@ class RhinoScriptRuntime(
          * 反射链条断在第一步，放行 String/数字并不会把它接回去。
          */
         val BRIDGE_ONLY = ClassShutter { name ->
-            name.startsWith(BRIDGE_PACKAGE) || name in VALUE_TYPES
+            name.startsWith(BRIDGE_PACKAGE) ||
+                name.startsWith("[L$BRIDGE_PACKAGE") ||
+                name in VALUE_TYPES
         }
 
         const val BRIDGE_PACKAGE = "com.radium.inkwell.core.source.js."
@@ -146,6 +154,9 @@ class RhinoScriptRuntime(
             "java.lang.Long",
             "java.lang.Float",
             "java.lang.Double",
+            // getStringList / headers(name) 返回 String[]；strToBytes 返回 byte[]
+            "[Ljava.lang.String;",
+            "[B",
         )
     }
 }

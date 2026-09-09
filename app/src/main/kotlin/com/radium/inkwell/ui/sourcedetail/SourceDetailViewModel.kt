@@ -77,6 +77,8 @@ class SourceDetailViewModel(
                     rule, firstChapter.url,
                     toc.mapTo(HashSet()) { it.url },
                     chapterVariable = firstChapter.variable,
+                    chapterTitle = firstChapter.title,
+                    chapterIndex = firstChapter.index,
                 )
                 val preview = content.elements
                     .filterIsInstance<com.radium.inkwell.core.model.ContentElement.Paragraph>()

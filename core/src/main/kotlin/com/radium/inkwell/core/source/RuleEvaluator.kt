@@ -142,8 +142,16 @@ class RuleEvaluator(
 
     /** 求值为字符串列表；空串结果被丢弃 */
     fun evalToStrings(node: RuleNode, ctx: EvalContext): List<String> = when (node) {
-        is RuleNode.Legado ->
-            ctx.element?.let { LegadoSelector.strings(it, withGetVars(node.rule, ctx)) }.orEmpty()
+        is RuleNode.Legado -> {
+            val resolved = withGetVars(node.rule, ctx)
+            // `@get:{n}` 整段就是取值（init 里 @put 之后的 name/author 常这么写）。
+            // 代入后再当选择器会去找名为「魔道修真」的标签，必然空。
+            if (isBareGetRule(node.rule)) {
+                if (resolved.isEmpty()) emptyList() else listOf(resolved)
+            } else {
+                ctx.element?.let { LegadoSelector.strings(it, resolved) }.orEmpty()
+            }
+        }
         is RuleNode.XPath -> xpathStrings(node.path, ctx)
         is RuleNode.JsonPath -> jsonToStrings(readJsonPath(node.path, ctx))
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
@@ -222,8 +230,12 @@ class RuleEvaluator(
     private fun regexExtract(pattern: String, ctx: EvalContext): List<String> {
         val target = contextText(ctx)
         if (target.isEmpty()) return emptyList()
+        // 书源里写坏的正则（Legado 认 ICU 语法，JVM 不一定认）编译会抛 PatternSyntaxException。
+        // 下面的预算关卡只接 RegexBudgetExceeded，不兜这一种 —— 于是它会绕过分析器
+        // 「永不抛错、降级为空」的承诺，直接把整章正文打成加载失败。按「未匹配」处理。
+        val regex = runCatching { regexOf(pattern) }.getOrElse { return emptyList() }
         return withRegexBudget(emptyList()) {
-            regexOf(pattern).findAll(guarded(target))
+            regex.findAll(guarded(target))
                 .map { m -> if (m.groupValues.size > 1) m.groupValues[1] else m.value }
                 .filter { it.isNotEmpty() }
                 .toList()
@@ -346,9 +358,13 @@ class RuleEvaluator(
         if (body.startsWith("@")) {
             return evalToStrings(RuleNode.Legado(body), ctx).firstOrNull().orEmpty()
         }
+        // baseUrl 先于 vars 查：vars 里那份是引擎在 varsOf 塞进来的**站点根**，而 Legado
+        // （与本文件 KDoc）的 {{baseUrl}} 是**当前页地址**（重定向后的 finalUrl）。从前 vars 先命中，
+        // 详情/目录/正文阶段一律解成站点根 —— 与同一条规则 JS 侧拿到的 baseUrl 都对不上。
+        // 搜索/发现的 URL 阶段两者本就相同（urlContext 的 baseUrl 就是 source.baseUrl），不受影响。
+        if (body == "baseUrl") return ctx.baseUrl
         // 已知变量 / 整数算术（{{(page-1)*20}}）
         ctx.vars[body]?.let { return it }
-        if (body == "baseUrl") return ctx.baseUrl
         evalArithmetic(body, ctx.vars)?.let { return it }
         // 其余按 JS 表达式求值 —— 这是 Legado 的默认分支。
         // 没有注入 JS 引擎时按空串处理：模板里的未知变量不该打死整条规则
@@ -364,6 +380,9 @@ class RuleEvaluator(
     private fun withGetVars(rule: String, ctx: EvalContext): String =
         if (!rule.contains("@get:")) rule
         else GET_VAR.replace(rule) { m -> ctx.js.scriptVars[m.groupValues[1].trim()].orEmpty() }
+
+    private fun isBareGetRule(rule: String): Boolean =
+        GET_VAR.matchEntire(rule.trim()) != null
 
     /** `@put:{"k":"规则"}`：每条规则在当前内容上求值，结果存进变量表 */
     private fun applyPut(spec: String, ctx: EvalContext) {
@@ -381,7 +400,7 @@ class RuleEvaluator(
     }
 
     private fun varValue(name: String, ctx: EvalContext): String =
-        ctx.vars[name] ?: if (name == "baseUrl") ctx.baseUrl else ""
+        if (name == "baseUrl") ctx.baseUrl else ctx.vars[name].orEmpty()
 
     /** 元素上下文取 outerHtml（可匹配属性与脚本内容），否则取 JSON/文本值 */
     private fun contextText(ctx: EvalContext): String =
@@ -397,9 +416,11 @@ class RuleEvaluator(
         }
         is PipeOp.RegexReplaceFirst -> list.map { s ->
             // Legado replaceFirst：取首个匹配、在其匹配区间内替换；未命中则清空（抽取语义）
-            val re = regexOf(op.pattern)
-            runCatching { re.find(guarded(s))?.let { re.replaceFirst(it.value, op.replacement) } ?: "" }
-                .getOrDefault("")
+            // 编译也放进 runCatching：坏正则同样按「未命中」清空，别抛出去
+            runCatching {
+                val re = regexOf(op.pattern)
+                re.find(guarded(s))?.let { re.replaceFirst(it.value, op.replacement) } ?: ""
+            }.getOrDefault("")
         }
         is PipeOp.Put -> {
             applyPut(op.spec, ctx)
@@ -434,7 +455,9 @@ class RuleEvaluator(
         val runtime = scriptRuntime
             ?: throw UnsupportedRuleException("该书源需要 JS 引擎，当前版本不支持")
         val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
-        val java = com.radium.inkwell.core.source.js.JavaBridge(jsHttp, jsCache, ctx.js.scriptVars)
+        val java = com.radium.inkwell.core.source.js.JavaBridge(
+            jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx),
+        )
         return try {
             runtime.eval(
                 script,
@@ -444,6 +467,7 @@ class RuleEvaluator(
                     "baseUrl" to ctx.baseUrl,
                     "key" to (ctx.vars["keyword"] ?: ""),
                     "page" to (ctx.vars["page"]?.toIntOrNull() ?: 1),
+                    "title" to ctx.js.chapter.title,
                     "java" to java,
                     "cookie" to com.radium.inkwell.core.source.js.CookieBridge(jsHttp),
                     "cache" to jsCache,
@@ -455,6 +479,26 @@ class RuleEvaluator(
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** `java.getString(rule)`：在当前页上下文上再跑一条规则。 */
+    private fun ruleQuery(ctx: EvalContext) = object : com.radium.inkwell.core.source.js.JsRuleQuery {
+        override fun getString(rule: String): String =
+            runCatching { evalToString(LegadoRuleAnalyzer.analyze(rule), ctx) }.getOrNull().orEmpty()
+
+        override fun getStringList(rule: String): Array<String> =
+            runCatching { evalToStrings(LegadoRuleAnalyzer.analyze(rule), ctx).toTypedArray() }
+                .getOrDefault(emptyArray())
+
+        override fun getElement(rule: String): com.radium.inkwell.core.source.js.JsElement? =
+            getElements(rule).firstOrNull()
+
+        override fun getElements(rule: String): Array<com.radium.inkwell.core.source.js.JsElement> =
+            runCatching {
+                evalToNodes(LegadoRuleAnalyzer.analyze(rule), ctx)
+                    .mapNotNull { it.element?.let { el -> com.radium.inkwell.core.source.js.JsElement(el) } }
+                    .toTypedArray()
+            }.getOrDefault(emptyArray())
     }
 }
 

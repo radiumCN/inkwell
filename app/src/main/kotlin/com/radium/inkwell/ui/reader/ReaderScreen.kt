@@ -165,8 +165,13 @@ fun ReaderScreen(
 
     // 音量键翻页（与点击共用动画路径）
     LaunchedEffect(session.settings.volumeKeyFlip, overlay.menuVisible, session.settings.flipAnimation) {
-        // 滚动模式下没有"页"，音量键翻页无从谈起 —— 按下去只会把游标推到别处、把人转晕
-        keyBus.volumeFlipEnabled = session.settings.volumeKeyFlip && !overlay.menuVisible
+        // 滚动模式下没有"页"，音量键翻页无从谈起 —— 按下去只会把游标推到别处、把人转晕。
+        // 这个条件必须真的写进来，不能只把 flipAnimation 挂在 key 上：漏了的话滚动模式下
+        // MainActivity 照样把音量键吃掉，事件发到没人订阅的 flipController 上凭空消失 ——
+        // 既翻不了页，系统音量也调不了。
+        keyBus.volumeFlipEnabled = session.settings.volumeKeyFlip &&
+            !overlay.menuVisible &&
+            session.settings.flipAnimation != FlipAnimation.SCROLL
     }
     LaunchedEffect(Unit) {
         keyBus.flipEvents.collect { flipController.requestFlip(it) }

@@ -122,6 +122,18 @@ class SourceHttpClientTest {
     }
 
     @Test
+    fun `http error is returned when throwOnHttpError is false`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(404).setBody("gone")
+                .setHeader("Content-Type", "text/plain"),
+        )
+        val page = client().fetch(server.url("/x").toString(), throwOnHttpError = false)
+        assertEquals(404, page.statusCode)
+        assertEquals("gone", page.bodyText)
+        assertTrue(page.headers.keys.any { it.equals("Content-Type", ignoreCase = true) })
+    }
+
+    @Test
     fun `post sends body with content type`() = runBlocking {
         server.enqueue(MockResponse().setBody("ok"))
         client().fetch(

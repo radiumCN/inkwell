@@ -139,9 +139,16 @@ class Paginator(private val measurer: TextMeasureFacade) {
         var line = 0
         var cursor = startCursor
         while (line < mp.lineCount) {
-            val fit = cursor.fitLines(mp, fromLine = line)
-            // 标题 keep-with-next：标题起步但本页连 1 行都放不下 → 推下页
-            val effectiveFit = if (isTitle && line == 0 && fit < minOf(mp.lineCount, 1)) 0 else fit
+            // 标题 keep-with-next：标题起步、本页已有内容、而「整个标题 + 段距 + 两行正文」
+            // 放不下 → 整体推下页，别让标题孤悬页底、正文全在下一页。
+            // 从前这里写的是 `fit < minOf(mp.lineCount, 1)`，与 `fit == 0` 等价 —— 判定形同虚设，
+            // 文件头 KDoc 承诺的规则实际从未生效过。页面本来就空时不推（再推还是空页，死循环）。
+            if (isTitle && line == 0 && !cursor.isEmpty && !cursor.fits(keepWithNextHeight(mp, spec))) {
+                onSeal()
+                cursor = currentCursor()
+                continue
+            }
+            val effectiveFit = cursor.fitLines(mp, fromLine = line)
             if (effectiveFit == 0) {
                 if (cursor.isEmpty) {
                     // 单行都放不下的极端小视口：强放 1 行避免死循环
@@ -165,6 +172,12 @@ class Paginator(private val measurer: TextMeasureFacade) {
         // 记录段落尾字符（供 endCharOffset 精确）
         currentCursor().noteCharEnd(elementCharBase + textLength)
     }
+
+    /** 标题要带着走的最小高度：标题全部行 + 一个段距 + [KEEP_WITH_NEXT_LINES] 行正文 */
+    private fun keepWithNextHeight(title: MeasuredParagraph, spec: LayoutSpec): Float =
+        (title.lineBottom(title.lineCount - 1) - title.lineTop(0)) +
+            spec.paragraphSpacingPx +
+            KEEP_WITH_NEXT_LINES * spec.lineHeightPx
 
     private inline fun placeImage(
         elementIndex: Int,
@@ -190,6 +203,10 @@ class Paginator(private val measurer: TextMeasureFacade) {
     }
 
     internal class TitleElement(val text: String)
+
+    private companion object {
+        const val KEEP_WITH_NEXT_LINES = 2
+    }
 
     private fun LayoutSpec.bodyStyle() = ResolvedTextStyle(
         fontSizePx = fontSizePx,

@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- 导出的书源 JSON 写在 cacheDir 里，只把这一个子目录暴露给分享目标 -->
-    <cache-path name="export" path="." />
+    <!--
+      导出的书源 JSON 写在 cacheDir/export/ 里，只把这一个子目录暴露给分享目标。
+      从前这里是 path="."：把整个 cacheDir 根都交了出去，分享面板拿到的 URI 顺着能够到
+      下载的安装包、图片缓存 —— 与这行注释想说的正相反。
+    -->
+    <cache-path name="export" path="export/" />
     <!-- 应用内下载的更新 APK（cacheDir/updates/），交给系统安装器 -->
     <cache-path name="updates" path="updates/" />
 </paths>

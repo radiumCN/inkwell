@@ -348,7 +348,10 @@ fun BookshelfScreen(
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        if (allBooks.isNotEmpty() && books.isEmpty() && hiddenCount > 0 && !showHidden) {
+        // 「全部隐藏」要按**整个书架**判，不能拿分组筛选后的 books 判：选中一个恰好没有可见书的
+        // 分组时 books 也是空的，若在这里整页换成空态，筛选条跟着一起消失，用户就没法切回「全部」了 ——
+        // 分组为空另有下面 ChipRow 之下的提示。
+        if (allBooks.isNotEmpty() && hiddenCount == allBooks.size && !showHidden) {
             // 书全被隐藏了。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
             // 就显示一个和真正空书架一模一样的空态：别人看不出区别，而你知道长按标题能回来。
             EmptyState(
@@ -448,8 +451,15 @@ fun BookshelfScreen(
                 val motionOn = animationsEnabled()
                 // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
                 val motion = MaterialTheme.motionScheme
-                when (layout) {
-                    BookshelfLayout.GRID -> LazyVerticalGrid(
+                when {
+                    // 当前分组下没有可见的书（未分组也算一个分组）。筛选条留在上面，空态只占内容区。
+                    // 隐藏区未展开时被藏起来的书也不算「有」，提示文案里同样一个字不提隐藏。
+                    books.isEmpty() -> EmptyState(
+                        icon = Icons.Default.AutoStories,
+                        title = "这个分组还没有书",
+                        hint = "长按书封「设置分组」可以把书移进来，或在上方切换分组",
+                    )
+                    layout == BookshelfLayout.GRID -> LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = Dimens.bookshelfGridMin),
                         modifier = Modifier.fillMaxSize(),
                         // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
@@ -492,7 +502,7 @@ fun BookshelfScreen(
                             )
                         }
                     }
-                    BookshelfLayout.LIST -> LazyColumn(
+                    else -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         // 左右内缩 + 行距：给 Expressive ListItem 的圆角容器留出背景露出，
                         // 否则贴边铺满时形状变化几乎看不见，主题的 surface 层级也读不出来。

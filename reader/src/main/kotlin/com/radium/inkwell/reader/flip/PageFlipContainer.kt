@@ -256,8 +256,13 @@ fun PageFlipContainer(
         launchSettle(commit = true)
     }
 
+    // startProgrammaticFlip 是每次重组都重新捕获 effectiveAnim / onCommit / canFlip 的局部函数；
+    // LaunchedEffect 只随 controller 重启，直接在里面调它就永远是**首帧**那一份 —— 用户在
+    // 阅读中把仿真换成滑动、或系统关掉动画后，音量键与自动翻页仍按旧类型跑。
+    // 经 rememberUpdatedState 取最新，与下面 pointerInput 里读到的保持同一帧。
+    val programmaticFlip by rememberUpdatedState<(FlipDirection) -> Unit> { startProgrammaticFlip(it) }
     LaunchedEffect(controller) {
-        controller.requests.collect { startProgrammaticFlip(it) }
+        controller.requests.collect { programmaticFlip(it) }
     }
     LaunchedEffect(gesturesEnabled) {
         if (!gesturesEnabled) interruptSettle()

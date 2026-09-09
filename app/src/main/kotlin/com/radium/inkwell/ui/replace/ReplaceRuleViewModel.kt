@@ -94,13 +94,13 @@ class ReplaceRuleViewModel(
             )
             return
         }
-        val regex = runCatching { Regex(draft.pattern) }
-        regex.fold(
-            onSuccess = { re ->
-                _state.value = _state.value.copy(
-                    patternError = null,
-                    sampleResult = re.replace(sample, draft.replacement),
-                )
+        // 编译和替换都要兜：`Regex(pattern)` 只管模式本身，替换串是另一套 Java 模板语法 ——
+        // 写个 `$1` 而模式里没有分组、或者以 `$`/`\` 结尾，炸的是 `replace` 这一步
+        // （IndexOutOfBounds / IllegalArgument）。这里在主线程按键即算，不兜就是当场崩。
+        // 正式净化（core Purifier.apply）对这类错误是有兜底的，所以只有试算这一处会崩。
+        runCatching { Regex(draft.pattern).replace(sample, draft.replacement) }.fold(
+            onSuccess = { result ->
+                _state.value = _state.value.copy(patternError = null, sampleResult = result)
             },
             onFailure = { e ->
                 _state.value = _state.value.copy(

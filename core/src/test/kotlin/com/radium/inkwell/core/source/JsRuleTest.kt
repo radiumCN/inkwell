@@ -51,6 +51,20 @@ class JsRuleTest {
     }
 
     @Test
+    fun `java getString evaluates a rule on the current page`() {
+        val html = """<div class="page-link">3/10</div>"""
+        val rule = """<js>java.getString('class.page-link@text')</js>"""
+        assertEquals("3/10", evaluator.evalToString(node(rule), htmlCtx(html)))
+    }
+
+    @Test
+    fun `java getElements returns wrappers the script can read`() {
+        val html = """<ul class="txt-list"><li><a>甲</a></li><li><a>乙</a></li></ul>"""
+        val rule = """<js>java.getElements('class.txt-list@tag.li@tag.a')[0].text()</js>"""
+        assertEquals("甲", evaluator.evalToString(node(rule), htmlCtx(html)))
+    }
+
+    @Test
     fun `js rule without runtime reports unsupported`() {
         val rule = """<js>result</js>"""
         assertFailsWith<UnsupportedRuleException> {
