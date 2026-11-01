@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,7 +52,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.bookKey
+import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.BookListRow
+import com.radium.inkwell.ui.components.ContentListItem
+import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
@@ -72,6 +77,7 @@ fun SearchScreen(
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     var showSortPicker by rememberSaveable { mutableStateOf(false) }
+    var confirmClearHistory by rememberSaveable { mutableStateOf(false) }
 
     // 滚动位置活在 ViewModel：进详情再返回时 Composable 会重建，但 VM 还在返回栈上。
     // 初值从 VM 读；滑动过程持续写回。只有 searchId/sortId 相对上次钉顶变了才滚回顶 ——
@@ -176,8 +182,23 @@ fun SearchScreen(
                     }
                 }
             }
-            if (state.results.isEmpty() && !state.searching && !state.searchPaused) {
-                if (state.searchId > 0) {
+            // 历史在两种时候出来：进页还没搜过；搜过之后把输入框清空了 —— 清空就是「换个词」的意思，
+            // 这时候还摆着上一个词的结果（或「没找到」）没有用，从前得退出页面再进来才看得到历史。
+            // 正在搜 / 暂停着的时候不让位：结果还在长，或者等着用户点「继续搜索」。
+            val idle = !state.searching && !state.searchPaused
+            // 「清空了输入框」要单独成立，不能只靠有没有历史：清空后把历史删光，
+            // 否则会落回上一个词的旧结果，顶着一个空搜索框
+            val cleared = idle && state.searchId > 0 && state.query.isBlank()
+            val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
+            if (showHistory) {
+                SearchHistoryList(
+                    history = state.history,
+                    onSearch = viewModel::searchFromHistory,
+                    onRemove = viewModel::removeHistory,
+                    onClear = { confirmClearHistory = true },
+                )
+            } else if ((state.results.isEmpty() && idle) || cleared) {
+                if (state.searchId > 0 && !cleared) {
                     // 搜完了一本没有。从前这里落回进页时那句「按已启用的规则搜索」，
                     // 看起来像什么都没发生 —— 用户分不清是没搜、还是搜了没有。
                     EmptyState(
@@ -253,6 +274,18 @@ fun SearchScreen(
         }
     }
 
+    if (confirmClearHistory) {
+        AppAlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = "清空搜索历史？",
+            confirmText = "清空",
+            onConfirm = {
+                confirmClearHistory = false
+                viewModel.clearHistory()
+            },
+        )
+    }
+
     if (showSortPicker) {
         OptionPickerSheet(
             title = "排序方式",
@@ -276,6 +309,62 @@ fun SearchScreen(
             },
             onDismiss = { showSortPicker = false },
         )
+    }
+}
+
+/**
+ * 进页还没搜时的搜索历史：点一条直接搜，行尾 ✕ 删单条，标题行右侧清空全部。
+ *
+ * 用列表行而不是一堆 chip：书名常常很长（「我在末世有套房」后面再带个作者），chip 换行后
+ * 参差不齐，单条删除的 ✕ 也没处放；一行一条，删哪条一目了然。
+ */
+@Composable
+private fun SearchHistoryList(
+    history: List<String>,
+    onSearch: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    val motion = MaterialTheme.motionScheme
+    // 键盘弹着时历史多半在它底下，同结果列表一样让开
+    LazyColumn(
+        modifier = Modifier.imePadding(),
+        contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.gapL),
+        verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+    ) {
+        item(key = "header") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionHeader("搜索历史", Modifier.weight(1f), horizontalInset = false)
+                InlineTextAction("清空", onClick = onClear)
+            }
+        }
+        // key 加前缀：裸用关键词的话，搜过「header」这个词就跟标题行的 key 撞上，LazyColumn 当场崩溃，
+        // 而且历史还在、每次进页都崩
+        items(history, key = { "h:$it" }) { keyword ->
+            ContentListItem(
+                onClick = { onSearch(keyword) },
+                // 删一条时它淡出、下面的挪上来补位；否则那一行是硬消失，看不出删的是哪条
+                modifier = Modifier.animateItem(
+                    fadeInSpec = motion.defaultEffectsSpec(),
+                    placementSpec = motion.defaultSpatialSpec(),
+                    fadeOutSpec = motion.fastEffectsSpec(),
+                ),
+                leadingContent = {
+                    Icon(Icons.Default.History, contentDescription = null, Modifier.size(Dimens.iconSm))
+                },
+                trailingContent = {
+                    AppIconButton(onClick = { onRemove(keyword) }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "删除「$keyword」",
+                            Modifier.size(Dimens.iconSm),
+                        )
+                    }
+                },
+            ) {
+                Text(keyword, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
@@ -349,15 +438,25 @@ private fun SearchPauseBar(label: String, onResume: () -> Unit) {
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            "继续搜索",
-            Modifier
-                .clickable(role = Role.Button, onClick = onResume)
-                .heightIn(min = Dimens.touchTarget)
-                .wrapContentHeight(Alignment.CenterVertically)
-                .padding(horizontal = Dimens.gapXS),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        InlineTextAction("继续搜索", onClick = onResume)
     }
+}
+
+/**
+ * 工具条 / 小标题行尾的文字动作（「继续搜索」「清空」）。不用 `SecondaryButton`：
+ * 它带 40dp 的按钮底和描边，塞进一行 labelLarge 的工具条里比两侧内容高出一截、像另一块控件。
+ * 文字链 + [Dimens.touchTarget] 保触控，与阅读菜单的上一章 / 下一章同一个思路。
+ */
+@Composable
+private fun InlineTextAction(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        Modifier
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = Dimens.touchTarget)
+            .wrapContentHeight(Alignment.CenterVertically)
+            .padding(horizontal = Dimens.gapXS),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
 }

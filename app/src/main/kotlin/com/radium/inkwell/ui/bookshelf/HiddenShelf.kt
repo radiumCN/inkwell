@@ -32,3 +32,29 @@ internal fun searchableShelfKeys(
     combine(bookRepo.books, appPrefs.hiddenRequireAuth) { books, locked ->
         searchableShelfKeys(books, locked)
     }
+
+/**
+ * 这个搜索词会不会把上锁隐藏区里的书露出来 —— 会的就不进搜索历史，已在历史里的也不显示。
+ *
+ * 和 [searchableShelfKeys] 同一个理由：搜索页不经验证就能打开，历史里摆着「藏起来的那本书」的书名，
+ * 等于把锁着的隐藏区替旁人念了一遍。所以按**包含**而不是相等来判：搜「斗破」找「斗破苍穹」，
+ * 或者整个书名带上作者一起输，都一样暴露了。作者也算 —— 搜作者名同样指向那本书。
+ * 宁可多拦：拦错了只是少记一条历史，放过了就是隐私泄露。
+ *
+ * 没上锁时一律不拦，理由同 [searchableShelfKeys]。
+ */
+internal fun revealsHiddenBook(
+    keyword: String,
+    books: List<BookEntity>,
+    hiddenLocked: Boolean,
+): Boolean {
+    if (!hiddenLocked) return false
+    val k = keyword.trim().lowercase()
+    if (k.isEmpty()) return false
+    fun overlaps(field: String): Boolean {
+        val f = field.trim().lowercase()
+        // 空字段一定得先排除：任何字符串都 contains("")，一本没填作者的隐藏书会把所有词都拦下
+        return f.isNotEmpty() && (f.contains(k) || k.contains(f))
+    }
+    return books.any { it.hidden && (overlaps(it.title) || overlaps(it.author)) }
+}

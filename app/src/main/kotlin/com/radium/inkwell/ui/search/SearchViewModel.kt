@@ -8,12 +8,14 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchPage
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.data.prefs.normalizeSearchKeyword
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.BookSourceRepository.EnabledSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.TitleMatch
+import com.radium.inkwell.ui.bookshelf.revealsHiddenBook
 import com.radium.inkwell.ui.bookshelf.searchableShelfKeys
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
@@ -28,6 +30,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -113,6 +118,8 @@ data class SearchUiState(
     val earlyStopped: Boolean = false,
     /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书） */
     val shelfKeys: Set<Pair<String, String>> = emptySet(),
+    /** 搜索历史，新的在前。设置里关掉记录时恒为空 */
+    val history: List<String> = emptyList(),
 )
 
 class SearchViewModel(
@@ -122,7 +129,7 @@ class SearchViewModel(
     private val bookRepo: BookRepository,
 ) : ViewModel(), KoinComponent {
 
-    /** 只为读「隐藏区上没上锁」这一个开关，同 BookPreviewViewModel 从 Koin 现取 */
+    /** 读「隐藏区上没上锁」与搜索历史，同 BookPreviewViewModel 从 Koin 现取 */
     private val appPrefs: AppPrefs by inject()
 
     private val _state = MutableStateFlow(SearchUiState())
@@ -234,6 +241,37 @@ class SearchViewModel(
                 _state.value = _state.value.copy(shelfKeys = keys)
             }
         }
+        viewModelScope.launch {
+            // 关开关时历史已经一并清掉了（见 setSearchHistoryEnabled），这里按开关再滤一道只是兜底：
+            // 「关着却显示历史」比「多判一次」代价大得多。
+            // 指向上锁隐藏书的词也滤掉：记录时已经拦了，但上锁之前记下的、或后来才藏起来的书，
+            // 词早就在历史里了 —— 锁一上，它们就该跟着看不见
+            combine(
+                appPrefs.searchHistoryEnabled,
+                appPrefs.searchHistory,
+                bookRepo.books,
+                appPrefs.hiddenRequireAuth,
+            ) { on, list, books, locked ->
+                if (!on) emptyList()
+                else list.filterNot { revealsHiddenBook(it, books, locked) }
+            }.distinctUntilChanged().collect { list ->
+                _state.value = _state.value.copy(history = list)
+            }
+        }
+    }
+
+    /** 点历史里的一条：填进输入框并直接搜，不用再按一次搜索 */
+    fun searchFromHistory(keyword: String) {
+        setQuery(keyword)
+        search()
+    }
+
+    fun removeHistory(keyword: String) {
+        viewModelScope.launch { appPrefs.removeSearchHistory(keyword) }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch { appPrefs.clearSearchHistory() }
     }
 
     fun setQuery(q: String) {
@@ -261,8 +299,18 @@ class SearchViewModel(
     }
 
     fun search() {
-        val keyword = _state.value.query.trim()
+        // 与历史同一个规范形（见 normalizeSearchKeyword），点历史重搜才是同一个词
+        val keyword = normalizeSearchKeyword(_state.value.query)
         if (keyword.isEmpty()) return
+        // 单独起协程、不挂在 searchJob 上：紧接着再搜一次会 cancel 掉 searchJob，这条历史不该跟着丢。
+        // 没有可用书源也照记 —— 用户导好书源回来，正好点历史重搜。
+        // 指向上锁隐藏书的词不记（见 revealsHiddenBook）：搜索页不经验证就能打开
+        viewModelScope.launch {
+            val locked = appPrefs.hiddenRequireAuth.first()
+            if (!revealsHiddenBook(keyword, bookRepo.books.first(), locked)) {
+                appPrefs.addSearchHistory(keyword)
+            }
+        }
         paused = null
         searchJob?.cancel()
         sortJob?.cancel()

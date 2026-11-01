@@ -39,6 +39,7 @@ fun ReadingSettingsScreen(
     val scope = rememberCoroutineScope()
     val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsStateWithLifecycle(initialValue = true)
     val autoChangeSource by appPrefs.autoChangeSource.collectAsStateWithLifecycle(initialValue = true)
+    val searchHistoryEnabled by appPrefs.searchHistoryEnabled.collectAsStateWithLifecycle(initialValue = true)
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
@@ -78,6 +79,17 @@ fun ReadingSettingsScreen(
                     checked = checkAuthor,
                     onCheckedChange = { on -> scope.launch { appPrefs.setChangeSourceCheckAuthor(on) } },
                     position = SettingGroupPosition.Last,
+                )
+            }
+            SettingGroup {
+                // 关掉会顺带清空已有历史（见 AppPrefs.setSearchHistoryEnabled），副标题得把这个后果说在前面
+                SwitchRow(
+                    title = "记录搜索历史",
+                    subtitle = if (searchHistoryEnabled) "搜索页显示最近搜过的词，点一下直接重搜。关闭会清空已有记录"
+                    else "已关闭，搜过的词不会留在这台设备上",
+                    checked = searchHistoryEnabled,
+                    onCheckedChange = { on -> scope.launch { appPrefs.setSearchHistoryEnabled(on) } },
+                    position = SettingGroupPosition.Alone,
                 )
             }
             Spacer(Modifier.height(Dimens.gapXL))

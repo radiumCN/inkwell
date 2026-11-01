@@ -17,6 +17,7 @@ import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateSource
 import com.radium.inkwell.core.webdav.BackupSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -45,6 +46,9 @@ class AppPrefs(private val context: Context) {
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
+        val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
+        /** 搜索历史，新的在前，换行分隔（关键词入库前已把换行压成空格，见 [pushSearchHistory]） */
+        val SEARCH_HISTORY = stringPreferencesKey("search_history")
         /**
          * 已读章节正文缓存保留天数。0 = 关闭自动清理；合法值 0/7/14/30，默认 14。
          * 只清进度之前且超过该天数未碰过的缓存，当前章与其后不动。
@@ -80,6 +84,7 @@ class AppPrefs(private val context: Context) {
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
+                "search_history_enabled" to (p[Keys.SEARCH_HISTORY_ENABLED] ?: true).toString(),
                 "bookshelf_layout" to (p[Keys.BOOKSHELF_LAYOUT] ?: BookshelfLayout.GRID.name),
                 "cache_auto_prune_days" to (p[Keys.CACHE_AUTO_PRUNE_DAYS] ?: DEFAULT_CACHE_AUTO_PRUNE_DAYS).toString(),
                 "theme_mode" to theme.mode.name,
@@ -111,6 +116,11 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
+            v["search_history_enabled"]?.toBooleanStrictOrNull()?.let { on ->
+                p[Keys.SEARCH_HISTORY_ENABLED] = on
+                // 与本机关掉开关同一个语义：关 = 不留记录。别让别的设备关了、这台还攒着一串旧词
+                if (!on) p.remove(Keys.SEARCH_HISTORY)
+            }
             v["bookshelf_layout"]
                 ?.takeIf { name -> BookshelfLayout.entries.any { it.name == name } }
                 ?.let { p[Keys.BOOKSHELF_LAYOUT] = it }
@@ -176,6 +186,60 @@ class AppPrefs(private val context: Context) {
     suspend fun setExploreEnabled(on: Boolean) {
         context.appDataStore.edit { it[Keys.EXPLORE_ENABLED] = on }
         touch()
+    }
+
+    /**
+     * 是否记录搜索历史。默认开。
+     *
+     * 开关进备份、随设备同步；**历史本身不进备份**：搜过什么是这台设备上的事，
+     * 同步过去等于把别人在另一台设备上搜的词摊在这台的搜索页上。
+     */
+    val searchHistoryEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.SEARCH_HISTORY_ENABLED] ?: true
+    }.distinctUntilChanged()
+
+    /** 关掉时连同已有历史一起清掉 —— 用户关它多半就是不想让人看见搜过什么，只停止记录不够 */
+    suspend fun setSearchHistoryEnabled(on: Boolean) {
+        context.appDataStore.edit { p ->
+            p[Keys.SEARCH_HISTORY_ENABLED] = on
+            if (!on) p.remove(Keys.SEARCH_HISTORY)
+        }
+        touch()
+    }
+
+    /**
+     * 搜索历史，新的在前；最多 [SEARCH_HISTORY_MAX] 条。
+     * 先比原始字符串再拆：同一个 DataStore 里任何一项设置变了（含 touch() 刷时间戳）整份 data 都会再发一次，
+     * 不去重的话每次都重拆一遍、再推给搜索页重组
+     */
+    val searchHistory: Flow<List<String>> = context.appDataStore.data
+        .map { p -> p[Keys.SEARCH_HISTORY] }
+        .distinctUntilChanged()
+        .map(::decodeSearchHistory)
+
+    /**
+     * 记一条。开关的判断放在同一次 edit 里：先读开关、再另起一次写的话，
+     * 中间用户关了开关、清了历史，这条又会被写回去。
+     * 历史不 touch()：它不进备份，刷时间戳只会让 WebDAV 以为设置变了、白推一次。
+     */
+    suspend fun addSearchHistory(keyword: String) {
+        context.appDataStore.edit { p ->
+            if (p[Keys.SEARCH_HISTORY_ENABLED] == false) return@edit
+            val next = pushSearchHistory(decodeSearchHistory(p[Keys.SEARCH_HISTORY]), keyword)
+            p[Keys.SEARCH_HISTORY] = next.joinToString("\n")
+        }
+    }
+
+    suspend fun removeSearchHistory(keyword: String) {
+        context.appDataStore.edit { p ->
+            val next = decodeSearchHistory(p[Keys.SEARCH_HISTORY]) - keyword
+            if (next.isEmpty()) p.remove(Keys.SEARCH_HISTORY)
+            else p[Keys.SEARCH_HISTORY] = next.joinToString("\n")
+        }
+    }
+
+    suspend fun clearSearchHistory() {
+        context.appDataStore.edit { it.remove(Keys.SEARCH_HISTORY) }
     }
 
     /** 书架展示：网格（封面优先）或列表（一行一书，方便扫最新章）。默认网格。 */
@@ -302,7 +366,34 @@ class AppPrefs(private val context: Context) {
 
     companion object {
         const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14
+        /** 再多就得在搜索页里滚着找了，那还不如重新输 */
+        const val SEARCH_HISTORY_MAX = 20
         /** 关闭 / 7 / 14 / 30 天 */
         val CACHE_AUTO_PRUNE_DAYS_OPTIONS = setOf(0, 7, 14, 30)
     }
+}
+
+private fun decodeSearchHistory(raw: String?): List<String> =
+    raw?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+
+/**
+ * 搜索关键词的规范形：去首尾空白，中间连续空白（含粘贴进来的换行）压成一个空格。
+ *
+ * 搜索与历史**必须**用同一个：历史按换行分隔存，词里留着换行会被拆成两条；而搜索若只 trim，
+ * 「斗破  苍穹」搜的是两个空格、历史记的是一个，点历史重搜就成了另一个词，书源返回的结果可能不同。
+ */
+fun normalizeSearchKeyword(raw: String): String = raw.trim().replace(WHITESPACE_RUN, " ")
+
+/** 每搜一次要用两三回（搜索本身、记历史），别每回现编一个 */
+private val WHITESPACE_RUN = Regex("\\s+")
+
+/** 把 [keyword] 放到历史最前：已有的同一个词挪上来而不是重复一条，超出 [max] 的旧词丢掉 */
+internal fun pushSearchHistory(
+    history: List<String>,
+    keyword: String,
+    max: Int = AppPrefs.SEARCH_HISTORY_MAX,
+): List<String> {
+    val k = normalizeSearchKeyword(keyword)
+    if (k.isEmpty()) return history
+    return (listOf(k) + history.filter { it != k }).take(max)
 }

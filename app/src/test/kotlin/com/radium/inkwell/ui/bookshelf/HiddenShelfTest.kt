@@ -40,4 +40,20 @@ class HiddenShelfTest {
         val keys = searchableShelfKeys(shelf, hiddenLocked = false)
         assertEquals(setOf(bookKey("看得见的书", "作者"), bookKey("藏起来的书", "作者")), keys)
     }
+
+    @Test
+    fun `上了锁 —— 搜书名片段、整个书名加作者、作者名都算暴露`() {
+        assertTrue(revealsHiddenBook("藏起来", shelf, hiddenLocked = true))
+        assertTrue(revealsHiddenBook("藏起来的书 作者", shelf, hiddenLocked = true))
+        assertTrue(revealsHiddenBook("作者", shelf, hiddenLocked = true))
+        assertFalse(revealsHiddenBook("看得见的书", listOf(book("看得见的书")), hiddenLocked = true))
+    }
+
+    @Test
+    fun `没上锁或空词不拦；隐藏书没填作者也不会把所有词都拦下`() {
+        assertFalse(revealsHiddenBook("藏起来", shelf, hiddenLocked = false))
+        assertFalse(revealsHiddenBook("  ", shelf, hiddenLocked = true))
+        val noAuthor = listOf(book("藏起来的书", hidden = true).copy(author = ""))
+        assertFalse(revealsHiddenBook("随便什么", noAuthor, hiddenLocked = true))
+    }
 }
