@@ -2,6 +2,8 @@ package com.radium.inkwell.ui.reader
 
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
@@ -42,9 +44,12 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         val containerLow = step(if (lightPaper) 0.04f else 0.10f)
         val containerMid = step(if (lightPaper) 0.07f else 0.14f)
         val containerHigh = step(if (lightPaper) 0.10f else 0.18f)
+        // 报错色按**纸**的深浅取 M3 基线的浅/深两套，不跟 App 走：App 浅色、纸是夜色时，
+        // App 的 error 是深红，压在深色纸上几乎看不见（自定义纸张的对比度警告就是这么糊掉的）
+        val errorBase = if (lightPaper) lightColorScheme() else darkColorScheme()
 
-        // 从 App 当前的 scheme 派生，只改与"纸张"相关的那些槽位 ——
-        // 其余（error 之类）保持一致，不必凭空造一套
+        // 从 App 当前的 scheme 派生，只改与"纸张"相关的那些槽位。
+        // 浮层里用得到的容器色、报错色都得在这里覆盖：漏一个，用到它的组件就在纸上露出 App 的配色
         base.copy(
             primary = accent,
             onPrimary = onAccent,
@@ -64,6 +69,17 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
             // 选中的 Chip 用正文色的淡底，而不是 M3 的紫
             secondaryContainer = fg.copy(alpha = 0.14f),
             onSecondaryContainer = fg,
+            // primary / tertiary 两组容器色从前没覆盖，读到的是 App 主题的颜色 —— 纸上冒出一块淡紫/淡蓝。
+            // 三组容器要分得开：primary 是强调色的淡底（比 secondary 浓一档），tertiary 退成纸面的实色台阶。
+            // 0.24 是上限：夜色纸上 accent 就是正文色，再浓，容器上的正文色就掉到 4.5:1 以下
+            primaryContainer = accent.copy(alpha = 0.24f),
+            onPrimaryContainer = fg,
+            tertiaryContainer = containerHigh,
+            onTertiaryContainer = fg,
+            error = errorBase.error,
+            onError = errorBase.onError,
+            errorContainer = errorBase.errorContainer,
+            onErrorContainer = errorBase.onErrorContainer,
             outline = fg.copy(alpha = 0.35f),
             outlineVariant = fg.copy(alpha = 0.18f),
             scrim = Color.Black.copy(alpha = 0.4f),

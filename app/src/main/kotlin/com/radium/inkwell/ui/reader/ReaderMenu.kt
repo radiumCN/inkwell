@@ -799,18 +799,24 @@ private fun TapZoneCell(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    // 翻页两向用主色 / 次色两套容器色拉开；菜单第三色；无动作退成最浅的容器色，像「这格空着」
+    val shape = MaterialTheme.shapes.small
+    // 面板在 ReaderThemeScope 里，三组容器色都是从纸色派生的（见那里）：下一页最浓、上一页淡一档、
+    // 菜单是纸面实色台阶；无动作不铺底只描边，像「这格空着」。纸上没有色相可借，四态靠浓淡 + 有无底色拉开
     val (container, content) = when (action) {
         TapAction.PREV -> scheme.secondaryContainer to scheme.onSecondaryContainer
         TapAction.NEXT -> scheme.primaryContainer to scheme.onPrimaryContainer
         TapAction.MENU -> scheme.tertiaryContainer to scheme.onTertiaryContainer
-        TapAction.NONE -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
+        TapAction.NONE -> Color.Transparent to scheme.onSurfaceVariant
     }
     Box(
         modifier
             .heightIn(min = Dimens.touchTarget)
-            .clip(MaterialTheme.shapes.small)
+            .clip(shape)
             .background(container)
+            .then(
+                if (action == TapAction.NONE) Modifier.border(1.dp, scheme.outlineVariant, shape)
+                else Modifier
+            )
             .then(
                 if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick)
                 else Modifier

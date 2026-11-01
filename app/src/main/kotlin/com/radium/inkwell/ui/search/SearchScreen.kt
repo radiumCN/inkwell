@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -26,6 +25,7 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
@@ -335,7 +335,7 @@ private fun SearchHistoryList(
         item(key = "header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionHeader("搜索历史", Modifier.weight(1f), horizontalInset = false)
-                InlineTextAction("清空", onClick = onClear)
+                AppTextButton(onClick = onClear) { Text("清空") }
             }
         }
         // key 加前缀：裸用关键词的话，搜过「header」这个词就跟标题行的 key 撞上，LazyColumn 当场崩溃，
@@ -422,7 +422,8 @@ private fun SearchSortBar(
 
 /**
  * 进详情后搜索被掐掉：进度条冻在当时的位置，给一个手动「继续」而不是返回就自动接着打。
- * 密度和 [SearchSortBar] 同一套，避免进度条底下突然冒出一块 40dp 按钮。
+ * 「继续搜索」走 [AppTextButton]：文字按钮没有底色，进度条底下不会冒出一块实心按钮；
+ * 行高由它自带的 48dp 触控下限撑住，与 [SearchSortBar] 一致。
  */
 @Composable
 private fun SearchPauseBar(label: String, onResume: () -> Unit) {
@@ -438,25 +439,6 @@ private fun SearchPauseBar(label: String, onResume: () -> Unit) {
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        InlineTextAction("继续搜索", onClick = onResume)
+        AppTextButton(onClick = onResume) { Text("继续搜索") }
     }
-}
-
-/**
- * 工具条 / 小标题行尾的文字动作（「继续搜索」「清空」）。不用 `SecondaryButton`：
- * 它带 40dp 的按钮底和描边，塞进一行 labelLarge 的工具条里比两侧内容高出一截、像另一块控件。
- * 文字链 + [Dimens.touchTarget] 保触控，与阅读菜单的上一章 / 下一章同一个思路。
- */
-@Composable
-private fun InlineTextAction(text: String, onClick: () -> Unit) {
-    Text(
-        text,
-        Modifier
-            .clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = Dimens.touchTarget)
-            .wrapContentHeight(Alignment.CenterVertically)
-            .padding(horizontal = Dimens.gapXS),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-    )
 }
