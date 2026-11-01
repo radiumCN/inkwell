@@ -7,6 +7,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -96,6 +97,8 @@ import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.api.TapAction
+import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.flip.FLIP_SLOP_DP
 import com.radium.inkwell.ui.theme.argbToHsv
 import com.radium.inkwell.ui.theme.hsvToArgb
@@ -726,18 +729,118 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
                 position = SettingGroupPosition.Last,
             )
         }
+
+        TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) }
     } else {
         SettingGroup(applyHorizontalInset = false) {
             SwitchRow(
-                title = "点击左右翻页",
-                subtitle = "打开后点屏幕左右可跳整页；默认关，点击只唤出菜单",
+                title = "点击翻页",
+                subtitle = "打开后按下面的点击区域翻页；默认关，点击只唤出菜单",
                 checked = settings.scrollClickToFlip,
                 onCheckedChange = { onUpdate(settings.copy(scrollClickToFlip = it)) },
                 position = SettingGroupPosition.Alone,
             )
         }
+        // 关着时分区不生效，摆出来只会让人以为改了没反应
+        if (settings.scrollClickToFlip) {
+            TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) }
+        }
     }
 }
+
+/**
+ * 点击区域：上面一排预设，下面是代表整块阅读区的九宫格，点一格就在
+ * 上一页 → 下一页 → 菜单 → 无动作 之间轮换。正中那格固定是菜单，画出来但不可点（见 [TapZones]）。
+ *
+ * 轮换而不是每格弹选择面板：编辑器本身就在底部面板里，再叠一层面板，关两次才回得到正文。
+ * 四个状态靠格子里的字和底色区分，轮一圈就回来，点错了接着点即可。
+ */
+@Composable
+private fun TapZoneEditor(zones: TapZones, onChange: (TapZones) -> Unit) {
+    val presets = TapZones.Preset.entries
+    val presetIndex = presets.indexOfFirst { it.zones == zones }
+    SectionLabel("点击区域")
+    // 改过任何一格、跟哪个预设都对不上时，补一个选中的「自定义」，让人知道当前不是预设而不是什么都没选
+    ChipRow(
+        options = presets.map { it.label } + if (presetIndex < 0) listOf("自定义") else emptyList(),
+        selectedIndex = if (presetIndex < 0) presets.size else presetIndex,
+        onSelect = { i -> presets.getOrNull(i)?.let { onChange(it.zones) } },
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Dimens.gapS),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+    ) {
+        for (row in 0..2) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
+                for (col in 0..2) {
+                    val index = row * 3 + col
+                    TapZoneCell(
+                        action = zones.at(col, row),
+                        position = TAP_ZONE_POSITIONS[index],
+                        // 正中锁死为菜单
+                        onClick = if (index == TapZones.CENTER) null else {
+                            { onChange(zones.with(index, zones.at(col, row).next())) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TapZoneCell(
+    action: TapAction,
+    position: String,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    // 翻页两向用主色 / 次色两套容器色拉开；菜单第三色；无动作退成最浅的容器色，像「这格空着」
+    val (container, content) = when (action) {
+        TapAction.PREV -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        TapAction.NEXT -> scheme.primaryContainer to scheme.onPrimaryContainer
+        TapAction.MENU -> scheme.tertiaryContainer to scheme.onTertiaryContainer
+        TapAction.NONE -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
+    }
+    Box(
+        modifier
+            .heightIn(min = Dimens.touchTarget)
+            .clip(MaterialTheme.shapes.small)
+            .background(container)
+            .then(
+                if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick)
+                else Modifier
+            )
+            // 读屏得知道是哪一格、现在是什么、点了会怎样；只念格子里的「下一页」分不清九格。
+            // 用 clearAndSet 把格子里的 Text 吞掉：只加 contentDescription 的话，可点格会念两遍动作名，
+            // 不可点的正中格还会拆成「格子 + 文字」两个焦点。clickable 在它外层，按钮角色与点击不受影响
+            .clearAndSetSemantics {
+                contentDescription = if (onClick != null) "${position}：${action.label}，点按切换"
+                else "${position}：${action.label}，固定"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(action.label, style = MaterialTheme.typography.labelLarge, color = content)
+    }
+}
+
+/** 轮换顺序：两个翻页方向挨着，最常用的改法（左右互换、全改下一页）点一两下就到 */
+private fun TapAction.next(): TapAction = when (this) {
+    TapAction.PREV -> TapAction.NEXT
+    TapAction.NEXT -> TapAction.MENU
+    TapAction.MENU -> TapAction.NONE
+    TapAction.NONE -> TapAction.PREV
+}
+
+private val TAP_ZONE_POSITIONS = listOf(
+    "左上", "正上", "右上",
+    "左侧", "正中", "右侧",
+    "左下", "正下", "右下",
+)
 
 @Composable
 private fun MoreTab(

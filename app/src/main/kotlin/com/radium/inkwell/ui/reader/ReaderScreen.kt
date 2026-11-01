@@ -412,6 +412,7 @@ fun ReaderScreen(
                             !overlay.readerSheetOpen &&
                             overlay.sourceCandidates == null,
                         clickToFlip = session.settings.scrollClickToFlip,
+                        tapZones = session.settings.tapZones,
                         onFlip = { viewModel.flip(it) },
                         onCenterTap = { viewModel.toggleMenu() },
                     )
@@ -481,6 +482,7 @@ fun ReaderScreen(
                         onCommit = { viewModel.flip(it) },
                         onCenterTap = { viewModel.toggleMenu() },
                         controller = flipController,
+                        tapZones = session.settings.tapZones,
                         selection = selection,
                     )
                     PageInfoBar(pageUi, session, layout)

@@ -1,6 +1,8 @@
 package com.radium.inkwell.reader.flip
 
 import com.radium.inkwell.reader.api.FlipDirection
+import com.radium.inkwell.reader.api.TapAction
+import com.radium.inkwell.reader.api.TapZones
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -114,19 +116,48 @@ class FlipGestureMathTest {
     }
 
     @Test
-    fun `点击左中右三分区对应翻页或菜单`() {
-        assertEquals(FlipDirection.BACKWARD, tapFlipDirection(100f, width = 900f))
-        assertNull(tapFlipDirection(450f, width = 900f))
-        assertEquals(FlipDirection.FORWARD, tapFlipDirection(800f, width = 900f))
-        assertNull(tapFlipDirection(300f, width = 900f))
-        assertNull(tapFlipDirection(600f, width = 900f))
+    fun `默认分区只看横向：左中右对应上一页、菜单、下一页`() {
+        val z = TapZones.DEFAULT
+        for (y in listOf(50f, 800f, 1550f)) {
+            assertEquals(TapAction.PREV, tapAction(100f, y, 900f, 1600f, z))
+            assertEquals(TapAction.MENU, tapAction(450f, y, 900f, 1600f, z))
+            assertEquals(TapAction.NEXT, tapAction(800f, y, 900f, 1600f, z))
+        }
+        // 分界线归右边那格：300 落中列，600 落右列（从前 600 算菜单，见 TapZones.actionAt）
+        assertEquals(TapAction.PREV, tapAction(299f, 800f, 900f, 1600f, z))
+        assertEquals(TapAction.MENU, tapAction(300f, 800f, 900f, 1600f, z))
+        assertEquals(TapAction.MENU, tapAction(599f, 800f, 900f, 1600f, z))
+        assertEquals(TapAction.NEXT, tapAction(600f, 800f, 900f, 1600f, z))
     }
 
     @Test
     fun `关掉点击翻页时左右也只当菜单`() {
-        assertNull(tapFlipDirection(100f, width = 900f, enabled = false))
-        assertNull(tapFlipDirection(800f, width = 900f, enabled = false))
-        assertNull(tapFlipDirection(450f, width = 900f, enabled = false))
+        val z = TapZones.DEFAULT
+        assertEquals(TapAction.MENU, tapAction(100f, 800f, 900f, 1600f, z, enabled = false))
+        assertEquals(TapAction.MENU, tapAction(800f, 800f, 900f, 1600f, z, enabled = false))
+        assertEquals(TapAction.MENU, tapAction(450f, 800f, 900f, 1600f, z, enabled = false))
+    }
+
+    @Test
+    fun `上下分区按行落格，压在屏幕外一点也夹回边上那格`() {
+        val z = TapZones.Preset.TOP_BOTTOM.zones
+        assertEquals(TapAction.PREV, tapAction(800f, 100f, 900f, 1600f, z))
+        assertEquals(TapAction.NEXT, tapAction(100f, 1500f, 900f, 1600f, z))
+        assertEquals(TapAction.PREV, tapAction(-3f, -3f, 900f, 1600f, z))
+        assertEquals(TapAction.NEXT, tapAction(903f, 1603f, 900f, 1600f, z))
+    }
+
+    @Test
+    fun `分发：翻页两向、菜单各走各的，无动作什么都不做`() {
+        fun run(a: TapAction): String {
+            var got = "nothing"
+            a.dispatch(onMenu = { got = "menu" }, onFlip = { got = it.name })
+            return got
+        }
+        assertEquals("BACKWARD", run(TapAction.PREV))
+        assertEquals("FORWARD", run(TapAction.NEXT))
+        assertEquals("menu", run(TapAction.MENU))
+        assertEquals("nothing", run(TapAction.NONE))
     }
 
     @Test

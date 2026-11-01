@@ -38,6 +38,11 @@ data class ReaderSettings(
      * 仿真/覆盖/平移不受这项影响（点左右翻页仍是它们的主操作）。
      */
     val scrollClickToFlip: Boolean = false,
+    /**
+     * 点击阅读区的九宫格分区。默认「左右分区」，与从前写死的行为一致。
+     * 滚动模式只在 [scrollClickToFlip] 打开时才按它走，关着时点哪儿都是开菜单。
+     */
+    val tapZones: TapZones = TapZones.DEFAULT,
     /** 自动翻页间隔（秒）；每页停留这么久后自动往下翻 */
     val autoFlipSeconds: Int = 15,
     /**

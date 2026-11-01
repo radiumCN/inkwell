@@ -1,6 +1,8 @@
 package com.radium.inkwell.reader.flip
 
 import com.radium.inkwell.reader.api.FlipDirection
+import com.radium.inkwell.reader.api.TapAction
+import com.radium.inkwell.reader.api.TapZones
 import kotlin.math.abs
 
 /** 甩页速度阈值（px/s） */
@@ -96,16 +98,28 @@ fun classifyReleaseBeforeSlopVertical(
 }
 
 /**
- * 点击落点对应的翻页方向。左三分之一上一页、右三分之一下一页，中间 null（开菜单）。
- * [enabled] 为 false 时一律 null —— 滚动模式默认如此，避免误触整页跳。
+ * 点击落点按九宫格 [zones] 该做的事。
+ * [enabled] 为 false 时一律 [TapAction.MENU] —— 滚动模式默认如此，避免误触整页跳。
  */
-fun tapFlipDirection(x: Float, width: Float, enabled: Boolean = true): FlipDirection? {
-    if (!enabled) return null
-    val w = width.coerceAtLeast(1f)
-    return when {
-        x < w / 3f -> FlipDirection.BACKWARD
-        x > w * 2f / 3f -> FlipDirection.FORWARD
-        else -> null
+fun tapAction(
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float,
+    zones: TapZones,
+    enabled: Boolean = true,
+): TapAction = if (enabled) zones.actionAt(x, y, width, height) else TapAction.MENU
+
+/**
+ * 点击动作分发，翻页容器与滚动阅读共用。`when` 不留 else：以后加一种 [TapAction]（比如朗读），
+ * 编译器会在这一处逼着把它接上，而不是两种阅读模式各漏一处、点同一格表现不一样。
+ */
+inline fun TapAction.dispatch(onMenu: () -> Unit, onFlip: (FlipDirection) -> Unit) {
+    when (this) {
+        TapAction.PREV -> onFlip(FlipDirection.BACKWARD)
+        TapAction.NEXT -> onFlip(FlipDirection.FORWARD)
+        TapAction.MENU -> onMenu()
+        TapAction.NONE -> Unit
     }
 }
 

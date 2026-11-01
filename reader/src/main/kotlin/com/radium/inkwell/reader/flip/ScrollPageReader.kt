@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPageItems
@@ -42,8 +43,9 @@ fun ScrollPageReader(
     hasPrev: Boolean,
     hasNext: Boolean,
     gesturesEnabled: Boolean,
-    /** 点左右三分之一是否跳整页。滚动默认关，避免误触丢掉页内偏移。 */
+    /** 点击是否按 [tapZones] 翻页。滚动默认关，避免误触丢掉页内偏移；关着时点哪儿都开菜单。 */
     clickToFlip: Boolean = false,
+    tapZones: TapZones = TapZones.DEFAULT,
     onFlip: (FlipDirection) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
@@ -64,6 +66,9 @@ fun ScrollPageReader(
     val hasNextLatest = rememberUpdatedState(hasNext)
     val onFlipLatest = rememberUpdatedState(onFlip)
     val clickToFlipLatest = rememberUpdatedState(clickToFlip)
+    val tapZonesLatest = rememberUpdatedState(tapZones)
+    // 与 onFlip 一样取最新：点按的 pointerInput 不以回调为 key，直接捕获会一直拿着第一次组合时的那个
+    val onCenterTapLatest = rememberUpdatedState(onCenterTap)
 
     val leftover = remember { mutableFloatStateOf(0f) }
     var leftoverChain by remember { mutableIntStateOf(0) }
@@ -198,21 +203,19 @@ fun ScrollPageReader(
             .pointerInput(gesturesEnabled, size, clickToFlip) {
                 if (!gesturesEnabled) return@pointerInput
                 detectTapGestures { pos ->
-                    val dir = tapFlipDirection(
-                        pos.x, size.width.toFloat(), enabled = clickToFlipLatest.value,
-                    )
-                    if (dir == null) {
-                        onCenterTap()
-                        return@detectTapGestures
-                    }
-                    val can = when (dir) {
-                        FlipDirection.BACKWARD -> hasPrevLatest.value
-                        FlipDirection.FORWARD -> hasNextLatest.value
-                    }
-                    if (can) {
-                        pendingFlip = dir
-                        pendingDispatched = true
-                        onFlipLatest.value(dir)
+                    tapAction(
+                        pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
+                        tapZonesLatest.value, enabled = clickToFlipLatest.value,
+                    ).dispatch(onMenu = { onCenterTapLatest.value() }) { dir ->
+                        val can = when (dir) {
+                            FlipDirection.BACKWARD -> hasPrevLatest.value
+                            FlipDirection.FORWARD -> hasNextLatest.value
+                        }
+                        if (can) {
+                            pendingFlip = dir
+                            pendingDispatched = true
+                            onFlipLatest.value(dir)
+                        }
                     }
                 }
             },

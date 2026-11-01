@@ -15,6 +15,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.core.webdav.BackupSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,8 @@ class ReaderPrefs(private val context: Context) {
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
         val SCROLL_CLICK_TO_FLIP = booleanPreferencesKey("scroll_click_to_flip")
+        /** 九宫格点击分区，见 [TapZones.encode] */
+        val TAP_ZONES = stringPreferencesKey("tap_zones")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
         val FONT_ID = stringPreferencesKey("font_id")
@@ -115,6 +118,7 @@ class ReaderPrefs(private val context: Context) {
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
             scrollClickToFlip = p[Keys.SCROLL_CLICK_TO_FLIP] ?: false,
+            tapZones = TapZones.decode(p[Keys.TAP_ZONES]),
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
         )
@@ -158,6 +162,7 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
             p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
+            p[Keys.TAP_ZONES] = settings.tapZones.encode()
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
         }
@@ -239,6 +244,7 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "volume_key_flip" to s.volumeKeyFlip.toString(),
             "flip_haptic" to s.flipHaptic.toString(),
             "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
+            "tap_zones" to s.tapZones.encode(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
         ),
@@ -284,6 +290,8 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
             flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
             scrollClickToFlip = v["scroll_click_to_flip"]?.toBooleanStrictOrNull() ?: base.scrollClickToFlip,
+            // 键缺失（旧版本的备份）或读不懂（新版本加了动作）→ 保留本地，别冲成默认
+            tapZones = TapZones.decodeOrNull(v["tap_zones"]) ?: base.tapZones,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
             preloadChapters = v["preload_chapters"]?.toIntOrNull() ?: base.preloadChapters,
         )

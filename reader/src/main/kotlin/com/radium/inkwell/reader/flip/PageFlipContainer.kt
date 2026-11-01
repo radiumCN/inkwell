@@ -41,6 +41,7 @@ import kotlin.math.abs
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.measure.MeasuredParagraph
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageSpec
@@ -103,6 +104,8 @@ fun PageFlipContainer(
     onCommit: (FlipDirection) -> Unit,
     onCenterTap: () -> Unit,
     controller: FlipController,
+    /** 点击分区：哪一格翻上一页、下一页、开菜单。见 [TapZones] */
+    tapZones: TapZones = TapZones.DEFAULT,
     modifier: Modifier = Modifier,
     /** 长按选中的文字；只在静止态（没在翻页）才可能非空 */
     selection: TextSelection? = null,
@@ -266,6 +269,8 @@ fun PageFlipContainer(
     // 经 rememberUpdatedState 取最新，与下面 pointerInput 里读到的保持同一帧。
     val programmaticFlip by rememberUpdatedState<(FlipDirection) -> Unit> { startProgrammaticFlip(it) }
     val selectionLatest = rememberUpdatedState(selection)
+    // 手势循环的 pointerInput 不以它为 key：在面板里改分区不该把正在进行的手势循环拆了重建
+    val tapZonesLatest = rememberUpdatedState(tapZones)
     LaunchedEffect(controller) {
         controller.requests.collect { dir ->
             // 选字中不接程序化翻页（音量键、自动翻页、菜单上的滑动翻页）。拖拽/点按手势早就因为选区停了，
@@ -421,8 +426,11 @@ fun PageFlipContainer(
                             }
                             FlipReleaseBeforeSlop.Tap -> {
                                 if (!pressedDuringSettle && !settling && direction == null) {
-                                    val dir = tapFlipDirection(down.position.x, size.width.toFloat())
-                                    if (dir != null) startProgrammaticFlip(dir) else onCenterTap()
+                                    tapAction(
+                                        down.position.x, down.position.y,
+                                        size.width.toFloat(), size.height.toFloat(),
+                                        tapZonesLatest.value,
+                                    ).dispatch(onMenu = onCenterTap, onFlip = ::startProgrammaticFlip)
                                 }
                             }
                             FlipReleaseBeforeSlop.Ignore -> Unit
