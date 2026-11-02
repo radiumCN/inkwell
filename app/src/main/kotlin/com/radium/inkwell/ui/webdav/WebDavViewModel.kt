@@ -40,6 +40,9 @@ data class WebDavUiState(
     val testing: Boolean = false,
     val syncing: Boolean = false,
     val lastSyncAt: Long = 0,
+    /** 最近一次失败（比 [lastSyncAt] 新才显示），见 WebDavConfig.lastSyncError */
+    val lastSyncError: String = "",
+    val lastSyncErrorAt: Long = 0,
     val autoSync: Boolean = true,
     val showConnectionInfo: Boolean = false,
     val confirmSwitchToCustom: Boolean = false,
@@ -87,6 +90,8 @@ class WebDavViewModel(
                 davPassword = c.password,
                 configured = c.isConfigured,
                 lastSyncAt = c.lastSyncAt,
+                lastSyncError = c.lastSyncError,
+                lastSyncErrorAt = c.lastSyncErrorAt,
                 autoSync = c.autoSync,
                 email = c.officialEmail,
             )
@@ -264,6 +269,8 @@ class WebDavViewModel(
                 it.copy(
                     syncing = false,
                     lastSyncAt = if (result.isSuccess) System.currentTimeMillis() else it.lastSyncAt,
+                    lastSyncError = result.exceptionOrNull()?.let { e -> e.message ?: e.javaClass.simpleName }.orEmpty(),
+                    lastSyncErrorAt = if (result.isFailure) System.currentTimeMillis() else 0,
                 )
             }
             // 判定放在仓库里：同步连的是**已保存**的地址，页面上的输入框可能改了还没存

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import com.radium.inkwell.ui.components.formatRelativeTime
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -311,6 +312,14 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
 
 @Composable
 private fun SyncFooter(state: WebDavUiState) {
+    // 失败比成功新才说：之后成功过就不再翻旧账。重试就是上面那个「立即同步」
+    if (state.lastSyncErrorAt > state.lastSyncAt) {
+        Text(
+            "上次同步失败（${formatRelativeTime(state.lastSyncErrorAt)}）：${state.lastSyncError}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
     if (state.lastSyncAt > 0) {
         Text(
             "上次同步：" + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
@@ -320,8 +329,8 @@ private fun SyncFooter(state: WebDavUiState) {
         )
     }
     Text(
-        "会同步：书架、阅读进度、书源、订阅源、净化规则，以及阅读与应用设置。\n" +
-            "不会同步：本地书的文件和已缓存的章节。换设备后，本地书需要重新导入。\n" +
+        "会同步：书架、阅读进度、阅读时长、书源、订阅源、净化规则，以及阅读与应用设置（含排版方案）。\n" +
+            "不会同步：本地书的文件、导入的字体和已缓存的章节。换设备后，本地书与字体需要重新导入。\n" +
             "两边都改过时，以较新的为准。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

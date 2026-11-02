@@ -25,6 +25,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.ReadingStatsRepository
+import com.radium.inkwell.data.prefs.WebDavConfig
+import com.radium.inkwell.data.prefs.WebDavPrefs
+import com.radium.inkwell.ui.components.formatRelativeTime
 import com.radium.inkwell.ui.stats.formatDuration
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
@@ -71,6 +74,8 @@ fun SettingsScreen(
 ) {
     val cache = koinInject<ChapterContentCache>()
     val readingStats = koinInject<ReadingStatsRepository>()
+    val webDavPrefs = koinInject<WebDavPrefs>()
+    val syncConfig by webDavPrefs.config.collectAsStateWithLifecycle(initialValue = null)
     // 行尾直接给今天的时长：点进去之前就知道今天读了多少，这一行才不只是个入口
     val todayReading by remember(readingStats) {
         readingStats.observeAll().map { rows ->
@@ -147,6 +152,8 @@ fun SettingsScreen(
                 SettingGroup {
                     SettingRow(
                         title = "WebDAV 备份同步",
+                        // 同步是后台静默跑的，坏了只有这里看得见：不必点进去才知道上回同步成没成
+                        value = syncConfig?.let(::syncStatusLabel),
                         onClick = onOpenWebDav,
                         position = SettingGroupPosition.First,
                     )
@@ -280,4 +287,15 @@ fun SettingsScreen(
 private fun cacheAutoPruneLabel(days: Int): String = when (days) {
     0 -> "关闭"
     else -> "$days 天"
+}
+
+/**
+ * 设置页 WebDAV 行尾的一句：没开、上回失败了、多久之前同步过。失败只在比上次成功更新时才说 ——
+ * 之后成功过一次就不再提（见 WebDavPrefs.markSynced）。
+ */
+private fun syncStatusLabel(c: WebDavConfig): String? = when {
+    !c.isConfigured -> "未开启"
+    c.lastSyncErrorAt > c.lastSyncAt -> "上次同步失败"
+    c.lastSyncAt > 0 -> "${formatRelativeTime(c.lastSyncAt)}同步"
+    else -> null
 }

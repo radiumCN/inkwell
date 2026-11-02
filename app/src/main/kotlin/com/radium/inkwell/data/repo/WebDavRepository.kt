@@ -89,6 +89,8 @@ class WebDavRepository(
         // 退到后台的自动同步被进程回收、或用户离开设置页 —— 这是取消，不是「同步失败」
         throw e
     } catch (e: Exception) {
+        // 记下来给设置页看。记录本身出错（存储写不进去）不能盖掉真正的失败原因
+        runCatching { prefs.markSyncFailed(e.message ?: e.javaClass.simpleName, System.currentTimeMillis()) }
         Result.failure(e)
     }
 

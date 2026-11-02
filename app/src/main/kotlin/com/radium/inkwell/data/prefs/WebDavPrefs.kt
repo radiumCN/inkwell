@@ -32,6 +32,12 @@ data class WebDavConfig(
     val username: String = "",
     val password: String = "",
     val lastSyncAt: Long = 0,
+    /**
+     * 最近一次同步失败的原因与时间（自动同步也记）。比 [lastSyncAt] 新才算「现在是坏的」——
+     * 之后成功过一次就清掉（见 [WebDavPrefs.markSynced]）。
+     */
+    val lastSyncError: String = "",
+    val lastSyncErrorAt: Long = 0,
     /** 自动同步：冷启动 + 退到后台时静默同步 */
     val autoSync: Boolean = true,
     val provider: WebDavProvider = WebDavProvider.CUSTOM,
@@ -53,6 +59,8 @@ class WebDavPrefs(
         val USERNAME = stringPreferencesKey("username")
         val PASSWORD = stringPreferencesKey("password")
         val LAST_SYNC = longPreferencesKey("last_sync")
+        val LAST_SYNC_ERROR = stringPreferencesKey("last_sync_error")
+        val LAST_SYNC_ERROR_AT = longPreferencesKey("last_sync_error_at")
         val DEVICE_ID = stringPreferencesKey("device_id")
         val AUTO_SYNC = androidx.datastore.preferences.core.booleanPreferencesKey("auto_sync")
         val PROVIDER = stringPreferencesKey("provider")
@@ -71,6 +79,8 @@ class WebDavPrefs(
             // 那会在每个订阅者上各触发一次写库，还可能把自己的写又喂回自己
             password = cipher.read(p[Keys.PASSWORD] ?: "").value,
             lastSyncAt = p[Keys.LAST_SYNC] ?: 0,
+            lastSyncError = p[Keys.LAST_SYNC_ERROR] ?: "",
+            lastSyncErrorAt = p[Keys.LAST_SYNC_ERROR_AT] ?: 0,
             autoSync = p[Keys.AUTO_SYNC] ?: true,
             provider = if (p[Keys.PROVIDER] == "official") WebDavProvider.OFFICIAL else WebDavProvider.CUSTOM,
             officialEmail = p[Keys.OFFICIAL_EMAIL] ?: "",
@@ -172,7 +182,22 @@ class WebDavPrefs(
     }
 
     suspend fun markSynced(at: Long) {
-        context.webDavDataStore.edit { it[Keys.LAST_SYNC] = at }
+        context.webDavDataStore.edit {
+            it[Keys.LAST_SYNC] = at
+            it.remove(Keys.LAST_SYNC_ERROR)
+            it.remove(Keys.LAST_SYNC_ERROR_AT)
+        }
+    }
+
+    /**
+     * 记下这次同步为什么失败。自动同步失败从前是静默的：断网、口令过期、服务器满了，
+     * 用户只会在换了设备、发现进度没过来时才知道 —— 那时已经晚了好几天。
+     */
+    suspend fun markSyncFailed(reason: String, at: Long) {
+        context.webDavDataStore.edit {
+            it[Keys.LAST_SYNC_ERROR] = reason
+            it[Keys.LAST_SYNC_ERROR_AT] = at
+        }
     }
 
     /**
