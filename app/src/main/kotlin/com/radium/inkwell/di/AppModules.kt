@@ -71,7 +71,9 @@ val appModule = module {
         )
     }
 
-    single { ReaderPrefs(androidContext()) }
+    single { com.radium.inkwell.data.repo.ReaderFontStore(androidContext()) }
+    // 字体库按需再取：ReaderPrefs 在 Application.onCreate 就被预热，别让它把扫字体目录也拽到启动路径上
+    single { ReaderPrefs(androidContext()) { id -> get<com.radium.inkwell.data.repo.ReaderFontStore>().isAvailable(id) } }
     single { WebDavPrefs(androidContext()) }
     single { com.radium.inkwell.data.prefs.AppPrefs(androidContext()) }
     single { com.radium.inkwell.util.RunLogRecorder(androidContext()) }
@@ -139,7 +141,7 @@ val appModule = module {
 
     viewModel { BookshelfViewModel(get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

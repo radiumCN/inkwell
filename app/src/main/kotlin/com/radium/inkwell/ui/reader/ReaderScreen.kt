@@ -86,7 +86,7 @@ import com.radium.inkwell.reader.flip.FlipController
 import com.radium.inkwell.reader.flip.PageFlipContainer
 import com.radium.inkwell.reader.flip.ScrollPageReader
 import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
-import com.radium.inkwell.reader.measure.SystemFontRegistry
+import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
@@ -171,9 +171,11 @@ fun ReaderScreen(
         else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight)
     }
 
+    // 导入的字体与预设走同一个注册表；应用级单例，FontFamily 缓存跨章、跨书都有效
+    val fontRegistry = koinInject<ReaderFontStore>().registry
     LaunchedEffect(spec) {
         val settled = spec ?: return@LaunchedEffect
-        val facade = ComposeTextMeasureFacade(fontFamilyResolver, density, SystemFontRegistry)
+        val facade = ComposeTextMeasureFacade(fontFamilyResolver, density, fontRegistry)
         viewModel.onLayoutReady(facade, settled)
     }
 
@@ -657,6 +659,7 @@ fun ReaderScreen(
             onPreviewSettings = { viewModel.previewSettings(it) },
             onCommitSettings = { viewModel.commitSettings() },
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
+            typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onDismiss = { viewModel.toggleMenu() },
@@ -760,6 +763,7 @@ private fun buildLayoutSpec(
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,
         justify = settings.justify,
+        letterSpacingEm = settings.letterSpacingEm,
     )
 }
 

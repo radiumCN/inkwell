@@ -119,6 +119,7 @@ fun ReaderMenu(
     onPreviewSettings: (ReaderSettings) -> Unit,
     onCommitSettings: () -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
+    typography: TypographyActions,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onDismiss: () -> Unit,
@@ -371,6 +372,7 @@ fun ReaderMenu(
                 onCommit = onCommitSettings,
                 textSelectionEnabled = session.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
+                typography = typography,
             )
         }
     }
@@ -480,6 +482,28 @@ private val LINE_SPACING_OPTIONS = listOf(
     "宽松" to 1.9f,
 )
 
+/** 段与段之间的空（em，按正文字号算）。0 = 段落之间只靠首行缩进区分 */
+private val PARA_SPACING_OPTIONS = listOf(
+    "无" to 0f,
+    "紧凑" to 0.3f,
+    "标准" to 0.6f,
+    "宽松" to 1.0f,
+)
+
+/** 字距（em）。档位很小：中文字距加到 0.1em 已经明显松散，再大就是一个个散字 */
+private val LETTER_SPACING_OPTIONS = listOf(
+    "标准" to 0f,
+    "稍宽" to 0.05f,
+    "宽" to 0.1f,
+)
+
+/** 首行缩进（字）。有的书正文自带全角空格缩进，再叠两字就成了四字 —— 给个「无」让人关掉 */
+private val INDENT_OPTIONS = listOf(
+    "无" to 0f,
+    "1 字" to 1f,
+    "2 字" to 2f,
+)
+
 /** 章节标题相对正文的倍数。1.0 = 与正文同大（有人不喜欢标题占地方） */
 private val TITLE_SCALE_OPTIONS = listOf(
     "小" to 1.0f,
@@ -519,12 +543,12 @@ private val MARGIN_H_OPTIONS = listOf(
 /**
  * 阅读设置面板。
  *
- * 分三页，而不是把九组「标签 + chip 行」直着堆下去 —— 那样面板长得要滚半天，
+ * 分四页，而不是把十几组「标签 + chip 行」直着堆下去 —— 那样面板长得要滚半天，
  * 而且每组长得都一样（一个小标题压一排 chip），眼睛根本抓不住重点。
- * 分页之后每页只有三四组，一屏就看完了。
  *
  * 分法按「改的频率」而不是按「技术类别」：
- * - 排版：字号、行距、字体、背景、亮度 —— 最常调的
+ * - 排版：方案、字号、行距、字体、背景、亮度 —— 最常调的，打开面板第一眼就该是它们
+ * - 版式：段距、字距、缩进、对齐、标题与边距 —— 调一次就很少再动的细节
  * - 翻页：翻页方式、自动翻页间隔、音量键翻页
  * - 更多：设一次基本不再动的（预加载、屏幕常亮）
  *
@@ -540,6 +564,7 @@ private fun TypographyPanel(
     onCommit: () -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
+    typography: TypographyActions,
 ) {
     var tab by remember { mutableIntStateOf(0) }
     val scroll = rememberScrollState()
@@ -565,8 +590,9 @@ private fun TypographyPanel(
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
         ) { current ->
             when (current) {
-                0 -> LayoutTab(settings, onUpdate, onPreview, onCommit)
-                1 -> FlipTab(settings, onUpdate)
+                0 -> LayoutTab(settings, onUpdate, onPreview, onCommit, typography)
+                1 -> StyleTab(settings, onUpdate)
+                2 -> FlipTab(settings, onUpdate)
                 else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
         }
@@ -583,7 +609,10 @@ private fun LayoutTab(
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    typography: TypographyActions,
 ) {
+    LayoutSchemeSection(settings, typography)
+
     // 字号：加减按钮 + 当前值，一行搞定。
     // 走 SecondaryButton 而不是裸 OutlinedButton：后者落到不带 shapes 的旧重载，按下去没有 Expressive 的
     // 圆角形变，和面板里其他按钮不是一套手感；触控区仍由 M3 按钮自带的 48dp 下限兜着。
@@ -606,6 +635,109 @@ private fun LayoutTab(
             text = "A＋",
             onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
             modifier = Modifier.weight(1f).semantics { contentDescription = "字号增大" },
+        )
+    }
+
+    SectionLabel("行距")
+    ChipRow(
+        options = LINE_SPACING_OPTIONS.map { it.first },
+        selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
+        },
+        onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
+    )
+
+    FontSection(settings, typography) { onUpdate(settings.copy(fontId = it)) }
+
+    SectionLabel("背景")
+    ThemeSwatches(settings, onUpdate)
+    // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
+    if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
+        CustomPaperEditor(
+            theme = settings.theme,
+            onChange = { onPreview(settings.copy(theme = it)) },
+            onChangeFinished = onCommit,
+        )
+    }
+
+    SectionLabel("亮度")
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Default.DarkMode, contentDescription = null,
+            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        AppSlider(
+            value = settings.brightnessOverride ?: 0.5f,
+            onValueChange = { v ->
+                onPreview(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
+            },
+            onValueChangeFinished = onCommit,
+            label = "亮度",
+            enabled = settings.brightnessOverride != null,
+            showStopIndicators = false,
+            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
+        )
+        Icon(
+            Icons.Default.LightMode, contentDescription = null,
+            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(12)
+        AppFilterChip(
+            selected = settings.brightnessOverride == null,
+            onClick = {
+                onUpdate(
+                    settings.copy(
+                        brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
+                    )
+                )
+            },
+            label = "系统",
+        )
+    }
+}
+
+/**
+ * 版式：段距、字距、缩进、对齐，以及标题与边距。都是「调一次就很少再动」的细节，
+ * 从排版页挪出来，让排版页一屏就能看到字号、字体和纸色。
+ */
+@Composable
+private fun StyleTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+    SectionLabel("段距")
+    ChipRow(
+        options = PARA_SPACING_OPTIONS.map { it.first },
+        selectedIndex = PARA_SPACING_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.paragraphSpacingEm) < 0.05f
+        },
+        onSelect = { onUpdate(settings.copy(paragraphSpacingEm = PARA_SPACING_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("字距")
+    ChipRow(
+        options = LETTER_SPACING_OPTIONS.map { it.first },
+        selectedIndex = LETTER_SPACING_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.letterSpacingEm) < 0.005f
+        },
+        onSelect = { onUpdate(settings.copy(letterSpacingEm = LETTER_SPACING_OPTIONS[it].second)) },
+    )
+
+    SectionLabel("首行缩进")
+    ChipRow(
+        options = INDENT_OPTIONS.map { it.first },
+        selectedIndex = INDENT_OPTIONS.indexOfFirst {
+            kotlin.math.abs(it.second - settings.firstLineIndentEm) < 0.05f
+        },
+        onSelect = { onUpdate(settings.copy(firstLineIndentEm = INDENT_OPTIONS[it].second)) },
+    )
+
+    // 外层已有 screenPadding，关 SettingGroup 水平 inset，卡宽与 Chip 对齐（同 FlipTab）
+    Spacer(Modifier.height(Dimens.gapM))
+    SettingGroup(applyHorizontalInset = false) {
+        SwitchRow(
+            title = "两端对齐",
+            subtitle = "每行左右都贴齐边距。关掉后行尾参差，但字距不会被拉开",
+            checked = settings.justify,
+            onCheckedChange = { onUpdate(settings.copy(justify = it)) },
+            position = SettingGroupPosition.Alone,
         )
     }
 
@@ -653,68 +785,6 @@ private fun LayoutTab(
         },
         onSelect = { onUpdate(settings.copy(marginHorizontalDp = MARGIN_H_OPTIONS[it].second)) },
     )
-
-    SectionLabel("行距")
-    ChipRow(
-        options = LINE_SPACING_OPTIONS.map { it.first },
-        selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
-        },
-        onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
-    )
-
-    SectionLabel("字体")
-    ChipRow(
-        options = ReaderSettings.FONT_PRESETS.map { it.second },
-        selectedIndex = ReaderSettings.FONT_PRESETS.indexOfFirst { it.first == settings.fontId },
-        onSelect = { onUpdate(settings.copy(fontId = ReaderSettings.FONT_PRESETS[it].first)) },
-    )
-
-    SectionLabel("背景")
-    ThemeSwatches(settings, onUpdate)
-    // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
-    if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-        CustomPaperEditor(
-            theme = settings.theme,
-            onChange = { onPreview(settings.copy(theme = it)) },
-            onChangeFinished = onCommit,
-        )
-    }
-
-    SectionLabel("亮度")
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            Icons.Default.DarkMode, contentDescription = null,
-            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        AppSlider(
-            value = settings.brightnessOverride ?: 0.5f,
-            onValueChange = { v ->
-                onPreview(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
-            },
-            onValueChangeFinished = onCommit,
-            label = "亮度",
-            enabled = settings.brightnessOverride != null,
-            showStopIndicators = false,
-            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
-        )
-        Icon(
-            Icons.Default.LightMode, contentDescription = null,
-            Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(12)
-        AppFilterChip(
-            selected = settings.brightnessOverride == null,
-            onClick = {
-                onUpdate(
-                    settings.copy(
-                        brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
-                    )
-                )
-            },
-            label = "系统",
-        )
-    }
 }
 
 @Composable
@@ -1083,7 +1153,7 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
     }
 }
 
-private val SETTINGS_TABS = listOf("排版", "翻页", "更多")
+private val SETTINGS_TABS = listOf("排版", "版式", "翻页", "更多")
 
 @Composable
 private fun SectionLabel(text: String) {

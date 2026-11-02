@@ -36,4 +36,5 @@ data class ResolvedTextStyle(
     val firstLineIndentEm: Float,
     val isBold: Boolean = false,
     val justify: Boolean = true,
+    val letterSpacingEm: Float = 0f,
 )

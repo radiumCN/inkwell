@@ -223,12 +223,14 @@ class Paginator(private val measurer: TextMeasureFacade) {
         const val KEEP_WITH_NEXT_LINES = 2
     }
 
+    // 字距三种样式一起带：标题按正文的字距走，否则正文调松以后标题显得挤成一团
     private fun LayoutSpec.bodyStyle() = ResolvedTextStyle(
         fontSizePx = fontSizePx,
         lineHeightPx = lineHeightPx,
         fontId = fontId,
         firstLineIndentEm = firstLineIndentEm,
         justify = justify,
+        letterSpacingEm = letterSpacingEm,
     )
 
     private fun LayoutSpec.titleStyle() = ResolvedTextStyle(
@@ -238,6 +240,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         firstLineIndentEm = 0f,
         isBold = true,
         justify = false,
+        letterSpacingEm = letterSpacingEm,
     )
 
     private fun LayoutSpec.headingStyle() = ResolvedTextStyle(
@@ -247,6 +250,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         firstLineIndentEm = 0f,
         isBold = true,
         justify = false,
+        letterSpacingEm = letterSpacingEm,
     )
 }
 

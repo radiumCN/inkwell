@@ -18,6 +18,7 @@ data class LayoutSpec(
     val firstLineIndentEm: Float = 2f,
     val fontId: String = "system",
     val justify: Boolean = true,
+    val letterSpacingEm: Float = 0f,
 ) {
     val contentWidthPx: Int get() = (viewportWidthPx - marginLeftPx - marginRightPx).toInt()
     val contentHeightPx: Float get() =

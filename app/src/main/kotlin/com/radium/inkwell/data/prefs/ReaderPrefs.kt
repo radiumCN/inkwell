@@ -35,7 +35,14 @@ private val Context.readerDataStore by preferencesDataStore(
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
 
-class ReaderPrefs(private val context: Context) {
+/**
+ * @param fontAvailable 这个字体在本机能不能用（见 ReaderFontStore.isAvailable）。只在导入备份时用：
+ * 另一台设备上导入的字体文件不会同步过来，拿它的 fontId 覆盖本地只会让排版静默回落默认字体
+ */
+class ReaderPrefs(
+    private val context: Context,
+    private val fontAvailable: (String) -> Boolean = { true },
+) {
 
     private object Keys {
         val FONT_SIZE = floatPreferencesKey("font_size_sp")
@@ -70,6 +77,11 @@ class ReaderPrefs(private val context: Context) {
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
         val FONT_ID = stringPreferencesKey("font_id")
+        val FIRST_LINE_INDENT = floatPreferencesKey("first_line_indent")
+        val JUSTIFY = booleanPreferencesKey("justify")
+        val LETTER_SPACING = floatPreferencesKey("letter_spacing")
+        /** 排版方案列表（JSON），见 [LayoutScheme] */
+        val LAYOUT_SCHEMES = stringPreferencesKey("layout_schemes")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("updated_at")
     }
@@ -109,6 +121,9 @@ class ReaderPrefs(private val context: Context) {
             paragraphSpacingEm = p[Keys.PARA_SPACING] ?: 0.6f,
             marginHorizontalDp = p[Keys.MARGIN_H] ?: 24f,
             marginVerticalDp = p[Keys.MARGIN_V] ?: 28f,
+            firstLineIndentEm = p[Keys.FIRST_LINE_INDENT] ?: 2f,
+            justify = p[Keys.JUSTIFY] ?: true,
+            letterSpacingEm = p[Keys.LETTER_SPACING] ?: 0f,
             theme = resolveActiveTheme(p, dark),
             flipAnimation = p[Keys.FLIP]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: FlipAnimation.COVER,
@@ -141,6 +156,9 @@ class ReaderPrefs(private val context: Context) {
             p[Keys.PARA_SPACING] = settings.paragraphSpacingEm
             p[Keys.MARGIN_H] = settings.marginHorizontalDp
             p[Keys.MARGIN_V] = settings.marginVerticalDp
+            p[Keys.FIRST_LINE_INDENT] = settings.firstLineIndentEm
+            p[Keys.JUSTIFY] = settings.justify
+            p[Keys.LETTER_SPACING] = settings.letterSpacingEm
             // 主题落到当前生效的槽（日/夜），另一个槽不动 —— 这就是"分别记住"
             if (darkActive.value) {
                 p[Keys.THEME_NIGHT] = settings.theme.id
@@ -212,6 +230,37 @@ class ReaderPrefs(private val context: Context) {
         }
     }
 
+    /** 排版方案。跟阅读设置同一个 DataStore、同一个时间戳，WebDAV 里也随阅读设置整块走 */
+    val layoutSchemes: StateFlow<List<LayoutScheme>> = context.readerDataStore.data
+        .map { LayoutSchemeCodec.decode(it[Keys.LAYOUT_SCHEMES]) }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** 把当前排版存成方案；同名覆盖 */
+    suspend fun saveLayoutScheme(scheme: LayoutScheme) = editSchemes { LayoutSchemeCodec.upsert(it, scheme) }
+
+    suspend fun deleteLayoutScheme(name: String) = editSchemes { list -> list.filterNot { it.name == name } }
+
+    private suspend fun editSchemes(change: (List<LayoutScheme>) -> List<LayoutScheme>) {
+        context.readerDataStore.edit { p ->
+            p[Keys.LAYOUT_SCHEMES] = LayoutSchemeCodec.encode(change(LayoutSchemeCodec.decode(p[Keys.LAYOUT_SCHEMES])))
+            p[Keys.UPDATED_AT] = System.currentTimeMillis()
+        }
+    }
+
+    /** 备份用：方案列表原样的 JSON（没存过就是空串） */
+    internal suspend fun layoutSchemesRaw(): String =
+        context.readerDataStore.data.first()[Keys.LAYOUT_SCHEMES].orEmpty()
+
+    /** 从备份写回方案列表。键缺失（老备份）→ 不动本地 */
+    internal suspend fun importLayoutSchemes(raw: String?) {
+        raw ?: return
+        context.readerDataStore.edit { it[Keys.LAYOUT_SCHEMES] = raw }
+    }
+
+    /** 远端设置里的字体本机没有 → 留本地的。见构造参数 fontAvailable */
+    internal fun usableFontId(remote: String?, local: String): String =
+        remote?.takeIf { fontAvailable(it) } ?: local
+
     /** 最后一次改动时间；WebDAV 整块 LWW 用 */
     suspend fun updatedAt(): Long = context.readerDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
 
@@ -237,6 +286,10 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "para_spacing" to s.paragraphSpacingEm.toString(),
             "margin_h" to s.marginHorizontalDp.toString(),
             "margin_v" to s.marginVerticalDp.toString(),
+            "first_line_indent" to s.firstLineIndentEm.toString(),
+            "justify" to s.justify.toString(),
+            "letter_spacing" to s.letterSpacingEm.toString(),
+            "layout_schemes" to layoutSchemesRaw(),
             "flip" to s.flipAnimation.name,
             "brightness" to (s.brightnessOverride ?: -1f).toString(),
             "keep_screen_on" to s.keepScreenOn.toString(),
@@ -274,11 +327,14 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             titleScale = v["title_scale"]?.toFloatOrNull() ?: base.titleScale,
             titleTopSpacingDp = v["title_top_spacing"]?.toFloatOrNull() ?: base.titleTopSpacingDp,
             headerTopSpacingDp = v["header_top_spacing"]?.toFloatOrNull() ?: base.headerTopSpacingDp,
-            fontId = v["font_id"] ?: base.fontId,
+            fontId = usableFontId(v["font_id"], base.fontId),
             lineSpacingMult = v["line_spacing"]?.toFloatOrNull() ?: base.lineSpacingMult,
             paragraphSpacingEm = v["para_spacing"]?.toFloatOrNull() ?: base.paragraphSpacingEm,
             marginHorizontalDp = v["margin_h"]?.toFloatOrNull() ?: base.marginHorizontalDp,
             marginVerticalDp = v["margin_v"]?.toFloatOrNull() ?: base.marginVerticalDp,
+            firstLineIndentEm = v["first_line_indent"]?.toFloatOrNull() ?: base.firstLineIndentEm,
+            justify = v["justify"]?.toBooleanStrictOrNull() ?: base.justify,
+            letterSpacingEm = v["letter_spacing"]?.toFloatOrNull() ?: base.letterSpacingEm,
             // 主题不走 copy —— 它现在是日/夜双槽，由下面的 importThemeSlots 单独写回
             flipAnimation = v["flip"]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: base.flipAnimation,
@@ -297,6 +353,7 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
         )
     )
     importThemeSlots(v)
+    importLayoutSchemes(v["layout_schemes"])
     // update() 会把时间戳刷成"现在"，但这份设置其实是远端的 —— 保留远端的时间戳，
     // 否则下次同步时本地看起来更新，会把这份设置又推回去，两台设备来回打架。
     stampUpdatedAt(backup.updatedAt)

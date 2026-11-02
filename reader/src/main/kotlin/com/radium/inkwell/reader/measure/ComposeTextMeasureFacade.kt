@@ -15,7 +15,12 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.Font
+import com.radium.inkwell.reader.api.ReaderSettings
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /** fontId → FontFamily 的解析 */
 interface FontRegistry {
@@ -29,6 +34,34 @@ object SystemFontRegistry : FontRegistry {
         "sans" -> FontFamily.SansSerif
         "mono" -> FontFamily.Monospace
         else -> FontFamily.Default
+    }
+}
+
+/**
+ * 预设字体 + 用户导入的字体文件（`file:<文件名>`，文件在 [fontsDir] 里）。
+ *
+ * **文件不在就回落默认字体**，而不是抛：字体 id 跟着 WebDAV 同步，A 机导入的字体在 B 机上根本没有；
+ * 用户在别处删了字体文件、设置还没跟上，也是同一种情况。读书的人只会看到换回了默认字体，不会看到崩溃。
+ *
+ * FontFamily 按 (id, 修改时间) 缓存：同一个字体每次分页都 new 一个 FontFamily，Compose 的字体缓存
+ * 就认不出是同一个，每章都要重新从磁盘解析一遍。带上修改时间是为了删掉再导入一个同名的不同字体时，
+ * 不拿到旧字体的缓存。
+ */
+class FileFontRegistry(private val fontsDir: File) : FontRegistry {
+    private val cache = ConcurrentHashMap<String, Pair<Long, FontFamily>>()
+
+    override fun resolve(fontId: String): FontFamily {
+        if (!ReaderSettings.isFileFont(fontId)) return SystemFontRegistry.resolve(fontId)
+        val file = File(fontsDir, fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX))
+        // 文件名来自同步过来的设置，别让 "../" 之类的东西把读取引到字体目录外面去
+        if (file.parentFile?.canonicalPath != fontsDir.canonicalPath || !file.isFile) {
+            return FontFamily.Default
+        }
+        val stamp = file.lastModified()
+        cache[fontId]?.let { (at, family) -> if (at == stamp) return family }
+        val family = FontFamily(Font(file))
+        cache[fontId] = stamp to family
+        return family
     }
 }
 
@@ -66,6 +99,7 @@ class ComposeTextMeasureFacade(
             fontWeight = if (style.isBold) FontWeight.Bold else FontWeight.Normal,
             textIndent = TextIndent(firstLine = indentSp),
             textAlign = if (style.justify) TextAlign.Justify else TextAlign.Start,
+            letterSpacing = style.letterSpacingEm.em,
             lineBreak = LineBreak.Paragraph,
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Center,

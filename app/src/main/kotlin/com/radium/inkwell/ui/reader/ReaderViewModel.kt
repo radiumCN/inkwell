@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,9 @@ import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
+import com.radium.inkwell.data.prefs.LayoutScheme
+import com.radium.inkwell.data.repo.ReaderFontStore
+import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
@@ -225,6 +229,7 @@ class ReaderViewModel(
     private val appPrefs: AppPrefs,
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
+    private val fontStore: ReaderFontStore,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -692,6 +697,53 @@ class ReaderViewModel(
 
     /** 把 [previewSettings] 预览着的那份落库。读此刻的 state 而不是滑块回调里捕获的旧值 */
     fun commitSettings() = updateSettings(_state.value.settings)
+
+    // ---------- 字体与排版方案 ----------
+
+    val userFonts: StateFlow<List<UserFont>> = fontStore.fonts
+    val layoutSchemes: StateFlow<List<LayoutScheme>> = readerPrefs.layoutSchemes
+
+    /** 导入成功就直接用上：人是为了换字体才去导入的，导完还得再点一下才生效像没导进来 */
+    fun importFont(uri: Uri) {
+        viewModelScope.launch {
+            fontStore.import(uri)
+                .onSuccess { font ->
+                    readerPrefs.update(_state.value.settings.copy(fontId = font.id))
+                    messageBus.emit("已导入字体「${font.label}」")
+                }
+                .onFailure { messageBus.emit("导入失败：${it.message ?: "未知错误"}") }
+        }
+    }
+
+    /** 删的是正在用的字体 → 先切回默认再删文件，别让分页撞上一个刚消失的字体文件 */
+    fun deleteFont(font: UserFont) {
+        viewModelScope.launch {
+            val current = _state.value.settings
+            if (current.fontId == font.id) {
+                readerPrefs.update(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
+            }
+            fontStore.delete(font)
+            messageBus.emit("已删除字体「${font.label}」")
+        }
+    }
+
+    fun applyLayoutScheme(scheme: LayoutScheme) = updateSettings(scheme.applyTo(_state.value.settings))
+
+    fun saveLayoutScheme(name: String) {
+        val trimmed = name.trim().take(LayoutScheme.MAX_NAME_LENGTH)
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            readerPrefs.saveLayoutScheme(LayoutScheme.capture(trimmed, _state.value.settings))
+            messageBus.emit("已保存排版方案「$trimmed」")
+        }
+    }
+
+    fun deleteLayoutScheme(name: String) {
+        viewModelScope.launch {
+            readerPrefs.deleteLayoutScheme(name)
+            messageBus.emit("已删除排版方案「$name」")
+        }
+    }
 
     // ---------- 自动翻页 ----------
 

@@ -16,6 +16,8 @@ data class ReaderSettings(
     val marginVerticalDp: Float = 28f,
     val firstLineIndentEm: Float = 2f,
     val justify: Boolean = true,
+    /** 字距（em）。0 = 字体自带的间距；中文正文稍松一点（0.05）在大屏上更透气 */
+    val letterSpacingEm: Float = 0f,
     val theme: ReaderTheme = ReaderTheme.PAPER,
     val flipAnimation: FlipAnimation = FlipAnimation.COVER,
     /** null = 跟随系统 */
@@ -57,7 +59,15 @@ data class ReaderSettings(
         const val FONT_SANS = "sans"
         const val FONT_MONO = "mono"
 
-        /** 预设系统字体（不做用户导入） */
+        /**
+         * 用户导入字体的 id 前缀：`file:<文件名>`，文件在 app 的字体目录里（见 [FileFontRegistry]）。
+         * 存文件名而不是绝对路径 —— id 会随 WebDAV 同步到别的设备，路径换台机器就是死的。
+         */
+        const val FONT_FILE_PREFIX = "file:"
+
+        fun isFileFont(fontId: String): Boolean = fontId.startsWith(FONT_FILE_PREFIX)
+
+        /** 系统预设字体；用户导入的字体另列，见 [FONT_FILE_PREFIX] */
         val FONT_PRESETS = listOf(
             FONT_SYSTEM to "默认",
             FONT_SERIF to "衬线",
