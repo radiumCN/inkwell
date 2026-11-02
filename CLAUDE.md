@@ -54,7 +54,9 @@ export JAVA_HOME=/opt/java/jdk-21.0.11+10   # 需 JDK 21
 
 ### 主题入口 → `MaterialExpressiveTheme`
 
-App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`（`ui/theme/Theme.kt`）与阅读页浮层的 `ReaderThemeScope` —— **两个都必须**是 `MaterialExpressiveTheme`。任一处退回普通 `MaterialTheme` 都会把 `LocalUsingExpressiveTheme` 关掉，那一片区域的组件就悄悄变回非 Expressive 形态（编译不报错，只是长得不一样）。
+App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`（`ui/theme/Theme.kt`）与阅读页浮层的 `ReaderThemeScope` —— **两个都必须**是 `MaterialExpressiveTheme`。任一处退回普通 `MaterialTheme` 都会把 `LocalUsingExpressiveTheme` 关掉，那一片区域的组件就悄悄变回非 Expressive 形态（编译不报错，只是长得不一样）。另有一处**局部覆盖**：书籍详情的封面取色 `CoverTintedTheme`（`ui/detail/CoverTint.kt`），只换 primary 一族、surface 一族照抄外层，同样是 `MaterialExpressiveTheme`，`motionScheme` 沿用外层的。
+
+「跟随壁纸」是一个预设 id（`AppThemes.DYNAMIC`），日/夜两槽都能选；解析统一走 `rememberResolvedScheme`（MainActivity 设窗体底色、`InkwellTheme` 铺整树共用这一个结果），别在别处直接调 `AppThemes.resolve` 而漏掉壁纸配色。
 
 `motionScheme` 这个参数**必须显式传**，别省：它默认 `null`，而 `null` 的含义是「沿用外层主题的方案」而非「填 expressive」—— 根节点没有外层，省掉就退成 `MotionScheme.standard()`，结果是组件形态换了、动效没换，编译与单测都看不出来。
 
@@ -97,7 +99,9 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
 | 整页加载态 | `LoadingState`（`Common.kt`） |
 | 不确定进度 | `AppLoadingIndicator`（`Common.kt`）：默认尺寸用 Expressive `LoadingIndicator`；**小于容器下限时自动回退** `CircularProgressIndicator`（强缩会炸约束）。调用点统一走封装，别裸写两种指示器 |
-| 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Expressive `LinearWavyProgressIndicator`）；搜索/书源校验/更新下载走它，别裸写 `LinearProgressIndicator` |
+| 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Expressive `LinearWavyProgressIndicator`）；搜索/书源校验/更新下载/离线缓存走它，别裸写 `LinearProgressIndicator` |
+| 阅读进度（静止的读数） | `ReadingProgressMeter`（`Common.kt`）：书封底边、「继续阅读」卡片。波浪线表示「有活在跑」，静止的进度别用 `DeterminateProgressBar` |
+| 相对时间（「3 小时前」「昨天」） | `formatRelativeTime`（`RelativeTime.kt`），按日历天而不是 24 小时算 |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`）。**居中、随文案收窄的胶囊**（短提示是药丸，长提示才横向展开）；色/圆角仍取主题 `inverseSurface` / `extraLarge`。页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 | 对话框 | `AppAlertDialog`（`AppDialog.kt`）：标题 + 正文/内容 + 等宽 `SecondaryButton` / `PrimaryButton`。别裸写 `AlertDialog` + `TextButton`，也别手搓居中 `Surface` 冒充弹层 |
 
