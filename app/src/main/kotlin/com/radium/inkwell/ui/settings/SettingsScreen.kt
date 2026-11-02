@@ -24,6 +24,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
+import com.radium.inkwell.data.repo.ReadingStatsRepository
+import com.radium.inkwell.ui.stats.formatDuration
+import kotlinx.coroutines.flow.map
+import java.time.LocalDate
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
@@ -57,6 +61,7 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenReadingStats: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenReading: () -> Unit,
     onOpenRss: () -> Unit,
@@ -65,6 +70,14 @@ fun SettingsScreen(
     onOpenAbout: () -> Unit,
 ) {
     val cache = koinInject<ChapterContentCache>()
+    val readingStats = koinInject<ReadingStatsRepository>()
+    // 行尾直接给今天的时长：点进去之前就知道今天读了多少，这一行才不只是个入口
+    val todayReading by remember(readingStats) {
+        readingStats.observeAll().map { rows ->
+            val today = LocalDate.now().toEpochDay()
+            rows.filter { it.day == today }.sumOf { it.millis }
+        }
+    }.collectAsStateWithLifecycle(initialValue = 0L)
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -106,6 +119,14 @@ fun SettingsScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(top = Dimens.gapS, bottom = Dimens.gapL),
             ) {
+                SettingGroup {
+                    SettingRow(
+                        title = "阅读记录",
+                        value = if (todayReading > 0) "今天 ${formatDuration(todayReading)}" else null,
+                        onClick = onOpenReadingStats,
+                        position = SettingGroupPosition.Alone,
+                    )
+                }
                 SettingGroup {
                     SettingRow(
                         title = "外观",

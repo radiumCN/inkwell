@@ -55,6 +55,7 @@ class WebDavRepository(
      * OkHttpClient：连接池、线程池、TLS 会话全是新的，退到后台一次就重新握一次手。
      */
     private val http: okhttp3.OkHttpClient,
+    private val readingStats: ReadingStatsRepository,
 ) {
     private companion object {
         const val DIR = "inkwell"
@@ -171,6 +172,7 @@ class WebDavRepository(
                 rssSources = merged.rssSources,
                 readerSettings = merged.mergedReaderSettings,
                 appSettings = merged.mergedAppSettings,
+                readingStats = merged.readingStats,
             )
         }
 
@@ -199,6 +201,7 @@ class WebDavRepository(
         maxOf(bookDao.lastChangeAt(), sourceDao.lastChangeAt()),
         maxOf(replaceRules.lastChangeAt(), rssDao.lastChangeAt()),
         maxOf(appPrefs.updatedAt(), readerPrefs.updatedAt()),
+        readingStats.lastChangeAt(),
     )
 
     /** 远端备份的版本标记；读不到（服务器不支持 HEAD、网络抖一下）就是 null，调用方当「动过」处理 */
@@ -222,7 +225,8 @@ class WebDavRepository(
             a.replaceRules.associateBy { it.id } == b.replaceRules.associateBy { it.id } &&
             a.rssSources.associateBy { it.id } == b.rssSources.associateBy { it.id } &&
             a.readerSettings == b.readerSettings &&
-            a.appSettings == b.appSettings
+            a.appSettings == b.appSettings &&
+            a.readingStats.associateBy { it.key } == b.readingStats.associateBy { it.key }
 
     private suspend fun buildLocalPayload(): BackupPayload = BackupPayload(
         deviceId = prefs.deviceId(),
@@ -280,6 +284,7 @@ class WebDavRepository(
         },
         readerSettings = readerPrefs.exportForBackup(),
         appSettings = appPrefs.exportForBackup(),
+        readingStats = readingStats.exportForBackup(),
     )
 
     private suspend fun applyToLocal(merged: BackupMerger.MergeResult): Int {
@@ -335,6 +340,8 @@ class WebDavRepository(
             }
         }
         merged.readerSettings?.let { readerPrefs.importFromBackup(it) }
+        // 别的设备的阅读时长、本机清数据前记下的时长。不计入「合并了几项更新」：那是给人看书架变化的
+        readingStats.applySynced(merged.changedReadingStats)
         merged.appSettings?.let { appPrefs.importFromBackup(it) }
         return appliedBooks
     }

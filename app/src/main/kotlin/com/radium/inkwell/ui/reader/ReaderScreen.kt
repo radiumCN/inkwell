@@ -189,8 +189,10 @@ fun ReaderScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) viewModel.onReaderStarted()
             if (event == Lifecycle.Event.ON_STOP) {
                 viewModel.flushProgress()
+                viewModel.onReaderStopped()
                 viewModel.stopAutoFlip()
             }
         }
@@ -198,6 +200,7 @@ fun ReaderScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             viewModel.flushProgress()
+            viewModel.onReaderStopped()
         }
     }
 

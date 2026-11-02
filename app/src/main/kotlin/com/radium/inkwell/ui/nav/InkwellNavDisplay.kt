@@ -279,6 +279,7 @@ fun InkwellNavDisplay() {
             ) {
                 SettingsScreen(
                     onBack = { nav.back() },
+                    onOpenReadingStats = { nav.go(ReadingStatsRoute) },
                     onOpenAppearance = { nav.go(AppearanceSettingsRoute) },
                     onOpenReading = { nav.go(ReadingSettingsRoute) },
                     onOpenRss = { nav.go(RssSourceRoute) },
@@ -286,6 +287,12 @@ fun InkwellNavDisplay() {
                     onOpenUpdate = { nav.go(UpdateSettingsRoute) },
                     onOpenAbout = { nav.go(AboutSettingsRoute) },
                 )
+            }
+            entry<ReadingStatsRoute>(
+                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
+            ) {
+                val vm = koinViewModel<com.radium.inkwell.ui.stats.ReadingStatsViewModel>()
+                com.radium.inkwell.ui.stats.ReadingStatsScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<AppearanceSettingsRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),

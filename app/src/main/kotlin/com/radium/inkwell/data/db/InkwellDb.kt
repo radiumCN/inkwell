@@ -11,12 +11,14 @@ import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.dao.RssSourceDao
+import com.radium.inkwell.data.db.dao.ReadingStatDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.db.entity.RssSourceEntity
+import com.radium.inkwell.data.db.entity.ReadingStatEntity
 
 @Database(
     entities = [
@@ -26,8 +28,9 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         BookSourceHitEntity::class,
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
+        ReadingStatEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -37,6 +40,7 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun bookSourceHitDao(): BookSourceHitDao
     abstract fun replaceRuleDao(): ReplaceRuleDao
     abstract fun rssSourceDao(): RssSourceDao
+    abstract fun readingStatDao(): ReadingStatDao
 
     companion object {
         /**
@@ -204,6 +208,24 @@ abstract class InkwellDb : RoomDatabase() {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("CREATE INDEX IF NOT EXISTS `idx_book_source_list` ON `book_source` (`deleted`, `sortOrder`, `name`, `id`, `enabled`, `updatedAt`, `groupName`, `checkStatus`, `checkMessage`, `respondTime`, `checkedAt`)")
                 connection.execSQL("CREATE INDEX IF NOT EXISTS `idx_book_source_enabled` ON `book_source` (`enabled`, `deleted`, `sortOrder`, `name`, `id`, `updatedAt`, `checkStatus`, `respondTime`, `searchMs`, `searchFails`)")
+            }
+        }
+
+        /** 阅读时长（阅读记录页）。纯新增表，老数据一行不动；从升级这一刻开始记 */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS reading_stat (
+                        deviceId TEXT NOT NULL,
+                        day INTEGER NOT NULL,
+                        bookId TEXT NOT NULL,
+                        millis INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        PRIMARY KEY(deviceId, day, bookId)
+                    )
+                    """.trimIndent(),
+                )
             }
         }
 

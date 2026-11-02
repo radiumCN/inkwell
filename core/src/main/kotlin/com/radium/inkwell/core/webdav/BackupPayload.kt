@@ -26,7 +26,29 @@ data class BackupPayload(
     val readerSettings: BackupSettings? = null,
     /** 应用设置（主题、更新渠道…）；整块 LWW */
     val appSettings: BackupSettings? = null,
+    /** 阅读时长，按「设备 + 日期 + 书」一行。合并规则见 [BackupReadingStat] */
+    val readingStats: List<BackupReadingStat> = emptyList(),
 )
+
+/**
+ * 某台设备某一天在某本书上读了多久（毫秒）。
+ *
+ * 时长是**累加量**，不能像别的字段那样 LWW：两台设备同一天各读了半小时，LWW 只会留下一边的半小时。
+ * 所以按设备拆行 —— 每台设备只往自己那几行上加，从不碰别人的行；合并时同一行取较大值
+ * （同一台设备上它只增不减，较大的就是较新的），总时长 = 各设备的行加起来。
+ * 这是计数器的标准做法（G-Counter）：怎么合、合几次、谁先谁后，结果都一样。
+ *
+ * [day] 是记录那台设备本地时区的日期（epochDay）。书删了行也留着：读过的时间不会因为删书就没读过。
+ */
+@Serializable
+data class BackupReadingStat(
+    val deviceId: String,
+    val day: Long,
+    val bookId: String,
+    val millis: Long,
+) {
+    val key: Triple<String, Long, String> get() = Triple(deviceId, day, bookId)
+}
 
 /**
  * 一组设置的快照。
@@ -179,6 +201,9 @@ object BackupMerger {
         /** 远端更新（需要写回本地）；null = 本地的更新或一样新 */
         val readerSettings: BackupSettings?,
         val appSettings: BackupSettings?,
+        /** 合并后的全部阅读时长行，与其中比本地大（需要写回本地）的那些 */
+        val readingStats: List<BackupReadingStat> = emptyList(),
+        val changedReadingStats: List<BackupReadingStat> = emptyList(),
         /** 合并后要上传的设置（取较新的那份） */
         val mergedReaderSettings: BackupSettings?,
         val mergedAppSettings: BackupSettings?,
@@ -237,6 +262,10 @@ object BackupMerger {
         }
         val changedRss = mergedRss.filter { it != localRss[it.id] }
 
+        val localStats = local.readingStats.associateBy { it.key }
+        val mergedStats = mergeReadingStats(local.readingStats, remote.readingStats)
+        val changedStats = mergedStats.filter { it != localStats[it.key] }
+
         val readerWinner = newer(local.readerSettings, remote.readerSettings)
         val appWinner = newer(local.appSettings, remote.appSettings)
 
@@ -256,7 +285,22 @@ object BackupMerger {
                 ?.takeIf { it === appWinner && it != local.appSettings },
             mergedReaderSettings = readerWinner,
             mergedAppSettings = appWinner,
+            readingStats = mergedStats,
+            changedReadingStats = changedStats,
         )
+    }
+
+    /** 同一行（设备 + 日期 + 书）取较大值；只有一边有的原样保留。理由见 [BackupReadingStat] */
+    fun mergeReadingStats(
+        local: List<BackupReadingStat>,
+        remote: List<BackupReadingStat>,
+    ): List<BackupReadingStat> {
+        val merged = LinkedHashMap<Triple<String, Long, String>, BackupReadingStat>(local.size + remote.size)
+        (local + remote).forEach { row ->
+            val existing = merged[row.key]
+            if (existing == null || row.millis > existing.millis) merged[row.key] = row
+        }
+        return merged.values.toList()
     }
 
     /** 整块 LWW；时间戳相同时本地优先（免得每次同步都来回覆盖） */

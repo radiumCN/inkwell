@@ -195,11 +195,17 @@ class WebDavPrefs(
         }
     }
 
+    /**
+     * 本机的设备 id，第一次要时生成。生成放在 edit 里做：edit 是串行的，读改写不会被插队。
+     * 从前是「读一次、没有就生成、再写」，阅读记录和同步同时第一次要它时会各生成一个 ——
+     * 阅读时长按设备 id 分行，两个 id 就把本机的时长劈成了两台「设备」。
+     */
     suspend fun deviceId(): String {
-        val existing = context.webDavDataStore.data.first()[Keys.DEVICE_ID]
-        if (existing != null) return existing
-        val id = UUID.randomUUID().toString()
-        context.webDavDataStore.edit { it[Keys.DEVICE_ID] = id }
+        context.webDavDataStore.data.first()[Keys.DEVICE_ID]?.let { return it }
+        var id = ""
+        context.webDavDataStore.edit { p ->
+            id = p[Keys.DEVICE_ID] ?: UUID.randomUUID().toString().also { p[Keys.DEVICE_ID] = it }
+        }
         return id
     }
 }

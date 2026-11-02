@@ -50,6 +50,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_16_17,
                 InkwellDb.MIGRATION_17_18,
                 InkwellDb.MIGRATION_18_19,
+                InkwellDb.MIGRATION_19_20,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
@@ -62,6 +63,8 @@ val appModule = module {
     single { get<InkwellDb>().bookSourceHitDao() }
     single { get<InkwellDb>().replaceRuleDao() }
     single { get<InkwellDb>().rssSourceDao() }
+    single { get<InkwellDb>().readingStatDao() }
+    single { com.radium.inkwell.data.repo.ReadingStatsRepository(get(), get(), get()) }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
     // txt 的解码结果与拆章表缓存在系统可清理的缓存目录：没了只是下次打开慢一次（见 TxtParser / TxtCache）
@@ -135,13 +138,13 @@ val appModule = module {
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
-    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
     viewModel { BookshelfViewModel(get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->
@@ -156,6 +159,7 @@ val appModule = module {
     viewModel { WebDavViewModel(get(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
+    viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }

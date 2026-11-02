@@ -17,6 +17,8 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.ReaderFontStore
+import com.radium.inkwell.data.repo.ReadingClock
+import com.radium.inkwell.data.repo.ReadingStatsRepository
 import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
@@ -230,6 +232,7 @@ class ReaderViewModel(
     private val replaceRules: com.radium.inkwell.data.repo.ReplaceRuleRepository,
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
     private val fontStore: ReaderFontStore,
+    private val readingStats: ReadingStatsRepository,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -1456,6 +1459,9 @@ class ReaderViewModel(
             atBookEnd = false,
         )
         saveProgress()
+        // 翻到一页 = 人在读。滚动、自动翻页越过页界也走这里
+        readingClock.touch()
+        if (readingClock.pendingMillis >= ReadingClock.FLUSH_EVERY_MS) flushReadingTime()
         notifyIfUnpurified(chapterIndex)
         // 滚动一次惯性就能甩过好几页，临近章末再预取会来不及，倒数第二页就开始排邻章。
         if (pageIndex <= 1 || pageIndex >= result.chapter.pages.lastIndex - 1) {
@@ -1759,7 +1765,30 @@ class ReaderViewModel(
         }
     }
 
+    // ---------- 阅读时长 ----------
+
+    private val readingClock = ReadingClock()
+
+    /** 阅读页回到前台（含刚打开）。之前在后台的时间不算 */
+    fun onReaderStarted() = readingClock.start()
+
+    /** 进后台 / 离开阅读页：收尾这一段并落库 */
+    fun onReaderStopped() {
+        readingClock.stop()
+        flushReadingTime()
+    }
+
+    /** 与 [flushProgress] 同一个理由用进程级作用域：页面销毁时 viewModelScope 已经取消，最后一段会写丢 */
+    private fun flushReadingTime() {
+        val millis = readingClock.drain()
+        if (millis <= 0) return
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO + NonCancellable).launch {
+            readingStats.record(bookId, millis)
+        }
+    }
+
     override fun onCleared() {
+        onReaderStopped()
         flushProgress()
         (source as? AutoCloseable)?.close()
     }

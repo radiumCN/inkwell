@@ -112,6 +112,9 @@ data class SourceDetailRoute(val sourceId: String) : NavKey
 data object SettingsRoute : NavKey
 
 @Serializable
+data object ReadingStatsRoute : NavKey
+
+@Serializable
 data object AppearanceSettingsRoute : NavKey
 
 @Serializable
@@ -149,6 +152,7 @@ data object DeveloperSettingsRoute : NavKey
  * 树形（层级即缩进深度）：
  * ```
  * 设置 (1)
+ * ├─ 阅读记录 (2)
  * ├─ 外观 (2) ── 主题 (3)
  * ├─ 阅读 (2) ─┬ 书源管理 (3) ── 书源详情 (4)
  * │            └ 替换规则 (3)
@@ -167,6 +171,7 @@ data object DeveloperSettingsRoute : NavKey
  * `animateTo`，看起来就像「先干等一秒才动」。
  */
 internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
+    is ReadingStatsRoute,
     is AppearanceSettingsRoute,
     is ReadingSettingsRoute,
     is UpdateSettingsRoute,
