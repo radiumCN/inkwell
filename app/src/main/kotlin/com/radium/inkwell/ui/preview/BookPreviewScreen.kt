@@ -231,13 +231,14 @@ private fun Header(
                 text = if (state.inShelf) "已在书架" else "加入书架",
                 onClick = viewModel::addToShelf,
                 enabled = !loading && !state.busy && !state.inShelf,
-                loading = state.busy && !state.inShelf,
+                loading = state.busy && !state.busyForReading && !state.inShelf,
                 modifier = Modifier.weight(1f),
             )
             PrimaryButton(
                 text = "开始阅读",
                 onClick = { viewModel.read() },
                 enabled = !loading && !state.busy,
+                loading = state.busy && state.busyForReading,
                 modifier = Modifier.weight(1f),
             )
         }

@@ -69,8 +69,12 @@ private fun rememberTonalFieldStyle(
 }
 
 /**
- * 紧凑搜索框：40dp 高、bodyMedium 字号、Expressive tonal 底色。
+ * 紧凑搜索框：默认 40dp 高、bodyMedium 字号、Expressive tonal 底色。
  * 顶栏/抽屉等空间敏感处用它，替代默认 56dp 的 OutlinedTextField。
+ *
+ * 高度是**下限**不是定值：系统字体调大（Android 14 起最大 200%）时随字号长高。从前钉死 40dp，
+ * 大字号下文字上下边直接被切掉。清空按钮的高度单独封顶在 40dp —— 它带 48dp 的最小可点区，
+ * 不封顶的话一输入字整个框就从 40dp 跳到 48dp；封顶后可点区由 Compose 照样扩到 48dp。
  */
 @Composable
 fun SearchField(
@@ -96,7 +100,7 @@ fun SearchField(
         keyboardActions = KeyboardActions(onSearch = { onSearch?.invoke() }),
         modifier = modifier
             .fillMaxWidth()
-            .height(Dimens.searchFieldHeight)
+            .heightIn(min = Dimens.searchFieldHeight)
             .background(style.container, style.shape),
         decorationBox = { innerTextField ->
             Row(
@@ -109,7 +113,8 @@ fun SearchField(
                     Modifier.size(Dimens.iconSm),
                     tint = style.placeholder,
                 )
-                Box(Modifier.weight(1f).padding(horizontal = Dimens.gapS)) {
+                // 上下留一点：字号大到撑高整个框时，文字别贴着边
+                Box(Modifier.weight(1f).padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS)) {
                     if (value.isEmpty()) {
                         Text(
                             placeholder,
@@ -122,7 +127,10 @@ fun SearchField(
                 }
                 if (value.isNotEmpty()) {
                     // 不再钉死 32dp —— 让 IconButton 保持默认可点区，图标本身缩到 16dp 即可
-                    AppIconButton(onClick = { onValueChange("") }) {
+                    AppIconButton(
+                        onClick = { onValueChange("") },
+                        modifier = Modifier.heightIn(max = Dimens.searchFieldHeight),
+                    ) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "清空",
@@ -136,7 +144,10 @@ fun SearchField(
     )
 }
 
-/** 紧凑单行输入框：40dp 高、bodyMedium 字号、Expressive tonal 底色，对话框/表单行内使用 */
+/**
+ * 紧凑单行输入框：默认 40dp 高、bodyMedium 字号、Expressive tonal 底色，对话框/表单行内使用。
+ * 高度同 [SearchField] 是下限，大字号下随字号长高。
+ */
 @Composable
 fun CompactTextField(
     value: String,
@@ -156,11 +167,11 @@ fun CompactTextField(
         interactionSource = interactionSource,
         modifier = modifier
             .fillMaxWidth()
-            .height(Dimens.compactFieldHeight)
+            .heightIn(min = Dimens.compactFieldHeight)
             .background(style.container, style.shape),
         decorationBox = { innerTextField ->
             Box(
-                Modifier.padding(horizontal = Dimens.gapM),
+                Modifier.padding(horizontal = Dimens.gapM, vertical = Dimens.gapXS),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (value.isEmpty()) {

@@ -141,7 +141,7 @@ fun SearchScreen(
     // 从预览页返回（已经搜过）不抢焦点，别平白把键盘弹出来挡住结果
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        if (state.searchId == 0 && state.query.isEmpty()) searchFocus.requestFocus()
+        if (state.searchId == 0 && viewModel.query.isEmpty()) searchFocus.requestFocus()
     }
     // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，写进 items 里就是每行挂一个
     val motionOn = animationsEnabled()
@@ -154,7 +154,8 @@ fun SearchScreen(
             TopAppBar(
                 title = {
                     SearchField(
-                        value = state.query,
+                        // 读 VM 里同步更新的那份，不读 StateFlow（理由见 SearchViewModel.query）
+                        value = viewModel.query,
                         onValueChange = viewModel::setQuery,
                         placeholder = "书名 / 作者",
                         onSearch = {
@@ -214,7 +215,7 @@ fun SearchScreen(
             val idle = !state.searching && !state.searchPaused
             // 「清空了输入框」要单独成立，不能只靠有没有历史：清空后把历史删光，
             // 否则会落回上一个词的旧结果，顶着一个空搜索框
-            val cleared = idle && state.searchId > 0 && state.query.isBlank()
+            val cleared = idle && state.searchId > 0 && viewModel.query.isBlank()
             val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
             if (showHistory) {
                 SearchHistoryList(

@@ -43,6 +43,11 @@ data class BookPreviewUiState(
     val inShelf: Boolean = false,
     /** 入库/跳转进行中，按钮置灰防重复点击 */
     val busy: Boolean = false,
+    /**
+     * 这次入库是为了「开始阅读」（试读入库）而不是「加入书架」。转圈落在用户点的那颗按钮上：
+     * 从前只看 [busy]，点「开始阅读」转的却是「加入书架」，像是点错了、又像是被偷偷加进了书架。
+     */
+    val busyForReading: Boolean = false,
     /** 有这本书的所有书源（sourceId），供换源；当前用的是 currentSource */
     /** 有这本书的所有书源（供换源）；带名称，光有网址没人认得出是哪个源 */
     val sources: List<SourceOption> = emptyList(),
@@ -317,18 +322,22 @@ class BookPreviewViewModel(
         val s = _state.value
         if (s.busy) return null
         val d = detail ?: return null
-        _state.value = s.copy(busy = true)
+        _state.value = s.copy(busy = true, busyForReading = !inShelf)
         return netBookRepo.addToShelf(
             result.sourceId, result.bookUrl, d, s.chapters,
             fallback = result,
             inShelf = inShelf,
         )
             .onSuccess {
-                _state.value = _state.value.copy(busy = false, inShelf = inShelf || _state.value.inShelf)
+                _state.value = _state.value.copy(
+                    busy = false,
+                    busyForReading = false,
+                    inShelf = inShelf || _state.value.inShelf,
+                )
             }
             .onFailure {
                 if (it is CancellationException) throw it
-                _state.value = _state.value.copy(busy = false)
+                _state.value = _state.value.copy(busy = false, busyForReading = false)
                 messages.emit(
                     if (inShelf) "加入书架失败: ${it.message?.take(80)}"
                     else "无法开始阅读: ${it.message?.take(80)}",

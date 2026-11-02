@@ -98,7 +98,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.runtime.rememberCoroutineScope
@@ -131,6 +132,19 @@ import com.radium.inkwell.ui.components.expandExit
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
  */
+/**
+ * 封面在布局里的位置句柄；点开书时才换算成窗口坐标（进书从这本书所在的位置展开）。
+ *
+ * 从前用 onGloballyPositioned 每次都算 boundsInWindow() 再写进 State：书架一滑，每个可见封面每帧都算一遍坐标、
+ * 写一次快照 —— 而这个值只在点击那一下才用得到。LayoutCoordinates 是活的，点击时算出来就是当下的位置；
+ * 这里存的是普通引用不是 State，滑动时写它不触发任何重组。
+ */
+private class CoverAnchor {
+    var coordinates: LayoutCoordinates? = null
+
+    fun boundsInWindow(): Rect? = coordinates?.takeIf { it.isAttached }?.boundsInWindow()
+}
+
 private fun originOf(bounds: Rect?, window: IntSize): TransformOrigin {
     if (bounds == null || window.width <= 0 || window.height <= 0) return TransformOrigin.Center
     return TransformOrigin(
@@ -849,13 +863,13 @@ private fun BookShelfListRow(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var coverBounds by remember { mutableStateOf<Rect?>(null) }
+    val cover = remember { CoverAnchor() }
     val leadingContent: @Composable () -> Unit = {
         BookShelfListLeading(
             book = book,
             selected = selected,
             selectionMode = selectionMode,
-            onBounds = { coverBounds = it },
+            anchor = cover,
         )
     }
     val trailingContent: (@Composable () -> Unit)? = if (selectionMode) {
@@ -891,7 +905,7 @@ private fun BookShelfListRow(
     if (selectionMode) {
         ContentListItem(
             checked = selected,
-            onCheckedChange = { onClick(coverBounds) },
+            onCheckedChange = { onClick(cover.boundsInWindow()) },
             onLongClick = onLongClick,
             modifier = modifier,
             leadingContent = leadingContent,
@@ -903,7 +917,7 @@ private fun BookShelfListRow(
         )
     } else {
         ContentListItem(
-            onClick = { onClick(coverBounds) },
+            onClick = { onClick(cover.boundsInWindow()) },
             onLongClick = onLongClick,
             modifier = modifier,
             leadingContent = leadingContent,
@@ -920,7 +934,7 @@ private fun BookShelfListLeading(
     book: BookEntity,
     selected: Boolean,
     selectionMode: Boolean,
-    onBounds: (Rect) -> Unit,
+    anchor: CoverAnchor,
 ) {
     val coverShape = MaterialTheme.shapes.small
     Box(
@@ -944,7 +958,7 @@ private fun BookShelfListLeading(
                         Modifier
                     },
                 )
-                .onGloballyPositioned { onBounds(it.boundsInWindow()) },
+                .onPlaced { anchor.coordinates = it },
             placeholderChars = 2,
             // 书名是这一行的标题，封面不再进读屏
             contentDescription = null,
@@ -990,7 +1004,7 @@ private fun BookCard(
     modifier: Modifier = Modifier,
 ) {
     // 用封面（而不是整张卡片）的位置：展开动画应该从书封长出来，标题那一行不算
-    var coverBounds by remember { mutableStateOf<Rect?>(null) }
+    val cover = remember { CoverAnchor() }
     // 与 BookCover 的 shape 对齐 —— 选中描边若用 medium，封面却是 small，就会看出「框套框」
     val coverShape = MaterialTheme.shapes.small
     Column(
@@ -1012,7 +1026,7 @@ private fun BookCard(
             .combinedClickable(
                 // 平时整张卡就是一个按钮（点开读、长按出面板）；多选时角色由上面的 Checkbox 给
                 role = if (selectionMode) null else Role.Button,
-                onClick = { onClick(coverBounds) },
+                onClick = { onClick(cover.boundsInWindow()) },
                 onLongClick = onLongClick,
             )
     ) {
@@ -1040,7 +1054,7 @@ private fun BookCard(
                             )
                         } else Modifier
                     )
-                    .onGloballyPositioned { coverBounds = it.boundsInWindow() },
+                    .onPlaced { cover.coordinates = it },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
                 // 卡片下面就印着书名，封面不再进读屏

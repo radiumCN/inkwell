@@ -51,6 +51,10 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.radium.inkwell.ui.components.animationsEnabled
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +75,9 @@ fun BookDetailScreen(
     val book = state.book
     val chapters = state.chapters
     val refreshing = state.refreshing
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val motionOn = animationsEnabled()
 
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
@@ -113,7 +120,9 @@ fun BookDetailScreen(
             return@Scaffold
         }
 
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+        // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
+        val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
+        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState) {
             item {
                 Header(
                     book = b,
@@ -122,12 +131,29 @@ fun BookDetailScreen(
                 )
             }
             item {
-                Text(
-                    // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
-                    "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
-                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Row(
+                    Modifier.fillMaxWidth().padding(start = Dimens.rowHorizontal, end = Dimens.gapS),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
+                        "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
+                        Modifier.weight(1f).padding(vertical = Dimens.gapS),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
+                    // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
+                    if (currentPos >= 0) {
+                        AppTextButton(onClick = {
+                            val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
+                            scope.launch {
+                                if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                            }
+                        }) {
+                            Text("定位当前章")
+                        }
+                    }
+                }
                 HorizontalDivider()
             }
             when {
@@ -244,3 +270,6 @@ private fun Header(
         if (intro.isNotBlank()) BookIntro(intro)
     }
 }
+
+/** 目录列表里第一章所在的位置：前面是头部与「目录」标题两项 */
+private const val TOC_FIRST_ITEM = 2

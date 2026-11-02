@@ -1,13 +1,20 @@
 package com.radium.inkwell.ui.rss
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -88,30 +95,41 @@ fun RssArticleScreen(
             return@Scaffold
         }
 
-        Column(
+        // 懒加载：长文、多图的文章从前一次把全部段落和图片组合完才出第一屏。
+        // 列表也让「上面的图加载出来、高度变了」不再把正在读的那段往下推 —— 位置锚在可见的那一项上
+        val imageRatios = remember { mutableStateMapOf<String, Float>() }
+        LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Dimens.screenPadding),
+                .padding(padding),
+            contentPadding = PaddingValues(horizontal = Dimens.screenPadding),
         ) {
-            Text(
-                state.title,
-                Modifier.padding(top = Dimens.gapS),
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            state.pubDate?.let {
-                Text(
-                    it,
-                    Modifier.padding(top = Dimens.gapXS),
-                    style = MaterialTheme.typography.labelMedium,
-                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            item(key = "title", contentType = "title") {
+                Column {
+                    Text(
+                        state.title,
+                        Modifier.padding(top = Dimens.gapS),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    state.pubDate?.let {
+                        Text(
+                            it,
+                            Modifier.padding(top = Dimens.gapXS),
+                            style = MaterialTheme.typography.labelMedium,
+                            // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(Dimens.gapL))
+                }
             }
-            Spacer(Modifier.height(Dimens.gapL))
 
-            state.elements.forEach { el ->
+            // 正文元素按位置当 key：抓一次就定了，不会增删重排
+            itemsIndexed(
+                state.elements,
+                key = { i, _ -> "el$i" },
+                contentType = { _, el -> el::class },
+            ) { _, el ->
                 when (el) {
                     is ContentElement.Heading -> Text(
                         el.text,
@@ -123,47 +141,84 @@ fun RssArticleScreen(
                         Modifier.padding(vertical = Dimens.gapS),
                         style = MaterialTheme.typography.bodyLarge,
                     )
-                    is ContentElement.Image -> AsyncImage(
-                        model = el.resourceId,
-                        contentDescription = el.alt,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = Dimens.gapS),
-                    )
+                    is ContentElement.Image -> ArticleImage(el, imageRatios)
                     ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
                 }
             }
 
-            // 抓取失败一律说出来、并给重试：从前错误只在「有原文链接」时才显示，
-            // 订阅源不存在、或没有链接时抓失败，页面就只剩一个标题
-            val error = state.error
-            if (error != null) {
-                Text(
-                    "正文没能取到：$error",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Spacer(Modifier.height(Dimens.gapM))
-                SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
-            } else if (state.needsBrowser) {
-                // 解析不出正文不是错误：很多源本来就只给标题+链接
-                Text(
-                    "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            item(key = "footer", contentType = "footer") {
+                Column {
+                    // 抓取失败一律说出来、并给重试：从前错误只在「有原文链接」时才显示，
+                    // 订阅源不存在、或没有链接时抓失败，页面就只剩一个标题
+                    val error = state.error
+                    if (error != null) {
+                        Text(
+                            "正文没能取到：$error",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(Dimens.gapM))
+                        SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
+                    } else if (state.needsBrowser) {
+                        // 解析不出正文不是错误：很多源本来就只给标题+链接
+                        Text(
+                            "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
 
-            // 「看原文」永远给出口，而不是只在正文解析失败时才给。
-            // 拿真实 feed 试过：BBC、少数派、HN 的摘要就是**一句话**，不是全文 ——
-            // 正文"解析成功"了，用户却只看到孤零零一行，然后无处可去。
-            if (state.link.isNotBlank()) {
-                Spacer(Modifier.height(Dimens.gapXL))
-                PrimaryButton(
-                    text = "在浏览器中打开原文",
-                    onClick = ::openInBrowser,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                    // 「看原文」永远给出口，而不是只在正文解析失败时才给。
+                    // 拿真实 feed 试过：BBC、少数派、HN 的摘要就是**一句话**，不是全文 ——
+                    // 正文"解析成功"了，用户却只看到孤零零一行，然后无处可去。
+                    if (state.link.isNotBlank()) {
+                        Spacer(Modifier.height(Dimens.gapXL))
+                        PrimaryButton(
+                            text = "在浏览器中打开原文",
+                            onClick = ::openInBrowser,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.height(Dimens.touchTarget))
+                }
             }
-            Spacer(Modifier.height(Dimens.touchTarget))
         }
     }
 }
+
+/**
+ * 正文里的一张图。没加载出来之前先按 4:3 占位，加载出来按真实宽高比铺满宽度；
+ * 比例记进 [ratios]（页面级），这一项滑出视口再滑回来时直接按真实比例排，不再先占位再跳一下。
+ * 加载失败就不占地方 —— 留一块永远不会有图的灰框只会让人以为还在加载。
+ */
+@Composable
+private fun ArticleImage(el: ContentElement.Image, ratios: MutableMap<String, Float>) {
+    val ratio = ratios[el.resourceId]
+    if (ratio == FAILED_IMAGE) return
+    AsyncImage(
+        model = el.resourceId,
+        contentDescription = el.alt,
+        contentScale = ContentScale.FillWidth,
+        onSuccess = { s ->
+            val size = s.painter.intrinsicSize
+            if (size.isSpecified && size.width > 0f && size.height > 0f) {
+                ratios[el.resourceId] = size.width / size.height
+            }
+        },
+        onError = { ratios[el.resourceId] = FAILED_IMAGE },
+        modifier = Modifier
+            .padding(vertical = Dimens.gapS)
+            .fillMaxWidth()
+            .aspectRatio(ratio ?: PLACEHOLDER_RATIO)
+            .clip(MaterialTheme.shapes.small)
+            .then(
+                if (ratio == null) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                else Modifier
+            ),
+    )
+}
+
+private const val PLACEHOLDER_RATIO = 4f / 3f
+
+/** [ArticleImage] 的比例表里「这张加载失败」的标记 */
+private const val FAILED_IMAGE = -1f

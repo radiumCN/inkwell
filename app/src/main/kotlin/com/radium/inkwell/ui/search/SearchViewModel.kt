@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.search
 
 import android.util.Log
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
@@ -299,7 +300,19 @@ class SearchViewModel(
         viewModelScope.launch { appPrefs.clearSearchHistory() }
     }
 
+    /**
+     * 输入框的实时内容，**Compose 状态、同步写**。
+     *
+     * 从前输入框的值读的是 StateFlow（[SearchUiState.query]）：打一个字 → 写 StateFlow → 下一帧
+     * collectAsState 才把新值交回输入框。输入法的组字（拼音候选）跟这一帧的延迟赛跑，打快了会被
+     * 旧值顶回去：候选被重置、丢字、光标跳。Compose 要求输入框的值在 onValueChange 里**同步**更新。
+     * [SearchUiState.query] 仍跟着写一份，VM 里别处照旧读它。
+     */
+    private val queryState = mutableStateOf("")
+    val query: String get() = queryState.value
+
     fun setQuery(q: String) {
+        queryState.value = q
         _state.value = _state.value.copy(query = q)
     }
 
