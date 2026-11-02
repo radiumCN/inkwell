@@ -601,6 +601,11 @@ fun BookshelfScreen(
                     val motionOn = animationsEnabled()
                     // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
                     val motion = MaterialTheme.motionScheme
+                    // 多选时收起卡片：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上。
+                    // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
+                    // 卡片收起（多选）时它回到网格里，照样能选
+                    val hero = continueReading?.takeIf { !selectionMode }
+                    val shelfItems = if (hero == null) books else books.filter { it.id != hero.book.id }
                     when {
                         // 当前分组下没有可见的书（未分组也算一个分组）。筛选条留在上面，空态只占内容区。
                         // 隐藏区未展开时被藏起来的书也不算「有」，提示文案里同样一个字不提隐藏。
@@ -624,8 +629,6 @@ fun BookshelfScreen(
                             horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
                             verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                         ) {
-                            // 多选时收起：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上
-                            val hero = continueReading?.takeIf { !selectionMode }
                             if (hero != null) {
                                 item(
                                     key = CONTINUE_READING_KEY,
@@ -650,7 +653,7 @@ fun BookshelfScreen(
                                     )
                                 }
                             }
-                            items(books, key = { it.id }) { book ->
+                            items(shelfItems, key = { it.id }) { book ->
                                 BookCard(
                                     book = book,
                                     selected = book.id in selected,
@@ -693,7 +696,6 @@ fun BookshelfScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                         ) {
-                            val hero = continueReading?.takeIf { !selectionMode }
                             if (hero != null) {
                                 item(key = CONTINUE_READING_KEY, contentType = CONTINUE_READING_KEY) {
                                     ContinueReadingCard(
@@ -717,7 +719,7 @@ fun BookshelfScreen(
                                     )
                                 }
                             }
-                            items(books, key = { it.id }) { book ->
+                            items(shelfItems, key = { it.id }) { book ->
                                 BookShelfListRow(
                                     book = book,
                                     selected = book.id in selected,

@@ -14,6 +14,12 @@ internal fun BookEntity.readingProgress(): Float? {
     return ((readChapterIndex + 1).toFloat() / totalChapters).coerceIn(0f, 1f)
 }
 
+/**
+ * 进度的说法。几千章的网文读到第 8 章是 0.06%，取整成「0%」看着像一页没读 —— 读过就不是 0：不满 1% 说「<1%」
+ */
+internal fun formatProgressPercent(progress: Float): String =
+    if (progress > 0f && progress < 0.01f) "<1%" else "${(progress * 100).toInt()}%"
+
 /** 最近一次「在读」的时间：打开或翻动过。与书架排序（`MAX(readAt, openedAt)`）同一个口径 */
 internal fun BookEntity.lastActiveAt(): Long = maxOf(readAt, openedAt)
 

@@ -62,4 +62,13 @@ class ShelfProgressTest {
         assertEquals("9 月 1 日", formatRelativeTime(at(2026, 9, 1, 12), now, zone))
         assertEquals("2025 年 12 月", formatRelativeTime(at(2025, 12, 20, 12), now, zone))
     }
+
+    @Test
+    fun `几千章的书读了几章不说 0%`() {
+        // 截图里的那本：13358 章读到第 8 章
+        assertEquals("<1%", formatProgressPercent(book(chapter = 7, total = 13358).readingProgress()!!))
+        assertEquals("1%", formatProgressPercent(0.01f))
+        assertEquals("50%", formatProgressPercent(0.5f))
+        assertEquals("100%", formatProgressPercent(1f))
+    }
 }
