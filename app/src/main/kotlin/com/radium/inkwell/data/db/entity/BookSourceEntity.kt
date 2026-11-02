@@ -1,9 +1,38 @@
 package com.radium.inkwell.data.db.entity
 
 import androidx.room3.Entity
+import androidx.room3.Index
 import androidx.room3.PrimaryKey
 
-@Entity(tableName = "book_source")
+/**
+ * 两条覆盖索引，让书源列表与「启用源元数据」两个热查询**完全不碰表本身**。
+ *
+ * [json] 是每行几 KB 到几十 KB 的大字段，排在中间：一行装不进一页，溢出到链式的溢出页上，
+ * 读它后面的列（updatedAt、groupName、校验结果……）就得顺着溢出页链走过去 —— 列表投影虽然没 SELECT json，
+ * 磁盘上照样把每个源的 JSON 读一遍。校验时每存一条结果，列表流就整表重查一次，几千个源一跑几十分钟，
+ * 就是几千遍「扫一遍全部 JSON」。索引里只有这些小列，按 sortOrder, name 排好，WHERE / ORDER BY 也一并走它。
+ *
+ * 列顺序要与 [InkwellDb.MIGRATION_18_19] 里建的完全一致：Room 开库时按 PRAGMA 逐项比对，对不上就拒绝开库。
+ */
+@Entity(
+    tableName = "book_source",
+    indices = [
+        Index(
+            value = [
+                "deleted", "sortOrder", "name", "id", "enabled", "updatedAt", "groupName",
+                "checkStatus", "checkMessage", "respondTime", "checkedAt",
+            ],
+            name = "idx_book_source_list",
+        ),
+        Index(
+            value = [
+                "enabled", "deleted", "sortOrder", "name", "id", "updatedAt",
+                "checkStatus", "respondTime", "searchMs", "searchFails",
+            ],
+            name = "idx_book_source_enabled",
+        ),
+    ],
+)
 data class BookSourceEntity(
     @PrimaryKey val id: String,
     val name: String,

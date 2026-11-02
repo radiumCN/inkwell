@@ -27,7 +27,7 @@ import com.radium.inkwell.data.db.entity.RssSourceEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -190,6 +190,20 @@ abstract class InkwellDb : RoomDatabase() {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("ALTER TABLE book_source ADD COLUMN searchMs INTEGER NOT NULL DEFAULT -1")
                 connection.execSQL("ALTER TABLE book_source ADD COLUMN searchFails INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * 书源表的两条覆盖索引（理由见 [com.radium.inkwell.data.db.entity.BookSourceEntity]）。
+         * 只建索引，不动任何一行数据。
+         *
+         * 语句**逐字照抄** Room 按实体生成的建表代码：开库时 Room 拿 PRAGMA 读出的索引（名字、列、顺序）
+         * 跟实体上声明的逐项比，差一个字就拒绝开库 —— 那是每个老用户一启动就崩。改实体上的索引必须同步改这里。
+         */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("CREATE INDEX IF NOT EXISTS `idx_book_source_list` ON `book_source` (`deleted`, `sortOrder`, `name`, `id`, `enabled`, `updatedAt`, `groupName`, `checkStatus`, `checkMessage`, `respondTime`, `checkedAt`)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS `idx_book_source_enabled` ON `book_source` (`enabled`, `deleted`, `sortOrder`, `name`, `id`, `updatedAt`, `checkStatus`, `respondTime`, `searchMs`, `searchFails`)")
             }
         }
 
