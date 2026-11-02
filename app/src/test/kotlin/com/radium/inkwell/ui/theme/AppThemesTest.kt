@@ -84,4 +84,29 @@ class AppThemesTest {
         assertEquals(Color(0xFF006064), scheme.primary)
         assertEquals(Color(0xFFF5FDFD), scheme.background)
     }
+
+    @Test
+    fun `跟随壁纸按日夜各取系统给的那套`() {
+        val wallpaperLight = AppThemes.schemeFrom(Color(0xFF00897B), Color(0xFFFAFAFA), dark = false)
+        val wallpaperDark = AppThemes.schemeFrom(Color(0xFF80CBC4), Color(0xFF101414), dark = true)
+        val config = ThemeConfig(lightPreset = AppThemes.DYNAMIC, darkPreset = AppThemes.DYNAMIC)
+        val provider = { dark: Boolean -> if (dark) wallpaperDark else wallpaperLight }
+        assertEquals(wallpaperLight to false, AppThemes.resolve(config, systemDark = false, dynamicScheme = provider))
+        assertEquals(wallpaperDark to true, AppThemes.resolve(config, systemDark = true, dynamicScheme = provider))
+    }
+
+    @Test
+    fun `只有一个槽选了壁纸时另一个槽照常用预设`() {
+        val config = ThemeConfig(lightPreset = AppThemes.DYNAMIC, darkPreset = AppThemes.DARK_BLACK)
+        val wallpaper = AppThemes.schemeFrom(Color(0xFF00897B), Color(0xFFFAFAFA), dark = false)
+        val (dark, _) = AppThemes.resolve(config, systemDark = true) { wallpaper }
+        assertEquals(AppThemes.darkPresets.first { it.id == AppThemes.DARK_BLACK }.scheme, dark)
+    }
+
+    @Test
+    fun `拿不到壁纸配色时回落第一个预设，不崩`() {
+        val config = ThemeConfig(lightPreset = AppThemes.DYNAMIC)
+        val (scheme, _) = AppThemes.resolve(config, systemDark = false)
+        assertEquals(AppThemes.lightPresets.first().scheme, scheme)
+    }
 }

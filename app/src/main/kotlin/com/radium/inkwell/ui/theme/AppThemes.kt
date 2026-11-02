@@ -46,6 +46,12 @@ object AppThemes {
     const val DARK_MOSS = "moss"
     const val DARK_PLUM = "plum"
     const val CUSTOM = "custom"
+    /**
+     * 跟随壁纸（Material You 动态取色）。日/夜两个槽都能选它，配色由系统按壁纸给 —— 不经 [schemeFrom]，
+     * 系统那套本来就有全部 surfaceContainer* 槽位。它要 Context，所以由调用方经 [resolve] 的参数传进来，
+     * 这个对象仍是纯函数、能 JVM 单测。
+     */
+    const val DYNAMIC = "dynamic"
 
     val lightPresets: List<ThemePreset> by lazy {
         listOf(
@@ -111,13 +117,24 @@ object AppThemes {
         )
     }
 
-    /** 解析当前应生效的配色；返回 (scheme, 是否深色) */
-    fun resolve(config: ThemeConfig, systemDark: Boolean): Pair<ColorScheme, Boolean> {
+    /**
+     * 解析当前应生效的配色；返回 (scheme, 是否深色)。
+     *
+     * @param dynamicScheme 按日夜给出系统壁纸配色。null（单测、拿不到 Context 的地方）时「跟随壁纸」
+     *   回落到第一个预设 —— 与读到未知预设 id（更新版本备份里的新预设）同一种退路
+     */
+    fun resolve(
+        config: ThemeConfig,
+        systemDark: Boolean,
+        dynamicScheme: ((dark: Boolean) -> ColorScheme)? = null,
+    ): Pair<ColorScheme, Boolean> {
         val dark = when (config.mode) {
             ThemeMode.SYSTEM -> systemDark
             ThemeMode.LIGHT -> false
             ThemeMode.DARK -> true
         }
+        val preset = if (dark) config.darkPreset else config.lightPreset
+        if (preset == DYNAMIC && dynamicScheme != null) return dynamicScheme(dark) to dark
         val scheme = if (dark) {
             if (config.darkPreset == CUSTOM) {
                 schemeFrom(Color(config.customDarkSeed), Color(config.customDarkBg), dark = true)

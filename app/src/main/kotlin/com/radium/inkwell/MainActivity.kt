@@ -12,14 +12,13 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.nav.InkwellNavDisplay
-import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.InkwellTheme
+import com.radium.inkwell.ui.theme.rememberResolvedScheme
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.util.KeyEventBus
 import androidx.lifecycle.lifecycleScope
@@ -55,9 +54,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             // 用户强制了日/夜或换了纯黑等预设时，只靠 values-night 的默认暖黑盖不住；
             // 转场缝隙若再落到 XML 里写死的白底，深色模式就会闪一条白边。
             // （阅读页另有沉浸逻辑自行隐藏系统栏，不受这里影响。）
-            val (scheme, dark) = remember(themeConfig, systemDark) {
-                AppThemes.resolve(themeConfig, systemDark)
-            }
+            val (scheme, dark) = rememberResolvedScheme(themeConfig, systemDark)
             val view = LocalView.current
             SideEffect {
                 window.setBackgroundDrawable(ColorDrawable(scheme.background.toArgb()))

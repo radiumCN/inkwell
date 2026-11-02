@@ -23,6 +23,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
@@ -69,6 +72,11 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         scope.launch { prefs.setThemeConfig(new) }
     }
 
+    // 「跟随壁纸」色块按系统此刻给的那套画：底色 + 强调色，跟别的预设同一种预览
+    val context = LocalContext.current
+    val wallpaperLight = remember(context) { dynamicLightColorScheme(context) }
+    val wallpaperDark = remember(context) { dynamicDarkColorScheme(context) }
+
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     Scaffold(
@@ -93,6 +101,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             SectionLabel("日间主题")
             PresetRow(
                 presets = AppThemes.lightPresets,
+                wallpaper = wallpaperLight.background to wallpaperLight.primary,
                 selectedId = config.lightPreset,
                 customAccent = Color(config.customLightSeed),
                 customBg = Color(config.customLightBg),
@@ -117,6 +126,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             SectionLabel("夜间主题")
             PresetRow(
                 presets = AppThemes.darkPresets,
+                wallpaper = wallpaperDark.background to wallpaperDark.primary,
                 selectedId = config.darkPreset,
                 customAccent = Color(config.customDarkSeed),
                 customBg = Color(config.customDarkBg),
@@ -149,20 +159,32 @@ private fun SectionLabel(text: String) {
     SectionHeader(text, horizontalInset = false)
 }
 
-/** 预设色板行 + 「自定义」入口 */
+/**
+ * 「跟随壁纸」+ 预设色板行 + 「自定义」入口。
+ *
+ * 壁纸放在最前：它是「不用挑」的那个选项，跟系统别的 App 一个颜色；挑不中意再往后看预设、最后自己调。
+ */
 @Composable
 private fun PresetRow(
     presets: List<ThemePreset>,
+    wallpaper: Pair<Color, Color>,
     selectedId: String,
     customAccent: Color,
     customBg: Color,
     onSelect: (String) -> Unit,
 ) {
-    // 横向可滚：5 个预设 + 自定义 = 6 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
+    // 横向可滚：壁纸 + 5 个预设 + 自定义 = 7 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
     Row(
         Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
+        ThemeSwatch(
+            bg = wallpaper.first,
+            accent = wallpaper.second,
+            label = "跟随壁纸",
+            selected = selectedId == AppThemes.DYNAMIC,
+            onClick = { onSelect(AppThemes.DYNAMIC) },
+        )
         presets.forEach { preset ->
             ThemeSwatch(
                 bg = preset.previewBg,

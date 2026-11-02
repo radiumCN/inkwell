@@ -57,6 +57,8 @@ import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.data.repo.OfflineDownload
 import com.radium.inkwell.data.repo.OfflineRange
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -88,143 +90,152 @@ fun BookDetailScreen(
     val motionOn = animationsEnabled()
 
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
-        modifier = Modifier.topBarScroll(topBarScroll),
-        topBar = {
-            // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画
-            AppTopBar("书籍详情", topBarScroll, onBack = onBack.takeIf { showBack }) {
-                if (book?.type == BookType.NET) {
-                    AppIconButton(
-                        onClick = { viewModel.refresh() },
-                        enabled = !refreshing,
-                        // 刷新中图标换成转圈，名字跟着它走：转圈本身没有名字
-                        modifier = if (refreshing) Modifier.semantics { contentDescription = "正在刷新目录" } else Modifier,
-                    ) {
-                        if (refreshing) {
-                            AppLoadingIndicator(size = Dimens.buttonSpinner)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
-                        }
-                    }
-                }
-            }
-        },
-        snackbarHost = { AppSnackbarHost(snackbar) },
-    ) { padding ->
-        val b = book
-        if (b == null) {
-            if (state.loaded) {
-                EmptyState(
-                    icon = Icons.Default.Warning,
-                    title = "书籍不存在",
-                    hint = "它可能已被删除",
-                    actionLabel = "返回",
-                    onAction = onBack,
-                    modifier = Modifier.padding(padding),
-                )
-            } else {
-                LoadingState(Modifier.padding(padding))
-            }
-            return@Scaffold
-        }
-
-        // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
-        val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
-        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState) {
-            item {
-                Header(
-                    book = b,
-                    chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
-                    cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
-                    download = download,
-                    onRead = onRead,
-                    onOfflineCache = { showOfflinePicker = true },
-                    onCancelDownload = viewModel::cancelDownload,
-                )
-            }
-            item {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = Dimens.rowHorizontal, end = Dimens.gapS),
-                    verticalAlignment = Alignment.CenterVertically,
+    // 整页换上封面的强调色（只换 primary 一族，底色不动），见 CoverTintedTheme
+    CoverTintedTheme(rememberCoverSeed(book?.coverPath)) {
+        Scaffold(
+            modifier = Modifier.topBarScroll(topBarScroll),
+            topBar = {
+                // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画。
+                // 顶栏与头部渐变的起点同色（primaryContainer），两者之间不留一道色缝
+                AppTopBar(
+                    "书籍详情",
+                    topBarScroll,
+                    onBack = onBack.takeIf { showBack },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
                 ) {
-                    Text(
-                        // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
-                        "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
-                        Modifier.weight(1f).padding(vertical = Dimens.gapS),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
-                    // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
-                    if (currentPos >= 0) {
-                        AppTextButton(onClick = {
-                            val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
-                            scope.launch {
-                                if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                    if (book?.type == BookType.NET) {
+                        AppIconButton(
+                            onClick = { viewModel.refresh() },
+                            enabled = !refreshing,
+                            // 刷新中图标换成转圈，名字跟着它走：转圈本身没有名字
+                            modifier = if (refreshing) Modifier.semantics { contentDescription = "正在刷新目录" } else Modifier,
+                        ) {
+                            if (refreshing) {
+                                AppLoadingIndicator(size = Dimens.buttonSpinner)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
                             }
-                        }) {
-                            Text("定位当前章")
                         }
                     }
                 }
-                HorizontalDivider()
+            },
+            snackbarHost = { AppSnackbarHost(snackbar) },
+        ) { padding ->
+            val b = book
+            if (b == null) {
+                if (state.loaded) {
+                    EmptyState(
+                        icon = Icons.Default.Warning,
+                        title = "书籍不存在",
+                        hint = "它可能已被删除",
+                        actionLabel = "返回",
+                        onAction = onBack,
+                        modifier = Modifier.padding(padding),
+                    )
+                } else {
+                    LoadingState(Modifier.padding(padding))
+                }
+                return@Scaffold
             }
-            when {
-                // 还在读章节表：留白，别先画「没有章节」再换成目录
-                !state.chaptersLoaded -> Unit
-                refreshing && chapters.isEmpty() -> {
-                    item {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(Dimens.gapXXL),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            AppLoadingIndicator(size = Dimens.iconMd)
-                            Spacer(Modifier.height(Dimens.gapM))
-                            Text(
-                                "正在获取目录…",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+
+            // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
+            val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
+            LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState) {
+                item {
+                    Header(
+                        book = b,
+                        chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
+                        cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
+                        download = download,
+                        onRead = onRead,
+                        onOfflineCache = { showOfflinePicker = true },
+                        onCancelDownload = viewModel::cancelDownload,
+                    )
+                }
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = Dimens.rowHorizontal, end = Dimens.gapS),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
+                            "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
+                            Modifier.weight(1f).padding(vertical = Dimens.gapS),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
+                        // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
+                        if (currentPos >= 0) {
+                            AppTextButton(onClick = {
+                                val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
+                                scope.launch {
+                                    if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                                }
+                            }) {
+                                Text("定位当前章")
+                            }
                         }
                     }
+                    HorizontalDivider()
                 }
-                chapters.isEmpty() -> {
-                    item {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(Dimens.gapXXL),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                if (b.type == BookType.NET) "目录还没加载" else "这本书没有章节",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (b.type == BookType.NET) {
-                                AppTextButton(
-                                    onClick = { viewModel.refresh() },
-                                    enabled = !refreshing,
-                                ) {
-                                    Text("重新获取")
+                when {
+                    // 还在读章节表：留白，别先画「没有章节」再换成目录
+                    !state.chaptersLoaded -> Unit
+                    refreshing && chapters.isEmpty() -> {
+                        item {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(Dimens.gapXXL),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                AppLoadingIndicator(size = Dimens.iconMd)
+                                Spacer(Modifier.height(Dimens.gapM))
+                                Text(
+                                    "正在获取目录…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    chapters.isEmpty() -> {
+                        item {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(Dimens.gapXXL),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    if (b.type == BookType.NET) "目录还没加载" else "这本书没有章节",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (b.type == BookType.NET) {
+                                    AppTextButton(
+                                        onClick = { viewModel.refresh() },
+                                        enabled = !refreshing,
+                                    ) {
+                                        Text("重新获取")
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                else -> {
-                    items(chapters, key = { it.index }) { chapter ->
-                        val current = chapter.index == b.readChapterIndex && b.readAt > 0
-                        ChapterListItem(
-                            title = chapter.title,
-                            selected = current,
-                            onClick = { viewModel.openChapter(chapter.index) },
-                        )
+                    else -> {
+                        items(chapters, key = { it.index }) { chapter ->
+                            val current = chapter.index == b.readChapterIndex && b.readAt > 0
+                            ChapterListItem(
+                                title = chapter.title,
+                                selected = current,
+                                onClick = { viewModel.openChapter(chapter.index) },
+                            )
+                        }
                     }
                 }
+                item { Spacer(Modifier.height(Dimens.gapXL)) }
             }
-            item { Spacer(Modifier.height(Dimens.gapXL)) }
         }
     }
 
@@ -258,6 +269,10 @@ private fun offlineRangeHint(range: OfflineRange): String = when (range) {
     OfflineRange.WHOLE_BOOK -> "从第一章到最后一章。章多的书要好一会儿"
 }
 
+/**
+ * 头部：封面、书名、阅读与缓存按钮、简介。底下铺一道从 primaryContainer 到页面底色的竖向渐变 ——
+ * 封面色（或 App 强调色）从顶栏流下来，在目录开始的地方化进纸面，详情页就不再是一张白纸上贴一张封面。
+ */
 @Composable
 private fun Header(
     book: BookEntity,
@@ -268,9 +283,11 @@ private fun Header(
     onOfflineCache: () -> Unit,
     onCancelDownload: () -> Unit,
 ) {
-
+    val scheme = MaterialTheme.colorScheme
     Column(
-        Modifier.padding(Dimens.screenPadding),
+        Modifier
+            .background(Brush.verticalGradient(listOf(scheme.primaryContainer, scheme.background)))
+            .padding(Dimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Row {

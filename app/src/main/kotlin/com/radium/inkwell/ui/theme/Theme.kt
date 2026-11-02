@@ -5,7 +5,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
@@ -67,14 +71,30 @@ private object InstantMotionScheme : MotionScheme {
  * 缝隙里没有别的 Compose 节点可画；若不铺底色，就会透到 Activity 的 windowBackground。
  * 以前那是纯白，深色主题下滑一下整条发白。
  */
+/**
+ * 当前生效的配色（含「跟随壁纸」）。MainActivity 拿它设窗体底色与系统栏明暗、[InkwellTheme] 拿它铺整树 ——
+ * 两处必须是同一个结果，否则选了壁纸配色后窗体底色还是预设的，转场缝隙里露出另一种颜色。
+ *
+ * 自定义主题的整套配色是现推导出来的（几十个槽位的颜色混合）：remember 住，别每次重组都推一遍。
+ * 换壁纸时系统会重建 Activity，这里跟着重新取，不必自己监听。
+ */
+@Composable
+fun rememberResolvedScheme(config: ThemeConfig, systemDark: Boolean): Pair<ColorScheme, Boolean> {
+    val context = LocalContext.current
+    return remember(config, systemDark, context) {
+        AppThemes.resolve(config, systemDark) { dark ->
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+    }
+}
+
 @Composable
 fun InkwellTheme(
     config: ThemeConfig = ThemeConfig(),
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    // 自定义主题的整套配色是现推导出来的（几十个槽位的颜色混合）：别每次重组都推一遍
-    val scheme = remember(config, systemDark) { AppThemes.resolve(config, systemDark).first }
+    val scheme = rememberResolvedScheme(config, systemDark).first
     val animate = animationsEnabled()
     // remember 住实例：主题走的是 staticCompositionLocalOf，换实例会让全树重组。
     // 也别按 animate 拆成两个 MaterialExpressiveTheme 调用点 —— 那样用户在系统设置里切
