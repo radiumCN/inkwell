@@ -53,6 +53,8 @@ class AppPrefs(private val context: Context) {
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
+        /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
+        val ONBOARDED = booleanPreferencesKey("onboarded")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
@@ -189,6 +191,21 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setTextSelectionEnabled(on: Boolean) {
         editTouched { it[Keys.TEXT_SELECTION] = on }
+    }
+
+    /**
+     * 首次启动的欢迎页（书架空着时代替空态出现）走过了没有。
+     *
+     * 书架上一旦有过书就算走过（见 BookshelfViewModel）：老用户升级上来不会看到它，
+     * 把书全藏进隐藏区的人也不会 —— 隐藏区收着时书架必须和真正的空书架一模一样，
+     * 欢迎页只给从没用过的那种空。
+     */
+    val onboardedState: StateFlow<Boolean?> = context.appDataStore.data
+        .map { it[Keys.ONBOARDED] ?: false }
+        .warm()
+
+    suspend fun setOnboarded() {
+        context.appDataStore.edit { it[Keys.ONBOARDED] = true }
     }
 
     /** 书架顶栏是否显示「发现」入口。不看发现页的人，那个图标只是碍事 */

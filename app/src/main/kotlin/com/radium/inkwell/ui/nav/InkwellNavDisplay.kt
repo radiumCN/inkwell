@@ -201,6 +201,8 @@ fun InkwellNavDisplay() {
                     onOpenSearch = { nav.go(SearchRoute()) },
                     onOpenExplore = { nav.go(ExploreRoute) },
                     onOpenSettings = { nav.go(SettingsRoute) },
+                    onOpenWebDav = { nav.go(WebDavSettingsRoute) },
+                    onOpenDisclaimer = { nav.go(DisclaimerRoute) },
                     // 只管宽屏：右栏就在收好的书架旁边，还摊着隐藏书的详情一眼就露了。
                     // 窄屏的详情是整页盖在书架上的，和从隐藏区点开的阅读页一样，读完自己回来
                     onHiddenCollapsed = { ids -> if (dualPane) nav.closeBookDetail(ids) },

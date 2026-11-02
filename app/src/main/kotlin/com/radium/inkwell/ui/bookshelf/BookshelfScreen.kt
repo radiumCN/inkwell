@@ -166,6 +166,9 @@ fun BookshelfScreen(
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
     onOpenSettings: () -> Unit,
+    /** 欢迎页的「从 WebDAV 恢复」与「用户协议」 */
+    onOpenWebDav: () -> Unit,
+    onOpenDisclaimer: () -> Unit,
     /**
      * 隐藏区收起了（✕、长按收摊、切后台自动收起都算），带上此刻隐藏的书 id。
      * 宽屏右栏若正开着其中一本的详情，由导航层关掉 —— 书架这一栏管不到旁边那一栏。
@@ -177,6 +180,7 @@ fun BookshelfScreen(
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
     val continueReading by viewModel.continueReading.collectAsStateWithLifecycle()
+    val onboarded by viewModel.onboarded.collectAsStateWithLifecycle()
     // 阅读页退干净了再放开顺序（见 BookshelfViewModel.frozenOrder）：退出动画是缩回这本书原来的位置，
     // 放早了它已经跑到第一格。返回栈在转场**开始**时就去掉了阅读页，这里得等过整段转场：
     // 普通返回是 READER_EXIT_MS 的 tween；侧滑返回跟手 seek，松手后剩下的那段按 PREDICTIVE_BACK_MS 的
@@ -499,7 +503,19 @@ fun BookshelfScreen(
         // 必须和真正的空书架一模一样（连「导入本地书」按钮也在）：别人看不出区别，而你知道长按标题能回来。
         // 从前是两段各写一份，全隐藏那份漏了导入按钮，一眼就和真空架对不上 —— 所以合成一个分支。
         val allHidden = allBooks.isNotEmpty() && hiddenCount == allBooks.size && !showHidden
-        if (allBooks.isEmpty() || allHidden) {
+        // 欢迎页只给真正空、且从没用过的书架（全藏起来的不算，见 WelcomeState）。
+        // 标记还没读到（null）时两样都先不画：别先闪一下普通空态再换成欢迎页
+        if (allBooks.isEmpty() && onboarded != true) {
+            if (onboarded == false) {
+                WelcomeState(
+                    onImport = ::launchImport,
+                    onRestore = onOpenWebDav,
+                    onSkip = viewModel::finishOnboarding,
+                    onOpenDisclaimer = onOpenDisclaimer,
+                    modifier = Modifier.padding(padding),
+                )
+            }
+        } else if (allBooks.isEmpty() || allHidden) {
             EmptyState(
                 icon = Icons.Default.AutoStories,
                 title = "书架空空如也",

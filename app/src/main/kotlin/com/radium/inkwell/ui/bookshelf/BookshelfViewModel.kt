@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import com.radium.inkwell.data.db.entity.BookType
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -233,6 +235,24 @@ class BookshelfViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val messages = MessageBus()
+
+    // ---- 首次启动 ----
+
+    /** null = 还没读到；见 AppPrefs.onboardedState */
+    val onboarded: StateFlow<Boolean?> = appPrefs.onboardedState
+
+    fun finishOnboarding() {
+        viewModelScope.launch { appPrefs.setOnboarded() }
+    }
+
+    init {
+        // 书架上一出现书（导入了、WebDAV 恢复下来了、老用户升级上来本来就有）就算走过欢迎页，以后不再出现
+        viewModelScope.launch {
+            if (appPrefs.onboardedState.filterNotNull().first()) return@launch
+            shelf.filterNotNull().first { it.isNotEmpty() }
+            appPrefs.setOnboarded()
+        }
+    }
 
     // ---- 分组 ----
 
