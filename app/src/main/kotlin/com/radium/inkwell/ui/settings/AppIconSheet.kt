@@ -19,6 +19,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +29,7 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.util.AppIcon
+import kotlinx.coroutines.launch
 
 /**
  * 选桌面图标。
@@ -42,15 +44,17 @@ fun AppIconSheet(
     onSelect: (AppIcon) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // 只要「收起 / 全展开」两态，不要中间的半展开 —— 图标一共几个，没有分段浏览的必要。
+    // 从前的写法是 rememberModalBottomSheetState(skipPartiallyExpanded = true)，
+    // material3 1.5.0-alpha 把它弃用了：改成显式列出允许的状态集合。
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    val scope = rememberCoroutineScope()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        // 只要「收起 / 全展开」两态，不要中间的半展开 —— 图标一共几个，没有分段浏览的必要。
-        // 从前的写法是 rememberModalBottomSheetState(skipPartiallyExpanded = true)，
-        // material3 1.5.0-alpha 把它弃用了：改成显式列出允许的状态集合。
-        sheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
-            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-        ),
+        sheetState = sheetState,
         // Sheet 用 surface；选项行读 surfaceContainerLow。默认都走 Low 时卡片糊进底色。
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
@@ -82,7 +86,13 @@ fun AppIconSheet(
                     IconRow(
                         icon = icon,
                         selected = icon == selected,
-                        onClick = { onSelect(icon) },
+                        // 先收起再回调：调用方一回调就把面板摘掉，退场动画会被掐断（同 OptionPickerSheet）
+                        onClick = {
+                            scope.launch {
+                                sheetState.hide()
+                                onSelect(icon)
+                            }
+                        },
                     )
                 }
             }

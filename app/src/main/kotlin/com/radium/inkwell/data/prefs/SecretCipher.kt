@@ -86,8 +86,9 @@ class KeystoreSecretCipher(
      */
     @Synchronized
     private fun key(): SecretKey {
+        cachedKey?.let { return it }
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (store.getEntry(alias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        (store.getEntry(alias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey.also { k -> cachedKey = k } }
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
         gen.init(
             KeyGenParameterSpec.Builder(
@@ -101,8 +102,14 @@ class KeystoreSecretCipher(
                 // 要求解锁会让自动同步在锁屏状态下直接失败
                 .build()
         )
-        return gen.generateKey()
+        return gen.generateKey().also { cachedKey = it }
     }
+
+    /**
+     * 取到过的密钥句柄。KeyStore.load / getEntry 都是跨进程调用：WebDAV 配置流每发射一次要解三个密文，
+     * 从前就是三趟 load + getEntry，还有一部分落在主线程上。句柄本身不含密钥材料，留着它不比每次现取更不安全。
+     */
+    private var cachedKey: SecretKey? = null
 
     private fun ByteArray.b64(): String = Base64.encodeToString(this, Base64.NO_WRAP)
     private fun String.unB64(): ByteArray = Base64.decode(this, Base64.NO_WRAP)

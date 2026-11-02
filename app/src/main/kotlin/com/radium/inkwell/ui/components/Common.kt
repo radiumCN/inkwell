@@ -1,9 +1,12 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +26,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -38,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
+import coil3.decode.DataSource
 import coil3.request.ImageRequest
 import coil3.size.Precision
 import com.radium.inkwell.core.util.htmlToPlainText
@@ -171,6 +178,10 @@ fun DeterminateProgressBar(
  * 落进 AsyncImage 的失败分支后就是一整块空白灰方 —— 连书名都没有，用户根本认不出是哪本书。
  * 垫在底层就不必去猜 Coil 的加载状态：成功即遮住，失败即透出。
  *
+ * 新解出来的图淡入盖上（effects 令牌，系统「移除动画」时直接出），而不是一帧之内从默认封面跳成图；
+ * 内存缓存命中的（滑回来的那些）不淡，直接出。不用 Coil 自带的 crossfade：它自己计时，
+ * 不理系统的动画开关，而且一成功就该撤掉的默认封面会在淡入期间先消失，露出底下的灰方。
+ *
  * @param contentDescription 读屏念的名字。书名就印在旁边（列表行标题、书架卡片下的书名、详情页抬头）
  *   时传 null —— 封面整块不进读屏，否则同一个书名连念两遍（默认封面上那行字还会再念一遍截断的）。
  *   默认仍是书名，给「只有一张封面、旁边没字」的地方用（进书 splash）。
@@ -189,19 +200,32 @@ fun BookCover(
         // 不加 tonalElevation：底色不是 surface 时它本就不起作用，这层底色也总被默认封面整块盖住
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
             var loaded by remember(coverModel) { mutableStateOf(false) }
-            if (!loaded) DefaultCover(title, placeholderChars)
+            // 这次成功是不是内存缓存命中：命中就不淡入
+            var instant by remember(coverModel) { mutableStateOf(false) }
+            val fade = remember(coverModel) { Animatable(0f) }
+            val fadeSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+            LaunchedEffect(fade, loaded, instant) {
+                when {
+                    !loaded -> fade.snapTo(0f)
+                    instant -> fade.snapTo(1f)
+                    else -> fade.animateTo(1f, fadeSpec)
+                }
+            }
+            // 图完全不透明了才撤默认封面；derivedStateOf 让淡入的每一帧只走图层、不重组
+            val covered by remember(coverModel) {
+                derivedStateOf { loaded && (instant || fade.value >= 1f) }
+            }
+            if (!covered) DefaultCover(title, placeholderChars)
             if (coverModel != null) {
-                // 按显示尺寸解码：列表封面 48×64dp，不能把 1000px 原图解进内存。
-                // 无界约束时退回 256 —— 比 ORIGINAL 小得多，也够 splash/详情用。
-                val w = if (constraints.hasBoundedWidth) constraints.maxWidth.coerceAtLeast(1) else 256
-                val h = if (constraints.hasBoundedHeight) constraints.maxHeight.coerceAtLeast(1) else 256
                 val context = LocalPlatformContext.current
-                val request = remember(coverModel, w, h, context) {
+                val request = remember(coverModel, context) {
                     ImageRequest.Builder(context)
                         .data(coverModel)
-                        .size(w, h)
+                        // 不设 size：AsyncImage 按布局约束定解码尺寸 —— 列表封面 48×64dp，不会把 1000px 原图解进内存。
+                        // 从前为了拿约束在外面套了 BoxWithConstraints，每个列表项都多一次子组合，书架一滑就是一屏。
+                        // 各调用点的尺寸都是有界的（定宽高，或网格格子里 fillMaxSize）；无界时 Coil 会按原图解，新调用点别给无界约束。
                         .precision(Precision.INEXACT)
                         .build()
                 }
@@ -209,8 +233,14 @@ fun BookCover(
                     model = request,
                     contentDescription = contentDescription,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    onSuccess = { loaded = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = if (instant) 1f else fade.value },
+                    onSuccess = { s ->
+                        instant = s.result.dataSource == DataSource.MEMORY_CACHE ||
+                            s.result.dataSource == DataSource.MEMORY
+                        loaded = true
+                    },
                     onError = { loaded = false },
                 )
             }
@@ -358,3 +388,32 @@ fun BookListRow(
         },
     )
 }
+
+/**
+ * 书籍简介：默认收起到 [INTRO_COLLAPSED_LINES] 行，**放不下才**给「展开 / 收起」。
+ * 详情页与预览页共用。从前两页各手写一份，按钮常驻 —— 简介本来就不到四行时，点了什么都不变。
+ */
+@Composable
+fun BookIntro(intro: String, modifier: Modifier = Modifier) {
+    var expanded by rememberSaveable(intro) { mutableStateOf(false) }
+    // 收起状态下排版有没有被截：展开后就看不出来了，所以只在收起时更新
+    var overflows by remember(intro) { mutableStateOf(false) }
+    Column(modifier) {
+        Text("简介", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(Dimens.gapXS))
+        Text(
+            intro,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = if (expanded) Int.MAX_VALUE else INTRO_COLLAPSED_LINES,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
+        )
+        if (expanded || overflows) {
+            AppTextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "收起" else "展开")
+            }
+        }
+    }
+}
+
+private const val INTRO_COLLAPSED_LINES = 4

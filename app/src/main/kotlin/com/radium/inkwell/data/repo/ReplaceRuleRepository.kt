@@ -152,6 +152,9 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
 
     suspend fun getAll(): List<ReplaceRuleEntity> = dao.getAll()
 
+    /** 最近一次改动的时间（含墓碑），见 [ReplaceRuleDao.lastChangeAt] */
+    suspend fun lastChangeAt(): Long = dao.lastChangeAt()
+
     suspend fun upsertAll(rules: List<ReplaceRuleEntity>) {
         rules.forEach { dao.upsert(it) }
     }

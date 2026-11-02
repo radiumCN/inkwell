@@ -82,4 +82,8 @@ interface BookDao {
     /** 打开这本书 = 你已经知道它更新了，红点清零；顺带记下打开时间给书架排序 */
     @Query("UPDATE book SET newChapterCount = 0, openedAt = :now WHERE id = :id")
     suspend fun markOpened(id: String, now: Long)
+
+    /** 书架最近一次改动（元数据或进度）的时间；空表为 0。同步「两边都没动就跳过」的本地一侧（见 WebDavRepository.syncLocked） */
+    @Query("SELECT MAX(COALESCE(MAX(updatedAt), 0), COALESCE(MAX(readAt), 0)) FROM book")
+    suspend fun lastChangeAt(): Long
 }

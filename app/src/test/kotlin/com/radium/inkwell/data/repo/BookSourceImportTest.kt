@@ -5,11 +5,15 @@ import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.BookSourceListItem
+import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.data.db.entity.EnabledSourceMeta
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class BookSourceImportTest {
@@ -19,6 +23,7 @@ class BookSourceImportTest {
         val store = linkedMapOf<String, BookSourceEntity>()
         var upsertAllCalls = 0
         var singleUpsertCalls = 0
+        var getByIdCalls = 0
 
         private fun BookSourceEntity.toListItem() = BookSourceListItem(
             id = id, name = name, enabled = enabled, sortOrder = sortOrder,
@@ -29,9 +34,15 @@ class BookSourceImportTest {
 
         override fun observeAll(): Flow<List<BookSourceListItem>> =
             flowOf(store.values.filter { !it.deleted }.map { it.toListItem() })
-        override suspend fun getEnabledIds() =
-            store.values.filter { it.enabled && !it.deleted }.map { it.id }
-        override suspend fun getById(id: String) = store[id]
+        override suspend fun getEnabledMeta() =
+            store.values.filter { it.enabled && !it.deleted }.map {
+                EnabledSourceMeta(
+                    id = it.id, updatedAt = it.updatedAt, checkStatus = it.checkStatus,
+                    respondTime = it.respondTime, sortOrder = it.sortOrder,
+                    searchMs = it.searchMs, searchFails = it.searchFails,
+                )
+            }
+        override suspend fun getById(id: String) = store[id].also { getByIdCalls++ }
         override suspend fun upsert(source: BookSourceEntity) {
             singleUpsertCalls++; store[source.id] = source
         }
@@ -77,6 +88,7 @@ class BookSourceImportTest {
 
         override suspend fun minSortOrder() = store.values.minOfOrNull { it.sortOrder }
         override suspend fun maxSortOrder() = store.values.maxOfOrNull { it.sortOrder }
+        override suspend fun lastChangeAt() = store.values.maxOfOrNull { it.updatedAt } ?: 0L
     }
 
     private val legadoArray = """
@@ -333,5 +345,50 @@ class BookSourceImportTest {
         repo.deleteAll(listOf("srcA", "srcB"))
 
         assertEquals(listOf("srcC"), hits.store.map { it.sourceId })
+    }
+
+    /**
+     * 搜索、发现页、换源每次都要全部启用源的规则：updatedAt 没变就用解好的那份，不再逐条读库重解。
+     * 规则变了（updatedAt 跟着变）只重解那一条。
+     */
+    @Test
+    fun `启用源的规则按 updatedAt 缓存，变了的那条才重新解码`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+
+        val first = repo.getEnabledRules().associateBy { it.bookSourceUrl }
+        val reads = dao.getByIdCalls
+        val second = repo.getEnabledRules().associateBy { it.bookSourceUrl }
+        // 没有任何一行变过：不读库，拿到的就是同一批实例
+        assertEquals(reads, dao.getByIdCalls)
+        first.forEach { (id, rule) -> assertSame(rule, second[id]) }
+
+        val a = dao.store["https://a.com"]!!
+        val changed = legadoSource("站A改名", "https://a.com")
+        dao.store[a.id] = a.copy(
+            json = repo.parseRule(changed).getOrThrow().let(repo::encodeRule),
+            updatedAt = a.updatedAt + 1,
+        )
+        val third = repo.getEnabledRules().associateBy { it.bookSourceUrl }
+        assertEquals("站A改名", third["https://a.com"]!!.bookSourceName)
+        assertNotSame(first["https://a.com"], third["https://a.com"])
+        // 只有变了的那条读了库
+        assertEquals(reads + 1, dao.getByIdCalls)
+        assertSame(first["https://d.com"], third["https://d.com"])
+    }
+
+    /** 校验结果、测速改了不动 updatedAt：它们不能跟着规则一起被缓存住，自动换源靠它们挑源 */
+    @Test
+    fun `换源取的校验结果每次现查，不被规则缓存挡住`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+        repo.getEnabledForSwitch()
+
+        repo.saveCheck("https://a.com", ok = true, message = "", respondMs = 321)
+        val a = repo.getEnabledForSwitch().single { it.rule.bookSourceUrl == "https://a.com" }
+        assertEquals(CheckStatus.OK, a.checkStatus)
+        assertEquals(321L, a.respondTime)
     }
 }

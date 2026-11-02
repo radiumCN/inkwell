@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
@@ -228,7 +229,14 @@ class ExploreViewModel(
                     messages.emit("书源不存在")
                     return@launch
                 }
-                netBookRepo.addToShelf(result, rule)
+                // 同搜索页：书源卡住时别让这一行一直转圈。用 withTimeoutOrNull 而不是 withTimeout ——
+                // 后者抛的是 CancellationException，会和「离开页面」的取消混在一起
+                val outcome = withTimeoutOrNull(ADD_TIMEOUT_MS) { netBookRepo.addToShelf(result, rule) }
+                if (outcome == null) {
+                    messages.emit("加入失败：书源响应超时")
+                    return@launch
+                }
+                outcome
                     .onSuccess { messages.emit("已加入书架") }
                     .onFailure {
                         if (it is CancellationException) throw it
@@ -242,5 +250,7 @@ class ExploreViewModel(
 
     private companion object {
         const val TAG = "Explore"
+        /** 详情+目录两个请求，同 SearchViewModel 的加入超时 */
+        const val ADD_TIMEOUT_MS = 20_000L
     }
 }

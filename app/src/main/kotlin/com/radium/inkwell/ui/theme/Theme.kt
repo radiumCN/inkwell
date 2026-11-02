@@ -72,7 +72,9 @@ fun InkwellTheme(
     config: ThemeConfig = ThemeConfig(),
     content: @Composable () -> Unit,
 ) {
-    val (scheme, _) = AppThemes.resolve(config, systemDark = isSystemInDarkTheme())
+    val systemDark = isSystemInDarkTheme()
+    // 自定义主题的整套配色是现推导出来的（几十个槽位的颜色混合）：别每次重组都推一遍
+    val scheme = remember(config, systemDark) { AppThemes.resolve(config, systemDark).first }
     val animate = animationsEnabled()
     // remember 住实例：主题走的是 staticCompositionLocalOf，换实例会让全树重组。
     // 也别按 animate 拆成两个 MaterialExpressiveTheme 调用点 —— 那样用户在系统设置里切

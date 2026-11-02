@@ -232,4 +232,40 @@ class ChapterContentCacheTest {
         assertTrue(File(root, uuid).isDirectory)
         assertTrue(File(root, md5).isDirectory)
     }
+
+    /** 预取问「要不要抓」用 hasCurrent：判断必须和 read 一致，旧版本格式的文件在也得照抓 */
+    @Test
+    fun `hasCurrent 与 read 一致，旧格式算没缓存`() {
+        val url = "https://ex.com/1.html"
+        assertFalse(cache.hasCurrent("b1", url))
+        cache.write("b1", url, content)
+        assertTrue(cache.hasCurrent("b1", url))
+        File(root, "b1").listFiles()!!.single { it.name.endsWith(".txt") }.writeText("正文第一段。")
+        assertFalse(cache.hasCurrent("b1", url))
+    }
+
+    /** 只是问一句有没有，别给没缓存过的书凭空建出空目录（追更时逐章问 isCached） */
+    @Test
+    fun `查询不建目录`() {
+        assertFalse(cache.has("never", "https://ex.com/x.html"))
+        assertFalse(cache.hasCurrent("never", "https://ex.com/x.html"))
+        assertNull(cache.read("never", "https://ex.com/x.html"))
+        assertFalse(File(root, "never").exists())
+    }
+
+    /** 库里已经没有的书留下的目录要清；还在库里的、或刚刚还碰过的不能动 */
+    @Test
+    fun `孤儿目录过了宽限期才删，在库的书不动`() {
+        cache.write("live", "https://ex.com/1.html", content)
+        cache.write("gone", "https://ex.com/1.html", content)
+        val later = System.currentTimeMillis() + 10_000
+
+        // 刚写过：宽限期内不删
+        assertEquals(0, cache.pruneOrphanBooks(listOf("live"), graceMs = 60_000, nowMs = later))
+        assertTrue(File(root, "gone").isDirectory)
+
+        assertEquals(1, cache.pruneOrphanBooks(listOf("live"), graceMs = 0, nowMs = later))
+        assertFalse(File(root, "gone").exists())
+        assertTrue(cache.has("live", "https://ex.com/1.html"))
+    }
 }

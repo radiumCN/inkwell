@@ -64,18 +64,23 @@ internal val SearchResult.searchKey: Pair<String, String>
  * 代表书源挂了还有别的可用，否则用户就卡死在报错页。
  */
 data class SearchHit(val results: List<SearchResult>) {
+    // key / result / origins 算一次就记住：排序比较器每比一次都要读它们，每次发布、每次重组又各读一遍，
+    // 从前是 getter，几百条结果排一次序就是成千上万次现算（origins 每次还新建一个 Set）。
+    // results 不可变，懒算安全；委托属性不进 data class 的 equals。
+
     /** 合并键，也是列表 key；同一个 hit 里的结果键都相同（见 [searchKey]） */
-    val key: Pair<String, String> get() = results.first().searchKey
+    val key: Pair<String, String> by lazy(LazyThreadSafetyMode.PUBLICATION) { results.first().searchKey }
     /** 代表条目：优先带字数/分类的那条，列表副标题才有东西可看 */
-    val result: SearchResult
-        get() = results.firstOrNull { !it.wordCount.isNullOrBlank() || !it.kind.isNullOrBlank() }
+    val result: SearchResult by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        results.firstOrNull { !it.wordCount.isNullOrBlank() || !it.kind.isNullOrBlank() }
             ?: results.first()
+    }
     /**
      * 打开详情 / 加入书架时优先用的源。[results] 按书源健康度排过之后即第一条；
      * 和 [result] 分开，是因为副标题要字数，打开却要快的活源。
      */
     val preferred: SearchResult get() = results.first()
-    val origins: Set<String> get() = results.mapTo(LinkedHashSet()) { it.sourceId }
+    val origins: Set<String> by lazy(LazyThreadSafetyMode.PUBLICATION) { results.mapTo(LinkedHashSet()) { it.sourceId } }
 }
 
 /** 搜索结果排序。默认相关度 —— 换别的会打乱「最像关键词」的优先顺序，所以选项里写清楚。 */
@@ -120,6 +125,17 @@ data class SearchUiState(
     val shelfKeys: Set<Pair<String, String>> = emptySet(),
     /** 搜索历史，新的在前。设置里关掉记录时恒为空 */
     val history: List<String> = emptyList(),
+    /**
+     * [history] 读到了没有。没读到之前，进页那块「按已启用的规则搜索」空态先别画 ——
+     * 历史要合并偏好与书架（一次 Room 查询）才出得来，拿 emptyList 当已知的话，
+     * 页面滑入时先闪一下空态大图标、紧接着换成历史列表。
+     */
+    val historyLoaded: Boolean = false,
+    /**
+     * 这一轮一本没搜到，而且**每个**书源都是超时或报错 —— 多半是断网或网络被拦。
+     * 这时不能说「没找到相关的书」：用户会以为书源里没有这本，换个词再搜也是一样。给错误态和重试。
+     */
+    val allFailed: Boolean = false,
 )
 
 class SearchViewModel(
@@ -140,8 +156,12 @@ class SearchViewModel(
     private var searchJob: Job? = null
     private var pagingJob: Job? = null
     private var sortJob: Job? = null
-    /** 防抖发布：每个源回来就全量重排+刷 UI 会把主线程打满 */
+    /** 节流发布：每个源回来就全量重排+刷 UI 会把主线程打满（见 [schedulePublish]） */
     private var publishJob: Job? = null
+    /** [publishJob] 排的是哪一轮搜索；在跑的那次属于别的搜索就不能搭车 */
+    private var publishFor = 0
+    /** [publishJob] 拍完快照之后又有源回来：这次发完还得再发一次 */
+    private var publishDirty = false
     private val hitsMutex = Mutex()
 
     /**
@@ -255,7 +275,7 @@ class SearchViewModel(
                 if (!on) emptyList()
                 else list.filterNot { revealsHiddenBook(it, books, locked) }
             }.distinctUntilChanged().collect { list ->
-                _state.value = _state.value.copy(history = list)
+                _state.value = _state.value.copy(history = list, historyLoaded = true)
             }
         }
     }
@@ -264,6 +284,11 @@ class SearchViewModel(
     fun searchFromHistory(keyword: String) {
         setQuery(keyword)
         search()
+    }
+
+    /** 「全部书源都没搜通」的重试：按上一次真正搜的那个词再来，不读输入框此刻的内容（见 [activeKeyword]） */
+    fun retrySearch() {
+        if (activeKeyword.isNotEmpty()) searchFromHistory(activeKeyword)
     }
 
     fun removeHistory(keyword: String) {
@@ -354,6 +379,7 @@ class SearchViewModel(
                 searching = true,
                 searchPaused = false,
                 earlyStopped = false,
+                allFailed = false,
                 pausedRemaining = 0,
                 results = emptyList(),
                 sourceCount = rules.size, doneCount = 0,
@@ -466,8 +492,9 @@ class SearchViewModel(
                             hitsMutex.withLock { merge(items) }
                             if (gen != roundGen) return@withPermit
                             if (items.isNotEmpty() && firstResultAt == 0L) firstResultAt = nowMs()
-                            val d = doneCounter.incrementAndGet()
-                            _state.update { it.copy(doneCount = d) }
+                            doneCounter.incrementAndGet()
+                            // 进度随节流发布一起刷（见 schedulePublish）：从前每回来一个源就 copy 一次整份状态，
+                            // 几百个源就是几百次整页重组，边搜边滑会掉帧
                             schedulePublish(keyword, searchId)
                             if (pageResult?.hasMore == true) moreAcc += rule
                             if (earlyStopArmed && items.any { SearchScheduling.isExactTitle(it.title, normalizedKeyword) }) {
@@ -511,8 +538,11 @@ class SearchViewModel(
         flushSearchStats()
         if (fetchPage == 1) logSummary(keyword, "搜完")
         if (_state.value.searchId != searchId) return
+        val done = doneCounter.get()
         _state.value = _state.value.copy(
             results = sorted,
+            allFailed = fetchPage == 1 && sorted.isEmpty() && done > 0 &&
+                timeoutCount.get() + failCount.get() >= done,
             searching = false,
             loadingMore = false,
             searchPaused = false,
@@ -525,17 +555,31 @@ class SearchViewModel(
     /**
      * 把 hits 快照排序后刷到 UI。多个源几乎同时回来时合并成一次重排。
      * 新搜索会 cancel [publishJob]，这里靠 searchId 再挡一层串台。
+     *
+     * 节流而不是防抖：已有一次排着就只记 dirty，不取消、不重新计时 —— 每 [PUBLISH_THROTTLE_MS] 至少刷一次。
+     * 从前是「来一个源就 cancel 重排」的防抖：几百个源 8 路并发，源与源的间隔常短于 250ms
+     * （DNS 直接失败的死源回得最快），计时一路往后推，进度条在走、列表却一直停在「搜索中…」；
+     * Default 上排到一半的那次也被下一个源掐掉，白排。
      */
     private fun schedulePublish(keyword: String, searchId: Int) {
+        if (publishJob?.isActive == true && publishFor == searchId) {
+            publishDirty = true
+            return
+        }
         publishJob?.cancel()
+        publishFor = searchId
         publishJob = viewModelScope.launch {
-            delay(PUBLISH_DEBOUNCE_MS)
-            if (_state.value.searchId != searchId) return@launch
-            cancelStaleSort()
-            val snapshot = hitsMutex.withLock { hits.values.toList() }
-            val sorted = orderedNow(snapshot, keyword)
-            if (_state.value.searchId != searchId) return@launch
-            _state.update { it.copy(results = sorted) }
+            do {
+                delay(PUBLISH_THROTTLE_MS)
+                if (_state.value.searchId != searchId) return@launch
+                // 在拍快照之前清：此后才 merge 进来的源会再置位，这次发完接着排下一次
+                publishDirty = false
+                cancelStaleSort()
+                val snapshot = hitsMutex.withLock { hits.values.toList() }
+                val sorted = orderedNow(snapshot, keyword)
+                if (_state.value.searchId != searchId) return@launch
+                _state.update { it.copy(results = sorted, doneCount = doneCounter.get()) }
+            } while (publishDirty)
         }
     }
 
@@ -805,7 +849,7 @@ class SearchViewModel(
 
     companion object {
         private const val TAG = "Search"
-        private const val PUBLISH_DEBOUNCE_MS = 250L
+        private const val PUBLISH_THROTTLE_MS = 250L
         /** 详情+目录两个请求；三个源串起来不超过一分钟 */
         private const val ADD_TIMEOUT_MS = 20_000L
         private const val MAX_ADD_TRIES = 3

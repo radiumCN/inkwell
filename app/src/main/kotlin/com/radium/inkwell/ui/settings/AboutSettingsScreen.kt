@@ -60,7 +60,7 @@ fun AboutSettingsScreen(
     val context = LocalContext.current
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
-    val developerMode by appPrefs.developerMode.collectAsStateWithLifecycle(initialValue = false)
+    val developerMode = appPrefs.developerModeState.collectAsStateWithLifecycle().value ?: false
     val messages = remember { MessageBus() }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(messages, snackbar)

@@ -56,7 +56,11 @@ class RssSourceViewModel(
     }
 
     private fun runImport(block: suspend () -> RssImportReport) {
-        if (_importing.value) return
+        // 粘的是 feed 地址就要联网抓，可能好几秒：再点一次得告诉人在忙，而不是一声不吭地吞掉
+        if (_importing.value) {
+            messages.emit("上一次导入还没完成")
+            return
+        }
         viewModelScope.launch {
             _importing.value = true
             try {

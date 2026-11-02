@@ -3,9 +3,14 @@ package com.radium.inkwell.ui.reader
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
@@ -53,7 +58,9 @@ fun SelectionToolbar(
 
     if (replacing) {
         Surface(
-            modifier.fillMaxWidth().navigationBarsPadding(),
+            // 贴底的输入表单：键盘弹起时整块让上去。导航栏与键盘取并集（谁大让谁），
+            // 不是两个 padding 叠加 —— 叠加会把导航栏那截再算一遍
+            modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
             color = MaterialTheme.colorScheme.surfaceContainer,
             contentColor = MaterialTheme.colorScheme.onSurface,
             shape = MaterialTheme.shapes.large,

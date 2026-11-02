@@ -76,9 +76,10 @@ fun SettingsScreen(
     var confirmClearCache by remember { mutableStateOf(false) }
     var showPrunePicker by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
-    val pruneDays by appPrefs.cacheAutoPruneDays.collectAsStateWithLifecycle(
-        initialValue = AppPrefs.DEFAULT_CACHE_AUTO_PRUNE_DAYS,
-    )
+    /** 正在删缓存：几千个文件要删一会儿，期间行上说一声、不许再点 */
+    var clearingCache by remember { mutableStateOf(false) }
+    val pruneDays = appPrefs.cacheAutoPruneDaysState.collectAsStateWithLifecycle().value
+        ?: AppPrefs.DEFAULT_CACHE_AUTO_PRUNE_DAYS
 
     suspend fun refreshCacheSize() {
         cacheBytes = withContext(Dispatchers.IO) { cache.sizeBytes() }
@@ -137,11 +138,13 @@ fun SettingsScreen(
                     SettingRow(
                         title = "清除正文缓存",
                         value = when {
+                            clearingCache -> "正在清除…"
                             cacheBytes < 0 -> "正在统计…"
                             cacheBytes == 0L -> "暂无缓存"
                             else -> formatSize(cacheBytes)
                         },
-                        onClick = { if (cacheBytes > 0) confirmClearCache = true },
+                        // 没东西可清、或正在清时不给点：从前「暂无缓存」照样能点，点了什么都不发生
+                        onClick = if (cacheBytes > 0 && !clearingCache) ({ confirmClearCache = true }) else null,
                         position = SettingGroupPosition.Last,
                     )
                 }
@@ -238,9 +241,14 @@ fun SettingsScreen(
             confirmText = "清除",
             onConfirm = {
                 confirmClearCache = false
+                clearingCache = true
                 scope.launch {
-                    withContext(Dispatchers.IO) { cache.clearAll() }
-                    refreshCacheSize()
+                    try {
+                        withContext(Dispatchers.IO) { cache.clearAll() }
+                        refreshCacheSize()
+                    } finally {
+                        clearingCache = false
+                    }
                     messages.emit("已清除正文缓存")
                 }
             },

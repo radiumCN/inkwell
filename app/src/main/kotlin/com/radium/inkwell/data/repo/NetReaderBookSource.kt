@@ -97,7 +97,8 @@ class NetReaderBookSource(
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: return
         val url = chapter.url ?: return
-        withContext(Dispatchers.IO) { cache.read(bookId, url) }?.let { return }
+        // 只问「有没有」，别 read：命中时整章读进来解析一遍再扔掉，每到章首章尾都要这样过几章（见 hasCurrent）
+        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url) }) return
         // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
         // 静态抓不到就放弃，等用户真翻到这一章再走 loadChapter 的渲染回退。
         val remote = engine.getContent(

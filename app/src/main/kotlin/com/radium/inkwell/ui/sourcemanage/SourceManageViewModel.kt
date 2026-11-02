@@ -9,30 +9,22 @@ import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.mapLatest
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.MessageBus
-import com.radium.inkwell.core.model.ContentElement
-import com.radium.inkwell.core.source.BookSourceEngine
-import com.radium.inkwell.data.repo.NetBookRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -90,8 +82,7 @@ fun sourceComparator(sort: SourceSort): Comparator<BookSourceListItem> = when (s
 class SourceManageViewModel(
     private val context: Context,
     private val sourceRepo: BookSourceRepository,
-    private val netBookRepo: NetBookRepository,
-    private val engine: BookSourceEngine,
+    private val checker: SourceChecker,
     /** 「从网址导入书源」用；走注入的那个客户端，它配了超时（裸 OkHttpClient() 没有总闸） */
     private val http: OkHttpClient,
 ) : ViewModel() {
@@ -138,142 +129,30 @@ class SourceManageViewModel(
 
 
     // ---- 校验 ----
+    //
+    // 校验本身在应用级的 [SourceChecker] 上跑：离开这页不会被掐掉（见那里）。这里只转发与展示。
 
-    private val _checkProgress = MutableStateFlow<CheckProgress?>(null)
-    val checkProgress: StateFlow<CheckProgress?> = _checkProgress.asStateFlow()
+    val checkProgress: StateFlow<CheckProgress?> = checker.progress
 
-    private val _options = MutableStateFlow(CheckOptions())
-    val options: StateFlow<CheckOptions> = _options.asStateFlow()
+    val options: StateFlow<CheckOptions> = checker.options
 
-    fun setOptions(o: CheckOptions) {
-        _options.value = o
-    }
+    fun setOptions(o: CheckOptions) = checker.setOptions(o)
 
-    private var checkJob: Job? = null
-
-    val checking: StateFlow<Boolean> = _checkProgress
+    val checking: StateFlow<Boolean> = checker.progress
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    fun cancelCheck() {
-        checkJob?.cancel()
-        _checkProgress.value = null
-    }
+    fun cancelCheck() = checker.cancel()
 
-    /**
-     * 校验书源：跑真实的 搜索 → 详情 → 目录 → 正文 冒烟。
-     *
-     * 只校验搜索是不够的 —— 「搜得到但读不了」的书源一样是废的，那正是最常见的坏法。
-     * 结果**落库**：几百个源校验一轮好几分钟，只存内存的话退出页面就没了，
-     * 用户根本没机会拿它做后续处理（筛选失效、按响应速度排序、批量禁用）。
-     *
-     * @param ids 为空则校验全部
-     */
+    /** @param ids 为空则校验全部 */
     fun validate(ids: Collection<String> = emptySet()) {
-        if (checkJob?.isActive == true) return
         val targets = (ids.ifEmpty { sources.value.map { it.id } }).toList()
-        if (targets.isEmpty()) return
-        val opts = _options.value
-        checkJob = viewModelScope.launch {
-            _checkProgress.value = CheckProgress(0, targets.size)
-            var done = 0
-            var bad = 0
-            val limiter = Semaphore(CHECK_CONCURRENCY)
-            coroutineScope {
-                targets.map { id ->
-                    async {
-                        limiter.withPermit {
-                            val check = checkOne(id, opts)
-                            sourceRepo.saveCheck(id, check.ok, check.message, check.respondMs)
-                            if (!check.ok) bad++
-                            done++
-                            _checkProgress.value = CheckProgress(done, targets.size)
-                        }
-                    }
-                }.awaitAll()
-            }
-            _checkProgress.value = null
-            // 按这一轮的实际结果计数：从前数的是列表流里的 checkStatus，最后几条 saveCheck
-            // 还没回流到 sources 时就少算了失效数
-            messages.emit("校验完成：可用 ${targets.size - bad}，失效 $bad")
-        }
+        if (!checker.start(targets)) messages.emit("正在校验中")
     }
 
-    /**
-     * 校验一个书源。两处刻意放宽，从前它们会把好书源判死：
-     * 1. 只探第一章。可第一章常常是「作品相关」「防盗公告」这类没有正文的东西 ——
-     *    正文抓不到不是书源坏了。所以再探一章中间的，两章都空才判失败。
-     * 2. 要求正文 ≥100 字，否则失败。短章节（序章、过渡章）本来就不到 100 字。
-     *    现在只要**非空**就算通过，偏短则照常可用、附带提示。
-     */
-    private suspend fun checkOne(id: String, opts: CheckOptions): SourceCheck {
-        val rule = sourceRepo.getRule(id) ?: return SourceCheck(false, "书源规则损坏")
-        if (rule.search == null) return SourceCheck(true, "仅发现页（不校验搜索）")
-        val startedAt = System.currentTimeMillis()
-        return runCatching {
-            withTimeout(opts.timeoutMs) {
-                val hit = engine.search(rule, opts.keyword).items.firstOrNull()
-                    ?: error("搜索无结果")
-                if (!opts.checkDetail && !opts.checkToc && !opts.checkContent) {
-                    return@withTimeout ok(toc = 0, chars = -1, startedAt)
-                }
-
-                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl)
-                if (!opts.checkToc && !opts.checkContent) {
-                    return@withTimeout ok(toc.size, chars = -1, startedAt)
-                }
-                check(toc.isNotEmpty()) { "目录为空" }
-                if (!opts.checkContent) return@withTimeout ok(toc.size, chars = -1, startedAt)
-
-                val urls = toc.mapTo(HashSet()) { it.url }
-                val probes = listOfNotNull(
-                    toc.first(),
-                    toc.getOrNull(toc.size / 2).takeIf { toc.size > 1 },
-                )
-                var best = 0
-                var lastError: String? = null
-                for (chapter in probes) {
-                    val chars = runCatching {
-                        engine.getContent(
-                            rule, chapter.url, urls, chapter.variable,
-                            chapterTitle = chapter.title, chapterIndex = chapter.index,
-                            variables = detail.variables,
-                        )
-                            .elements
-                            .filterIsInstance<ContentElement.Paragraph>()
-                            .sumOf { it.text.length }
-                    }.getOrElse {
-                        // 取消（含外层 withTimeout 到点）必须放出去给外层那段判定：吞在这里的话，
-                        // 超时的源会被写成「正文为空」而不是超时，用户取消校验也会被记成失效。
-                        if (it is CancellationException) throw it
-                        lastError = it.message
-                        0
-                    }
-                    if (chars > best) best = chars
-                    if (best >= SHORT_CONTENT_CHARS) break
-                }
-                check(best > 0) { lastError ?: "正文为空" }
-                ok(toc.size, best, startedAt)
-            }
-        }.getOrElse {
-            // 用户点「取消校验」时，在飞的这些源抛的是 CancellationException。把它当成判定结果
-            // 记下来的话，一次取消就能把几十个好书源写成"失效"，而校验一轮要好几分钟、
-            // 结果又是落库的 —— 用户得重跑一遍才能洗掉。取消不是判定结果，原样抛出去。
-            // 但 withTimeout 的 TimeoutCancellationException 是判定结果（这个源太慢），要留下。
-            if (it is CancellationException && it !is TimeoutCancellationException) throw it
-            SourceCheck(false, it.message?.take(60) ?: "失败", System.currentTimeMillis() - startedAt)
-        }
-    }
-
-    private fun ok(toc: Int, chars: Int, startedAt: Long): SourceCheck {
-        val ms = System.currentTimeMillis() - startedAt
-        val parts = buildList {
-            add("可用")
-            if (toc > 0) add("$toc 章")
-            add("${ms}ms")
-            if (chars in 1 until SHORT_CONTENT_CHARS) add("正文偏短（$chars 字）")
-        }
-        return SourceCheck(true, parts.joinToString(" · "), ms)
+    init {
+        // 这一页开着时跑完的那一轮，照旧在页面上报一句总结
+        viewModelScope.launch { checker.finished.collect { messages.emit(it) } }
     }
 
     // ---- 校验之后：拿结果做事 ----
@@ -386,6 +265,13 @@ class SourceManageViewModel(
     val group: StateFlow<String?> = _group.asStateFlow()
     fun setGroupFilter(g: String?) { _group.value = g }
 
+    /** 筛完是空的时候的出口：搜索词、筛选、分组一并放开（排序不算筛选，留着） */
+    fun clearFilters() {
+        _query.value = ""
+        _filter.value = SourceFilter.ALL
+        _group.value = null
+    }
+
     /** 所有出现过的分组名。一个书源可能挂多个组（逗号分隔） */
     val groups: StateFlow<List<String>> = sources
         .map { list ->
@@ -395,6 +281,8 @@ class SourceManageViewModel(
                 .distinct()
                 .sorted()
         }
+        // 几千个源逐个拆分组：校验时每存一条结果列表流就重发一次，别在主线程上做
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
@@ -415,28 +303,31 @@ class SourceManageViewModel(
      *
      * 只在书源集合或规则本身变了（id / updatedAt）才重算：校验时每个源 saveCheck 一次都会让
      * 列表流重发，从前每发一次就把几百条规则重新解码一遍。
+     * 重算也只重取 updatedAt 变了的那几条（[BookSourceRepository.exploreOnlyIds]）：启停、置顶、分组
+     * 都会动 updatedAt，从前拨一下开关就把几千份规则整表重解，IO 上跑好几秒，期间「仅发现页」筛选是空的。
      * 必须声明在 [visibleSources] 之前 —— 它是后者 combine 的一路输入，构造期就要取到。
      */
     val exploreOnlyIds: StateFlow<Set<String>> = sourceRepo.sources
         .map { list -> list.map { it.id to it.updatedAt } }
         .distinctUntilChanged()
-        .mapLatest { list ->
-            list.mapNotNull { (id, _) ->
-                val rule = sourceRepo.getRule(id) ?: return@mapNotNull null
-                id.takeIf { rule.search == null }
-            }.toSet()
-        }
-        .flowOn(Dispatchers.IO)
+        .mapLatest { list -> sourceRepo.exploreOnlyIds(list) }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /**
      * 列表实际显示的书源：搜索 + 筛选 + 分组 + 排序。
      * [exploreOnlyIds] 也是一路输入：从前只在筛选时读它的当前值，「仅发现页」在它算完之前点下去
      * （或导入之后）列表就一直是空的 / 旧的，直到别的条件变一下。
+     *
+     * 整条在 Default 上算：几千个源每敲一个字就是上万次 contains 再排一次序，校验时每存一条结果又重来一遍，
+     * 从前全压在主线程上。搜索词只对**过滤**防抖（输入框读的仍是 [query]，打字不受影响）；清空立刻生效。
      */
+    @OptIn(FlowPreview::class)
     val visibleSources: StateFlow<List<BookSourceListItem>> =
         kotlinx.coroutines.flow.combine(
-            sources, _query, _filter, _sort, _group, exploreOnlyIds,
+            sources,
+            _query.debounce { if (it.isEmpty()) 0L else QUERY_DEBOUNCE_MS },
+            _filter, _sort, _group, exploreOnlyIds,
         ) { args ->
             @Suppress("UNCHECKED_CAST")
             val list = args[0] as List<BookSourceListItem>
@@ -452,7 +343,9 @@ class SourceManageViewModel(
                 .filter { g == null || it.groupName.split(',', '，').any { s -> s.trim() == g } }
                 .sortedWith(sourceComparator(o))
                 .toList()
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         // 多选只对**看得见的**书源生效：选了几个再改搜索词/筛选/分组，看不见的还留在选中集合里，
@@ -482,13 +375,38 @@ class SourceManageViewModel(
 
     val failedCount: StateFlow<Int> = sources
         .map { list -> list.count { it.checkStatus == CheckStatus.FAILED } }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** 一次性提示：用事件流而非 StateFlow，避免相同内容的连续提示被去重吞掉 */
     val messages = MessageBus()
 
+    private val _importing = MutableStateFlow(false)
+    /** 正在导入（读文件 / 下载 / 解析入库）。页面据此给一行进行中提示，别让人以为没点上、又点一遍 */
+    val importing: StateFlow<Boolean> = _importing.asStateFlow()
+    private var importJob: Job? = null
+
+    /**
+     * 导入一次只跑一个。从前三个入口各起各的协程、全程没有任何反馈：几 MB 的合集要解析好几秒，
+     * 用户以为没点上又点一次，两次导入并行，各自读一遍「已有」再各写一遍。
+     */
+    private fun startImport(block: suspend () -> Unit) {
+        if (importJob?.isActive == true) {
+            messages.emit("上一次导入还没完成")
+            return
+        }
+        importJob = viewModelScope.launch {
+            _importing.value = true
+            try {
+                block()
+            } finally {
+                _importing.value = false
+            }
+        }
+    }
+
     fun importFromFile(uri: Uri) {
-        viewModelScope.launch {
+        startImport {
             val text = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(uri)?.use {
@@ -507,14 +425,20 @@ class SourceManageViewModel(
 
     fun importFromUrl(url: String) {
         if (url.isBlank()) return
-        viewModelScope.launch {
-            messages.emit("正在下载书源…")
+        startImport {
             val text = withContext(Dispatchers.IO) {
                 runCatching {
                     http.newCall(Request.Builder().url(url.trim()).build())
                         .execute().use { resp ->
                             check(resp.isSuccessful) { "HTTP ${resp.code}" }
-                            resp.body.string()
+                            // 封个顶：地址是用户粘来的，指到一个几百 MB 的文件上，body.string() 会把它整个读进内存。
+                            // 先预读（request 只往缓冲里填、不消费）确认没超，再交给 body.string() ——
+                            // BOM 与 Content-Type 里的字符集它都会处理，自己按 UTF-8 解的话带 BOM 的合集就解析不了
+                            val body = resp.body
+                            check(!body.source().request(MAX_IMPORT_BYTES + 1L)) {
+                                "文件太大（超过 ${MAX_IMPORT_BYTES shr 20}MB）"
+                            }
+                            body.string()
                         }
                 }
             }
@@ -527,12 +451,10 @@ class SourceManageViewModel(
         }
     }
 
-    private fun importText(text: String) {
-        viewModelScope.launch {
-            sourceRepo.importJson(text)
-                .onSuccess { messages.emit(it.summary) }
-                .onFailure { messages.emit("导入失败: ${it.message?.take(120)}") }
-        }
+    private suspend fun importText(text: String) {
+        sourceRepo.importJson(text)
+            .onSuccess { messages.emit(it.summary) }
+            .onFailure { messages.emit("导入失败: ${it.message?.take(120)}") }
     }
 
     fun setEnabled(id: String, enabled: Boolean) {
@@ -544,9 +466,9 @@ class SourceManageViewModel(
     }
 
     private companion object {
-        /** 并发上限。几百个源同时打网站只会集体被限流，反而校验出一堆假的"失效" */
-        const val CHECK_CONCURRENCY = 6
-        /** 低于此字数只提示"正文偏短"，不判失败 —— 序章、过渡章本来就短 */
-        const val SHORT_CONTENT_CHARS = 100
+        /** 从网址导入书源的大小上限 */
+        const val MAX_IMPORT_BYTES = 32 shl 20
+        /** 搜索框停手多久才重新过滤：几千个源每个字都全量过滤一遍，打字会跟不上 */
+        const val QUERY_DEBOUNCE_MS = 150L
     }
 }

@@ -18,6 +18,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -54,6 +56,11 @@ fun AppSlider(
     inactiveColor: Color? = null,
     @Suppress("UNUSED_PARAMETER")
     showStopIndicators: Boolean = false,
+    /**
+     * 读屏念的名字（「亮度」「纸色色相」……）。不给的话读屏只念一个百分比，不知道这条在调什么；
+     * 旁边印着的标签 Text 在滑块节点之外，念不到它身上。
+     */
+    label: String? = null,
 ) {
     val colors = if (activeColor == null && inactiveColor == null) {
         SliderDefaults.colors()
@@ -76,7 +83,7 @@ fun AppSlider(
     Slider(
         state = state,
         onValueChange = onValueChange,
-        modifier = modifier,
+        modifier = if (label != null) modifier.semantics { contentDescription = label } else modifier,
         enabled = enabled,
         onValueChangeFinished = onValueChangeFinished,
         colors = colors,

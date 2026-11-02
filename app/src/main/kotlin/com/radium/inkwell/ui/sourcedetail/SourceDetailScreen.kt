@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +34,9 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SecondaryButton
+import androidx.compose.material.icons.filled.Warning
+import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.settingsPageColor
 /**
  * 书源详情：只读展示规则原文 + 一键全链路测试。书源不在应用内编辑，改规则请重新导入。
@@ -64,10 +68,27 @@ fun SourceDetailScreen(
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
+        if (!state.loaded) {
+            LoadingState(Modifier.padding(padding))
+            return@Scaffold
+        }
+        if (state.missing) {
+            EmptyState(
+                icon = Icons.Default.Warning,
+                title = "书源不存在",
+                hint = "它可能已被删除",
+                actionLabel = "返回",
+                onAction = onBack,
+                modifier = Modifier.padding(padding),
+            )
+            return@Scaffold
+        }
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
+                .consumeWindowInsets(padding)
                 // 顶上有测试关键词输入框：edge-to-edge 下键盘弹起会盖住下面的测试报告与规则
                 .imePadding()
                 .padding(Dimens.screenPadding)

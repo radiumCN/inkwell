@@ -30,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -41,6 +43,7 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.BookIntro
 import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.CollectMessages
@@ -79,6 +82,8 @@ fun BookDetailScreen(
                     AppIconButton(
                         onClick = { viewModel.refresh() },
                         enabled = !refreshing,
+                        // 刷新中图标换成转圈，名字跟着它走：转圈本身没有名字
+                        modifier = if (refreshing) Modifier.semantics { contentDescription = "正在刷新目录" } else Modifier,
                     ) {
                         if (refreshing) {
                             AppLoadingIndicator(size = Dimens.buttonSpinner)
@@ -118,13 +123,16 @@ fun BookDetailScreen(
             }
             item {
                 Text(
-                    "目录 · 共 ${chapters.size} 章",
+                    // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
+                    "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
                     Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 HorizontalDivider()
             }
             when {
+                // 还在读章节表：留白，别先画「没有章节」再换成目录
+                !state.chaptersLoaded -> Unit
                 refreshing && chapters.isEmpty() -> {
                     item {
                         Column(
@@ -189,7 +197,6 @@ private fun Header(
     chapterCount: Int,
     onRead: () -> Unit,
 ) {
-    var introExpanded by remember { mutableStateOf(false) }
 
     Column(
         Modifier.padding(Dimens.screenPadding),
@@ -208,7 +215,12 @@ private fun Header(
                 contentDescription = null,
             )
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
-                Text(book.title, style = MaterialTheme.typography.titleLarge, maxLines = 2)
+                Text(
+                    book.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (book.author.isNotBlank()) {
                     Text(
                         book.author,
@@ -229,20 +241,6 @@ private fun Header(
             modifier = Modifier.fillMaxWidth(),
         )
         val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
-        if (intro.isNotBlank()) {
-            Column {
-                Text("简介", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(Dimens.gapXS))
-                Text(
-                    intro,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = if (introExpanded) Int.MAX_VALUE else 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                AppTextButton(onClick = { introExpanded = !introExpanded }) {
-                    Text(if (introExpanded) "收起" else "展开")
-                }
-            }
-        }
+        if (intro.isNotBlank()) BookIntro(intro)
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -115,6 +116,8 @@ fun ReaderMenu(
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
+    onPreviewSettings: (ReaderSettings) -> Unit,
+    onCommitSettings: () -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
@@ -171,7 +174,7 @@ fun ReaderMenu(
                                 color = barContent.copy(alpha = 0.10f),
                                 start = Offset(0f, size.height),
                                 end = Offset(size.width, size.height),
-                                strokeWidth = 1.dp.toPx(),
+                                strokeWidth = Dimens.strokeThin.toPx(),
                             )
                         }
                         .padding(horizontal = Dimens.gapXS),
@@ -244,7 +247,7 @@ fun ReaderMenu(
                                 color = barContent.copy(alpha = 0.10f),
                                 start = Offset(0f, 0f),
                                 end = Offset(size.width, 0f),
-                                strokeWidth = 1.dp.toPx(),
+                                strokeWidth = Dimens.strokeThin.toPx(),
                             )
                         }
                         .navigationBarsPadding()
@@ -269,6 +272,7 @@ fun ReaderMenu(
                             value = if (pageUi.pageCount <= 1) 0f
                             else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
                             onValueChange = onSeekPercent,
+                            label = "章内进度",
                             enabled = pageUi.pageCount > 1,
                             activeColor = barContent,
                             inactiveColor = barContent.copy(alpha = 0.2f),
@@ -363,6 +367,8 @@ fun ReaderMenu(
             TypographyPanel(
                 settings = session.settings,
                 onUpdate = onUpdateSettings,
+                onPreview = onPreviewSettings,
+                onCommit = onCommitSettings,
                 textSelectionEnabled = session.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
             )
@@ -530,6 +536,8 @@ private val MARGIN_H_OPTIONS = listOf(
 private fun TypographyPanel(
     settings: ReaderSettings,
     onUpdate: (ReaderSettings) -> Unit,
+    onPreview: (ReaderSettings) -> Unit,
+    onCommit: () -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
@@ -557,7 +565,7 @@ private fun TypographyPanel(
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
         ) { current ->
             when (current) {
-                0 -> LayoutTab(settings, onUpdate)
+                0 -> LayoutTab(settings, onUpdate, onPreview, onCommit)
                 1 -> FlipTab(settings, onUpdate)
                 else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
@@ -565,8 +573,17 @@ private fun TypographyPanel(
     }
 }
 
+/**
+ * [onPreview] / [onCommit]：连续拖动的滑块（纸色、亮度）拖着时只预览、松手才落库，
+ * 见 [ReaderViewModel.previewSettings]。点一下就定的项照旧走 [onUpdate]。
+ */
 @Composable
-private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun LayoutTab(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    onPreview: (ReaderSettings) -> Unit,
+    onCommit: () -> Unit,
+) {
     // 字号：加减按钮 + 当前值，一行搞定。
     // 走 SecondaryButton 而不是裸 OutlinedButton：后者落到不带 shapes 的旧重载，按下去没有 Expressive 的
     // 圆角形变，和面板里其他按钮不是一套手感；触控区仍由 M3 按钮自带的 48dp 下限兜着。
@@ -580,7 +597,8 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
         )
         Text(
             "${settings.fontSizeSp.toInt()}",
-            Modifier.width(72.dp),
+            // 数字两侧留出间距，宽度至少一个触控目标：字号从 9 变到 10 时两侧按钮别跟着挪
+            Modifier.padding(horizontal = Dimens.gapM).widthIn(min = Dimens.touchTarget),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.titleLarge,
         )
@@ -656,7 +674,11 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
     ThemeSwatches(settings, onUpdate)
     // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
     if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-        CustomPaperEditor(settings.theme) { onUpdate(settings.copy(theme = it)) }
+        CustomPaperEditor(
+            theme = settings.theme,
+            onChange = { onPreview(settings.copy(theme = it)) },
+            onChangeFinished = onCommit,
+        )
     }
 
     SectionLabel("亮度")
@@ -668,8 +690,10 @@ private fun LayoutTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Un
         AppSlider(
             value = settings.brightnessOverride ?: 0.5f,
             onValueChange = { v ->
-                onUpdate(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
+                onPreview(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
             },
+            onValueChangeFinished = onCommit,
+            label = "亮度",
             enabled = settings.brightnessOverride != null,
             showStopIndicators = false,
             modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
@@ -814,7 +838,7 @@ private fun TapZoneCell(
             .clip(shape)
             .background(container)
             .then(
-                if (action == TapAction.NONE) Modifier.border(1.dp, scheme.outlineVariant, shape)
+                if (action == TapAction.NONE) Modifier.border(Dimens.strokeThin, scheme.outlineVariant, shape)
                 else Modifier
             )
             .then(
@@ -904,7 +928,11 @@ private fun MoreTab(
  * 「墨绿纸配灰字」看着挺雅，读两章眼睛就疼，而用户根本不会把眼疼归因到自己调的色上。
  */
 @Composable
-private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Unit) {
+private fun CustomPaperEditor(
+    theme: ReaderTheme,
+    onChange: (ReaderTheme) -> Unit,
+    onChangeFinished: () -> Unit,
+) {
     val bgHsv = remember(theme.background) { argbToHsv(theme.background) }
     // 字色深浅：0 = 与纸同色（看不见），1 = 纯黑/纯白（最刺眼）。取它在纸色明度上的相对位置
     val textLevel = remember(theme.textColor) { argbToHsv(theme.textColor)[2] }
@@ -924,18 +952,24 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
         value = bgHsv[0],
         valueRange = 0f..360f,
         onValueChange = { rebuild(h = it) },
+        onValueChangeFinished = onChangeFinished,
+        label = "纸色色相",
         showStopIndicators = false,
     )
     AppSlider(
         value = bgHsv[1],
         valueRange = 0f..0.25f,
         onValueChange = { rebuild(s = it) },
+        onValueChangeFinished = onChangeFinished,
+        label = "纸色浓度",
         showStopIndicators = false,
     )
     AppSlider(
         value = bgHsv[2],
         valueRange = 0f..1f,
         onValueChange = { rebuild(v = it) },
+        onValueChangeFinished = onChangeFinished,
+        label = "纸色明度",
         showStopIndicators = false,
     )
 
@@ -944,6 +978,8 @@ private fun CustomPaperEditor(theme: ReaderTheme, onChange: (ReaderTheme) -> Uni
         value = textLevel,
         valueRange = 0f..1f,
         onValueChange = { rebuild(t = it) },
+        onValueChangeFinished = onChangeFinished,
+        label = "字色深浅",
         showStopIndicators = false,
     )
 
@@ -1011,7 +1047,7 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
                 .clip(CircleShape)
                 .background(Color(theme.background))
                 .border(
-                    width = if (selected) 2.dp else 1.dp,
+                    width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
                     color = if (selected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.outlineVariant,
                     shape = CircleShape,

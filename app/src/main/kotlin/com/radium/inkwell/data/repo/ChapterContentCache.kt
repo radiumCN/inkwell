@@ -3,6 +3,7 @@ package com.radium.inkwell.data.repo
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.util.toHex
+import com.radium.inkwell.data.db.entity.ChapterEntity
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -23,8 +24,6 @@ class ChapterContentCache(private val root: File) {
     private val digest = ThreadLocal.withInitial { MessageDigest.getInstance("MD5") }
     private val touched = ConcurrentHashMap.newKeySet<String>()
 
-    private fun dir(bookId: String): File = bookDir(bookId).apply { mkdirs() }
-
     /**
      * 书 id 拼进路径之前先过一道：id 不全是本机生成的 —— WebDAV 同步来的书行出自备份文件，
      * 谁能写备份谁就能填（明文 http 下还有中间人）。`../books` 这样的 id 原样拼进去，
@@ -36,8 +35,12 @@ class ChapterContentCache(private val root: File) {
     private fun bookDir(bookId: String): File =
         File(root, if (SAFE_ID.matches(bookId)) bookId else "_" + key(bookId))
 
+    /**
+     * 只拼路径，不建目录。从前这里走 `dir().apply { mkdirs() }`：has() / read() 每问一章都要 mkdirs 一次，
+     * 追更逐章算 isCached 时还给没缓存过的书凭空建出空目录。目录只在 [write] 时建。
+     */
     private fun file(bookId: String, chapterUrl: String): File =
-        File(dir(bookId), key(chapterUrl) + ".txt")
+        File(bookDir(bookId), key(chapterUrl) + ".txt")
 
     private fun key(chapterUrl: String): String {
         val md = checkNotNull(digest.get())
@@ -46,6 +49,32 @@ class ChapterContentCache(private val root: File) {
     }
 
     fun has(bookId: String, chapterUrl: String): Boolean = file(bookId, chapterUrl).isFile
+
+    /** 这本书有没有任何正文缓存。全书架清理先问这一句，没有就不必去读它几千行的目录 */
+    fun hasAny(bookId: String): Boolean = bookDir(bookId).list()?.isNotEmpty() == true
+
+    /**
+     * 整本目录逐章问 [has] 的批量版：目录只列一次，之后每章算个 MD5 查集合。语义与 [has] 相同（文件在不在）。
+     * 追更、加书架、换源都要给几千章各算一个 isCached —— 从前就是几千次文件 stat。
+     */
+    fun cachedChecker(bookId: String): (String) -> Boolean {
+        val names = bookDir(bookId).list()?.toHashSet() ?: return { false }
+        return { url -> (key(url) + ".txt") in names }
+    }
+
+    /**
+     * 有缓存、且格式版本对得上（[read] 不会当它没缓存）。只读首行，不解析正文。
+     *
+     * 预取问「这章还要不要抓」用它。从前拿 [read] 来问：命中也是整章读进来、切行、建元素表再扔掉，
+     * 每到章首章尾都要把后面几章这样过一遍。只看 [has] 又不够 —— 旧版本格式的文件在，
+     * read 却当没缓存，预取就该照抓。
+     */
+    fun hasCurrent(bookId: String, chapterUrl: String): Boolean {
+        val f = file(bookId, chapterUrl)
+        if (!f.isFile) return false
+        return runCatching { f.bufferedReader().use { it.readLine() } == FORMAT_VERSION }
+            .getOrDefault(false)
+    }
 
     fun read(bookId: String, chapterUrl: String): ChapterContent? {
         val f = file(bookId, chapterUrl)
@@ -109,6 +138,7 @@ class ChapterContentCache(private val root: File) {
         // 先写临时文件再原子改名：进程被杀留下的半截文件不会被 has()/read() 当成有效缓存，
         // 两个协程（前台加载 + 后台预取）同抓同章时也是「整文件替换」，不会交错出半截内容。
         val target = file(bookId, chapterUrl)
+        target.parentFile?.mkdirs()
         val tmp = File.createTempFile("tmp", ".part", target.parentFile)
         try {
             tmp.writeText(text)
@@ -131,12 +161,12 @@ class ChapterContentCache(private val root: File) {
     }
 
     fun clear(bookId: String) {
-        dir(bookId).deleteRecursively()
+        bookDir(bookId).deleteRecursively()
     }
 
     /** 删掉早先按序号命名的缓存（`0.txt`）：目录一变它们就名不副实，且再也不会被读到 */
     fun purgeLegacy(bookId: String) {
-        dir(bookId).listFiles()
+        bookDir(bookId).listFiles()
             ?.filter { it.nameWithoutExtension.toIntOrNull() != null }
             ?.forEach { it.delete() }
     }
@@ -189,6 +219,26 @@ class ChapterContentCache(private val root: File) {
         return pruned
     }
 
+    /**
+     * 删掉库里已经没有的书留下的整本缓存目录，返回删了几本。
+     *
+     * 删书、丢弃试读、同步来的远端删除都会顺手清缓存，可总有漏网的：老版本删书不清、清到一半进程被杀、
+     * 书行被别的路径删掉……这些目录没有任何入口能再读到，只会一直占着空间。
+     * 留 [graceMs] 的余地：刚开始加的书可能还没落库，别跟它抢。
+     */
+    fun pruneOrphanBooks(liveBookIds: Collection<String>, graceMs: Long, nowMs: Long = System.currentTimeMillis()): Int {
+        val live = liveBookIds.mapTo(HashSet()) { bookDir(it).name }
+        val cutoff = nowMs - graceMs
+        var removed = 0
+        root.listFiles()?.forEach { dir ->
+            if (!dir.isDirectory || dir.name in live) return@forEach
+            // 目录自己的 mtime 只随增删文件变；里面最近碰过的那个文件才说明它还有没有人用
+            val newest = dir.listFiles()?.maxOfOrNull { it.lastModified() } ?: dir.lastModified()
+            if (newest <= cutoff && dir.deleteRecursively()) removed++
+        }
+        return removed
+    }
+
     private companion object {
         /**
          * 缓存格式 / 解析器版本。**任何会改变正文解析结果的改动都必须 +1。**
@@ -221,4 +271,14 @@ class ChapterContentCache(private val root: File) {
         /** 能直接当目录名的书 id：本机生成的 UUID / MD5 hex 都落在这里面，不含 `.` 与路径分隔符 */
         val SAFE_ID = Regex("[A-Za-z0-9-]+")
     }
+}
+
+/** 目录行 → 按章号对齐的地址表，喂给 [ChapterContentCache.pruneBehindProgress]。目录偶有空洞时不能用 list 位置冒充 chapter.index */
+fun chapterUrlsByIndex(chapters: List<ChapterEntity>): List<String?> {
+    val maxIndex = chapters.maxOfOrNull { it.index } ?: return emptyList()
+    val urls = MutableList<String?>(maxIndex + 1) { null }
+    for (c in chapters) {
+        if (c.index in urls.indices) urls[c.index] = c.url
+    }
+    return urls
 }

@@ -4,6 +4,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -16,10 +17,16 @@ import com.radium.inkwell.ui.theme.ThemeMode
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateSource
 import com.radium.inkwell.core.webdav.BackupSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 private val Context.appDataStore by preferencesDataStore(
     name = "app_prefs",
@@ -29,6 +36,8 @@ private val Context.appDataStore by preferencesDataStore(
 )
 
 class AppPrefs(private val context: Context) {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
@@ -60,8 +69,15 @@ class AppPrefs(private val context: Context) {
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
 
-    private suspend fun touch() {
-        context.appDataStore.edit { it[Keys.UPDATED_AT] = System.currentTimeMillis() }
+    /**
+     * 改设置并盖时间戳，**同一次** edit。从前是先 edit、再 touch() 单独写一遍时间戳：
+     * 每拨一下开关整份文件写两遍，每条派生流（主题、各开关……）各发射两次。
+     */
+    private suspend fun editTouched(block: (MutablePreferences) -> Unit) {
+        context.appDataStore.edit { p ->
+            block(p)
+            p[Keys.UPDATED_AT] = System.currentTimeMillis()
+        }
     }
 
     suspend fun updatedAt(): Long = context.appDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
@@ -151,8 +167,7 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setChangeSourceCheckAuthor(on: Boolean) {
-        context.appDataStore.edit { it[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = on }
-        touch()
+        editTouched { it[Keys.CHANGE_SOURCE_CHECK_AUTHOR] = on }
     }
 
     /**
@@ -169,13 +184,11 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setAutoChangeSource(on: Boolean) {
-        context.appDataStore.edit { it[Keys.AUTO_CHANGE_SOURCE] = on }
-        touch()
+        editTouched { it[Keys.AUTO_CHANGE_SOURCE] = on }
     }
 
     suspend fun setTextSelectionEnabled(on: Boolean) {
-        context.appDataStore.edit { it[Keys.TEXT_SELECTION] = on }
-        touch()
+        editTouched { it[Keys.TEXT_SELECTION] = on }
     }
 
     /** 书架顶栏是否显示「发现」入口。不看发现页的人，那个图标只是碍事 */
@@ -184,8 +197,7 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setExploreEnabled(on: Boolean) {
-        context.appDataStore.edit { it[Keys.EXPLORE_ENABLED] = on }
-        touch()
+        editTouched { it[Keys.EXPLORE_ENABLED] = on }
     }
 
     /**
@@ -200,16 +212,15 @@ class AppPrefs(private val context: Context) {
 
     /** 关掉时连同已有历史一起清掉 —— 用户关它多半就是不想让人看见搜过什么，只停止记录不够 */
     suspend fun setSearchHistoryEnabled(on: Boolean) {
-        context.appDataStore.edit { p ->
+        editTouched { p ->
             p[Keys.SEARCH_HISTORY_ENABLED] = on
             if (!on) p.remove(Keys.SEARCH_HISTORY)
         }
-        touch()
     }
 
     /**
      * 搜索历史，新的在前；最多 [SEARCH_HISTORY_MAX] 条。
-     * 先比原始字符串再拆：同一个 DataStore 里任何一项设置变了（含 touch() 刷时间戳）整份 data 都会再发一次，
+     * 先比原始字符串再拆：同一个 DataStore 里任何一项设置变了（含刷时间戳）整份 data 都会再发一次，
      * 不去重的话每次都重拆一遍、再推给搜索页重组
      */
     val searchHistory: Flow<List<String>> = context.appDataStore.data
@@ -220,7 +231,7 @@ class AppPrefs(private val context: Context) {
     /**
      * 记一条。开关的判断放在同一次 edit 里：先读开关、再另起一次写的话，
      * 中间用户关了开关、清了历史，这条又会被写回去。
-     * 历史不 touch()：它不进备份，刷时间戳只会让 WebDAV 以为设置变了、白推一次。
+     * 历史不刷时间戳（不走 editTouched）：它不进备份，刷时间戳只会让 WebDAV 以为设置变了、白推一次。
      */
     suspend fun addSearchHistory(keyword: String) {
         context.appDataStore.edit { p ->
@@ -250,8 +261,7 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setBookshelfLayout(layout: BookshelfLayout) {
-        context.appDataStore.edit { it[Keys.BOOKSHELF_LAYOUT] = layout.name }
-        touch()
+        editTouched { it[Keys.BOOKSHELF_LAYOUT] = layout.name }
     }
 
     /**
@@ -268,8 +278,7 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setCacheAutoPruneDays(days: Int) {
         require(days in CACHE_AUTO_PRUNE_DAYS_OPTIONS) { "非法保留天数: $days" }
-        context.appDataStore.edit { it[Keys.CACHE_AUTO_PRUNE_DAYS] = days }
-        touch()
+        editTouched { it[Keys.CACHE_AUTO_PRUNE_DAYS] = days }
     }
 
     /**
@@ -289,7 +298,7 @@ class AppPrefs(private val context: Context) {
     /**
      * 开发者模式：关于页连点版本号打开。默认关。
      *
-     * 与下面的日志开关一样**不进备份、不 touch()**：这是一台设备上为定位问题临时开的，
+     * 与下面的日志开关一样**不进备份、不刷时间戳**：这是一台设备上为定位问题临时开的，
      * 同步过去就成了「另一台设备莫名其妙一直在录日志」。
      */
     val developerMode: Flow<Boolean> = context.appDataStore.data.map { p ->
@@ -320,8 +329,7 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setUpdateChannel(channel: UpdateChannel) {
-        context.appDataStore.edit { it[Keys.UPDATE_CHANNEL] = channel.name }
-        touch()
+        editTouched { it[Keys.UPDATE_CHANNEL] = channel.name }
     }
 
     /** 更新源：GitHub（默认）或中转服务器 */
@@ -332,8 +340,7 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setUpdateSource(source: UpdateSource) {
-        context.appDataStore.edit { it[Keys.UPDATE_SOURCE] = source.name }
-        touch()
+        editTouched { it[Keys.UPDATE_SOURCE] = source.name }
     }
 
     val themeConfig: Flow<ThemeConfig> = context.appDataStore.data.map { p ->
@@ -351,8 +358,21 @@ class AppPrefs(private val context: Context) {
         )
     }
 
+    /**
+     * [themeConfig] 的预热版，null = 磁盘那一读还没回来。
+     *
+     * 界面要的是「第一帧就是对的主题」：拿 `collectAsState(initialValue = ThemeConfig())` 收冷流的话，
+     * 强制夜间、纯黑、自定义强调色的用户每次冷启动都先按默认暖纸画一帧，读到配置再整树换色。
+     * InkwellApp 冷启动就 get 一次 AppPrefs，让这一读和 ReaderPrefs 的预热一起提前；
+     * MainActivity 在它到之前拦住首帧（见 MainActivity.holdFirstFrameUntilThemed）。
+     * 之后进的页面（阅读页、主题设置）直接读 .value，就不必各自再闪一次默认值。
+     */
+    val themeState: StateFlow<ThemeConfig?> = themeConfig
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     suspend fun setThemeConfig(config: ThemeConfig) {
-        context.appDataStore.edit { p ->
+        editTouched { p ->
             p[Keys.THEME_MODE] = config.mode.name
             p[Keys.THEME_LIGHT] = config.lightPreset
             p[Keys.THEME_DARK] = config.darkPreset
@@ -361,8 +381,26 @@ class AppPrefs(private val context: Context) {
             p[Keys.CUSTOM_DARK_SEED] = config.customDarkSeed
             p[Keys.CUSTOM_DARK_BG] = config.customDarkBg
         }
-        touch()
     }
+
+    // ---- 设置页读的预热版 ----
+    //
+    // null = 磁盘那一读还没回来。设置页从前拿 `collectAsState(initialValue = 默认值)` 收冷流：
+    // 第一帧按默认值画、下一帧才是真值，关过「自动换源」的人每次进页都看着开关从「开」滑到「关」。
+    // 这些流从 App 启动起就在收（AppPrefs 在 InkwellApp 里预热），进设置页时 .value 早已是真值。
+    // 原来的 Flow 一个不动：别处用 .first() 读的是真值，不能被这里的占位顶替。
+
+    private fun <T> Flow<T>.warm(): StateFlow<T?> = stateIn(scope, SharingStarted.Eagerly, null)
+
+    val changeSourceCheckAuthorState: StateFlow<Boolean?> = changeSourceCheckAuthor.warm()
+    val autoChangeSourceState: StateFlow<Boolean?> = autoChangeSource.warm()
+    val exploreEnabledState: StateFlow<Boolean?> = exploreEnabled.warm()
+    val searchHistoryEnabledState: StateFlow<Boolean?> = searchHistoryEnabled.warm()
+    val bookshelfLayoutState: StateFlow<BookshelfLayout?> = bookshelfLayout.warm()
+    val cacheAutoPruneDaysState: StateFlow<Int?> = cacheAutoPruneDays.warm()
+    val developerModeState: StateFlow<Boolean?> = developerMode.warm()
+    val updateChannelState: StateFlow<UpdateChannel?> = updateChannel.warm()
+    val updateSourceState: StateFlow<UpdateSource?> = updateSource.warm()
 
     companion object {
         const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14

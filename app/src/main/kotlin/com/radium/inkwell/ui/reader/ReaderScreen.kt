@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -116,9 +117,9 @@ fun ReaderScreen(
 
     // 阅读纸张跟 App 的日夜走：算出此刻生效的是日间还是夜间，喂给 ViewModel 切日/夜槽。
     val appPrefs = koinInject<com.radium.inkwell.data.prefs.AppPrefs>()
-    val themeConfig by appPrefs.themeConfig.collectAsStateWithLifecycle(
-        initialValue = com.radium.inkwell.ui.theme.ThemeConfig(),
-    )
+    // 读预热好的那份：冷流配 initialValue 的话，进书第一帧按默认日夜算，夜间用户会先切一次日间纸
+    val themeConfig = appPrefs.themeState.collectAsStateWithLifecycle().value
+        ?: com.radium.inkwell.ui.theme.ThemeConfig()
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val effectiveDark = when (themeConfig.mode) {
         com.radium.inkwell.ui.theme.ThemeMode.LIGHT -> false
@@ -367,11 +368,20 @@ fun ReaderScreen(
                 // 首屏之后的再加载（跳章、失败重试、换源重载）：splash 的一次性协程早已收场、
                 // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
                 // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
+                // 转圈同样先让开 READER_SPLASH_DELAY_MS：本地书、已缓存的章节几十毫秒就排好，
+                // 从前跨章时邻章没排完就会一闪转圈；等不到那么久的加载，纸面干干净净地过去。
                 if (firstContentShown) {
-                    AppLoadingIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                        color = Color(session.settings.theme.textColor),
-                    )
+                    var spinnerDue by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        delay(Motion.READER_SPLASH_DELAY_MS)
+                        spinnerDue = true
+                    }
+                    if (spinnerDue) {
+                        AppLoadingIndicator(
+                            modifier = Modifier.align(Alignment.Center),
+                            color = Color(session.settings.theme.textColor),
+                        )
+                    }
                 } else AnimatedVisibility(
                     visible = splashVisible,
                     modifier = Modifier.align(Alignment.Center),
@@ -513,8 +523,8 @@ fun ReaderScreen(
                 Surface(
                     Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     shape = MaterialTheme.shapes.medium,
+                    // 不加 tonalElevation：显式给了容器色，色调抬升只在底色是 surface 时才起作用
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 3.dp,
                 ) {
                     Row(
                         Modifier.padding(
@@ -644,6 +654,8 @@ fun ReaderScreen(
             onGotoChapter = { viewModel.gotoChapter(it) },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
+            onPreviewSettings = { viewModel.previewSettings(it) },
+            onCommitSettings = { viewModel.commitSettings() },
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             onSearchSources = { viewModel.searchOtherSources() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
@@ -751,16 +763,24 @@ private fun buildLayoutSpec(
     )
 }
 
+/**
+ * 设值与复位分开：拖亮度条时 brightness 每帧都变。从前是 `DisposableEffect(activity, brightness)`，
+ * 每变一次先在 onDispose 里复位成系统亮度、再设新值 —— 一帧两次 `window.attributes`，
+ * 中间那一下还可能闪回系统亮度。复位只该在离开阅读页时做一次。
+ */
 @Composable
 private fun BrightnessEffect(activity: Activity?, brightness: Float?) {
-    DisposableEffect(activity, brightness) {
-        val window = activity?.window
-        if (window != null) {
-            val attrs = window.attributes
-            attrs.screenBrightness = brightness?.coerceIn(0.01f, 1f)
-                ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    SideEffect {
+        val window = activity?.window ?: return@SideEffect
+        val target = brightness?.coerceIn(0.01f, 1f)
+            ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        val attrs = window.attributes
+        if (attrs.screenBrightness != target) {
+            attrs.screenBrightness = target
             window.attributes = attrs
         }
+    }
+    DisposableEffect(activity) {
         onDispose {
             val w = activity?.window ?: return@onDispose
             val attrs = w.attributes

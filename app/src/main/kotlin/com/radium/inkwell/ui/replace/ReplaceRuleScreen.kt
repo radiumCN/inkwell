@@ -101,7 +101,9 @@ fun ReplaceRuleScreen(
         } else {
             LazyColumn(
                 Modifier.fillMaxSize().padding(padding),
-                contentPadding = ContentListDefaults.listContentPadding(),
+                // 底部给悬浮的「新建」按钮让位（56dp 高 + 16dp 边距）：不留的话，最后一条行尾的开关与删除
+                // 正好压在按钮下面，还滚不出来
+                contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.touchTarget + Dimens.gapXXL),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(state.rules, key = { it.id }) { rule ->

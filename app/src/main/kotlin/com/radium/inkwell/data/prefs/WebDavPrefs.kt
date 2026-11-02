@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.radium.inkwell.data.net.OfficialWebDav
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 
@@ -57,6 +59,8 @@ class WebDavPrefs(
         val OFFICIAL_EMAIL = stringPreferencesKey("official_email")
         val OFFICIAL_ACCESS = stringPreferencesKey("official_access")
         val OFFICIAL_REFRESH = stringPreferencesKey("official_refresh")
+        val SYNC_LOCAL_STAMP = longPreferencesKey("sync_local_stamp")
+        val REMOTE_VERSION = stringPreferencesKey("remote_version")
     }
 
     val config: Flow<WebDavConfig> = context.webDavDataStore.data.map { p ->
@@ -74,6 +78,8 @@ class WebDavPrefs(
             officialRefreshToken = cipher.read(p[Keys.OFFICIAL_REFRESH] ?: "").value,
         )
     }
+        // 解密走 Keystore（跨进程）：WebDAV 设置页在 viewModelScope（主线程）上收这条流，别让它在主线程上解
+        .flowOn(Dispatchers.IO)
 
     /**
      * 把升级前留下的明文口令原地换成密文。启动时跑一次即可。
@@ -167,6 +173,26 @@ class WebDavPrefs(
 
     suspend fun markSynced(at: Long) {
         context.webDavDataStore.edit { it[Keys.LAST_SYNC] = at }
+    }
+
+    /**
+     * 上次完整同步之后两边各自停在哪：拍本地快照时本地的「最新修改时间」[SyncMark.localStamp]，
+     * 远端备份当时的版本 [SyncMark.remote]（连同是哪个地址、哪个账号 —— 换了账号，旧标记绝不能被当成「远端没变」）。
+     * 自动同步据此判断两边都没动过、整次跳过，见 WebDavRepository.syncLocked。
+     */
+    data class SyncMark(val localStamp: Long, val remote: String?)
+
+    suspend fun syncMark(): SyncMark {
+        val p = context.webDavDataStore.data.first()
+        return SyncMark(p[Keys.SYNC_LOCAL_STAMP] ?: -1L, p[Keys.REMOTE_VERSION])
+    }
+
+    /** [remote] 为 null（服务器不给版本标记）就清掉旧的：下次照常完整同步 */
+    suspend fun saveSyncMark(localStamp: Long, remote: String?) {
+        context.webDavDataStore.edit {
+            it[Keys.SYNC_LOCAL_STAMP] = localStamp
+            if (remote != null) it[Keys.REMOTE_VERSION] = remote else it.remove(Keys.REMOTE_VERSION)
+        }
     }
 
     suspend fun deviceId(): String {

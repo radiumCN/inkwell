@@ -1,7 +1,7 @@
 package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -141,12 +141,12 @@ fun AppSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier)
             .padding(horizontal = Dimens.screenPadding)
             .padding(bottom = Dimens.gapS),
     ) { data ->
-        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // 普通 Box 就够：外层已经 fillMaxWidth，宽度上限本来就是这一行；从前套 BoxWithConstraints 取 maxWidth
+        // 再 widthIn(max = maxWidth)，多一次子组合却什么都没限制住
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             AppSnackbar(
                 data = data,
-                modifier = Modifier
-                    .widthIn(max = maxWidth)
-                    .wrapContentWidth(align = Alignment.CenterHorizontally),
+                modifier = Modifier.wrapContentWidth(align = Alignment.CenterHorizontally),
             )
         }
     }

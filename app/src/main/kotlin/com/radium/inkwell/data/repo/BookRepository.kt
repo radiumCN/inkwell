@@ -153,6 +153,8 @@ class BookRepository(
         // 事务**提交之后**才被取消（写事务返回时会补查一次取消）：书行已经指向这个文件，这次导入其实成了。
         // 从前一律当失败回滚，删掉的是一本已经在书架上的书的文件 —— 留下一条点开就报错的幽灵书。
         if (bookDao.countByLocalPath(dest.absolutePath) > 0) return
+        // 解析时（txt）已经按这个路径写过缓存：文件删了它就再也没人用，跟着清
+        parserRegistry.evictCaches(dest)
         dest.delete()
         // 封面在入库事务之前就落了盘，失败了也得跟着删（补占位那条路径同样用新 id 起名）
         File(coversDir(), "$bookId.img").delete()
@@ -194,6 +196,8 @@ class BookRepository(
 
             shelfLocalBookByKey(title, author)?.let { existing ->
                 if (existing.hasLocalFile()) {
+                    // 刚才 open 时 txt 已按 dest 写了解析缓存；dest 是这次导入的新路径，删了就是孤儿
+                    parserRegistry.evictCaches(dest)
                     dest.delete()
                     coverFile?.delete()
                     return@use LocalImportResult.AlreadyOnShelf(existing.id)
@@ -272,14 +276,23 @@ class BookRepository(
         }
     }
 
-    suspend fun deleteBook(id: String) = withContext(Dispatchers.IO) {
-        bookDao.getById(id)?.let { book ->
-            deleteLocalFiles(book)
-            // 三步写库成组提交：中途被杀会留下半套 —— 最糟的是目录已清、墓碑没打上，
-            // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
-            // 文件删除放在事务外：那是不可回滚的磁盘 IO，圈进来只会拉长锁。
-            val now = System.currentTimeMillis()
-            db.withWriteTransaction {
+    suspend fun deleteBook(id: String) = deleteBooks(listOf(id))
+
+    /**
+     * 删一批书。书架多选删除走这里：从前逐本调 [deleteBook]，每本一个事务，
+     * 删 N 本书架流就重发 N 次、整架跟着重排 N 遍。
+     */
+    suspend fun deleteBooks(ids: Collection<String>) = withContext(Dispatchers.IO) {
+        val books = ids.mapNotNull { bookDao.getById(it) }
+        if (books.isEmpty()) return@withContext
+        // 文件删除放在事务外：那是不可回滚的磁盘 IO，圈进来只会拉长锁。
+        books.forEach { deleteLocalFiles(it) }
+        // 几步写库成组提交：中途被杀会留下半套 —— 最糟的是目录已清、墓碑没打上，
+        // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
+        val now = System.currentTimeMillis()
+        db.withWriteTransaction {
+            for (book in books) {
+                val id = book.id
                 chapterDao.deleteByBook(id)
                 // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
                 hitDao.deleteByBook(id)
@@ -293,6 +306,30 @@ class BookRepository(
     }
 
     /**
+     * 全书架清一遍正文缓存，冷启动后在后台跑。
+     *
+     * 阅读页进书时的清理（ReaderViewModel.pruneStaleChapterCache）只管**那一本**：不再打开的书、
+     * 读完扔在一边的书，进度之前的缓存永远没人清，几十本连载攒下来就是几百 MB。这里按同一条规则
+     * （进度之前、超过 [maxAgeDays] 天没碰过）把每本网络书过一遍；[maxAgeDays] 为 0 即用户关了自动清理，只清孤儿。
+     * 库里已经没有的书留下的整本目录，不论设置都清（没有任何入口能再读到它们）。
+     */
+    suspend fun sweepContentCache(maxAgeDays: Int) = withContext(Dispatchers.IO) {
+        val all = bookDao.getAll()
+        val live = all.filter { !it.deleted }
+        cache.pruneOrphanBooks(live.map { it.id }, graceMs = ORPHAN_GRACE_MS)
+        if (maxAgeDays <= 0) return@withContext
+        val maxAgeMs = maxAgeDays * 86_400_000L
+        for (book in live) {
+            if (book.type != BookType.NET || book.readChapterIndex <= 0) continue
+            // 本机从没缓存过的书（同步来的、只加没读的）占大多数：先看目录在不在，别白读一整本目录表
+            if (!cache.hasAny(book.id)) continue
+            val urls = chapterUrlsByIndex(chapterDao.getByBook(book.id)).ifEmpty { continue }
+            val pruned = cache.pruneBehindProgress(book.id, book.readChapterIndex, urls, maxAgeMs)
+            if (pruned.isNotEmpty()) chapterDao.markUncached(book.id, pruned)
+        }
+    }
+
+    /**
      * 清掉一本书在本机的附属文件：导入的书文件、本地封面、正文缓存。删书、丢弃试读、
      * 同步来的远端删除都走这里。
      *
@@ -300,6 +337,8 @@ class BookRepository(
      * 都出自备份文件，不能拿来直接删（见那里的说明）。只做文件 IO，调用方负责在 IO 线程、事务之外调。
      */
     fun deleteLocalFiles(book: BookEntity) {
+        // 解析缓存（txt 的解码正文 + 章节表）按书文件路径记，先于书文件本身清掉
+        book.localPath?.let { parserRegistry.evictCaches(File(it)) }
         deleteOwnedFile(book.localPath, booksDir())
         deleteOwnedFile(book.coverPath, coversDir())
         cache.clear(book.id)
@@ -307,6 +346,17 @@ class BookRepository(
 
     suspend fun setGroup(id: String, group: String) {
         bookDao.setGroup(id, group, System.currentTimeMillis())
+    }
+
+    /** 多选归组 / 隐藏：一个事务，书架流只重发一次（逐本写就是整架连着重排 N 遍） */
+    suspend fun setGroupAll(ids: Collection<String>, group: String) {
+        val now = System.currentTimeMillis()
+        db.withWriteTransaction { for (id in ids) bookDao.setGroup(id, group, now) }
+    }
+
+    suspend fun setHiddenAll(ids: Collection<String>, hidden: Boolean) {
+        val now = System.currentTimeMillis()
+        db.withWriteTransaction { for (id in ids) bookDao.setHidden(id, hidden, now) }
     }
 
     /** 打开书就把「有新章节」的红点清掉 —— 打开即已知晓；同时记下打开时间（书架排序） */
@@ -340,6 +390,9 @@ class BookRepository(
             if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
         }
 }
+
+/** 孤儿缓存目录至少多久没碰过才删（[BookRepository.sweepContentCache]）：刚加的书可能还没落库，别跟它抢 */
+private const val ORPHAN_GRACE_MS = 86_400_000L
 
 /** 「同一本书」的判定键：书名 + 作者（去空白）。与搜索结果的合并键（SearchViewModel.merge）一致 */
 fun bookKey(title: String, author: String?): Pair<String, String> =

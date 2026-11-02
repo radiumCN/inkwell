@@ -162,34 +162,54 @@ class WebViewPageRenderer(
 
     /**
      * onPageFinished 只代表主文档就绪，正文往往还在 XHR 途中。
-     * 轮询 DOM，直到 HTML 长度连续两次不再变化（视为渲染稳定）或超时。
+     * 轮询 DOM，直到页面连续两次不再变化（视为渲染稳定）或超时。
+     *
+     * 轮询只取一个**签名**（长度 + 整串哈希，在页面里算好），稳定了再取一次全文。从前每 350ms 把整页
+     * outerHTML（几百 KB）经 JSON 字面量传回来，在主线程上 JSONTokener 解一遍、再整串比较，最多 24 次 ——
+     * 阅读页翻到要渲染的章节时，翻页动画正好跟它抢主线程。只比长度又不够：定长的占位（补齐的「加载中…」、
+     * 倒计时）换成正文前长度可能不变，会被当成已经渲染完。哈希在渲染进程里算，几十万字符一遍是几毫秒。
      */
     private suspend fun awaitSettledHtml(wv: WebView): String {
         var last = ""
         var stable = 0
         repeat(MAX_POLLS) {
             delay(POLL_INTERVAL_MS)
-            val html = readHtml(wv)
-            if (html.isNotEmpty() && html == last) {
-                if (++stable >= 2) return html
+            val signature = readHtmlSignature(wv)
+            if (signature.isNotEmpty() && !signature.startsWith("0:") && signature == last) {
+                if (++stable >= 2) return readHtml(wv).ifEmpty { throw RenderFailed("渲染后页面为空") }
             } else {
                 stable = 0
-                last = html
+                last = signature
             }
         }
-        return last.ifEmpty { throw RenderFailed("渲染后页面为空") }
+        return readHtml(wv).ifEmpty { throw RenderFailed("渲染后页面为空") }
     }
 
-    private suspend fun readHtml(wv: WebView): String = suspendCancellableCoroutine { cont ->
-        wv.evaluateJavascript("document.documentElement.outerHTML") { value ->
-            // evaluateJavascript 回传的是 JSON 字面量，需解成原始字符串
-            val html = runCatching { JSONTokener(value).nextValue() as? String }.getOrNull()
-            if (cont.isActive) cont.resume(html.orEmpty())
+    /** 「长度:哈希」；evaluateJavascript 回传的是 JSON 字面量（带引号的短串），解开即可 */
+    private suspend fun readHtmlSignature(wv: WebView): String = suspendCancellableCoroutine { cont ->
+        wv.evaluateJavascript(SIGNATURE_JS) { value ->
+            val signature = runCatching { JSONTokener(value).nextValue() as? String }.getOrNull().orEmpty()
+            if (cont.isActive) cont.resume(signature)
+        }
+    }
+
+    private suspend fun readHtml(wv: WebView): String {
+        val literal = suspendCancellableCoroutine<String?> { cont ->
+            wv.evaluateJavascript("document.documentElement.outerHTML") { value ->
+                if (cont.isActive) cont.resume(value)
+            }
+        }
+        // evaluateJavascript 回传的是 JSON 字面量，需解成原始字符串。几百 KB 的串，解码放到后台
+        return withContext(Dispatchers.Default) {
+            runCatching { JSONTokener(literal).nextValue() as? String }.getOrNull().orEmpty()
         }
     }
 
     private companion object {
         const val POLL_INTERVAL_MS = 350L
+        /** 页面签名：长度 + 整串的 31 进制滚动哈希（|0 截成 32 位整数） */
+        const val SIGNATURE_JS = "(function(){var s=document.documentElement.outerHTML,h=0;" +
+            "for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0}return s.length+':'+h})()"
         const val MAX_POLLS = 24 // 与 timeoutMs 共同兜底；连续两次稳定就提前返回
     }
 }

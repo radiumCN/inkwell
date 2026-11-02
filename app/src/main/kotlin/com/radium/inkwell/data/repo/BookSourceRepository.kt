@@ -2,6 +2,9 @@ package com.radium.inkwell.data.repo
 
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.data.db.dao.BookSourceDao
@@ -9,12 +12,15 @@ import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.data.db.entity.EnabledSourceMeta
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.lang.ref.SoftReference
+import java.util.concurrent.ConcurrentHashMap
 
 class BookSourceRepository(
     private val dao: BookSourceDao,
@@ -179,6 +185,7 @@ class BookSourceRepository(
 
     suspend fun delete(id: String) {
         dao.softDeleteById(id, System.currentTimeMillis())
+        forget(listOf(id))
         // 换源记忆里指向这个源的行成了孤儿
         hitDao.deleteBySource(id)
     }
@@ -188,20 +195,85 @@ class BookSourceRepository(
         if (ids.isEmpty()) return
         dao.softDeleteByIds(ids.toList(), System.currentTimeMillis())
         hitDao.deleteBySources(ids.toList())
+        forget(ids)
     }
 
     suspend fun setEnabledAll(ids: Collection<String>, enabled: Boolean) {
         if (ids.isNotEmpty()) dao.setEnabledForIds(ids.toList(), enabled, System.currentTimeMillis())
     }
 
-    suspend fun getRule(id: String): BookSourceRule? =
-        loadEntity(id)?.let { runCatching { json.decodeFromString<BookSourceRule>(it.json) }.getOrNull() }
+    suspend fun getRule(id: String): BookSourceRule? = loadEntity(id)?.let { decode(it) }
+
+    // ---- 规则解码缓存 ----
+
+    /**
+     * 解码好的规则，按 id 记，连同解码时那一行的 updatedAt。
+     *
+     * 搜索、发现页、预览、换源、自动换源一进来都要「全部启用源的规则」：从前每次都逐条读库、
+     * 把几千份 JSON 从头解码一遍 —— 导入两千个源后点一下搜索，要等一两秒才开始转圈，连点两下就是两遍。
+     * 规则只随 updatedAt 一起变（导入改了 json 就盖 now，WebDAV 只在远端更新时写入），所以 updatedAt
+     * 对得上就能直接用；启停 / 排序 / 分组也会动 updatedAt，代价只是那一条重解一次。
+     *
+     * 值用 SoftReference 持有：几千份规则常驻是几十 MB，内存吃紧时让 GC 收走，下次再解。
+     * BookSourceRule 是不可变的 data class，各调用方共用同一个实例没有问题。
+     */
+    private class Decoded(val updatedAt: Long, rule: BookSourceRule) {
+        val ref = SoftReference(rule)
+    }
+    private val decoded = ConcurrentHashMap<String, Decoded>()
+
+    /** 「有没有搜索规则」，书源管理的「仅发现页」筛选用。只是个布尔，强引用常驻，不怕 GC 收走后整表重解 */
+    private val searchless = ConcurrentHashMap<String, Pair<Long, Boolean>>()
+
+    private fun decode(entity: BookSourceEntity): BookSourceRule? {
+        decoded[entity.id]?.takeIf { it.updatedAt == entity.updatedAt }?.ref?.get()?.let { return it }
+        val rule = runCatching { json.decodeFromString<BookSourceRule>(entity.json) }.getOrNull() ?: return null
+        decoded[entity.id] = Decoded(entity.updatedAt, rule)
+        return rule
+    }
+
+    /** 按元数据里的 updatedAt 取规则：命中缓存就不读库；没命中（或行在这期间又变了）按条取最新行 */
+    private suspend fun ruleAt(id: String, updatedAt: Long): BookSourceRule? {
+        decoded[id]?.takeIf { it.updatedAt == updatedAt }?.ref?.get()?.let { return it }
+        return loadEntity(id)?.let { decode(it) }
+    }
+
+    /**
+     * 按 [items] 的顺序逐个求值，分几路并行。冷启动后的第一次没有缓存可用，几千份 JSON 串行解码要一两秒；
+     * 解码吃 CPU，分到几个核上并行。结果顺序与输入一致（调用方靠它保持书源的手动顺序）。
+     */
+    private suspend fun <T, R> inLanes(items: List<T>, f: suspend (T) -> R): List<R> = coroutineScope {
+        if (items.isEmpty()) return@coroutineScope emptyList()
+        val lanes = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        val size = (items.size + lanes - 1) / lanes
+        items.chunked(size).map { part -> async { part.map { f(it) } } }.awaitAll().flatten()
+    }
+
+    private fun forget(ids: Collection<String>) {
+        for (id in ids) {
+            decoded.remove(id)
+            searchless.remove(id)
+        }
+    }
+
+    /**
+     * 无搜索规则（仅发现页可用）的书源 id。[items] 是 (id, updatedAt)。
+     * 书源管理每当书源集合或 updatedAt 变了就重算一遍；只有 updatedAt 变了的那几条要重新取规则 ——
+     * 从前拨一下开关（会动 updatedAt）就把几千份规则整表重解。
+     */
+    suspend fun exploreOnlyIds(items: List<Pair<String, Long>>): Set<String> = withContext(Dispatchers.Default) {
+        inLanes(items) { (id, at) ->
+            val flag = searchless[id]?.takeIf { it.first == at }?.second
+                ?: ruleAt(id, at)?.let { rule -> (rule.search == null).also { searchless[id] = at to it } }
+            id.takeIf { flag == true }
+        }.filterNotNullTo(HashSet())
+    }
 
     suspend fun getEntity(id: String): BookSourceEntity? = loadEntity(id)
 
     /** 逐条解码几百份规则 JSON：搜索/发现/预览一进页面就调，别在主线程上做 */
     suspend fun getEnabledRules(): List<BookSourceRule> = withContext(Dispatchers.Default) {
-        dao.getEnabledIds().mapNotNull { id -> getRule(id) }
+        inLanes(dao.getEnabledMeta()) { ruleAt(it.id, it.updatedAt) }.filterNotNull()
     }
 
     /**
@@ -211,19 +283,18 @@ class BookSourceRepository(
      * 自动换源要靠这些决定先试谁（校验通过的、响应快的优先占住并发名额）。
      */
     suspend fun getEnabledForSwitch(): List<EnabledSource> = withContext(Dispatchers.Default) {
-        dao.getEnabledIds().mapNotNull { id ->
-            val entity = loadEntity(id) ?: return@mapNotNull null
-            val rule = runCatching { json.decodeFromString<BookSourceRule>(entity.json) }
-                .getOrNull() ?: return@mapNotNull null
+        // 校验结果与测速每次现查（元数据投影），只有规则正文走解码缓存：它们改了不动 updatedAt
+        inLanes(dao.getEnabledMeta()) { meta: EnabledSourceMeta ->
+            val rule = ruleAt(meta.id, meta.updatedAt) ?: return@inLanes null
             EnabledSource(
                 rule = rule,
-                checkStatus = entity.checkStatus,
-                respondTime = entity.respondTime,
-                sortOrder = entity.sortOrder,
-                searchMs = entity.searchMs,
-                searchFails = entity.searchFails,
+                checkStatus = meta.checkStatus,
+                respondTime = meta.respondTime,
+                sortOrder = meta.sortOrder,
+                searchMs = meta.searchMs,
+                searchFails = meta.searchFails,
             )
-        }
+        }.filterNotNull()
     }
 
     data class EnabledSource(
@@ -262,18 +333,13 @@ class BookSourceRepository(
         )
     }
 
-    /** 置顶：排到当前最小序号之前。递增分配（起点 = min - 个数），保持选中项之间的相对顺序 ——
-     *  从前用 order-- 递减，会把多选置顶的顺序整体倒过来 */
+    /** 置顶 / 置底：整批一个事务，见 [com.radium.inkwell.data.db.dao.BookSourceDao.moveToTop] */
     suspend fun moveToTop(ids: Collection<String>) {
-        var order = (dao.minSortOrder() ?: 0) - ids.size
-        val now = System.currentTimeMillis()
-        ids.forEach { dao.setSortOrder(it, order++, now) }
+        if (ids.isNotEmpty()) dao.moveToTop(ids.toList(), System.currentTimeMillis())
     }
 
     suspend fun moveToBottom(ids: Collection<String>) {
-        var order = (dao.maxSortOrder() ?: 0) + 1
-        val now = System.currentTimeMillis()
-        ids.forEach { dao.setSortOrder(it, order++, now) }
+        if (ids.isNotEmpty()) dao.moveToBottom(ids.toList(), System.currentTimeMillis())
     }
 
     suspend fun setGroup(ids: Collection<String>, group: String) {
@@ -281,10 +347,14 @@ class BookSourceRepository(
     }
 
     /** 导出为 Legado 原生格式（库里存的就是原生 JSON） */
-    suspend fun exportJson(ids: Collection<String>): String {
+    /**
+     * 自己切 IO：调用方在 viewModelScope（主线程）上。几千个源逐条读库、拼成几十 MB 的串，
+     * 从前每读一条就回一次主线程，最后在主线程上 joinToString —— 全选导出会掉帧甚至 ANR。
+     */
+    suspend fun exportJson(ids: Collection<String>): String = withContext(Dispatchers.IO) {
         val idSet = ids.toSet()
         val items = idSet.mapNotNull { id -> loadEntity(id)?.json }
-        return items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
+        items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
     }
 
     /**

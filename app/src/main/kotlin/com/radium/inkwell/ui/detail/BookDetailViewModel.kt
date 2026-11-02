@@ -16,10 +16,13 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 data class BookDetailUiState(
@@ -27,6 +30,11 @@ data class BookDetailUiState(
     /** 区分"还在查库"和"查完了没这本书"：前者转圈，后者给空态 */
     val loaded: Boolean = false,
     val chapters: List<ChapterEntity> = emptyList(),
+    /**
+     * 章节表读到了没有。书行是单行查询、通常先回来；几千章的目录要几十到几百毫秒 ——
+     * 这段时间拿 emptyList 当真，页面就先闪「共 0 章 / 目录还没加载」，网络书还多一个「重新获取」。
+     */
+    val chaptersLoaded: Boolean = false,
     /** 正在追更（顶栏转圈、空目录时的「正在获取目录…」） */
     val refreshing: Boolean = false,
 )
@@ -46,8 +54,30 @@ class BookDetailViewModel(
     private val chapterDao: ChapterDao,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(BookDetailUiState())
-    val state: StateFlow<BookDetailUiState> = _state.asStateFlow()
+    private val refreshing = MutableStateFlow(false)
+
+    /**
+     * 书行 + 章节表 + 追更中，**只在页面看得见时**订阅（WhileSubscribed）。
+     *
+     * 从前两个 collect 挂在 viewModelScope 上常驻：详情页压在返回栈里时照收不误。从详情进书以后，
+     * 阅读页每预取一章（改 isCached）章节表就失效一次，这边就跟着把整本几千章的目录重查一遍。
+     * 章节流先发一个 null（[BookDetailUiState.chaptersLoaded] = false）：章节表通常比书行晚到，
+     * 别先闪「共 0 章」。重新订阅时 StateFlow 留着上一份，返回详情页不会闪空。
+     */
+    val state: StateFlow<BookDetailUiState> = combine(
+        // 追更会改 totalChapters / coverPath / intro —— 订阅书行，刷新后 UI 自动跟上
+        bookRepo.observeBook(bookId),
+        chapterDao.observeByBook(bookId).map<List<ChapterEntity>, List<ChapterEntity>?> { it }.onStart { emit(null) },
+        refreshing,
+    ) { book, chapters, refreshing ->
+        BookDetailUiState(
+            book = book,
+            loaded = true,
+            chapters = chapters.orEmpty(),
+            chaptersLoaded = chapters != null,
+            refreshing = refreshing,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookDetailUiState())
 
     val messages = MessageBus()
 
@@ -56,17 +86,6 @@ class BookDetailViewModel(
     val openReader: SharedFlow<Unit> = _openReader
 
     init {
-        // 追更会改 totalChapters / coverPath / intro —— 订阅书行，刷新后 UI 自动跟上
-        viewModelScope.launch {
-            bookRepo.observeBook(bookId).collect { book ->
-                _state.update { it.copy(book = book, loaded = true) }
-            }
-        }
-        viewModelScope.launch {
-            chapterDao.observeByBook(bookId).collect { chapters ->
-                _state.update { it.copy(chapters = chapters) }
-            }
-        }
         // WebDAV 只同步书行、不同步章节表。同步下来的网络书进详情时目录是空的 ——
         // 以前要等进阅读器才补抓，详情页自己却装聋作哑（菜单还写着「目录」）。
         // 进页发现章节表为空就自动追更一次；失败不弹提示打扰，留给空态里的「重新获取」。
@@ -89,8 +108,8 @@ class BookDetailViewModel(
      * `showSnackbar`，它要等那条提示自己消失（约 4 秒）才返回，转圈和「正在获取目录…」就陪着多挂 4 秒。
      */
     fun refresh(quiet: Boolean = false) {
-        if (_state.value.refreshing) return
-        _state.update { it.copy(refreshing = true) }
+        if (refreshing.value) return
+        refreshing.value = true
         viewModelScope.launch {
             val message = try {
                 refreshMessage()
@@ -99,7 +118,7 @@ class BookDetailViewModel(
             } catch (e: Exception) {
                 "刷新失败: ${e.message}"
             } finally {
-                _state.update { it.copy(refreshing = false) }
+                refreshing.value = false
             }
             if (!quiet) messages.emit(message)
         }

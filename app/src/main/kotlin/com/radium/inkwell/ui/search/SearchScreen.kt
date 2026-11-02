@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,6 +48,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,9 +65,11 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
+import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
 import com.radium.inkwell.ui.components.settingsPageColor
@@ -128,6 +135,17 @@ fun SearchScreen(
     // 与书架/设置同一套画布：浅色灰底白卡。默认 Scaffold 是 surface 白底，
     // 结果行圆角缝里会透出一块白板，像每条结果后面垫了一层白背景。
     val pageColor = settingsPageColor()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    // 进搜索页就是来打字的：还没搜过、框里也是空的就直接把光标放进去，不必再点一下输入框。
+    // 从预览页返回（已经搜过）不抢焦点，别平白把键盘弹出来挡住结果
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (state.searchId == 0 && state.query.isEmpty()) searchFocus.requestFocus()
+    }
+    // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，写进 items 里就是每行挂一个
+    val motionOn = animationsEnabled()
+    val motion = MaterialTheme.motionScheme
     Scaffold(
         containerColor = pageColor,
         topBar = {
@@ -139,8 +157,15 @@ fun SearchScreen(
                         value = state.query,
                         onValueChange = viewModel::setQuery,
                         placeholder = "书名 / 作者",
-                        onSearch = { viewModel.search() },
-                        modifier = Modifier.padding(end = Dimens.gapS),
+                        onSearch = {
+                            // 回车搜了就收键盘：IME 的 Search 动作默认不收，键盘一直挡着大半屏结果
+                            keyboard?.hide()
+                            focusManager.clearFocus()
+                            viewModel.search()
+                        },
+                        modifier = Modifier
+                            .padding(end = Dimens.gapS)
+                            .focusRequester(searchFocus),
                     )
                 },
                 navigationIcon = {
@@ -159,7 +184,8 @@ fun SearchScreen(
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             AnimatedVisibility(
                 visible = state.searching || state.searchPaused,
                 enter = expandEnter(),
@@ -198,7 +224,14 @@ fun SearchScreen(
                     onClear = { confirmClearHistory = true },
                 )
             } else if ((state.results.isEmpty() && idle) || cleared) {
-                if (state.searchId > 0 && !cleared) {
+                if (state.searchId > 0 && !cleared && state.allFailed) {
+                    // 每个源都超时或报错：多半是网络问题，不是书源里没这本。说「没找到」会让人换词白搜
+                    ErrorState(
+                        title = "书源都没有响应",
+                        message = "搜索的书源全部超时或出错，请检查网络后重试",
+                        onRetry = viewModel::retrySearch,
+                    )
+                } else if (state.searchId > 0 && !cleared) {
                     // 搜完了一本没有。从前这里落回进页时那句「按已启用的规则搜索」，
                     // 看起来像什么都没发生 —— 用户分不清是没搜、还是搜了没有。
                     EmptyState(
@@ -206,7 +239,8 @@ fun SearchScreen(
                         title = "没有找到相关的书",
                         hint = "换个关键词试试，或到书源管理里检查书源是否已启用、是否还能用",
                     )
-                } else {
+                } else if (state.historyLoaded) {
+                    // 历史还没读到时什么都不画：读到后要么是历史列表、要么才是这块空态，别先闪一下它
                     EmptyState(
                         icon = Icons.Default.Search,
                         title = "按已启用的规则搜索",
@@ -232,6 +266,8 @@ fun SearchScreen(
                     // key 必须与合并键是同一个（SearchHit.key）：拿代表条目的 sourceId|bookUrl 当 key 的话，
                     // 一个书源把同一地址列成两本书就撞 key 崩溃，见 searchKey
                     items(state.results, key = { it.key }) { hit ->
+                        // 边搜边重排（源数变了、相关度变了）时让行滑到新位置，而不是一帧之内互换 ——
+                        // 手指底下的那行瞬间换成别的书，点开的就不是想点的那本
                         val result = hit.result
                         val inShelf = bookKey(result.title, result.author) in state.shelfKeys
                         BookListRow(
@@ -260,6 +296,12 @@ fun SearchScreen(
                                 viewModel.pauseSearch()
                                 onOpenPreview(viewModel.rankedResults(hit.results))
                             },
+                            // 关了系统动画就传 null（这个 API 的「不动画」写法），同书架
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                            ),
                         )
                     }
                     if (state.loadingMore) {

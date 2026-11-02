@@ -252,18 +252,26 @@ class NetBookRepository(
 
     private fun buildTocOnIo(bookId: String, toc: List<RemoteChapter>): List<ChapterEntity> {
         cache.purgeLegacy(bookId)
+        // 目录只列一次，别逐章 stat（见 ChapterContentCache.cachedChecker）
+        val isCached = cache.cachedChecker(bookId)
         return toc.map {
             ChapterEntity(
                 bookId, it.index, it.title,
                 url = it.url,
-                isCached = cache.has(bookId, it.url),
+                isCached = isCached(it.url),
                 variable = it.variable,
             )
         }
     }
 
-    /** 换目录 = 先清后写，务必在事务里成对执行：中途被杀不能留下空目录或半套目录 */
+    /**
+     * 换目录 = 先清后写，务必在事务里成对执行：中途被杀不能留下空目录或半套目录。
+     *
+     * 跟库里那份一模一样就不动：下拉追更绝大多数时候没有新章节，从前照样把几千行整本删掉重插 ——
+     * 写一大片不说，章节表一失效，阅读页、详情页的目录流就各自把整本目录重查一遍。
+     */
     private suspend fun replaceToc(bookId: String, entities: List<ChapterEntity>) {
+        if (chapterDao.getByBook(bookId) == entities) return
         chapterDao.deleteByBook(bookId)
         chapterDao.upsertAll(entities)
     }

@@ -64,7 +64,12 @@ val appModule = module {
     single { get<InkwellDb>().rssSourceDao() }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
-    single { BookParserRegistry(listOf(EpubParser(), MobiParser(), TxtParser())) }
+    // txt 的解码结果与拆章表缓存在系统可清理的缓存目录：没了只是下次打开慢一次（见 TxtParser / TxtCache）
+    single {
+        BookParserRegistry(
+            listOf(EpubParser(), MobiParser(), TxtParser(cacheDir = java.io.File(androidContext().cacheDir, "txt"))),
+        )
+    }
 
     single { ReaderPrefs(androidContext()) }
     single { WebDavPrefs(androidContext()) }
@@ -128,7 +133,7 @@ val appModule = module {
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
-    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
@@ -142,7 +147,9 @@ val appModule = module {
     }
     viewModel { com.radium.inkwell.ui.explore.ExploreViewModel(get(), get(), get(), get()) }
     viewModel { (bookId: String) -> com.radium.inkwell.ui.detail.BookDetailViewModel(bookId, get(), get(), get(), get()) }
-    viewModel { SourceManageViewModel(androidContext(), get(), get(), get(), get()) }
+    // 校验挂在应用级单例上，离开书源管理页也照跑（见 SourceChecker）
+    single { com.radium.inkwell.ui.sourcemanage.SourceChecker(get(), get(), get()) }
+    viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
     viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }

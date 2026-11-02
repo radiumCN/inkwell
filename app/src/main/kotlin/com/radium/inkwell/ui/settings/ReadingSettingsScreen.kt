@@ -37,9 +37,10 @@ fun ReadingSettingsScreen(
 ) {
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
-    val checkAuthor by appPrefs.changeSourceCheckAuthor.collectAsStateWithLifecycle(initialValue = true)
-    val autoChangeSource by appPrefs.autoChangeSource.collectAsStateWithLifecycle(initialValue = true)
-    val searchHistoryEnabled by appPrefs.searchHistoryEnabled.collectAsStateWithLifecycle(initialValue = true)
+    // 读预热好的那份，第一帧就是真值：从前关过的开关每次进页都要从「开」滑到「关」（见 AppPrefs 的「设置页读的预热版」）
+    val checkAuthor = appPrefs.changeSourceCheckAuthorState.collectAsStateWithLifecycle().value ?: true
+    val autoChangeSource = appPrefs.autoChangeSourceState.collectAsStateWithLifecycle().value ?: true
+    val searchHistoryEnabled = appPrefs.searchHistoryEnabledState.collectAsStateWithLifecycle().value ?: true
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()

@@ -37,6 +37,7 @@ import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.settingsPageColor
 /**
  * 文章阅读。
@@ -131,10 +132,21 @@ fun RssArticleScreen(
                 }
             }
 
-            if (state.needsBrowser) {
+            // 抓取失败一律说出来、并给重试：从前错误只在「有原文链接」时才显示，
+            // 订阅源不存在、或没有链接时抓失败，页面就只剩一个标题
+            val error = state.error
+            if (error != null) {
+                Text(
+                    "正文没能取到：$error",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(Dimens.gapM))
+                SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
+            } else if (state.needsBrowser) {
                 // 解析不出正文不是错误：很多源本来就只给标题+链接
                 Text(
-                    state.error ?: "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
+                    "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

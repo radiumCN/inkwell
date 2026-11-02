@@ -50,6 +50,11 @@ class WebDavRepository(
     private val replaceRules: ReplaceRuleRepository,
     private val localNetwork: LocalNetworkAccess,
     private val bookRepo: BookRepository,
+    /**
+     * 共用应用的 HTTP 客户端（WebDavClient 在它上面派生自己的超时）。从前每次同步都 new 一个
+     * OkHttpClient：连接池、线程池、TLS 会话全是新的，退到后台一次就重新握一次手。
+     */
+    private val http: okhttp3.OkHttpClient,
 ) {
     private companion object {
         const val DIR = "inkwell"
@@ -65,14 +70,19 @@ class WebDavRepository(
     private val syncMutex = Mutex()
 
     suspend fun testConnection(url: String, username: String, password: String): Result<Unit> =
-        WebDavClient(url, username, password).check()
+        WebDavClient(url, username, password, http).check()
 
-    /** 双向同步：GET 远端 → 字段级 LWW 合并 → 写回本地 → PUT 合并结果 */
-    suspend fun sync(): Result<String> = try {
+    /**
+     * 双向同步：GET 远端 → 字段级 LWW 合并 → 写回本地 → PUT 合并结果。
+     *
+     * @param auto 自动同步（冷启动、退到后台）。两边都没动过就整次跳过，见 [syncLocked]；
+     *   设置页手点的「立即同步」照常完整走一遍 —— 那是用户明说要同步。
+     */
+    suspend fun sync(auto: Boolean = false): Result<String> = try {
         // 备份里装着每个书源的完整 JSON，几百个源就是几 MB：gzip、整份编解码、逐条解析书源类型
         // 都是重活，而设置页的「立即同步」是从 viewModelScope（主线程）调进来的
         withContext(Dispatchers.IO) {
-            syncMutex.withLock { Result.success(syncLocked()) }
+            syncMutex.withLock { Result.success(syncLocked(auto)) }
         }
     } catch (e: CancellationException) {
         // 退到后台的自动同步被进程回收、或用户离开设置页 —— 这是取消，不是「同步失败」
@@ -81,19 +91,42 @@ class WebDavRepository(
         Result.failure(e)
     }
 
-    private suspend fun syncLocked(): String {
+    private suspend fun syncLocked(auto: Boolean): String {
         val config = prefs.config.first()
         check(config.isConfigured) { "尚未配置 WebDAV" }
         val url = if (OfficialWebDav.isLegacyDav(config.url)) OfficialWebDav.DAV else config.url
         // 局域网 NAS 缺 Android 17 的局域网权限时，连接不报错、只会挂到超时 ——
         // 先拦下来，给一句看得懂的话（设置页据此弹授权）。后台自动同步也不必白等十几秒
         if (localNetwork.isBlocked(url)) throw LocalNetworkPermissionMissing()
-        val client = WebDavClient(url, config.username, config.password)
+        val client = WebDavClient(url, config.username, config.password, http)
+        // 版本标记连同是哪个地址、哪个账号一起记：换了账号，旧标记不能被当成「远端没变」
+        val account = url + "\u0000" + config.username + "\u0000"
+
+        // 两边都没动过就整次跳过。自动同步的常态是「切出 App 时什么都没改」：从前每次都整份下载、
+        // 合并、再整份上传 —— 几千个书源的备份就是每切一次后台几 MB 的上下行。
+        // 本地：「最新修改时间」与上次拍快照时记下的**相等**（见 [localChangeAt]）；
+        // 远端：版本标记（ETag / Last-Modified）与上次同步后记下的一致。任何一样拿不准都当动过，照常完整同步。
+        if (auto) {
+            val mark = prefs.syncMark()
+            if (mark.remote != null && localChangeAt() == mark.localStamp) {
+                val remoteNow = remoteVersion(client)?.let { account + it }
+                if (remoteNow == mark.remote) {
+                    prefs.markSynced(System.currentTimeMillis())
+                    return "已是最新"
+                }
+            }
+        }
 
         // 先建目录再读：首次同步时 inkwell/ 还不存在，直接 GET 备份文件，
         // 坚果云对「父目录不存在」回的是 409 而不是 404 —— 同步就一次都成不了。
         // MKCOL 是幂等的（已存在返回 405，客户端当成功）。
         client.mkcol(DIR)
+
+        // 远端版本在**下载之前**取：这一轮拿到的内容不会比它旧。从前是整轮同步走完再取 ——
+        // 合并几千个书源的那几秒里，另一台设备要是传了一版，它的版本会被当成「这一轮已经同步过」记下来，
+        // 之后的自动同步一直跳过，那一版（比如对面的阅读进度）永远拉不下来。
+        // 下载前后之间若有人上传：这里记的是更旧的版本，下次一比对不上就照常完整同步，不丢东西。
+        val remoteBefore = remoteVersion(client)
 
         // 远端文件损坏（上传中断留半截、被别的客户端写坏）时 decode 会抛异常。若让它把整个 sync
         // 拖垮，PUT 永远执行不到 → 损坏文件永远修不好、同步永久瘫痪。这里把损坏视作「远端没有可用备份」，
@@ -112,6 +145,11 @@ class WebDavRepository(
         // 本地快照在下载**之后**再拍：备份动辄几 MB，冷启动同步下载的那几秒里用户删书、隐藏、
         // 改分组，按下载前的快照合并会把这些修改原样写回去（删掉的书复活）。
         // 拍完到写回之间仍有一小段合并耗时，那段由 applyBooks / applySources 按时间戳兜住。
+        // 拍快照**之前**记下本地的「最新修改时间」，下次跳过的条件是它原样没变。
+        // 不拿墙钟时刻当基线：时间戳盖在快照之前、却在快照之后才提交的写入（导入大合集时先取 now、
+        // 好几秒后才落库，正赶上切到后台），既不在这次上传里、又不晚于基线 —— 会被永远当成已同步。
+        // 按「相等」比，那一笔一落库最新时间就变了，下次照常同步。
+        val localStamp = localChangeAt()
         val local = buildLocalPayload()
 
         val toUpload: BackupPayload
@@ -138,10 +176,53 @@ class WebDavRepository(
 
         // 直接 PUT 覆盖。半截文件的风险由上面的「decode 失败即当远端没有、直接覆盖自愈」兜底，
         // 不再用「PUT 临时名 + MOVE」——坚果云等服务器对 MOVE 回 409，反而把同步整个搞挂。
-        client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
+        // 合并完跟远端一模一样（这次只有远端的更新要拉下来，或两边本来就一致）就不必再传一遍
+        val uploaded = remote == null || !sameContent(toUpload, remote)
+        if (uploaded) {
+            client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
+        }
         prefs.markSynced(System.currentTimeMillis())
+        // 传了就紧接着取新版本（与 PUT 之间只隔一个请求）；没传，远端就还是下载前的那一版
+        val remoteAfter = if (uploaded) remoteVersion(client) else remoteBefore
+        prefs.saveSyncMark(localStamp, remoteAfter?.let { account + it })
         return if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"
     }
+
+    /**
+     * 本地会进备份的东西最近一次改动的时间：书架（含进度）、书源、净化规则、订阅源、两份设置。
+     *
+     * 当「版本」用，按相等比（见 [syncLocked]）：任何一笔新写入，时间戳只要比现有的都新，这个值就变。
+     * 盲区只剩系统时间被往回调之后的写入（新时间戳比已有的旧）—— 那种情况等时间走过来，或下一次手动同步。
+     * 合并时写进本地的远端改动也会让它变：拉过远端更新的下一次自动同步会再完整走一遍，之后就稳定了。
+     */
+    private suspend fun localChangeAt(): Long = maxOf(
+        maxOf(bookDao.lastChangeAt(), sourceDao.lastChangeAt()),
+        maxOf(replaceRules.lastChangeAt(), rssDao.lastChangeAt()),
+        maxOf(appPrefs.updatedAt(), readerPrefs.updatedAt()),
+    )
+
+    /** 远端备份的版本标记；读不到（服务器不支持 HEAD、网络抖一下）就是 null，调用方当「动过」处理 */
+    private suspend fun remoteVersion(client: WebDavClient): String? =
+        try {
+            client.version(BACKUP)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+    /**
+     * 两份备份内容是否一致，不看导出时间与设备号。按 id 比，不看列表顺序：
+     * 远端那份是别的设备合并出来的，顺序跟这边从库里读出来的不一定一样。
+     */
+    private fun sameContent(a: BackupPayload, b: BackupPayload): Boolean =
+        a.version == b.version &&
+            a.books.associateBy { it.id } == b.books.associateBy { it.id } &&
+            a.sources.associateBy { it.id } == b.sources.associateBy { it.id } &&
+            a.replaceRules.associateBy { it.id } == b.replaceRules.associateBy { it.id } &&
+            a.rssSources.associateBy { it.id } == b.rssSources.associateBy { it.id } &&
+            a.readerSettings == b.readerSettings &&
+            a.appSettings == b.appSettings
 
     private suspend fun buildLocalPayload(): BackupPayload = BackupPayload(
         deviceId = prefs.deviceId(),

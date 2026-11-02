@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -93,6 +94,8 @@ fun FeedbackScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
+                .consumeWindowInsets(padding)
                 // edge-to-edge 下窗口不再自动 resize，键盘会盖住提交按钮；让出 IME 高度
                 .imePadding()
                 .padding(Dimens.screenPadding)

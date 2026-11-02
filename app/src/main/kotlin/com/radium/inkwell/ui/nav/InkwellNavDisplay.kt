@@ -205,6 +205,7 @@ fun InkwellNavDisplay() {
                     // 窄屏的详情是整页盖在书架上的，和从隐藏区点开的阅读页一样，读完自己回来
                     onHiddenCollapsed = { ids -> if (dualPane) nav.closeBookDetail(ids) },
                     viewModel = vm,
+                    readerOpen = backStack.any { it is ReaderRoute },
                 )
             }
             entry<BookDetailRoute>(

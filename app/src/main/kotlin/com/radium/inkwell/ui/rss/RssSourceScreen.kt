@@ -45,6 +45,9 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +58,7 @@ fun RssSourceScreen(
     viewModel: RssSourceViewModel,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
+    val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
 
@@ -75,8 +79,20 @@ fun RssSourceScreen(
         topBar = {
             AppTopBar("订阅", topBarScroll, onBack = onBack, containerColor = pageColor) {
                 Box {
-                    AppIconButton(onClick = { showImportMenu = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "添加订阅源")
+                    // 导入进行中（粘地址要联网抓 feed）换成转圈：从前这个状态 VM 里有、页面从没读过，点了像没点上
+                    if (importing) {
+                        // 转圈没有名字，读屏只会念「按钮，已停用」：补一句它在干什么
+                        AppIconButton(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier.semantics { contentDescription = "正在导入订阅源" },
+                        ) {
+                            AppLoadingIndicator(size = Dimens.buttonSpinner)
+                        }
+                    } else {
+                        AppIconButton(onClick = { showImportMenu = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "添加订阅源")
+                        }
                     }
                     DropdownMenu(
                         expanded = showImportMenu,
@@ -107,7 +123,9 @@ fun RssSourceScreen(
     ) { padding ->
         // null = 库还没读回来：先空着，别闪一下「还没有订阅源」
         val list = sources ?: return@Scaffold
-        if (list.isEmpty()) {
+        if (list.isEmpty() && importing) {
+            LoadingState(Modifier.padding(padding), label = "正在导入订阅源…")
+        } else if (list.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.RssFeed,
                 title = "还没有订阅源",

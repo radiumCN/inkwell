@@ -4,8 +4,10 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
+import androidx.room3.Transaction
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceListItem
+import com.radium.inkwell.data.db.entity.EnabledSourceMeta
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -25,15 +27,19 @@ interface BookSourceDao {
     )
     fun observeAll(): Flow<List<BookSourceListItem>>
 
-    /** 启用源的 id；规则正文用 [getById] 逐条取，避免一次 Cursor 塞满大 JSON */
+    /**
+     * 启用源的元数据，顺序即书源管理里的手动顺序。规则正文用 [getById] 逐条取（避免一次 Cursor 塞满大 JSON），
+     * 仓库先按 updatedAt 查解码缓存，命中就不必取。
+     */
     @Query(
         """
-        SELECT id FROM book_source
+        SELECT id, updatedAt, checkStatus, respondTime, sortOrder, searchMs, searchFails
+          FROM book_source
          WHERE enabled = 1 AND deleted = 0
          ORDER BY sortOrder, name
         """,
     )
-    suspend fun getEnabledIds(): List<String>
+    suspend fun getEnabledMeta(): List<EnabledSourceMeta>
 
     @Query("SELECT * FROM book_source WHERE id = :id")
     suspend fun getById(id: String): BookSourceEntity?
@@ -97,4 +103,29 @@ interface BookSourceDao {
 
     @Query("SELECT MAX(sortOrder) FROM book_source WHERE deleted = 0")
     suspend fun maxSortOrder(): Int?
+
+    /**
+     * 把 [ids] 按给定顺序排到最前：递增分配（起点 = min - 个数），保持选中项之间的相对顺序 ——
+     * 从前用 order-- 递减，会把多选置顶的顺序整体倒过来。
+     *
+     * 整批一个写事务。从前在仓库里逐条 UPDATE，每条各开各的事务：全选几千个置顶就是几千次提交、
+     * 几千次表失效（书源列表跟着重查几千遍），中途被杀还会只挪了一半。读 min 也放进同一个事务，
+     * 别让并发的另一次置顶插在读与写之间。
+     */
+    @Transaction
+    suspend fun moveToTop(ids: List<String>, now: Long) {
+        var order = (minSortOrder() ?: 0) - ids.size
+        for (id in ids) setSortOrder(id, order++, now)
+    }
+
+    /** 同 [moveToTop]，排到最后 */
+    @Transaction
+    suspend fun moveToBottom(ids: List<String>, now: Long) {
+        var order = (maxSortOrder() ?: 0) + 1
+        for (id in ids) setSortOrder(id, order++, now)
+    }
+
+    /** 书源最近一次改动的时间（含墓碑）；空表为 0。同步「两边都没动就跳过」的本地一侧（见 WebDavRepository.syncLocked） */
+    @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM book_source")
+    suspend fun lastChangeAt(): Long
 }

@@ -10,12 +10,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -31,6 +33,7 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
@@ -75,6 +78,14 @@ fun RssArticlesScreen(
                     message = state.error!!,
                     onRetry = viewModel::refresh,
                 )
+                // 抓成功了但一篇都没有（源的列表规则不匹配、或这个分类本来就空）：从前就是一片空白
+                state.articles.isEmpty() -> EmptyState(
+                    icon = Icons.Default.RssFeed,
+                    title = "这里还没有文章",
+                    hint = "换个分类看看，或稍后刷新",
+                    actionLabel = "刷新",
+                    onAction = viewModel::refresh,
+                )
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = ContentListDefaults.listContentPadding(),
@@ -91,10 +102,14 @@ fun RssArticlesScreen(
 
 @Composable
 private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
-    val desc = article.description?.htmlToPlainText()
-        ?.replace(Regex("\\s+"), " ")
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
+    // 全文型 feed 的 description 就是整篇 HTML：每次重组都过一遍 Jsoup、现编一次正则，滑动就掉帧。
+    // 记住它，同 BookListRow 的 caption
+    val desc = remember(article.description) {
+        article.description?.htmlToPlainText()
+            ?.replace(WHITESPACE_RUN, " ")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
     val date = article.pubDate?.takeIf { it.isNotBlank() }
     ContentListItem(
         onClick = onClick,
@@ -133,3 +148,5 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
         },
     )
 }
+
+private val WHITESPACE_RUN = Regex("\\s+")

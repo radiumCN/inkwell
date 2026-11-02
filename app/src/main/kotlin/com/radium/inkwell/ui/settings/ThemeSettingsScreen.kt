@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,7 +62,8 @@ import org.koin.compose.koinInject
 fun ThemeSettingsScreen(onBack: () -> Unit) {
     val prefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
-    val config by prefs.themeConfig.collectAsStateWithLifecycle(initialValue = ThemeConfig())
+    // 预热好的那份：冷流配 initialValue 的话，进页先按默认画一帧，选中态与预览跟着跳一下
+    val config = prefs.themeState.collectAsStateWithLifecycle().value ?: ThemeConfig()
 
     fun update(new: ThemeConfig) {
         scope.launch { prefs.setThemeConfig(new) }
@@ -201,7 +203,15 @@ private fun ThemeSwatch(
                 )
                 // 整块色板作为单选目标带上名字与选中态：否则读屏聚焦未选中的色块什么都念不出，
                 // 十个色块无从区分（名字 Text 在可点区之外）
-                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                // 水波纹是圆的：默认的有界水波纹是方的，圆色板按下去冒出一个方块。不用 clip 圈住 ——
+                // 那会把右下角的选中对勾一起裁掉
+                .selectable(
+                    selected = selected,
+                    interactionSource = null,
+                    indication = ripple(bounded = false, radius = Dimens.swatch / 2),
+                    role = Role.RadioButton,
+                    onClick = onClick,
+                )
                 .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,
         ) {
@@ -255,7 +265,10 @@ private fun CustomThemeEditor(
         return hsvToColor(45f, bgWarmth.coerceIn(0f, 0.12f), v)
     }
 
-    val previewScheme = AppThemes.schemeFrom(currentSeed(), currentBg(), dark)
+    // 拖色相 / 明度滑块时每帧都会重组：输入没变就别重推整套配色
+    val seed = currentSeed()
+    val bg = currentBg()
+    val previewScheme = remember(seed, bg, dark) { AppThemes.schemeFrom(seed, bg, dark) }
 
     Surface(
         Modifier.fillMaxWidth().padding(top = Dimens.gapM),
@@ -403,6 +416,7 @@ private fun LabeledSlider(
             onValueChangeFinished = onFinished,
             valueRange = range,
             modifier = Modifier.weight(1f),
+            label = label,
         )
     }
 }

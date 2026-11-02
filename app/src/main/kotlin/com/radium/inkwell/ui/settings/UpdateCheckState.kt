@@ -23,6 +23,7 @@ import com.radium.inkwell.update.UpdateInfo
 import com.radium.inkwell.update.UpdateManager
 import com.radium.inkwell.update.UpdateSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -53,12 +54,14 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"
     }
-    val channel by appPrefs.updateChannel.collectAsStateWithLifecycle(initialValue = UpdateChannel.STABLE)
-    val source by appPrefs.updateSource.collectAsStateWithLifecycle(initialValue = UpdateSource.GITHUB)
+    val channel = appPrefs.updateChannelState.collectAsStateWithLifecycle().value ?: UpdateChannel.STABLE
+    val source = appPrefs.updateSourceState.collectAsStateWithLifecycle().value ?: UpdateSource.GITHUB
 
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateInfo?>(null) }
     var downloading by remember { mutableStateOf(false) }
+    /** 正在跑的下载；「取消下载」掐它（半截的包由下载器自己删掉，见 UpdateInstaller） */
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     /**
      * 下载/安装没成的原因，**写在弹窗里**而不是弹 Snackbar：弹窗是模态的，Snackbar 落在它后面根本看不见。
@@ -104,15 +107,19 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
                     info.browserIsApk -> "下载 APK"
                     else -> "查看 Release"
                 },
-                dismissText = "以后再说",
+                // 下载中次按钮变成「取消下载」：镜像慢、包几十 MB 时，从前返回键、点外面、「以后再说」全失效，
+                // 只能干等或杀进程。返回键 / 点外面仍不关（上面的 onDismissRequest），免得误触把下载丢了
+                dismissText = if (downloading) "取消下载" else "以后再说",
+                onDismiss = {
+                    if (downloading) downloadJob?.cancel() else dismissDialog()
+                },
                 confirmLoading = downloading,
-                dismissEnabled = !downloading,
                 onConfirm = {
                     if (direct != null) {
                         downloading = true
                         downloadProgress = 0f
                         downloadError = null
-                        scope.launch {
+                        downloadJob = scope.launch {
                             // 转圈先收、再说原因：失败原因写在弹窗里，按钮立刻能点
                             val error = try {
                                 val apk = updateManager.downloadAndVerify(
@@ -124,7 +131,9 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
                                     "请先在系统里授予「安装未知应用」权限，再点一次"
                                 }
                             } catch (e: CancellationException) {
-                                // 离开设置页取消的下载不是「下载失败」
+                                // 离开设置页、或点了「取消下载」，都不是「下载失败」。弹窗还在（点的是取消）就说一声，
+                                // 「下载并安装」照样能再点；离开了页面这句也没人看见，无妨
+                                downloadError = "已取消下载"
                                 throw e
                             } catch (e: Exception) {
                                 "下载失败: ${e.message?.take(80)}"

@@ -189,13 +189,22 @@ class BookshelfViewModel(
         private const val REFRESH_CONCURRENCY = 4
     }
 
-    /** 书架顶栏是否显示「发现」入口 */
-    val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    /**
+     * 书架顶栏是否显示「发现」入口。从预热版取（见 AppPrefs 的「设置页读的预热版」），初值也用它此刻的值：
+     * 从前初值写死 true，关了发现入口的人冷启动首帧先画出「发现」图标再消失，搜索图标跟着挪位。
+     * 冷启动时首帧要等主题读到才放行（MainActivity），这两样出自同一次磁盘读取，到那时基本都已就位。
+     */
+    val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabledState
+        .map { it ?: true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), appPrefs.exploreEnabledState.value ?: true)
 
-    /** 书架展示：网格或列表 */
-    val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayout
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookshelfLayout.GRID)
+    /** 书架展示：网格或列表。初值同上，别让列表用户先看一帧网格 */
+    val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayoutState
+        .map { it ?: BookshelfLayout.GRID }
+        .stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            appPrefs.bookshelfLayoutState.value ?: BookshelfLayout.GRID,
+        )
 
     /**
      * Room 送来的书架；null = 第一帧还没到。
@@ -321,11 +330,36 @@ class BookshelfViewModel(
         .map { list -> list.count { it.hidden } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
+    /**
+     * 开书那一刻的书架顺序；非 null 时 [books] 照它摆。
+     *
+     * 书架按「最近读 / 打开」排序，而开书当场就会 markOpened —— 这本书立刻跳到第一位。阅读页的
+     * 退出动画却是缩回「点开它时的位置」（InkwellNavigator.openOrigin）：缩回去的地方已经换成了别的书；
+     * 读满几秒再退出，还会先看见旧顺序、紧接着整架重排一次。冻住顺序，等退出动画播完再放开
+     * （[releaseShelfOrder]），这本书再用 animateItem 滑到最前面 —— 顺带交代了它为什么换了位置。
+     * 冻结期间新冒出来的书排在最后；书本身的增删、改动照常反映。
+     */
+    private val frozenOrder = MutableStateFlow<List<String>?>(null)
+
+    fun freezeShelfOrder() {
+        frozenOrder.value = books.value.map { it.id }
+    }
+
+    fun releaseShelfOrder() {
+        frozenOrder.value = null
+    }
+
     val books: StateFlow<List<BookEntity>> =
-        combine(allBooks, _group, _showHidden) { list, g, showHidden ->
-            list
+        combine(allBooks, _group, _showHidden, frozenOrder) { list, g, showHidden, frozen ->
+            val visible = list
                 .filter { showHidden || !it.hidden }
                 .filter { inGroup(it, g) }
+            if (frozen == null) {
+                visible
+            } else {
+                val rank = HashMap<String, Int>(frozen.size * 2).apply { frozen.forEachIndexed { i, id -> put(id, i) } }
+                visible.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private fun inGroup(book: BookEntity, g: String?): Boolean = when (g) {
@@ -373,7 +407,7 @@ class BookshelfViewModel(
         val ids = _selected.value
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            ids.forEach { bookRepo.deleteBook(it) }
+            bookRepo.deleteBooks(ids)
             clearSelection()
             messages.emit("已删除 ${ids.size} 本")
         }
@@ -384,7 +418,7 @@ class BookshelfViewModel(
         if (ids.isEmpty()) return
         viewModelScope.launch {
             val name = group.trim()
-            ids.forEach { bookRepo.setGroup(it, name) }
+            bookRepo.setGroupAll(ids, name)
             clearSelection()
             messages.emit(
                 if (name.isBlank()) "已移出分组 ${ids.size} 本"
@@ -397,7 +431,7 @@ class BookshelfViewModel(
         val ids = _selected.value
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            ids.forEach { bookRepo.setHidden(it, hidden) }
+            bookRepo.setHiddenAll(ids, hidden)
             clearSelection()
             messages.emit(
                 if (hidden) "已隐藏 ${ids.size} 本。长按顶栏「书架」标题可以找回"

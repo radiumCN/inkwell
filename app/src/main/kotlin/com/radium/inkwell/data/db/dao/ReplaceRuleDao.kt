@@ -46,4 +46,8 @@ interface ReplaceRuleDao {
 
     @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM replace_rule WHERE deleted = 0")
     suspend fun maxSortOrder(): Int
+
+    /** 净化规则最近一次改动的时间（含墓碑）；空表为 0。同步「两边都没动就跳过」的本地一侧（见 WebDavRepository.syncLocked） */
+    @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM replace_rule")
+    suspend fun lastChangeAt(): Long
 }

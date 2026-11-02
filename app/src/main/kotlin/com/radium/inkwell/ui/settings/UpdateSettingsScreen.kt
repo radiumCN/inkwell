@@ -40,8 +40,8 @@ import org.koin.compose.koinInject
 fun UpdateSettingsScreen(onBack: () -> Unit) {
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
-    val channel by appPrefs.updateChannel.collectAsStateWithLifecycle(initialValue = UpdateChannel.STABLE)
-    val source by appPrefs.updateSource.collectAsStateWithLifecycle(initialValue = UpdateSource.GITHUB)
+    val channel = appPrefs.updateChannelState.collectAsStateWithLifecycle().value ?: UpdateChannel.STABLE
+    val source = appPrefs.updateSourceState.collectAsStateWithLifecycle().value ?: UpdateSource.GITHUB
     var showChannelPicker by remember { mutableStateOf(false) }
     var showSourcePicker by remember { mutableStateOf(false) }
 

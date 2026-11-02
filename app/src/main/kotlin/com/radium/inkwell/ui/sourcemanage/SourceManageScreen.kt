@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -75,6 +77,8 @@ import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
@@ -98,6 +102,7 @@ fun SourceManageScreen(
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val failedCount by viewModel.failedCount.collectAsStateWithLifecycle()
     val options by viewModel.options.collectAsStateWithLifecycle()
+    val importing by viewModel.importing.collectAsStateWithLifecycle()
 
     var showCheckOptions by remember { mutableStateOf(false) }
     var showSortPicker by remember { mutableStateOf(false) }
@@ -168,8 +173,12 @@ fun SourceManageScreen(
                         AppIconButton(onClick = viewModel::selectAll) {
                             Icon(Icons.Default.SelectAll, contentDescription = "全选")
                         }
-                        AppIconButton(onClick = { viewModel.validate(selected) }) {
-                            Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验")
+                        // 同普通状态：先挑选项（弹窗按「有选中就只校验选中的」写好了），校验进行中不给 ——
+                        // 从前多选里直接开跑、跳过了选项；正在校验时再点则静默无效
+                        if (checkProgress == null) {
+                            AppIconButton(onClick = { showCheckOptions = true }) {
+                                Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验")
+                            }
                         }
                         AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
@@ -272,6 +281,9 @@ fun SourceManageScreen(
     ) { padding ->
         if (!sourcesLoaded) {
             // 库还没读回来：先空着，别闪一下「还没有书源」
+        } else if (sources.isEmpty() && importing) {
+            // 从空态点了导入：别还对着「还没有书源」干等，几 MB 的合集要解析好几秒
+            LoadingState(Modifier.padding(padding), label = "正在导入书源…")
         } else if (sources.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.Source,
@@ -286,7 +298,8 @@ fun SourceManageScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            Column(Modifier.fillMaxSize().padding(padding)) {
+            // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
+            Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             // 几百个书源，没有搜索和筛选就只能一路滑
             SearchField(
                 value = query,
@@ -312,6 +325,17 @@ fun SourceManageScreen(
                     null
                 },
             )
+            // 导入进行中：几 MB 的合集要解析好几秒，没有这一行就像没点上
+            if (importing) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+                ) {
+                    AppLoadingIndicator(size = Dimens.buttonSpinner)
+                    Text("正在导入书源…", style = MaterialTheme.typography.labelMedium)
+                }
+            }
             // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
             checkProgress?.let { p ->
                 Row(
@@ -356,7 +380,19 @@ fun SourceManageScreen(
                     }
                 }
             }
-            LazyColumn(
+            // 搜不到 / 筛完是空的：从前就是一个空的列表，一片空白，也没有退出这个筛选的出口
+            // （「失效」筛选下把失效源删完就是这样）。只在真的筛了的时候说 —— 没筛却是空的只可能是还没算完
+            val narrowed = query.isNotBlank() || filter != SourceFilter.ALL || groupFilter != null
+            if (visible.isEmpty() && narrowed) {
+                EmptyState(
+                    icon = Icons.Default.SearchOff,
+                    title = "没有符合条件的书源",
+                    hint = "换个关键词，或放宽筛选条件",
+                    actionLabel = "清除筛选",
+                    onAction = viewModel::clearFilters,
+                    modifier = Modifier.imePadding(),
+                )
+            } else LazyColumn(
                 // 上面压着搜索框：edge-to-edge 下键盘弹起会盖住列表下半截，最后几条滚不出来
                 Modifier.fillMaxSize().imePadding(),
                 contentPadding = ContentListDefaults.listContentPadding(),
@@ -420,6 +456,7 @@ fun SourceManageScreen(
                     onValueChange = { draft = draft.copy(timeoutMs = it.toLong() * 1000) },
                     valueRange = 15f..180f,
                     steps = 10,
+                    label = "单源超时",
                 )
             },
         )

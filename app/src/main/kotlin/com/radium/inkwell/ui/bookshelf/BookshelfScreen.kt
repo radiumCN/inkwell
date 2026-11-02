@@ -59,6 +59,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -75,6 +77,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
@@ -103,6 +106,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.radium.inkwell.util.BiometricAuth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import com.radium.inkwell.ui.components.Motion
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.Modifier
@@ -145,8 +153,21 @@ fun BookshelfScreen(
      */
     onHiddenCollapsed: (hiddenIds: Set<String>) -> Unit,
     viewModel: BookshelfViewModel,
+    /** 返回栈里还有没有阅读页。从这里开的书，读完退回来、退出动画播完，书架才放开冻住的顺序 */
+    readerOpen: Boolean = false,
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
+    // 阅读页退干净了再放开顺序（见 BookshelfViewModel.frozenOrder）：退出动画是缩回这本书原来的位置，
+    // 放早了它已经跑到第一格。返回栈在转场**开始**时就去掉了阅读页，这里得等过整段转场：
+    // 普通返回是 READER_EXIT_MS 的 tween；侧滑返回跟手 seek，松手后剩下的那段按 PREDICTIVE_BACK_MS 的
+    // 线性 tween 走完 —— 两段加起来，哪种退法都覆盖得到。晚一点放开只是书滑上去的时机晚一点，不会错。
+    // 书架一直在组合里、或回来时才重新组合，都走这里
+    LaunchedEffect(readerOpen) {
+        if (!readerOpen) {
+            delay((Motion.READER_EXIT_MS + Motion.PREDICTIVE_BACK_MS).toLong())
+            viewModel.releaseShelfOrder()
+        }
+    }
     val shelfReady by viewModel.shelfReady.collectAsStateWithLifecycle()
     // 首批书架数据落地再报 fully drawn，启动基准才是「看见书」而不是首帧空白
     ReportDrawnWhen { shelfReady }
@@ -208,6 +229,24 @@ fun BookshelfScreen(
     }
     // 新列表还没到就又收起了：别把这次回顶留到下一回
     LaunchedEffect(showHidden) { if (!showHidden) scrollTopOnReveal = false }
+
+    /**
+     * 换了分组就回到顶上。从前停在「全部」的第 20 排切到只有 10 本的分组，人会被夹在列表末尾，
+     * 或停在锚定的那本书附近（发现页切分类同理，见 ExploreScreen）。
+     *
+     * 等新分组的列表到了再滚（最多等一会儿）：先滚的话列表随后按旧的锚点 key 又跳到别处。
+     * 「旧列表」得在**点下 chip 的那一刻**记（[groupSwitchFrom]）：到了 effect 里再取，新分组和新列表
+     * 往往已经同一帧到了，就会傻等一个永远不来的「下一份」，每次切分组都白等满超时。
+     * 只由点击触发：从别的页面返回、分组被删后自动退回「全部」，都不该把人拽回顶部。
+     */
+    var groupSwitchFrom by remember { mutableStateOf<List<BookEntity>?>(null) }
+    LaunchedEffect(groupSwitchFrom) {
+        val from = groupSwitchFrom ?: return@LaunchedEffect
+        withTimeoutOrNull(GROUP_SWITCH_WAIT_MS) { snapshotFlow { books }.first { it !== from } }
+        if (layout == BookshelfLayout.GRID) gridState.requestScrollToItem(0)
+        else listState.requestScrollToItem(0)
+        groupSwitchFrom = null
+    }
 
     fun openHidden() {
         if (viewModel.openHiddenPanel()) scrollTopOnReveal = true
@@ -490,6 +529,7 @@ fun BookshelfScreen(
                         options = chipOptions,
                         selectedIndex = selectedChip,
                         onSelect = { i ->
+                            groupSwitchFrom = books
                             viewModel.setGroup(
                                 when (i) {
                                     0 -> null
@@ -555,7 +595,11 @@ fun BookshelfScreen(
                                     selectionMode = selectionMode,
                                     onClick = { bounds ->
                                         if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else onOpenBook(book.id, originOf(bounds, windowSize))
+                                        else {
+                                            // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
+                                            viewModel.freezeShelfOrder()
+                                            onOpenBook(book.id, originOf(bounds, windowSize))
+                                        }
                                     },
                                     // 方案 A：平时长按 = 单本操作面板；已在多选里则长按继续勾选切换。
                                     // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
@@ -594,7 +638,11 @@ fun BookshelfScreen(
                                     selectionMode = selectionMode,
                                     onClick = { bounds ->
                                         if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else onOpenBook(book.id, originOf(bounds, windowSize))
+                                        else {
+                                            // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
+                                            viewModel.freezeShelfOrder()
+                                            onOpenBook(book.id, originOf(bounds, windowSize))
+                                        }
                                     },
                                     onLongClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -619,8 +667,20 @@ fun BookshelfScreen(
     fun BookEntity.stillVisible() = showHidden || !hidden
 
     actionTarget?.takeIf { it.stillVisible() }?.let { book ->
+        // 点了选项先把面板收下去再办事。从前直接把 actionTarget 置空：面板当场从组合树摘掉，
+        // 退场动画被掐断、一帧之内消失（同 OptionPickerSheet 里的那条）
+        val sheetState = rememberModalBottomSheetState()
+        val sheetScope = rememberCoroutineScope()
+        fun dismissThen(action: () -> Unit) {
+            sheetScope.launch {
+                sheetState.hide()
+                actionTarget = null
+                action()
+            }
+        }
         ModalBottomSheet(
             onDismissRequest = { actionTarget = null },
+            sheetState = sheetState,
             // Sheet 用 surface；SettingRow 卡片读 surfaceContainerLow。
             // 默认两者都走 Low 时选项会糊进底色，看起来像没有卡片（见 ChangeSourceSheet）。
             containerColor = MaterialTheme.colorScheme.surface,
@@ -638,17 +698,17 @@ fun BookshelfScreen(
                     subtitle = "简介、目录、刷新目录",
                     onClick = {
                         val id = book.id
-                        actionTarget = null
-                        onOpenDetail(id)
+                        dismissThen { onOpenDetail(id) }
                     },
                 )
                 SettingRow(
                     title = "设置分组",
                     subtitle = book.groupName.ifBlank { "未分组" },
                     onClick = {
-                        groupInput = book.groupName
-                        groupTarget = book
-                        actionTarget = null
+                        dismissThen {
+                            groupInput = book.groupName
+                            groupTarget = book
+                        }
                     },
                 )
                 SettingRow(
@@ -658,8 +718,7 @@ fun BookshelfScreen(
                     // 而进了多选又根本找不到它 —— 既泄了底，又是句空头承诺。
                     subtitle = if (showHidden) "批量删除、分组或隐藏" else "批量删除或分组",
                     onClick = {
-                        viewModel.startSelection(book.id)
-                        actionTarget = null
+                        dismissThen { viewModel.startSelection(book.id) }
                     },
                 )
                 // 「从书架隐藏」只在隐藏区打开时出现 —— 平时长按看不到，别人想不到能藏书。
@@ -672,8 +731,7 @@ fun BookshelfScreen(
                             "书、进度、缓存都还在，只是列表里不显示"
                         },
                         onClick = {
-                            viewModel.setHidden(book.id, !book.hidden)
-                            actionTarget = null
+                            dismissThen { viewModel.setHidden(book.id, !book.hidden) }
                         },
                     )
                 }
@@ -681,8 +739,7 @@ fun BookshelfScreen(
                     title = "从书架删除",
                     subtitle = "本地文件与缓存将一并删除",
                     onClick = {
-                        deleteTarget = book
-                        actionTarget = null
+                        dismissThen { deleteTarget = book }
                     },
                 )
             }
@@ -905,7 +962,9 @@ private fun BookShelfListLeading(
         }
         if (book.newChapterCount > 0 && !selectionMode) {
             Badge(
-                modifier = Modifier.align(Alignment.TopEnd),
+                modifier = Modifier.align(Alignment.TopEnd)
+                // 角标合并进卡片的语义后，读屏只念一个光秃秃的「3」：给它一句完整的话
+                .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
                 containerColor = MaterialTheme.colorScheme.error,
                 contentColor = MaterialTheme.colorScheme.onError,
             ) {
@@ -1012,7 +1071,9 @@ private fun BookCard(
             // 画在封面右上角而不是占一行 —— 网格里每多一行文字，一屏就少一排书
             if (book.newChapterCount > 0 && !selectionMode) {
                 Badge(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(Dimens.gapXS),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(Dimens.gapXS)
+                    // 角标合并进卡片的语义后，读屏只念一个光秃秃的「3」：给它一句完整的话
+                    .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
                 ) {
@@ -1058,7 +1119,8 @@ private fun BookCard(
         if (!book.latestChapterTitle.isNullOrBlank()) {
             Text(
                 book.latestChapterTitle,
-                style = MaterialTheme.typography.labelSmall,
+                // 正文性小字不低于 bodySmall（12sp）；labelSmall 只有 11sp
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1144,3 +1206,6 @@ private fun HiddenStatusBar(
         }
     }
 }
+
+/** 换分组后等新列表最多多久再回顶（见 BookshelfScreen 里的 groupSwitchFrom） */
+private const val GROUP_SWITCH_WAIT_MS = 500L

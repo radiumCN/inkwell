@@ -44,8 +44,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.BookIntro
 import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
@@ -75,7 +77,8 @@ fun BookPreviewScreen(
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         when {
-            state.loading -> Box(Modifier.fillMaxSize().padding(padding)) {
+            // 连书名都还没有（不是从搜索结果点进来的）才整页转圈；有就边加载边把已知的先画出来
+            state.loading && state.title.isBlank() -> Box(Modifier.fillMaxSize().padding(padding)) {
                 LoadingState(label = state.loadingLabel)
                 // 卡在某个源上时别只能干等：有别的书源就给出换源，不必等超时
                 if (state.sources.size > 1) {
@@ -102,7 +105,35 @@ fun BookPreviewScreen(
             )
 
             else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                item { Header(state, viewModel, onOpenSourcePicker = { sourcePickerOpen = true }) }
+                // 加载中也画头部：搜索结果里的书名、封面、简介早就在 state 里了（见 BookPreviewViewModel），
+                // 从前只给一个转圈 —— 卡在慢源上最多要等三个源各 15 秒，人连点的是哪本都看不见。
+                // 换源入口在头部里（多于一个源时），不必干等超时。
+                item {
+                    Header(
+                        state, viewModel,
+                        onOpenSourcePicker = { sourcePickerOpen = true },
+                        loading = state.loading,
+                    )
+                }
+                if (state.loading) {
+                    item {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(Dimens.gapXXL),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            AppLoadingIndicator(size = Dimens.iconMd)
+                            Spacer(Modifier.height(Dimens.gapM))
+                            Text(
+                                state.loadingLabel,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    return@LazyColumn
+                }
                 item {
                     Text(
                         "目录 · 共 ${state.chapters.size} 章",
@@ -147,8 +178,9 @@ private fun Header(
     state: BookPreviewUiState,
     viewModel: BookPreviewViewModel,
     onOpenSourcePicker: () -> Unit,
+    /** 详情与目录还在取：书名等先按搜索结果画，按钮先置灰（没目录可读、可加） */
+    loading: Boolean = false,
 ) {
-    var introExpanded by remember { mutableStateOf(false) }
 
     Column(
         Modifier.padding(Dimens.screenPadding),
@@ -167,7 +199,12 @@ private fun Header(
                 contentDescription = null,
             )
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
-                Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 2)
+                Text(
+                    state.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (state.author.isNotBlank()) {
                     Text(
                         state.author,
@@ -176,7 +213,7 @@ private fun Header(
                     )
                 }
                 Text(
-                    "共 ${state.chapters.size} 章 · 来源 ${state.sourceName}",
+                    if (loading) "来源 ${state.sourceName}" else "共 ${state.chapters.size} 章 · 来源 ${state.sourceName}",
                     style = MaterialTheme.typography.bodySmall,
                     // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -193,33 +230,19 @@ private fun Header(
             SecondaryButton(
                 text = if (state.inShelf) "已在书架" else "加入书架",
                 onClick = viewModel::addToShelf,
-                enabled = !state.busy && !state.inShelf,
+                enabled = !loading && !state.busy && !state.inShelf,
                 loading = state.busy && !state.inShelf,
                 modifier = Modifier.weight(1f),
             )
             PrimaryButton(
                 text = "开始阅读",
                 onClick = { viewModel.read() },
-                enabled = !state.busy,
+                enabled = !loading && !state.busy,
                 modifier = Modifier.weight(1f),
             )
         }
 
         val intro = remember(state.intro) { state.intro?.htmlToPlainText().orEmpty() }
-        if (intro.isNotBlank()) {
-            Column {
-                Text("简介", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(Dimens.gapXS))
-                Text(
-                    intro,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = if (introExpanded) Int.MAX_VALUE else 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                AppTextButton(onClick = { introExpanded = !introExpanded }) {
-                    Text(if (introExpanded) "收起" else "展开")
-                }
-            }
-        }
+        if (intro.isNotBlank()) BookIntro(intro)
     }
 }

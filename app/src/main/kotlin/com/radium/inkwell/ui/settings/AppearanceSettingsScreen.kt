@@ -53,10 +53,9 @@ fun AppearanceSettingsScreen(
     // 提示走 MessageBus：新提示替换正在显示的那条，而不是排在它后面等 4 秒
     val messages = remember { MessageBus() }
     CollectMessages(messages, snackbar)
-    val exploreEnabled by appPrefs.exploreEnabled.collectAsStateWithLifecycle(initialValue = true)
-    val bookshelfLayout by appPrefs.bookshelfLayout.collectAsStateWithLifecycle(
-        initialValue = BookshelfLayout.GRID,
-    )
+    // 读预热好的那份，第一帧就是真值（见 AppPrefs 的「设置页读的预热版」）
+    val exploreEnabled = appPrefs.exploreEnabledState.collectAsStateWithLifecycle().value ?: true
+    val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
     var showLayoutPicker by remember { mutableStateOf(false) }

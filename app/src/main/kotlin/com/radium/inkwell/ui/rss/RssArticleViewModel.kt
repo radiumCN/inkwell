@@ -65,6 +65,12 @@ class RssArticleViewModel(
     val state: StateFlow<RssArticleUiState> = _state.asStateFlow()
 
     init {
+        load()
+    }
+
+    /** 抓正文。失败了页面上给「重试」（从前只能退出去再进来） */
+    fun load() {
+        _state.value = _state.value.copy(loading = true, error = null, needsBrowser = false)
         viewModelScope.launch {
             val rule = repo.getRule(args.sourceId)
             if (rule == null) {
@@ -95,7 +101,7 @@ class RssArticleViewModel(
                     _state.value = _state.value.copy(
                         loading = false,
                         needsBrowser = args.link.isNotBlank(),
-                        error = it.message?.take(120),
+                        error = it.message?.take(120) ?: "抓取失败",
                     )
                 }
         }

@@ -20,6 +20,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class WebDavUiState(
+    /**
+     * 配置读到了没有。没读到时 [provider] 只是占位的 CUSTOM：从前首帧先画出「自备 WebDAV」表单，
+     * 紧接着跳回「官方同步」，整页内容换一遍。
+     */
+    val loaded: Boolean = false,
     val provider: WebDavProvider = WebDavProvider.CUSTOM,
     val officialConnected: Boolean = false,
     val officialEmail: String = "",
@@ -73,6 +78,7 @@ class WebDavViewModel(
                 else -> WebDavProvider.OFFICIAL
             }
             _state.value = WebDavUiState(
+                loaded = true,
                 provider = provider,
                 officialConnected = c.isOfficialConnected,
                 officialEmail = c.officialEmail,

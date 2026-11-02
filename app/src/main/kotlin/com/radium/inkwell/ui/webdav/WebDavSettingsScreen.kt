@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -83,10 +84,14 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
         topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
+        // 配置还没读回来：先空着，别先画一遍「自备 WebDAV」再跳回「官方同步」
+        if (!state.loaded) return@Scaffold
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
+                .consumeWindowInsets(padding)
                 .imePadding()
                 .padding(Dimens.screenPadding)
                 .verticalScroll(rememberScrollState()),
