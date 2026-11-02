@@ -90,7 +90,7 @@ class WebDavRepository(
         throw e
     } catch (e: Exception) {
         // 记下来给设置页看。记录本身出错（存储写不进去）不能盖掉真正的失败原因
-        runCatching { prefs.markSyncFailed(e.message ?: e.javaClass.simpleName, System.currentTimeMillis()) }
+        runCatching { prefs.markSyncFailed(describeSyncError(e), System.currentTimeMillis()) }
         Result.failure(e)
     }
 

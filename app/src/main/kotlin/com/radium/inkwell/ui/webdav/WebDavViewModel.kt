@@ -7,6 +7,7 @@ import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.prefs.WebDavProvider
 import com.radium.inkwell.data.repo.OfficialWebDavRepository
 import com.radium.inkwell.data.repo.WebDavRepository
+import com.radium.inkwell.data.repo.describeSyncError
 import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.util.LocalNetworkAccess
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
@@ -255,7 +256,7 @@ class WebDavViewModel(
                 messages.emit("连接成功，已保存")
             } else {
                 _state.update { it.copy(testing = false) }
-                messages.emit("连接失败: ${result.exceptionOrNull()?.message}")
+                messages.emit("连接失败：" + result.exceptionOrNull()?.let(::describeSyncError).orEmpty())
             }
         }
     }
@@ -269,7 +270,7 @@ class WebDavViewModel(
                 it.copy(
                     syncing = false,
                     lastSyncAt = if (result.isSuccess) System.currentTimeMillis() else it.lastSyncAt,
-                    lastSyncError = result.exceptionOrNull()?.let { e -> e.message ?: e.javaClass.simpleName }.orEmpty(),
+                    lastSyncError = result.exceptionOrNull()?.let(::describeSyncError).orEmpty(),
                     lastSyncErrorAt = if (result.isFailure) System.currentTimeMillis() else 0,
                 )
             }
@@ -278,7 +279,7 @@ class WebDavViewModel(
                 askLocalNetwork(then = ::syncNow)
                 return@launch
             }
-            messages.emit(result.getOrElse { "同步失败: ${it.message}" })
+            messages.emit(result.getOrElse { "同步失败：" + describeSyncError(it) })
         }
     }
 
