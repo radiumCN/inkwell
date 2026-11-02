@@ -16,6 +16,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LoadingIndicatorDefaults
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -167,6 +169,32 @@ fun DeterminateProgressBar(
     LinearWavyProgressIndicator(
         progress = progress,
         modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * 读数式的进度条：书读到哪了。书架封面底边、「继续阅读」卡片里用。
+ *
+ * 不用 [DeterminateProgressBar]：那条波浪线一直在动，表达的是「有活正在跑」（搜索、校验、下载）；
+ * 阅读进度是个静止的读数，书架上一排封面都在起伏只会让人以为它们在下载。
+ * 也不画 M3 线性进度条尾巴上那个「终点」小圆点 —— 4dp 细线上它只是一粒噪点。
+ *
+ * [progress] 落在 0..1；读屏按进度条报百分比（LinearProgressIndicator 自带 progressBarRangeInfo）。
+ */
+@Composable
+fun ReadingProgressMeter(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+) {
+    LinearProgressIndicator(
+        progress = { progress.coerceIn(0f, 1f) },
+        modifier = modifier.fillMaxWidth().height(Dimens.progressMeter),
+        color = color,
+        trackColor = trackColor,
+        strokeCap = StrokeCap.Round,
+        drawStopIndicator = {},
     )
 }
 

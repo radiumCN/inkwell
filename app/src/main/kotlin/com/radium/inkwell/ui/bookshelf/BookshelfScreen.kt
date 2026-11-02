@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -139,7 +140,10 @@ import com.radium.inkwell.ui.components.expandExit
  * 写一次快照 —— 而这个值只在点击那一下才用得到。LayoutCoordinates 是活的，点击时算出来就是当下的位置；
  * 这里存的是普通引用不是 State，滑动时写它不触发任何重组。
  */
-private class CoverAnchor {
+/** 「继续阅读」卡片在 Lazy 列表里的 key。书的 key 是 UUID，撞不上 */
+private const val CONTINUE_READING_KEY = "continue-reading"
+
+internal class CoverAnchor {
     var coordinates: LayoutCoordinates? = null
 
     fun boundsInWindow(): Rect? = coordinates?.takeIf { it.isAttached }?.boundsInWindow()
@@ -171,6 +175,7 @@ fun BookshelfScreen(
     readerOpen: Boolean = false,
 ) {
     val books by viewModel.books.collectAsStateWithLifecycle()
+    val continueReading by viewModel.continueReading.collectAsStateWithLifecycle()
     // 阅读页退干净了再放开顺序（见 BookshelfViewModel.frozenOrder）：退出动画是缩回这本书原来的位置，
     // 放早了它已经跑到第一格。返回栈在转场**开始**时就去掉了阅读页，这里得等过整段转场：
     // 普通返回是 READER_EXIT_MS 的 tween；侧滑返回跟手 seek，松手后剩下的那段按 PREDICTIVE_BACK_MS 的
@@ -602,6 +607,32 @@ fun BookshelfScreen(
                             horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
                             verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                         ) {
+                            // 多选时收起：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上
+                            val hero = continueReading?.takeIf { !selectionMode }
+                            if (hero != null) {
+                                item(
+                                    key = CONTINUE_READING_KEY,
+                                    span = { GridItemSpan(maxLineSpan) },
+                                    contentType = CONTINUE_READING_KEY,
+                                ) {
+                                    ContinueReadingCard(
+                                        entry = hero,
+                                        onClick = { bounds ->
+                                            viewModel.freezeShelfOrder()
+                                            onOpenBook(hero.book.id, originOf(bounds, windowSize))
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            actionTarget = hero.book
+                                        },
+                                        modifier = Modifier.animateItem(
+                                            fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                            placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                            fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                        ),
+                                    )
+                                }
+                            }
                             items(books, key = { it.id }) { book ->
                                 BookCard(
                                     book = book,
@@ -645,6 +676,30 @@ fun BookshelfScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                         ) {
+                            val hero = continueReading?.takeIf { !selectionMode }
+                            if (hero != null) {
+                                item(key = CONTINUE_READING_KEY, contentType = CONTINUE_READING_KEY) {
+                                    ContinueReadingCard(
+                                        entry = hero,
+                                        onClick = { bounds ->
+                                            viewModel.freezeShelfOrder()
+                                            onOpenBook(hero.book.id, originOf(bounds, windowSize))
+                                        },
+                                        onLongClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            actionTarget = hero.book
+                                        },
+                                        // 列表行左右有 listContentPadding，卡片与行同宽；下面再空一档，别跟第一行粘在一起
+                                        modifier = Modifier
+                                            .padding(bottom = Dimens.gapS)
+                                            .animateItem(
+                                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                            ),
+                                    )
+                                }
+                            }
                             items(books, key = { it.id }) { book ->
                                 BookShelfListRow(
                                     book = book,
@@ -963,6 +1018,7 @@ private fun BookShelfListLeading(
             // 书名是这一行的标题，封面不再进读屏
             contentDescription = null,
         )
+        CoverProgressOverlay(book.readingProgress(), coverShape)
         if (book.hidden) {
             Icon(
                 Icons.Default.VisibilityOff,
@@ -1060,6 +1116,8 @@ private fun BookCard(
                 // 卡片下面就印着书名，封面不再进读屏
                 contentDescription = null,
             )
+            // 多选时让位给描边与勾选：选中态才是那时要看的
+            if (!selectionMode) CoverProgressOverlay(book.readingProgress(), coverShape)
             // MD3 tonal：已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
             if (selectionMode && selected) {
                 Box(

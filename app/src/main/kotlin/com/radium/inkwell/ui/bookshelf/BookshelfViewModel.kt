@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.mapLatest
 import com.radium.inkwell.data.db.entity.BookType
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -45,6 +47,7 @@ class BookshelfViewModel(
     private val appPrefs: com.radium.inkwell.data.prefs.AppPrefs,
     private val netBookRepo: com.radium.inkwell.data.repo.NetBookRepository,
     private val sourceRepo: com.radium.inkwell.data.repo.BookSourceRepository,
+    private val chapterDao: com.radium.inkwell.data.db.dao.ChapterDao,
 ) : ViewModel() {
 
     // ---------- 追更 ----------
@@ -361,6 +364,25 @@ class BookshelfViewModel(
                 visible.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 书架顶上的「继续阅读」：最近在读的那一本。只在「全部」里出现 —— 筛到某个分组时人是在找书，
+     * 不是要接着读。
+     *
+     * 取自 [books] 而不是 allBooks：开书时顺序被冻住（见 [frozenOrder]），卡片也就跟着冻住 ——
+     * 否则从网格里点开另一本，退出动画还没播完，顶上的卡片就先换了封面。隐藏区收着时隐藏书本来就
+     * 不在 [books] 里，卡片也就不会把藏起来的书摆到最显眼的位置。
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val continueReading: StateFlow<ContinueReading?> =
+        combine(books, _group) { list, g ->
+            if (g != null) null else list.firstOrNull { it.lastActiveAt() > 0L }
+        }
+            .distinctUntilChanged()
+            .mapLatest { book ->
+                book?.let { ContinueReading(it, chapterDao.get(it.id, it.readChapterIndex)?.title) }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private fun inGroup(book: BookEntity, g: String?): Boolean = when (g) {
         null -> true

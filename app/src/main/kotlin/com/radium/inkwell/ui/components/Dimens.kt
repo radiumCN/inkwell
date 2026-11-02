@@ -89,6 +89,8 @@ object Dimens {
     val strokeThin = 1.dp
     /** 2dp。选中色板的外圈、小号转圈的线宽 —— 比 [strokeThin] 粗一档才看得出「选中」 */
     val strokeThick = 2.dp
+    /** 4dp。书封上的阅读进度条（[ReadingProgressMeter]）。与滑块细轨同粗，书架上看是同一种「线」 */
+    val progressMeter = 4.dp
 
     // ---- 控件 ----
     /** 触控目标下限（Material：48dp）。图标本身可以小，可点区域不能小于它 */
