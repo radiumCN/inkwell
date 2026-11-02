@@ -234,3 +234,21 @@ internal fun DrawScope.drawFittedImage(bitmap: ImageBitmap, dst: Rect) {
         dstSize = IntSize(w, h),
     )
 }
+
+/**
+ * 本页的文字，给读屏用。按切片的行范围从**同一个**测量结果里截：跨页的段落只念属于本页的那几行，
+ * 不会把上一页已经念过的半段再念一遍。图片、分隔符不出字。
+ */
+fun RenderablePage.accessibleText(): String = buildString {
+    for (item in spec.items) {
+        if (item !is PageItem.TextSlice) continue
+        val layout = measured[item.elementIndex]?.renderHandle as? TextLayoutResult ?: continue
+        val text = layout.layoutInput.text.text
+        val start = layout.getLineStart(item.startLine).coerceIn(0, text.length)
+        val end = layout.getLineEnd(item.endLine).coerceIn(start, text.length)
+        if (start == end) continue
+        if (isNotEmpty()) append('\n')
+        append(text, start, end)
+    }
+}
+

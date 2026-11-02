@@ -29,6 +29,10 @@ class Paginator(private val measurer: TextMeasureFacade) {
      * @param notifyAfterChar 调用方想尽快看到的章内偏移（进书进度）。覆盖到该偏移的页
      *   一旦封好就 [onPartial] 一次，让 UI 先出字；余下页继续排完再返回完整结果。
      *   `Int.MAX_VALUE`（跳到章末）不中途回调，避免先闪第一页再跳最后一页。
+     * @param isAbandoned 每排一段问一次：这次排版是不是已经作废了（视口 / 字号换了、调用方被取消）。
+     *   是就立刻收手，返回 `complete = false` 的半截结果 —— 调用方得自己丢掉它，别当缓存。
+     *   排版是纯 CPU 循环、没有挂起点，协程取消对它无效：不问这一句的话，连点几下 A+，
+     *   每一档都要把整章排完、还一路占着测量锁，新字号排在它们后面干等。
      */
     fun paginate(
         chapterIndex: Int,
@@ -37,6 +41,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         spec: LayoutSpec,
         notifyAfterChar: Int = 0,
         onPartial: ((Result) -> Unit)? = null,
+        isAbandoned: () -> Boolean = { false },
     ): Result {
         val elements = buildList {
             add(TitleElement(title))
@@ -83,6 +88,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         fun seal() = sealPage(endOfChapter = false)
 
         elements.forEachIndexed { idx, element ->
+            if (isAbandoned()) return snapshot(complete = false)
             when (element) {
                 is TitleElement -> {
                     if (element.text.isNotBlank()) {

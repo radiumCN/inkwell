@@ -72,11 +72,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /**
      * @param cornerBottom 卷角固定在右下(true)/右上(false)，手势开始时锁定
+     * @param front 卷起的那页；null = 那一页还没排好，只有纸色（同 [under]）。
+     *   从前用一张常驻的全屏空白位图垫着，可它画上去和这里先铺的纸色一模一样（背面的淡墨也只调 alpha），
+     *   白占十几 MB。
      */
     fun draw(
         canvas: Canvas,
-        front: Bitmap,
-        under: Bitmap,
+        front: Bitmap?,
+        under: Bitmap?,
         touchX: Float,
         touchY: Float,
         cornerBottom: Boolean,
@@ -109,7 +112,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 前页可见区（挖掉卷起区，画前页） */
-    private fun drawCurrentPageArea(canvas: Canvas, front: Bitmap) {
+    private fun drawCurrentPageArea(canvas: Canvas, front: Bitmap?) {
+        if (front == null) return // 纸色已经铺过
         canvas.save()
         canvas.clipOutPath(pathFront)
         canvas.drawBitmap(front, 0f, 0f, null)
@@ -117,11 +121,12 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 下页露出区 + 翻起页投在下页上的阴影（legado 的 backShadow，宽 = 触角距/4） */
-    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap) {
+    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?) {
         canvas.save()
         canvas.clipPath(pathFront)
         canvas.clipPath(pathUnder)
-        canvas.drawBitmap(under, 0f, 0f, null)
+        // 没有底页就露纸色（已铺）；投影照画，否则卷起来像纸片平移
+        if (under != null) canvas.drawBitmap(under, 0f, 0f, null)
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val w = (touchToCornerDis / 4f)
@@ -204,7 +209,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 卷起页背面（铺纸色 + 淡墨镜像）+ 背面折缝阴影（legado 的 folderShadow，宽 = min 半距） */
-    private fun drawCurrentBackArea(canvas: Canvas, front: Bitmap) {
+    private fun drawCurrentBackArea(canvas: Canvas, front: Bitmap?) {
         val i = (bezierStart1.x + bezierControl1.x) / 2f
         val f1 = abs(i - bezierControl1.x)
         val i1 = (bezierStart2.y + bezierControl2.y) / 2f
@@ -228,7 +233,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         backMatrix.preTranslate(-bezierControl1.x, -bezierControl1.y)
         backMatrix.postTranslate(bezierControl1.x, bezierControl1.y)
         canvas.drawColor(paperColor)
-        canvas.drawBitmap(front, backMatrix, backPaint)
+        if (front != null) canvas.drawBitmap(front, backMatrix, backPaint)
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val (drawable, left, right) = if (isRtOrLb) {

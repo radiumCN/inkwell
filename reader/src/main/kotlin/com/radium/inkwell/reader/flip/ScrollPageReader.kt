@@ -5,8 +5,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -17,8 +19,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -152,47 +156,38 @@ fun ScrollPageReader(
         if (drag == 0f) 0f else composeDelta * (applied / drag)
     }
 
+    // 点按翻页与读屏的翻页动作走同一条路：先记下 pendingFlip（换页那帧据此接上 leftover），再交给 onFlip
+    fun flipBy(dir: FlipDirection) {
+        val can = when (dir) {
+            FlipDirection.BACKWARD -> hasPrevLatest.value
+            FlipDirection.FORWARD -> hasNextLatest.value
+        }
+        if (can) {
+            pendingFlip = dir
+            pendingDispatched = true
+            onFlipLatest.value(dir)
+        }
+    }
+
+    val contentTop = scrollContentTop(layout)
+    val contentBottom = scrollContentBottom(layout)
+    val curH = scrollPageHeight(current).let { if (it <= 0f) 1f else it }
+    val prevH = scrollPageHeight(prev).let { if (it <= 0f) 1f else it }
+
     Box(
         modifier
             .fillMaxSize()
             .onSizeChanged { size = it }
-            .drawBehind {
-                drawRect(Color(theme.background))
-                val cur = current ?: return@drawBehind
-                val contentTop = scrollContentTop(layout)
-                val contentBottom = scrollContentBottom(layout)
-                val curH = scrollPageHeight(cur).let {
-                    if (it <= 0f) 1f else it
-                }
-                val y = offset.floatValue
-                // 只在正文带里画。页眉/页脚是 PageInfoBar 的固定层，字滑进去会盖住章节名和时间。
-                clipRect(
-                    left = 0f,
-                    top = contentTop,
-                    right = size.width.toFloat(),
-                    bottom = contentBottom,
-                ) {
-                    drawPageItems(
-                        cur, layout, theme, originY = y + contentTop,
-                        collapseMissingImages = true,
-                    )
-                    next?.let { nxt ->
-                        drawPageItems(
-                            nxt, layout, theme, originY = y + contentTop + curH,
-                            collapseMissingImages = true,
-                        )
-                    }
-                    prev?.let { prv ->
-                        val prevH = scrollPageHeight(prv).let {
-                            if (it <= 0f) 1f else it
-                        }
-                        drawPageItems(
-                            prv, layout, theme, originY = y + contentTop - prevH,
-                            collapseMissingImages = true,
-                        )
-                    }
-                }
-            }
+            .drawBehind { drawRect(Color(theme.background)) }
+            // 读屏：本页文字 + 翻页 / 开菜单两个动作（见 readerPageSemantics）
+            .readerPageSemantics(
+                page = current,
+                canFlip = { dir ->
+                    gesturesEnabled && if (dir == FlipDirection.BACKWARD) hasPrev else hasNext
+                },
+                onFlip = ::flipBy,
+                onMenu = { onCenterTapLatest.value() },
+            )
             .scrollable(
                 state = scrollableState,
                 orientation = Orientation.Vertical,
@@ -206,18 +201,53 @@ fun ScrollPageReader(
                     tapAction(
                         pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
                         tapZonesLatest.value, enabled = clickToFlipLatest.value,
-                    ).dispatch(onMenu = { onCenterTapLatest.value() }) { dir ->
-                        val can = when (dir) {
-                            FlipDirection.BACKWARD -> hasPrevLatest.value
-                            FlipDirection.FORWARD -> hasNextLatest.value
-                        }
-                        if (can) {
-                            pendingFlip = dir
-                            pendingDispatched = true
-                            onFlipLatest.value(dir)
-                        }
-                    }
+                    ).dispatch(onMenu = { onCenterTapLatest.value() }) { dir -> flipBy(dir) }
                 }
+            },
+    ) {
+        if (current != null) {
+            // 只在正文带里画。页眉/页脚是 PageInfoBar 的固定层，字滑进去会盖住章节名和时间。
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        // this.size：外面有个同名的 IntSize 局部变量，裸写 size 会解析到它
+                        clipRect(left = 0f, top = contentTop, right = this.size.width, bottom = contentBottom) {
+                            this@drawWithContent.drawContent()
+                        }
+                    },
+            ) {
+                ScrollPageLayer(current, layout, theme, baseY = contentTop, offset = offset)
+                ScrollPageLayer(next, layout, theme, baseY = contentTop + curH, offset = offset)
+                ScrollPageLayer(prev, layout, theme, baseY = contentTop - prevH, offset = offset)
+            }
+        }
+    }
+}
+
+/**
+ * 滚动叠页里的一页：正文只录一次，滚动只挪图层。
+ *
+ * 从前三页都画在外层同一个 drawBehind 里、在里面读 [offset]：滚动的每一帧都把三页几十个段落的
+ * MultiParagraph 重新 paint、重录一遍显示列表，120Hz 屏、中低端机上直接掉帧。翻页模式早就是图层位移
+ * （见 PageFlipContainer），滚动模式这里补上：位移只在 graphicsLayer 里读，正文的 drawBehind 不读任何
+ * 跟手的状态，换页 / 换主题 / 换排版时才重录。
+ */
+@Composable
+private fun ScrollPageLayer(
+    page: RenderablePage?,
+    layout: LayoutSpec,
+    theme: ReaderTheme,
+    baseY: Float,
+    offset: FloatState,
+) {
+    if (page == null) return
+    Spacer(
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer { translationY = baseY + offset.floatValue }
+            .drawBehind {
+                drawPageItems(page, layout, theme, originY = 0f, collapseMissingImages = true)
             },
     )
 }

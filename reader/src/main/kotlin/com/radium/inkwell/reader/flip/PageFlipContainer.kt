@@ -289,6 +289,13 @@ fun PageFlipContainer(
         modifier
             .fillMaxSize()
             .onSizeChanged { size = it }
+            // 读屏：本页文字 + 翻页 / 开菜单两个动作（见 readerPageSemantics）
+            .readerPageSemantics(
+                page = current,
+                canFlip = { gesturesEnabled && canFlip(it) },
+                onFlip = { programmaticFlip(it) },
+                onMenu = onCenterTap,
+            )
             .pointerInput(gesturesEnabled, effectiveAnim, flipSlopPx) {
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
@@ -698,7 +705,7 @@ private class CurlRequest(
 /**
  * 能留用就留用：三页里哪一页的旧图还对得上（前翻后的 prev←current、current←next，
  * 拖进度条时没动的邻页……），就直接搬过来，只渲真正新出现的那几页。
- * 版式、纸张、密度变了则一张都用不上 —— 字的位置、颜色、像素全不一样。blank 同理。
+ * 版式、纸张、密度变了则一张都用不上 —— 字的位置、颜色、像素全不一样。
  * 什么都没变时原样返回 [old]，调用方据此跳过提交。
  */
 private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest): CurlBitmaps {
@@ -721,7 +728,6 @@ private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest): CurlBitmaps 
         current = obtain(req.current),
         prev = obtain(req.prev),
         next = obtain(req.next),
-        blank = reusable?.blank ?: renderPageAndroidBitmap(null, req.layout, req.theme, req.density),
         currentKey = req.current?.curlKey(),
         prevKey = req.prev?.curlKey(),
         nextKey = req.next?.curlKey(),
@@ -742,12 +748,14 @@ private fun recycleBitmap(bmp: android.graphics.Bitmap?) {
     if (bmp != null && !bmp.isRecycled) bmp.recycle()
 }
 
-/** CURL 用的三页 + 空白占位。空闲时持有，手势开始零合成。位图直接是 Android Bitmap，draw 路径不再每帧 asAndroidBitmap。 */
+/**
+ * CURL 用的三页。空闲时持有，手势开始零合成。位图直接是 Android Bitmap，draw 路径不再每帧 asAndroidBitmap。
+ * 邻页没排好时那一层传 null，CurlRenderer 露纸色 —— 不再垫一张全屏空白位图（见 CurlRenderer.draw）。
+ */
 private class CurlBitmaps(
     val current: android.graphics.Bitmap?,
     val prev: android.graphics.Bitmap?,
     val next: android.graphics.Bitmap?,
-    val blank: android.graphics.Bitmap,
     val currentKey: CurlPageKey?,
     val prevKey: CurlPageKey?,
     val nextKey: CurlPageKey?,
@@ -764,23 +772,23 @@ private class CurlBitmaps(
 
     /**
      * 这一刀要卷的「上层 / 底层」两张图；手里的图不是 [req] 里这几页（或版式/纸张已变）时返回 null。
-     * 前翻卷走当前页、底下露出下一页；后翻是上一页卷回来盖住当前页。邻页还没排好时底层用空白纸。
+     * 前翻卷走当前页、底下露出下一页；后翻是上一页卷回来盖住当前页。邻页还没排好时那一层是 null（纸色）。
      */
     fun curlPair(
         direction: FlipDirection,
         req: CurlRequest,
-    ): Pair<android.graphics.Bitmap, android.graphics.Bitmap>? {
+    ): Pair<android.graphics.Bitmap?, android.graphics.Bitmap?>? {
         if (layout != req.layout || theme != req.theme || density != req.density) return null
         val cur = current ?: return null
         if (!req.current.matches(currentKey)) return null
         return when (direction) {
             FlipDirection.FORWARD -> {
                 if (!req.next.matches(nextKey)) return null
-                cur to (next ?: blank)
+                cur to next
             }
             FlipDirection.BACKWARD -> {
                 if (!req.prev.matches(prevKey)) return null
-                (prev ?: blank) to cur
+                prev to cur
             }
         }
     }
@@ -789,7 +797,6 @@ private class CurlBitmaps(
         recycleBitmap(current)
         recycleBitmap(prev)
         recycleBitmap(next)
-        recycleBitmap(blank)
     }
 
     fun recycleUnused(keep: CurlBitmaps) {
@@ -798,8 +805,8 @@ private class CurlBitmaps(
 
     /** 回收 [this] 里有、[keep] 里没有的位图 */
     fun recycleFresh(keep: CurlBitmaps?) {
-        val live = keep?.let { setOfNotNull(it.current, it.prev, it.next, it.blank) } ?: emptySet()
-        listOfNotNull(current, prev, next, blank).distinct().forEach { bmp ->
+        val live = keep?.let { setOfNotNull(it.current, it.prev, it.next) } ?: emptySet()
+        listOfNotNull(current, prev, next).distinct().forEach { bmp ->
             if (bmp !in live) recycleBitmap(bmp)
         }
     }
