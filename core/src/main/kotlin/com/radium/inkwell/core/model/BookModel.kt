@@ -65,6 +65,9 @@ interface BookParser {
     fun sniff(file: File): Boolean
     @Throws(BookParseException::class)
     fun open(file: File): BookHandle
+
+    /** 删掉这个文件留下的解析缓存（删书时调）。没有缓存的解析器不必实现 */
+    fun evictCache(file: File) {}
 }
 
 sealed class BookParseException(message: String, cause: Throwable? = null) : Exception(message, cause) {

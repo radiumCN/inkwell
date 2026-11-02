@@ -145,9 +145,10 @@ internal class Kf8Reader(
         HEADING.find(html)?.groupValues?.get(1)
             ?.replace(TAG, "")
             ?.let { org.jsoup.parser.Parser.unescapeEntities(it, false) }
-            ?.replace(Regex("\\s+"), " ")?.trim()?.ifBlank { null }
+            ?.replace(WHITESPACE, " ")?.trim()?.ifBlank { null }
 
     private companion object {
+        val WHITESPACE = Regex("\\s+")
         val HEADING = Regex("<h[1-3][^>]*>(.*?)</h[1-3]>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         val TAG = Regex("<[^>]*>")
         val SVG_FLOW_IMG = Regex(

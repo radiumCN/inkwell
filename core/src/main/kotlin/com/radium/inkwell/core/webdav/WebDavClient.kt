@@ -16,7 +16,7 @@ import java.io.IOException
 import kotlin.coroutines.resumeWithException
 
 /**
- * 极简 WebDAV 客户端：只覆盖备份所需的 4 个动词（MKCOL/PUT/GET/PROPFIND）。
+ * 极简 WebDAV 客户端：只覆盖备份所需的几个动词（MKCOL/PUT/GET/HEAD/PROPFIND）。
  * 不引第三方 sardine——年久失修且依赖重。
  */
 class WebDavClient(
@@ -74,6 +74,21 @@ class WebDavClient(
                 it.isSuccessful -> withContext(Dispatchers.IO) { it.body.bytes() }
                 else -> throw WebDavException(it.code, "GET 失败: ${it.code}")
             }
+        }
+    }
+
+    /**
+     * 文件的版本标记：ETag，没有就退回 Last-Modified + 长度。不存在、或服务器两样都不给，返回 null ——
+     * 调用方据此判断「远端从上次同步以来动没动过」，拿不准（null）就当动过，照常完整同步。
+     * 用 HEAD：只为一个响应头，别把几 MB 的备份下下来。
+     */
+    suspend fun version(path: String): String? {
+        val resp = execute(request(path).head().build())
+        resp.use {
+            if (!it.isSuccessful) return null
+            it.header("ETag")?.takeIf { tag -> tag.isNotBlank() }?.let { tag -> return "etag:$tag" }
+            val modified = it.header("Last-Modified")?.takeIf { m -> m.isNotBlank() } ?: return null
+            return "mtime:$modified:${it.header("Content-Length").orEmpty()}"
         }
     }
 

@@ -215,16 +215,46 @@ class RuleEvaluator(
 
     private fun readJsonPath(path: String, ctx: EvalContext): Any? {
         val doc = ctx.json ?: return null
-        val parsed: Any = try {
-            if (doc is String) jsonConf.jsonProvider().parse(doc) else doc
-        } catch (_: Exception) {
-            return null // 非 JSON 内容视为不匹配
+        val parsed: Any = if (doc is String) {
+            parseJsonCached(doc) ?: return null // 非 JSON 内容视为不匹配
+        } else {
+            doc
         }
         return try {
             JsonPath.using(jsonConf).parse(parsed).read<Any?>(path)
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * 最近解析过的 JSON 文本 → 解析结果，按**同一个 String 实例**认。
+     *
+     * 一页的上下文里 json 就是响应体那一个串（[BookSourceEngine] 的 pageContext）。详情接口常把整本目录
+     * 一起返回（0.5–2MB），书名、作者、简介、目录地址……从前每个字段都把整份 JSON 重新解析一遍；
+     * 目录页、正文页也至少两遍（列表规则 + 下一页规则）。按实例认而不是按内容：比内容就得再扫一遍全文，
+     * 而不同页面的串不会是同一个实例。解析失败的也记下（[NOT_JSON]），免得每个字段再失败一次。
+     *
+     * 键是弱引用（WeakHashMap，命中时先比的是 ==）：页面上下文一丢，响应体那个串没人引用了，
+     * 这条连同解析树一起被回收 —— 求值器是单例，从前封顶 [PARSED_JSON_KEEP] 条的强引用会把最后几页的
+     * 解析树（原文的好几倍大）一直攥到进程结束。解析树里没有指回原文的引用，拴不住键。
+     * 条数照样封顶，防一条抓取链路里同时活着太多页。跨线程共享：解析结果只读，没人改它。
+     */
+    private val parsedJson = java.util.WeakHashMap<String, Any>()
+
+    private fun parseJsonCached(text: String): Any? {
+        // 小串（列表项、正则抠出来的片段）每次都是新实例，进缓存只会把整页那份挤出去；它们解析起来也快
+        if (text.length < PARSED_JSON_MIN_CHARS) {
+            return runCatching { jsonConf.jsonProvider().parse(text) }.getOrNull()
+        }
+        val hit = synchronized(parsedJson) { parsedJson[text] }
+        val parsed = hit ?: (runCatching { jsonConf.jsonProvider().parse(text) }.getOrNull() ?: NOT_JSON).also {
+            synchronized(parsedJson) {
+                if (parsedJson.size >= PARSED_JSON_KEEP) parsedJson.clear()
+                parsedJson[text] = it
+            }
+        }
+        return parsed.takeIf { it !== NOT_JSON }
     }
 
     private fun jsonToStrings(value: Any?): List<String> = when (value) {
@@ -517,6 +547,8 @@ class RuleEvaluator(
                 ),
             )
         } catch (e: Exception) {
+            // 取消不是「脚本报错」：吞掉的话，被取消的那次调用还会带着空结果把剩下的条目一个个求值完
+            if (e is kotlinx.coroutines.CancellationException) throw e
             null
         }
     }
@@ -546,6 +578,15 @@ class RuleEvaluator(
 
 /** `@put` spec、地址选项用：宽松模式接受不加引号的键（Legado 文档写法） */
 private val LENIENT_JSON = kotlinx.serialization.json.Json { isLenient = true }
+
+/** [RuleEvaluator] 的 JSON 解析缓存里「这串不是 JSON」的占位 */
+private val NOT_JSON = Any()
+
+/** 同时留几页的解析结果：一条抓取链路里交替求值的通常就是列表页和它的子上下文 */
+private const val PARSED_JSON_KEEP = 4
+
+/** 多长的 JSON 文本才进解析缓存 */
+private const val PARSED_JSON_MIN_CHARS = 4_096
 
 /**
  * 书源里手写的 JSON 对象（`@put:{…}`、地址的 `,{…}` 选项）：键可以不加引号，字符串可以用单引号 ——
@@ -662,16 +703,20 @@ internal fun expandTemplate(
  */
 internal fun evalArithmetic(expr: String, vars: Map<String, String>): String? {
     var unknownVar = false
-    val substituted = Regex("[a-zA-Z_][a-zA-Z0-9_]*").replace(expr) { m ->
+    val substituted = ARITH_IDENT.replace(expr) { m ->
         vars[m.value] ?: run { unknownVar = true; "" }
     }
-    if (unknownVar || !substituted.matches(Regex("[0-9+\\-*/()\\s]+"))) return null
+    if (unknownVar || !substituted.matches(ARITH_EXPR)) return null
     return try {
         ArithmeticParser(substituted).parse()?.toString()
     } catch (_: Exception) {
         null
     }
 }
+
+// 每个非变量的 {{…}} 都要走一遍 evalArithmetic（常是每个条目一次），别在函数里现编
+private val ARITH_IDENT = Regex("[a-zA-Z_][a-zA-Z0-9_]*")
+private val ARITH_EXPR = Regex("[0-9+\\-*/()\\s]+")
 
 /** 递归下降：expr = term (±term)* ; term = factor (乘除 factor)* ; factor = num | (expr) | -factor */
 private class ArithmeticParser(private val text: String) {

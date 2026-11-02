@@ -227,7 +227,7 @@ private class MobiBookHandle(
                 val pos = m.groupValues[1].toIntOrNull() ?: return@mapNotNull null
                 val label = m.groupValues[2].replace(TAG, "")
                     .let { org.jsoup.parser.Parser.unescapeEntities(it, false) }
-                    .replace(Regex("\\s+"), " ").trim()
+                    .replace(WHITESPACE, " ").trim()
                 if (label.isBlank() || pos !in latin.indices) null else TocPos(pos, label, 0)
             }.toList()
         }
@@ -236,7 +236,7 @@ private class MobiBookHandle(
             HEADING.find(html)?.groupValues?.get(1)
                 ?.replace(TAG, "")
                 ?.let { org.jsoup.parser.Parser.unescapeEntities(it, false) }
-                ?.replace(Regex("\\s+"), " ")?.trim()?.ifBlank { null }
+                ?.replace(WHITESPACE, " ")?.trim()?.ifBlank { null }
 
         /** 封面：EXTH 201 coverOffset + 图片区起点；无则取首个图片记录 */
         private fun findCover(pdb: PdbFile, exthHeader: MobiHeader, imageBase: Long): ImageBlob? {
@@ -268,6 +268,8 @@ private class MobiBookHandle(
         }
 
         private val PAGEBREAK = Regex("<mbp:pagebreak", RegexOption.IGNORE_CASE)
+        /** 目录项、章标题逐个规整空白：每章一次，别在循环里现编 */
+        private val WHITESPACE = Regex("\\s+")
         private val REFERENCE = Regex("<reference[^>]*>", RegexOption.IGNORE_CASE)
         private val TOC_TYPE = Regex("type=[\"']?toc[\"'\\s/>]", RegexOption.IGNORE_CASE)
         private val FILEPOS = Regex("filepos=[\"']?(\\d+)", RegexOption.IGNORE_CASE)

@@ -153,26 +153,56 @@ class Purifier private constructor(
          * 还会触发自动换源 —— 而同一个书源在阅读 APP 里只是那条广告没删掉。超时不在退回之列：
          * 病态正则照样撞预算、整章按未净化返回，看门狗与预算一点不放松。
          */
-        fun legado(rules: List<PurifyRule>): Purifier = Purifier(
-            rules.map { rule ->
-                try {
-                    Compiled(rule)
-                } catch (_: Exception) {
-                    Compiled(rule.copy(isRegex = false))
-                }
-            },
-            lenient = true,
-            literalFallback = true,
-        )
+        fun legado(rules: List<PurifyRule>): Purifier = cached(Mode.LEGADO, rules) {
+            Purifier(
+                rules.map { rule ->
+                    try {
+                        Compiled(rule)
+                    } catch (_: Exception) {
+                        Compiled(rule.copy(isRegex = false))
+                    }
+                },
+                lenient = true,
+                literalFallback = true,
+            )
+        }
 
         /**
          * 用户自己写的规则：一条正则写错，跳过它就是，不该让整章正文加载失败 ——
          * 那在阅读页只会显示"正文规则未匹配到内容"，用户根本猜不到是自己的净化规则干的。
          */
-        fun lenient(rules: List<PurifyRule>): Purifier = Purifier(
-            rules.mapNotNull { runCatching { Compiled(it) }.getOrNull() },
-            lenient = true,
-        )
+        fun lenient(rules: List<PurifyRule>): Purifier = cached(Mode.LENIENT, rules) {
+            Purifier(
+                rules.mapNotNull { runCatching { Compiled(it) }.getOrNull() },
+                lenient = true,
+            )
+        }
+
+        private enum class Mode { LEGADO, LENIENT }
+
+        /**
+         * 按「模式 + 规则表」缓存编好的净化器。
+         *
+         * 抓正文时每章都要按书源的 replaceRegex 与通用规则各建一个，阅读页渲染时再按书内规则建一个 ——
+         * 从前每次都把每条正则现编一遍。导入过几百条的 Legado 替换规则包，读一章、预取一章都要重编几百条。
+         * 规则是 data class，按值比较；净化器本身不可变（每次 apply 的预算与现场都是现建的），跨线程共享安全。
+         * 拉黑走的是 [RegexWatchdog] 的全局表，不随实例走，缓存不会让坏规则漏网。
+         */
+        private val cache = object : LinkedHashMap<Pair<Mode, List<PurifyRule>>, Purifier>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<Mode, List<PurifyRule>>, Purifier>?) =
+                size > CACHE_SIZE
+        }
+        private const val CACHE_SIZE = 32
+
+        private fun cached(mode: Mode, rules: List<PurifyRule>, build: () -> Purifier): Purifier {
+            if (rules.isEmpty()) return build()
+            // 拷一份当键：调用方传进来的可能是之后还会被改的可变列表
+            val key = mode to rules.toList()
+            synchronized(cache) { cache[key] }?.let { return it }
+            // 锁外编译：几百条正则编一遍不短，别让别的线程陪着等（重了也只是多编一次，结果一样）
+            val built = build()
+            return synchronized(cache) { cache.getOrPut(key) { built } }
+        }
 
         /**
          * 单次净化（一整章）的时间预算。

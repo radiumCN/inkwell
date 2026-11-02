@@ -1,6 +1,5 @@
 package com.radium.inkwell.core.source
 
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 原生 Legado 规则串 → [RuleNode] 求值树。
@@ -22,10 +21,23 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object LegadoRuleAnalyzer {
 
-    private val cache = ConcurrentHashMap<String, RuleNode>()
+    /**
+     * 按原文缓存编译结果，有上限。从前是无界的 ConcurrentHashMap：脚本里动态拼出来的规则
+     * （`java.getString('$.list['+i+'].name')`）、`@put` 里的规则也都进缓存，几千个源长期用下来只增不减。
+     */
+    private val cache = object : LinkedHashMap<String, RuleNode>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, RuleNode>?): Boolean =
+            size > CACHE_SIZE
+    }
+    private const val CACHE_SIZE = 4096
 
     /** 编译一条 Legado 规则；结果按原文缓存。空规则得到空字面量。 */
-    fun analyze(rule: String): RuleNode = cache.getOrPut(rule) { build(rule.trim()) }
+    fun analyze(rule: String): RuleNode {
+        synchronized(cache) { cache[rule] }?.let { return it }
+        // 锁外编译：重了也只是多编一次，结果一样
+        val built = build(rule.trim())
+        return synchronized(cache) { cache.getOrPut(rule) { built } }
+    }
 
     private fun build(raw: String): RuleNode {
         if (raw.isEmpty()) return RuleNode.Literal("")

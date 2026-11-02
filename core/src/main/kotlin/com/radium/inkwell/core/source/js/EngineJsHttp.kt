@@ -31,8 +31,6 @@ class EngineJsHttp(
     private val timeout: Duration = 60.seconds,
 ) : JsHttp {
 
-    private val parentJob = ThreadLocal<Job?>()
-
     /**
      * 把 [job] 绑成协程上下文元素，随协程一起迁移线程。
      *
@@ -44,6 +42,17 @@ class EngineJsHttp(
      * [asContextElement] 在每次恢复时重设、挂起时还原，线程怎么跳都拿到自己的 Job。
      */
     fun bindingTo(job: Job?): CoroutineContext = parentJob.asContextElement(job)
+
+    companion object {
+        /**
+         * 每次引擎调用各绑各的（[bindingTo] 随协程迁移），所以几个引擎实例共用一个 ThreadLocal 也不会串。
+         * 放在伴生对象上是为了让脚本运行时也读得到：见 [currentJob]。
+         */
+        private val parentJob = ThreadLocal<Job?>()
+
+        /** 此刻这根线程上跑的那次引擎调用的 Job；脚本运行时靠它响应取消（RhinoScriptRuntime） */
+        internal fun currentJob(): Job? = parentJob.get()
+    }
 
     override fun fetch(
         url: String,

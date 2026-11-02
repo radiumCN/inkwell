@@ -60,15 +60,18 @@ data class BookSourceRule(
     /** Legado 无源级编码字段；编码来自 searchUrl 的 `,{charset}` 选项或响应头 */
     val charset: String? get() = null
 
-    val headers: Map<String, String> get() = parseHeaderJson(header)
+    // headers / rateLimit / explore 是解析出来的，算一次就记住：每个请求都要读 headers 和 rateLimit
+    // （JSON 解析 + 正则），搜一轮几百个源、目录几十页就是几百上千遍。规则对象不可变，懒算安全；
+    // 带委托的属性不参与序列化，也不进 data class 的 equals / copy。
+    val headers: Map<String, String> by lazy(LazyThreadSafetyMode.PUBLICATION) { parseHeaderJson(header) }
 
-    val rateLimit: RateLimitRule? get() = parseConcurrentRate(concurrentRate)
+    val rateLimit: RateLimitRule? by lazy(LazyThreadSafetyMode.PUBLICATION) { parseConcurrentRate(concurrentRate) }
 
     /** 具备可用搜索能力时非空（有 searchUrl 且有列表规则），供上层 `search != null` 判断 */
     val search: SearchRuleSet? get() = ruleSearch?.takeIf { !searchUrl.isNullOrBlank() }
 
     /** 发现页目录，从 exploreUrl 解析（`名称::地址` 多行 / JSON 数组）；动态(JS)地址得空列表 */
-    val explore: List<ExploreItem> get() = parseExplore(exploreUrl, enabledExplore)
+    val explore: List<ExploreItem> by lazy(LazyThreadSafetyMode.PUBLICATION) { parseExplore(exploreUrl, enabledExplore) }
 
     fun toJson(): String = BookSourceJson.encodeToString(serializer(), this)
 
@@ -168,11 +171,13 @@ internal fun parseConcurrentRate(raw: String?): RateLimitRule? {
     val t = raw?.trim().orEmpty()
     if (t.isEmpty()) return null
     t.toLongOrNull()?.let { return if (it > 0) RateLimitRule(intervalMs = it) else null }
-    val m = Regex("^(\\d+)/(\\d+)$").find(t) ?: return null
+    val m = RATE_FRACTION.find(t) ?: return null
     val (count, ms) = m.destructured
     val interval = ms.toLong() / count.toLong().coerceAtLeast(1)
     return if (interval > 0) RateLimitRule(intervalMs = interval) else null
 }
+
+private val RATE_FRACTION = Regex("^(\\d+)/(\\d+)$")
 
 /**
  * 解析 exploreUrl 为发现页列表。支持 Legado 两种写法：

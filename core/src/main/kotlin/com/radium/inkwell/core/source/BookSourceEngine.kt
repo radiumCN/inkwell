@@ -5,8 +5,12 @@ import com.radium.inkwell.core.parser.html.HtmlToElements
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.contentOrNull
@@ -309,42 +313,83 @@ class BookSourceEngine(
         val tocVars = java.util.concurrent.ConcurrentHashMap(variables)
         // nextTocUrl 在 Legado 里可以一次吐出全部页码（.pages a@href / option@value / JS 数组）。
         // 从前只取第一个：第一个常是「当前页」，visited 一撞就停，目录只剩第一页。
+        //
+        // 按「波」抓：每一波把队列里还没访问过的页一次取出，**并发抓、按原顺序解析**。
+        // 从前严格一页一页地等：手机站一页 20 章、四十页的目录要二十多秒，预览（15s）、加书架（20s）
+        // 的超时稳定撞上，报「书源响应超时」再去试下一个源。只给一个「下一页」的链式分页每波只有一页，
+        // 照旧串行；全部页码一次给出的，第二波就是剩下的全部页。解析仍是串行的：目录级变量表
+        // （java.put / @put）要按页序写，结果也要按页序拼。限速仍由 http 层按书源的令牌桶管。
+        // 要走 WebView 渲染的不并发：WebView 只能在主线程跑，同时开几个只会一起慢。
         while (pending.isNotEmpty() && pages < MAX_TOC_PAGES) {
-            val url = pending.removeFirst()
-            if (!visited.add(pageKey(url))) continue
-            pages++
-            val fetched = fetchPage(source, url, "toc", render)
-            val ctx = pageContext(
-                fetched, varsOf(source),
-                jsContextOf(source, bookUrl = bookUrl, tocUrl = tocUrl, bookName = bookTitle, bookAuthor = bookAuthor)
-                    .copy(scriptVars = tocVars),
-            )
-            for (item in evalList("toc", listRule, ctx)) {
-                // 每个章节项一份变量表：@put 存的参数属于这一章，不能串到别的章节上。
-                // 但要拿目录级变量表打底，而不是一张白纸：chapterList 里 `<js>java.put('bid',…)</js>`
-                // 存下的书号，chapterUrl 的 `@get:{bid}` 要取得到，也要随章节落库给正文用。从前给的是空表，两头都断。
-                val itemCtx = item.copy(js = item.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap(tocVars)))
-                val title = evalField("toc", "title", rule.chapterName, itemCtx)
-                val chapUrl = evalUrlField("toc", "url", rule.chapterUrl, itemCtx)
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { resolveUrl(fetched.finalUrl, it) }
-                if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank() && seenChap.add(chapUrl)) {
-                    // 原样传进来、没被改过的书级变量不进章节：调用方随书存着一份，每章再存一遍只是把库撑大
-                    val own = itemCtx.js.scriptVars.filter { (k, v) -> variables[k] != v }
-                    collected += Triple(title, chapUrl, encodeVars(own))
-                }
+            val wave = ArrayList<String>()
+            while (pending.isNotEmpty() && pages + wave.size < MAX_TOC_PAGES) {
+                val url = pending.removeFirst()
+                if (visited.add(pageKey(url))) wave += url
             }
-            val nexts = rule.nextTocUrl
-                ?.let { evalUrlFields("toc", "nextPage", it, ctx) }
-                .orEmpty()
-            for (n in nexts) {
-                val resolved = resolveUrl(fetched.finalUrl, n)
-                if (isFetchable(resolved) && pageKey(resolved) !in visited) pending.add(resolved)
+            if (wave.isEmpty()) break
+            pages += wave.size
+            coroutineScope {
+                val lanes = Semaphore(if (render || wave.size == 1) 1 else TOC_CONCURRENCY)
+                val fetches = wave.map { url ->
+                    async { lanes.withPermit { fetchPage(source, url, "toc", render) } }
+                }
+                for (page in fetches) {
+                    val fetched = page.await()
+                    collectTocPage(
+                        source, rule, fetched, listRule, tocUrl, bookUrl, bookTitle, bookAuthor,
+                        tocVars, variables, collected, seenChap,
+                    ) { resolved -> if (pageKey(resolved) !in visited) pending.add(resolved) }
+                }
             }
         }
         if (collected.isEmpty()) return null
         val ordered = if (reverse) collected.asReversed() else collected
         return ordered.mapIndexed { i, (title, u, vars) -> RemoteChapter(i, title, u, vars) }
+    }
+
+    /** 解析目录的一页：章节追加进 [collected]，下一页地址交给 [onNext] */
+    private fun collectTocPage(
+        source: BookSourceRule,
+        rule: TocRuleSet,
+        fetched: FetchedPage,
+        listRule: String,
+        tocUrl: String,
+        bookUrl: String,
+        bookTitle: String,
+        bookAuthor: String,
+        tocVars: java.util.concurrent.ConcurrentHashMap<String, String>,
+        variables: Map<String, String>,
+        collected: MutableList<Triple<String, String, String>>,
+        seenChap: MutableSet<String>,
+        onNext: (String) -> Unit,
+    ) {
+        val ctx = pageContext(
+            fetched, varsOf(source),
+            jsContextOf(source, bookUrl = bookUrl, tocUrl = tocUrl, bookName = bookTitle, bookAuthor = bookAuthor)
+                .copy(scriptVars = tocVars),
+        )
+        for (item in evalList("toc", listRule, ctx)) {
+            // 每个章节项一份变量表：@put 存的参数属于这一章，不能串到别的章节上。
+            // 但要拿目录级变量表打底，而不是一张白纸：chapterList 里 `<js>java.put('bid',…)</js>`
+            // 存下的书号，chapterUrl 的 `@get:{bid}` 要取得到，也要随章节落库给正文用。从前给的是空表，两头都断。
+            val itemCtx = item.copy(js = item.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap(tocVars)))
+            val title = evalField("toc", "title", rule.chapterName, itemCtx)
+            val chapUrl = evalUrlField("toc", "url", rule.chapterUrl, itemCtx)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { resolveUrl(fetched.finalUrl, it) }
+            if (!title.isNullOrBlank() && !chapUrl.isNullOrBlank() && seenChap.add(chapUrl)) {
+                // 原样传进来、没被改过的书级变量不进章节：调用方随书存着一份，每章再存一遍只是把库撑大
+                val own = itemCtx.js.scriptVars.filter { (k, v) -> variables[k] != v }
+                collected += Triple(title, chapUrl, encodeVars(own))
+            }
+        }
+        val nexts = rule.nextTocUrl
+            ?.let { evalUrlFields("toc", "nextPage", it, ctx) }
+            .orEmpty()
+        for (n in nexts) {
+            val resolved = resolveUrl(fetched.finalUrl, n)
+            if (isFetchable(resolved)) onNext(resolved)
+        }
     }
 
     /**
@@ -412,7 +457,12 @@ class BookSourceEngine(
         val userPurifier = Purifier.lenient(globalPurify(source))
         val elements = mutableListOf<ContentElement>()
         val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
-        val stopAt = otherChapterUrls.mapNotNullTo(HashSet()) { u -> pageKey(u).takeIf { it != pageKey(firstUrl) } }
+        // 用到才建：绝大多数章节只有一页，根本走不到「下一页是不是别的章」那一步。从前每章（含每次预取）
+        // 都把整本几千章的地址过一遍 pageKey，pageKey(firstUrl) 还在循环里重算
+        val stopAt by lazy(LazyThreadSafetyMode.NONE) {
+            val self = pageKey(firstUrl)
+            otherChapterUrls.mapNotNullTo(HashSet()) { u -> pageKey(u).takeIf { it != self } }
+        }
         var url: String? = firstUrl
         val visited = HashSet<String>()
         var pages = 0
@@ -491,6 +541,58 @@ class BookSourceEngine(
      * 交给渲染器的地址也先剥掉 `,{…}` 后缀 —— 留着它，WebView 打开的就是一个必然 404 的废地址。
      */
     private suspend fun fetchPage(
+        source: BookSourceRule,
+        url: String,
+        stage: String,
+        render: Boolean,
+    ): FetchedPage {
+        val key = recentKey(source, url, render)
+        if (stage == "toc" && key != null) takeRecent(key)?.let { return it }
+        val page = fetchPageUncached(source, url, stage, render)
+        if (stage == "detail" && key != null) {
+            keepRecent(key, page)
+            // 目录地址缺省取的是详情页的 finalUrl（跳转之后的地址），两个都记上
+            recentKey(source, page.finalUrl, render)?.let { keepRecent(it, page) }
+        }
+        return page
+    }
+
+    /**
+     * 刚抓过的详情页，短暂留一会儿给紧接着的目录阶段。
+     *
+     * 「详情页即目录页」（没写 tocUrl，目录地址就是详情页本身）的书源，预览、加书架、换源都是
+     * 先 getDetail 再 getToc —— 同一个地址前后脚抓两遍：多一个完整往返、多排一次限速令牌，
+     * 第二次还更容易吃 403，而预览 15 秒、加书架 20 秒的超时就那么点预算。
+     * 只为接住紧挨着的下一步：**取一次就作废**（之后的追更、刷新目录照常现抓，不会拿到旧页），
+     * 条数、存活时间也压得很小，写入时顺手清掉过期的，别让几页响应体一直攥在单例里。只缓存不带 body 的 GET。
+     * 调试书源时（[trace]）不走缓存：每次抓取都得出现在调试输出里。
+     */
+    private val recentPages = object : LinkedHashMap<String, Pair<Long, FetchedPage>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, FetchedPage>>?): Boolean =
+            size > RECENT_PAGES
+    }
+
+    private fun recentKey(source: BookSourceRule, url: String, render: Boolean): String? {
+        if (trace != null) return null
+        val opt = splitUrlOptions(url)?.second
+        if (opt != null && (opt.body != null || !(opt.method ?: "GET").equals("GET", ignoreCase = true))) return null
+        return source.id + "\u0000" + render + "\u0000" + pageKey(url)
+    }
+
+    private fun keepRecent(key: String, page: FetchedPage) = synchronized(recentPages) {
+        val now = System.nanoTime()
+        recentPages.values.removeAll { (at, _) -> now - at > RECENT_PAGE_TTL_NS }
+        recentPages[key] = now to page
+    }
+
+    private fun takeRecent(key: String): FetchedPage? = synchronized(recentPages) {
+        val (at, page) = recentPages.remove(key) ?: return null
+        // 同一页可能记在两个键下（请求地址与跳转后的 finalUrl），一起作废
+        recentPages.values.removeAll { (_, p) -> p === page }
+        page.takeIf { System.nanoTime() - at <= RECENT_PAGE_TTL_NS }
+    }
+
+    private suspend fun fetchPageUncached(
         source: BookSourceRule,
         url: String,
         stage: String,
@@ -794,6 +896,11 @@ class BookSourceEngine(
         val VARS_JSON = kotlinx.serialization.json.Json
         val PAGE_VAR = Regex("\\{\\{[^}]*page[^}]*\\}\\}")
         const val MAX_TOC_PAGES = 200
+        /** 目录分页的并发抓取数。再多就是对着同一个站点群发，限流、封 IP 的风险比省下的时间大 */
+        const val TOC_CONCURRENCY = 4
+        /** 见 [recentPages]：只接「详情 → 目录」紧挨着的那一步 */
+        const val RECENT_PAGES = 8
+        const val RECENT_PAGE_TTL_NS = 30_000_000_000L
         /** 单章分页抓取上限。50 会让失控的 nextPage 空转近一分钟；正经分页站很少超过十几页 */
         const val MAX_CONTENT_PAGES = 16
 

@@ -400,6 +400,9 @@ class BookSourceEngineTest {
                 path == "/mp/toc" -> html(MP_TOC_1)
                 path == "/mp/toc2" -> html(MP_TOC_2)
                 path == "/mp/toc3" -> html(MP_TOC_3)
+                // 故意慢回来的第二页：并发抓目录时它比第三页晚到，结果仍得按页序拼
+                path == "/mp/slowtoc2" -> html(MP_TOC_2).setBodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS)
+                path == "/selftoc" -> html(SELF_TOC_PAGE)
                 path == "/gbk/chap" -> MockResponse()
                     .setBody(Buffer().write(GBK_CHAP.toByteArray(charset("GBK"))))
                     .setHeader("Content-Type", "text/html")
@@ -464,6 +467,42 @@ class BookSourceEngineTest {
         """.trimIndent()
         val toc = engine().getToc(BookSourceRule.fromJson(json), "$base/mp/toc")
         assertEquals(listOf("一", "二", "三"), toc.map { it.title })
+    }
+
+    /** 目录分页并发抓：晚到的那页不能被排到后面去 */
+    @Test
+    fun `并发抓目录分页时仍按页序拼接`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"慢分页",
+             "ruleToc":{"chapterList":"ul.chapters li a","chapterName":"text","chapterUrl":"href",
+               "nextTocUrl":"<js>['$base/mp/slowtoc2','$base/mp/toc3']</js>"}}
+        """.trimIndent()
+        val toc = engine().getToc(BookSourceRule.fromJson(json), "$base/mp/toc")
+        assertEquals(listOf("一", "二", "三"), toc.map { it.title })
+    }
+
+    /**
+     * 没写 tocUrl 的书源，目录地址就是详情页：先 getDetail 再 getToc 不该把同一页抓两遍
+     * （多一个往返、多排一次限速，预览和加书架的超时预算就那么点）。
+     */
+    @Test
+    fun `详情页即目录页时只抓一次`() = runBlocking {
+        val json = """
+            {"bookSourceUrl":"$base","bookSourceName":"同页站",
+             "ruleBookInfo":{"name":"h1@text"},
+             "ruleToc":{"chapterList":"ul.chapters li a","chapterName":"text","chapterUrl":"href"}}
+        """.trimIndent()
+        val src = BookSourceRule.fromJson(json)
+        val e = engine()
+        val detail = e.getDetail(src, "$base/selftoc")
+        assertEquals("同页书", detail.title)
+        val toc = e.getToc(src, detail.tocUrl)
+        assertEquals(listOf("第一章", "第二章"), toc.map { it.title })
+        assertEquals(1, server.requestCount)
+
+        // 缓存只接紧挨着的那一步：之后再取目录（下拉追更、刷新目录）必须真的去抓，别拿刚才那份旧页
+        e.getToc(src, detail.tocUrl)
+        assertEquals(2, server.requestCount)
     }
 
     @Test
@@ -890,6 +929,11 @@ class BookSourceEngineTest {
             </ul><div class="pages">
             <a href="/mp/toc">1</a><a href="/mp/toc2">2</a><a href="/mp/toc3">3</a>
             </div></body></html>"""
+
+        /** 详情页即目录页：书名和章节列表在同一页上 */
+        const val SELF_TOC_PAGE = """<html><body><h1>同页书</h1>
+            <ul class="chapters"><li><a href="/self/c1">第一章</a></li><li><a href="/self/c2">第二章</a></li></ul>
+            </body></html>"""
 
         const val EXPLORE_PAGE = """<html><body>
             <div class="result"><h3><a href="/book/9">发现书一</a></h3></div>

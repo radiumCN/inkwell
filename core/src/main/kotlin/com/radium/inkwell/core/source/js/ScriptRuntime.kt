@@ -37,6 +37,13 @@ class RhinoScriptRuntime(
         }
 
         override fun observeInstructionCount(cx: Context, instructionCount: Int) {
+            // 调用方已经取消（离开页面、单源搜索超时）就别跑完。脚本是纯 CPU 循环、没有挂起点，
+            // withTimeout 管不住它：从前一段死循环要烧满指令预算才停，期间一直占着一个搜索名额。
+            // 抛的是取消而不是普通异常：Rhino 对非 JS 异常只走 finally、不进脚本的 catch，书源吞不掉它；
+            // RuleEvaluator.runJs 也会把它放出去（见那里）
+            if (EngineJsHttp.currentJob()?.isActive == false) {
+                throw kotlinx.coroutines.CancellationException("脚本所在的引擎调用已取消")
+            }
             val counted = (cx.getThreadLocal(KEY_COUNT) as? Long ?: 0L) + instructionCount
             if (counted > maxInstructions) {
                 throw IllegalStateException("脚本执行超出指令数限制")
@@ -84,11 +91,12 @@ class RhinoScriptRuntime(
             bindings.forEach { (name, value) ->
                 scope.put(name, scope, Context.javaToJS(value, scope))
             }
-            val compiled = synchronized(compiledScripts) {
-                compiledScripts[script] ?: cx.compileString(script, "rule.js", 1, null).also {
-                    compiledScripts[script] = it
+            // 锁里只查表，编译放在锁外：一段几十 KB 的脚本（内嵌 CryptoJS 的源不少）编译期间，
+            // 从前别的书源的 JS 求值 —— 连缓存命中的 —— 全排在这把锁上。重了也只是多编一次
+            val compiled = synchronized(compiledScripts) { compiledScripts[script] }
+                ?: cx.compileString(script, "rule.js", 1, null).let { fresh ->
+                    synchronized(compiledScripts) { compiledScripts.getOrPut(script) { fresh } }
                 }
-            }
             val result = compiled.exec(cx, scope)
             return when {
                 result == null || result === Context.getUndefinedValue() -> null

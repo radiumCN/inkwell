@@ -1,6 +1,8 @@
 package com.radium.inkwell.core.source
 
 import org.jsoup.nodes.Element
+import org.jsoup.select.Evaluator
+import org.jsoup.select.Selector
 
 /**
  * Legado「默认规则」语法的求值器（按公开的规则语法独立实现）。
@@ -145,7 +147,32 @@ object LegadoSelector {
     /** 选择器无效时返回空集而不是抛错：书源里手写的 CSS 有的本就不合法，不该拖垮整条链路 */
     private fun cssSelect(el: Element, query: String): List<Element> =
         if (query.isEmpty()) listOf(el)
-        else runCatching { el.select(query).toList() }.getOrDefault(emptyList())
+        else runCatching { el.select(evaluatorOf(query)).toList() }.getOrDefault(emptyList())
+
+    /**
+     * 解析好的 CSS 选择器。jsoup 1.23 的 `select(String)` 每次都现解析一遍，不缓存 ——
+     * 目录每章两三个字段、每个字段一两段，三千章就是上万次解析；几百个源一起搜也一样。
+     *
+     * Evaluator 可以跨线程、跨文档复用：结构型求值器（`a > b`、`:has` 等）的备忘表是 ThreadLocal，
+     * 每次 select 收尾都会 reset 清掉，不会攥着上一份 DOM 不放。
+     * 不合法的选择器也记一笔（[NEVER]），否则每个条目都要再抛一次解析异常。
+     */
+    private val evaluators = object : LinkedHashMap<String, Evaluator>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Evaluator>?): Boolean =
+            size > 512
+    }
+
+    private fun evaluatorOf(query: String): Evaluator {
+        synchronized(evaluators) { evaluators[query] }?.let { return it }
+        val parsed = runCatching { Selector.evaluatorOf(query) }.getOrDefault(NEVER)
+        synchronized(evaluators) { evaluators[query] = parsed }
+        return parsed
+    }
+
+    /** 选择器不合法时的占位：什么都不匹配，结果与从前「解析抛错 → 空集」一致 */
+    private object NEVER : Evaluator() {
+        override fun matches(root: Element, element: Element): Boolean = false
+    }
 
     private fun baseElements(el: Element, selector: String): List<Element> {
         if (selector.isEmpty() || selector == "children") return el.children().toList()

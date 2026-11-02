@@ -119,4 +119,55 @@ class TxtParserTest {
         assertEquals(10, last.size)
         assertTrue(last.all { it.startsWith("这是第300章的第") && it.endsWith("情节发展。") }, "实际: $last")
     }
+
+    private fun paragraphs(handle: com.radium.inkwell.core.model.BookHandle, index: Int): List<String> =
+        handle.loadChapter(index).elements.map { (it as com.radium.inkwell.core.model.ContentElement.Paragraph).text }
+
+    private fun tempDir(): File = kotlin.io.path.createTempDirectory("txt-cache").toFile().also { it.deleteOnExit() }
+
+    /**
+     * 缓存版（第二次打开读的是缓存文件）与整本解码版逐章一模一样 —— 偏移换算错一个字，
+     * 就是章节开头少字、结尾串进下一章。标题里带 tab、反斜杠的也得原样往返。
+     */
+    @Test
+    fun `缓存命中时目录与正文和整本解码完全一致`() {
+        val text = novel(chapters = 40, paraPerChapter = 4) + "第41章\t反斜杠\\标题\n　　最后一段。\n"
+        val file = openTemp(text, charset = charset("GBK"))
+        val plain = TxtParser().open(file)
+        val dir = tempDir()
+        TxtParser(cacheDir = dir).open(file).close() // 第一次：建缓存
+        assertTrue(dir.listFiles()!!.any { it.name.endsWith(".u16") } && dir.listFiles()!!.any { it.name.endsWith(".idx") })
+
+        TxtParser(cacheDir = dir).open(file).use { cached ->
+            assertEquals(plain.chapters, cached.chapters)
+            assertEquals(plain.toc, cached.toc)
+            assertEquals("第41章\t反斜杠\\标题", cached.chapters.last().title)
+            for (i in plain.chapters.indices) assertEquals(paragraphs(plain, i), paragraphs(cached, i), "第 $i 章")
+        }
+    }
+
+    /** 原文件换了（重新导入覆盖、外部改过），旧的拆章表与正文就作废，不能按旧结果读 */
+    @Test
+    fun `原文件变了缓存作废`() {
+        val file = openTemp(novel(chapters = 5))
+        val dir = tempDir()
+        TxtParser(cacheDir = dir).open(file).close()
+
+        file.writeText(novel(chapters = 8))
+        file.setLastModified(file.lastModified() + 5_000)
+        TxtParser(cacheDir = dir).open(file).use { reopened ->
+            assertEquals(9, reopened.chapters.size)
+        }
+    }
+
+    @Test
+    fun `删书时清掉这本的缓存`() {
+        val file = openTemp(novel(chapters = 3))
+        val dir = tempDir()
+        val parser = TxtParser(cacheDir = dir)
+        parser.open(file).close()
+        assertTrue(dir.listFiles()!!.isNotEmpty())
+        parser.evictCache(file)
+        assertTrue(dir.listFiles()!!.isEmpty(), "实际: ${dir.listFiles()!!.map { it.name }}")
+    }
 }
