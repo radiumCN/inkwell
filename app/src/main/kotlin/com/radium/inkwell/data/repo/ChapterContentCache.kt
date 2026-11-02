@@ -25,6 +25,16 @@ class ChapterContentCache(private val root: File) {
     private val touched = ConcurrentHashMap.newKeySet<String>()
 
     /**
+     * 「这本书的缓存被整本清过几次」。后台整本缓存（OfflineDownloader）抓一章要好几秒，这期间书可能换了源、
+     * 被删了、被同步改了源 —— 这些路径最后都落到 [clear]。抓之前记下 [epoch]，写的时候用 [writeIfEpoch]：
+     * 期间清过就不写，免得把旧源的正文写进新源的缓存（同站点两个规则的章节 URL 一模一样，写进去就成了「已缓存」）。
+     * 比较与清除在同一把锁里：查完、还没写的那一刻被清，也写不进去。
+     */
+    private val epochLock = Any()
+    private val bookEpochs = HashMap<String, Int>()
+    private var allEpoch = 0
+
+    /**
      * 书 id 拼进路径之前先过一道：id 不全是本机生成的 —— WebDAV 同步来的书行出自备份文件，
      * 谁能写备份谁就能填（明文 http 下还有中间人）。`../books` 这样的 id 原样拼进去，
      * [clear] 的 deleteRecursively 就删到缓存根之外（整个导入书目录）。
@@ -151,17 +161,35 @@ class ChapterContentCache(private val root: File) {
         }
     }
 
+    fun epoch(bookId: String): Long = synchronized(epochLock) {
+        (allEpoch.toLong() shl 32) or (bookEpochs[bookId] ?: 0).toLong()
+    }
+
+    /** 自 [epoch] 那一刻起这本书的缓存没被清过才写；返回写没写 */
+    fun writeIfEpoch(bookId: String, chapterUrl: String, content: ChapterContent, epoch: Long): Boolean =
+        synchronized(epochLock) {
+            if (epoch(bookId) != epoch) return false
+            write(bookId, chapterUrl, content)
+            true
+        }
+
     /** 全部正文缓存占用的字节数（设置页要显示，用户得知道清的是多少东西） */
     fun sizeBytes(): Long =
         root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
     /** 清空所有书的正文缓存。目录与阅读进度不受影响，只是下次读要重新联网抓 */
     fun clearAll() {
-        root.listFiles()?.forEach { it.deleteRecursively() }
+        synchronized(epochLock) {
+            allEpoch++
+            root.listFiles()?.forEach { it.deleteRecursively() }
+        }
     }
 
     fun clear(bookId: String) {
-        bookDir(bookId).deleteRecursively()
+        synchronized(epochLock) {
+            bookEpochs[bookId] = (bookEpochs[bookId] ?: 0) + 1
+            bookDir(bookId).deleteRecursively()
+        }
     }
 
     /** 删掉早先按序号命名的缓存（`0.txt`）：目录一变它们就名不副实，且再也不会被读到 */

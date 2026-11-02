@@ -123,6 +123,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.EmptyState
@@ -764,7 +765,7 @@ fun BookshelfScreen(
                 )
                 SettingRow(
                     title = "书籍详情",
-                    subtitle = "简介、目录、刷新目录",
+                    subtitle = if (book.type == BookType.NET) "简介、目录、离线缓存" else "简介、目录",
                     onClick = {
                         val id = book.id
                         dismissThen { onOpenDetail(id) }

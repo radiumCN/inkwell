@@ -268,4 +268,24 @@ class ChapterContentCacheTest {
         assertFalse(File(root, "gone").exists())
         assertTrue(cache.has("live", "https://ex.com/1.html"))
     }
+
+    @Test
+    fun `整本缓存抓章期间这本书被清过（换源、删书），抓回来的旧正文不写`() {
+        val epoch = cache.epoch("b1")
+        cache.clear("b1")
+        assertFalse(cache.writeIfEpoch("b1", "https://ex.com/1.html", content, epoch))
+        assertFalse(cache.has("b1", "https://ex.com/1.html"))
+    }
+
+    @Test
+    fun `清的是别的书不影响；清空全部缓存则一律作废`() {
+        val epoch = cache.epoch("b1")
+        cache.clear("b2")
+        assertTrue(cache.writeIfEpoch("b1", "https://ex.com/1.html", content, epoch))
+        assertTrue(cache.has("b1", "https://ex.com/1.html"))
+
+        val again = cache.epoch("b1")
+        cache.clearAll()
+        assertFalse(cache.writeIfEpoch("b1", "https://ex.com/2.html", content, again))
+    }
 }

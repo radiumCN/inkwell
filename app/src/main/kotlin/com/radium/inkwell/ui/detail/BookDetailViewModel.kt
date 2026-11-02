@@ -9,6 +9,9 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.data.repo.OfflineDownload
+import com.radium.inkwell.data.repo.OfflineDownloader
+import com.radium.inkwell.data.repo.OfflineRange
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -52,6 +55,7 @@ class BookDetailViewModel(
     private val netBookRepo: NetBookRepository,
     private val sourceRepo: BookSourceRepository,
     private val chapterDao: ChapterDao,
+    private val downloader: OfflineDownloader,
 ) : ViewModel() {
 
     private val refreshing = MutableStateFlow(false)
@@ -80,6 +84,15 @@ class BookDetailViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookDetailUiState())
 
     val messages = MessageBus()
+
+    /** 这本书的整本缓存：在跑的、或上一轮的结果（null = 这次进程里没缓存过它） */
+    val download: StateFlow<OfflineDownload?> = downloader.downloads
+        .map { it[bookId] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), downloader.downloads.value[bookId])
+
+    fun startDownload(range: OfflineRange) = downloader.start(bookId, range)
+
+    fun cancelDownload() = downloader.cancel(bookId)
 
     /** 进度写完了，页面该进阅读器了 */
     private val _openReader = MutableSharedFlow<Unit>(extraBufferCapacity = 1)

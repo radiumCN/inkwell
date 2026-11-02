@@ -51,6 +51,12 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.DeterminateProgressBar
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.data.repo.OfflineDownload
+import com.radium.inkwell.data.repo.OfflineRange
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -66,6 +72,8 @@ fun BookDetailScreen(
     viewModel: BookDetailViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val download by viewModel.download.collectAsStateWithLifecycle()
+    var showOfflinePicker by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     // 点目录：进度写完才进阅读器（见 BookDetailViewModel.openChapter）
@@ -127,7 +135,11 @@ fun BookDetailScreen(
                 Header(
                     book = b,
                     chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
+                    cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
+                    download = download,
                     onRead = onRead,
+                    onOfflineCache = { showOfflinePicker = true },
+                    onCancelDownload = viewModel::cancelDownload,
                 )
             }
             item {
@@ -215,13 +227,46 @@ fun BookDetailScreen(
             item { Spacer(Modifier.height(Dimens.gapXL)) }
         }
     }
+
+    if (showOfflinePicker) {
+        OptionPickerSheet(
+            title = "离线缓存",
+            options = OfflineRange.entries.map { range ->
+                PickerOption(id = range.name, label = range.label, subtitle = offlineRangeHint(range))
+            },
+            selectedId = null,
+            onSelect = { opt ->
+                showOfflinePicker = false
+                viewModel.startDownload(OfflineRange.valueOf(opt.id))
+            },
+            onDismiss = { showOfflinePicker = false },
+            header = {
+                Text(
+                    "离开这一页也会接着缓存；已经缓存过的章直接跳过。需要网页渲染才抓得到的章，留到阅读时再加载",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
+                )
+            },
+        )
+    }
+}
+
+private fun offlineRangeHint(range: OfflineRange): String = when (range) {
+    OfflineRange.NEXT_50 -> "从读到的这一章起，往后 50 章"
+    OfflineRange.TO_END -> "从读到的这一章起，一直到最后一章"
+    OfflineRange.WHOLE_BOOK -> "从第一章到最后一章。章多的书要好一会儿"
 }
 
 @Composable
 private fun Header(
     book: BookEntity,
     chapterCount: Int,
+    cachedCount: Int,
+    download: OfflineDownload?,
     onRead: () -> Unit,
+    onOfflineCache: () -> Unit,
+    onCancelDownload: () -> Unit,
 ) {
 
     Column(
@@ -261,13 +306,70 @@ private fun Header(
                 )
             }
         }
-        PrimaryButton(
-            text = if (book.readAt > 0) "继续阅读" else "开始阅读",
-            onClick = onRead,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        val readLabel = if (book.readAt > 0) "继续阅读" else "开始阅读"
+        if (book.type == BookType.NET) {
+            val running = download?.running == true
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.weight(1f))
+                SecondaryButton(
+                    text = if (running) "缓存中…" else "离线缓存",
+                    onClick = onOfflineCache,
+                    enabled = !running,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            OfflineStatus(download, cachedCount, chapterCount, onCancelDownload)
+        } else {
+            PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.fillMaxWidth())
+        }
         val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
         if (intro.isNotBlank()) BookIntro(intro)
+    }
+}
+
+/**
+ * 缓存状态一行：在缓存时是进度条 + 停止；停下来以后说一句结果；平时只报「已缓存多少章」，
+ * 一章都没缓存就什么都不说（大多数书从没缓存过，没必要每本都挂一行「已缓存 0 章」）。
+ */
+@Composable
+private fun OfflineStatus(
+    download: OfflineDownload?,
+    cachedCount: Int,
+    chapterCount: Int,
+    onCancel: () -> Unit,
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    when {
+        download?.running == true -> Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "正在缓存 ${download.done} / ${download.total} 章" +
+                        if (download.failed > 0) "，${download.failed} 章没抓到" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = muted,
+                    modifier = Modifier.weight(1f),
+                )
+                AppTextButton(onClick = onCancel) { Text("停止") }
+            }
+            DeterminateProgressBar(
+                progress = { if (download.total == 0) 0f else download.done.toFloat() / download.total },
+            )
+        }
+        download != null -> Text(
+            when {
+                download.stoppedBecause != null -> download.stoppedBecause
+                download.done < download.total -> "已停止，缓存了 ${download.done} / ${download.total} 章"
+                download.failed > 0 -> "缓存完成，${download.failed} 章没抓到（阅读时会再试）"
+                else -> "缓存完成，已缓存 $cachedCount / $chapterCount 章"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = muted,
+        )
+        cachedCount > 0 -> Text(
+            "已缓存 $cachedCount / $chapterCount 章",
+            style = MaterialTheme.typography.bodySmall,
+            color = muted,
+        )
     }
 }
 
