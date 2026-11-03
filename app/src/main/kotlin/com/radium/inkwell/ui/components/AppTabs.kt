@@ -9,6 +9,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -31,8 +33,13 @@ fun AppTabRow(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 默认是主题的 surface。放在不是 surface 的面板上（阅读设置面板）传 Transparent：
+     * 不然面板顶上横着一条别的颜色的带子
+     */
+    containerColor: Color = TabRowDefaults.primaryContainerColor,
 ) {
-    PrimaryTabRow(selectedTabIndex = selectedIndex, modifier = modifier) {
+    PrimaryTabRow(selectedTabIndex = selectedIndex, modifier = modifier, containerColor = containerColor) {
         titles.forEachIndexed { i, title ->
             Tab(
                 selected = selectedIndex == i,

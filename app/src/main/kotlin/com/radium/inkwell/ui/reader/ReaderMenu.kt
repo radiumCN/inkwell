@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.TonalButton
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,7 +42,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -107,7 +108,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.radium.inkwell.ui.components.SegmentedChoice
-import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.AppTextButton
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -151,10 +151,11 @@ fun ReaderMenu(
     // - 从前顶栏、底栏与纸同色，只隔一根发丝线，看着像页面上下多了两行字，而不是盖上来的一层。
     // - 也别回到投影 / 压暗：同色纸上 4~8dp 的投影就是一道脏灰线；压暗正文会把米色纸压成灰绿，
     //   在顶栏底边裂出一道生硬的分界（两条都实测过）。纸书里书签和纸页之间也没有阴影。
-    // 顶栏是比纸深（深色纸上是浅）一档的实色条；底部拆成两块悬浮的圆角条，四周露出纸色 ——
-    // 露出来的那一圈纸，就是「浮在纸上」的全部表达。色阶的约定见 ReaderThemeScope。
+    // 顶栏是比纸深（深色纸上是浅）一档的实色条，朝正文那一侧是大圆角；底部是两块同色的悬浮圆角条
+    // （进度、操作），四周露出纸色。圆角的边、露出来的那圈纸，就是「盖在纸上」的全部表达。
+    // 浮层底色与点「设置」弹出的面板同一个（见 readerOverlayColor）。
     val scheme = MaterialTheme.colorScheme
-    val barColor = scheme.surfaceContainerHigh
+    val barColor = readerOverlayColor()
 
     // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
     // 整层淡入 —— 让人看得出这是「盖上来的一层」，而不是页面突然换了个样子。
@@ -168,8 +169,7 @@ fun ReaderMenu(
         val slopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
         Box(Modifier.fillMaxSize()) {
             // 底层：整块纸面，**透明**。点一下关菜单；按当前翻页方向滑一下 = 关并翻一页。
-            // 铺满全屏而不只是两条栏之间：悬浮条四周露出来的那圈纸也是纸，点它同样该关菜单。
-            // 栏和悬浮条都是 Surface，落在它们身上的触摸被它们吃掉，不会漏到这一层。
+            // 顶栏和底部面板都是 Surface，落在它们身上的触摸被它们吃掉，不会漏到这一层。
             // 无涟漪：这是块半屏的空白。目录/设置/换源开着时不拦截，否则跟面板里的列表抢手势。
             // visible 已是 false 时也不挂 —— 退场动画还在播若仍吃手势，关完会短暂翻不了页。
             Box(
@@ -192,6 +192,7 @@ fun ReaderMenu(
                 Surface(
                     color = barColor,
                     contentColor = scheme.onSurface,
+                    shape = MaterialTheme.shapes.extraLarge.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize),
                     modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
                 ) {
                     Row(
@@ -233,22 +234,34 @@ fun ReaderMenu(
                         .padding(horizontal = Dimens.gapM, vertical = Dimens.gapS),
                     verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 ) {
-                    ProgressCard(
-                        pageUi = pageUi,
-                        chapterCount = session.chapterCount,
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
                         color = barColor,
-                        onGotoChapter = onGotoChapter,
-                        onSeekPercent = onSeekPercent,
-                    )
-                    ActionBar(
-                        session = session,
-                        overlay = overlay,
+                        contentColor = scheme.onSurface,
+                    ) {
+                        ChapterProgress(
+                            pageUi = pageUi,
+                            chapterCount = session.chapterCount,
+                            onGotoChapter = onGotoChapter,
+                            onSeekPercent = onSeekPercent,
+                            modifier = Modifier.padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS),
+                        )
+                    }
+                    Surface(
+                        shape = MaterialTheme.shapes.extraLarge,
                         color = barColor,
-                        onShowToc = { showToc = true },
-                        onSearchSources = onSearchSources,
-                        onToggleAutoFlip = onToggleAutoFlip,
-                        onShowSettings = { showSettings = true },
-                    )
+                        contentColor = scheme.onSurface,
+                    ) {
+                        MenuActions(
+                            session = session,
+                            overlay = overlay,
+                            onShowToc = { showToc = true },
+                            onSearchSources = onSearchSources,
+                            onToggleAutoFlip = onToggleAutoFlip,
+                            onShowSettings = { showSettings = true },
+                            modifier = Modifier.padding(Dimens.gapXS),
+                        )
+                    }
                 }
             }
         }
@@ -275,7 +288,8 @@ fun ReaderMenu(
     if (showSettings) {
         ModalBottomSheet(
             onDismissRequest = { showSettings = false },
-            containerColor = MaterialTheme.colorScheme.surface,
+            // 与菜单的浮层同色。必须与纸面差一档：同色的话面板上沿等于不存在，见 readerOverlayColor
+            containerColor = readerOverlayColor(),
             // 不压暗正文：面板只占半屏，上面露出来的正文就是排版的实时预览。
             // 隔着一层 32% 的黑看，行距字距勉强看得出，纸色和亮度根本没法判断
             scrimColor = Color.Transparent,
@@ -322,122 +336,110 @@ private fun ChapterTextAction(
 }
 
 /**
- * 章节进度：上一章 / 细轨滑块 / 下一章，下面一行「第几章 · 第几页」。
+ * 章节进度：上一章 / 细轨滑块 / 下一章，下面一行「本章第几页 · 全书百分比」。
  *
  * 从前只有一根轨：看不出读到这一章的哪儿、全书的哪儿；拖的时候也没有数字，松手前不知道会落在哪一页。
  * 拖动是实时跳页的（见 ReaderViewModel.seekToPercent），这行字跟着页码一起变。
+ *
+ * 不写「第几章」：那是目录里的序号，书源目录里混着公告、卷名时，跟章节标题自己的编号对不上 ——
+ * 标题写着第 2383 章，这里却说第 2395 章。全书百分比与页脚同一个算法（[bookProgressPercent]）。
  */
 @Composable
-private fun ProgressCard(
+private fun ChapterProgress(
     pageUi: ReaderPageUi,
     chapterCount: Int,
-    color: Color,
     onGotoChapter: (Int) -> Unit,
     onSeekPercent: (Float) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = color,
-        contentColor = scheme.onSurface,
-    ) {
-        Column(Modifier.padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChapterTextAction(
-                    label = "上一章",
-                    enabled = pageUi.chapterIndex > 0,
-                    color = scheme.onSurface,
-                    onClick = { onGotoChapter(pageUi.chapterIndex - 1) },
-                )
-                AppSlider(
-                    value = if (pageUi.pageCount <= 1) 0f
-                    else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
-                    onValueChange = onSeekPercent,
-                    label = "章内进度",
-                    enabled = pageUi.pageCount > 1,
-                    activeColor = scheme.primary,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = Dimens.gapS),
-                )
-                ChapterTextAction(
-                    label = "下一章",
-                    enabled = pageUi.chapterIndex + 1 < chapterCount,
-                    color = scheme.onSurface,
-                    onClick = { onGotoChapter(pageUi.chapterIndex + 1) },
-                )
-            }
-            Text(
-                progressLabel(pageUi, chapterCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ChapterTextAction(
+                label = "上一章",
+                enabled = pageUi.chapterIndex > 0,
+                color = scheme.onSurface,
+                onClick = { onGotoChapter(pageUi.chapterIndex - 1) },
+            )
+            AppSlider(
+                value = if (pageUi.pageCount <= 1) 0f
+                else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
+                onValueChange = onSeekPercent,
+                label = "章内进度",
+                enabled = pageUi.pageCount > 1,
+                activeColor = scheme.primary,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = Dimens.gapXS),
+                    .weight(1f)
+                    .padding(horizontal = Dimens.gapS),
+            )
+            ChapterTextAction(
+                label = "下一章",
+                enabled = pageUi.chapterIndex + 1 < chapterCount,
+                color = scheme.onSurface,
+                onClick = { onGotoChapter(pageUi.chapterIndex + 1) },
             )
         }
+        Text(
+            progressLabel(pageUi, chapterCount),
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = Dimens.gapXS),
+        )
     }
 }
 
 private fun progressLabel(page: ReaderPageUi, chapterCount: Int): String = buildString {
-    append("第 ${page.chapterIndex + 1} / $chapterCount 章")
-    if (page.pageCount > 0) append(" · ${page.pageInChapter + 1} / ${page.pageCount} 页")
+    if (page.pageCount > 0) append("本章 ${page.pageInChapter + 1} / ${page.pageCount} 页 · ")
+    append("全书 ${"%.1f".format(bookProgressPercent(page, chapterCount))}%")
 }
 
 /**
- * 底部操作条。图标配上文字：从前是四个光秃秃的图标，分量一模一样，新用户得挨个点了才知道是什么。
- * 「设置」做成实心主按钮 —— 读书时调得最多的就是它；目录、换源、自动翻页是文字按钮。
+ * 底部操作条。图标配上文字：从前是四个光秃秃的图标，新用户得挨个点了才知道是什么。
+ *
+ * 四个动作同一种样式（图标在上、字在下）、平分宽度。曾把「设置」做成实心主按钮突出它，可那是
+ * 图标在左、字在右的另一种排法，一排四个里只有它横着，看着像拼错了 —— 宁可四个一样。
  * 本地书 / 滚动模式下不适用的动作保留占位并禁用，位置不跳。
  */
 @Composable
-private fun ActionBar(
+private fun MenuActions(
     session: ReaderSessionUi,
     overlay: ReaderOverlayUi,
-    color: Color,
     onShowToc: () -> Unit,
     onSearchSources: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onShowSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = color,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(Dimens.gapXS),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BarAction(
-                icon = Icons.AutoMirrored.Filled.List,
-                label = "目录",
-                onClick = onShowToc,
-                modifier = Modifier.weight(1f),
-            )
-            BarAction(
-                icon = Icons.Default.SwapHoriz,
-                label = "换源",
-                onClick = onSearchSources,
-                enabled = session.isNetBook,
-                modifier = Modifier.weight(1f),
-            )
-            BarAction(
-                icon = if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
-                label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
-                onClick = onToggleAutoFlip,
-                enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
-                modifier = Modifier.weight(1f),
-            )
-            PrimaryButton(
-                text = "设置",
-                icon = Icons.Default.Tune,
-                onClick = onShowSettings,
-                modifier = Modifier.padding(horizontal = Dimens.gapXS),
-            )
-        }
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        BarAction(
+            icon = Icons.AutoMirrored.Filled.List,
+            label = "目录",
+            onClick = onShowToc,
+            modifier = Modifier.weight(1f),
+        )
+        BarAction(
+            icon = Icons.Default.SwapHoriz,
+            label = "换源",
+            onClick = onSearchSources,
+            enabled = session.isNetBook,
+            modifier = Modifier.weight(1f),
+        )
+        BarAction(
+            icon = if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+            label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
+            onClick = onToggleAutoFlip,
+            enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
+            modifier = Modifier.weight(1f),
+        )
+        BarAction(
+            icon = Icons.Default.Tune,
+            label = "设置",
+            onClick = onShowSettings,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -612,8 +614,8 @@ private val MARGIN_H_OPTIONS = listOf(
  * - 翻页：翻页方式、自动翻页间隔、音量键翻页、点击区域
  * - 更多：设一次基本不再动的（预加载、屏幕常亮）
  *
- * 层次靠三档色阶拉开（见 ReaderThemeScope）：面板底是纸面，设置项收进深一档的分组卡（[ReaderGroup]），
- * 卡里的分段按钮未选中再深一档、选中的实心填强调色。从前是十几组「小标题 + 一排 chip」平铺在纸上，
+ * 层次靠三档色阶拉开（见 ReaderThemeScope）：面板本身与纸面差一档（[readerOverlayColor]），
+ * 设置项收进分组卡（[ReaderGroup]，[readerCardColor]），卡里的分段按钮未选中再差一档、选中的实心填强调色。从前是十几组「小标题 + 一排 chip」平铺在纸上，
  * 每组长得一模一样，选中的 chip 只是一层淡底，一屏看下来没有任何东西跳出来。
  *
  * **只占半屏、不压暗正文**：调排版要看得见效果。从前面板固定 560dp 高、底下还压着一层黑，
@@ -644,7 +646,13 @@ private fun TypographyPanel(
 
     Column(Modifier.fillMaxWidth()) {
         // TabRow 钉在顶不滚，只让下面的内容滚
-        AppTabRow(titles = SETTINGS_TABS, selectedIndex = tab, onSelect = { tab = it })
+        AppTabRow(
+            titles = SETTINGS_TABS,
+            selectedIndex = tab,
+            onSelect = { tab = it },
+            // 透出面板自己的底色；默认的 surface 是纸色，会在面板顶上横出一条纸色的带子
+            containerColor = Color.Transparent,
+        )
         AppTabContent(
             targetState = tab,
             label = "readerSettingsTab",
@@ -668,7 +676,7 @@ private fun TypographyPanel(
 }
 
 /**
- * 设置面板里的一张分组卡：标题在卡外，用次要文字色（不跟选中态抢强调色）；内容在比纸面深一档的卡里。
+ * 设置面板里的一张分组卡：标题在卡外，用次要文字色（不跟选中态抢强调色）；内容在卡里（底色见 [readerCardColor]）。
  * 卡内的行自己带左右内缩（[ReaderRow] / [ReaderBlock] / 分组 [SwitchRow] 都是 listHorizontal），
  * 卡本身只给上下一点留白。
  */
@@ -692,7 +700,7 @@ private fun ReaderGroup(
             Modifier
                 .fillMaxWidth()
                 .clip(MaterialTheme.shapes.large)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .background(readerCardColor())
                 .padding(vertical = Dimens.gapXS),
             content = content,
         )
@@ -822,14 +830,14 @@ private fun LayoutTab(
 
 /**
  * 字号：加减按钮 + 当前值，一行搞定。
- * 走 SecondaryButton 而不是裸 OutlinedButton：后者落到不带 shapes 的旧重载，按下去没有 Expressive 的
- * 圆角形变，和面板里其他按钮不是一套手感；触控区仍由 M3 按钮自带的 48dp 下限兜着。
+ * 用 [TonalButton]（浅底实心）而不是描边按钮：同一张卡里下面就是一排分段按钮，一圈描边夹在实心按钮中间，
+ * 看着像两套控件拼在一起。触控区由 M3 按钮自带的 48dp 下限兜着。
  * 「A−」读屏只会念成「A 减」，补一个说清用途的名字
  */
 @Composable
 private fun FontSizeStepper(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        SecondaryButton(
+        TonalButton(
             text = "A−",
             onClick = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
             modifier = Modifier.weight(1f).semantics { contentDescription = "字号减小" },
@@ -841,7 +849,7 @@ private fun FontSizeStepper(settings: ReaderSettings, onUpdate: (ReaderSettings)
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.titleLarge,
         )
-        SecondaryButton(
+        TonalButton(
             text = "A＋",
             onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
             modifier = Modifier.weight(1f).semantics { contentDescription = "字号增大" },

@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -26,11 +27,9 @@ import com.radium.inkwell.reader.api.ReaderTheme
  * 两者同色时换源列表就「有 ListItem 却看不见卡片」—— 截图里开关行若隐若现、
  * 候选行整片糊进纸底，就是这么来的。Sheet 再显式用 [surface]，卡片用 Low，层次才分得开。
  *
- * 菜单与设置面板的层次靠这几档色阶，而不是阴影和蒙层（同色纸上的投影是脏灰线，压暗正文会裂出分界）：
- * - 纸面：[surface]，正文与设置面板的底；
- * - 浮层：`surfaceContainerHigh`，菜单顶栏、底部悬浮条、设置面板里的分组卡；
- * - 控件：`surfaceContainerHighest` 是分段按钮未选中的那几段，选中的那段实心填 [primary]。
- * Highest 从前与 High 同值，分组卡里的未选中段就和卡片糊成一片，单独再抬一档。
+ * 菜单与设置面板的层次靠色阶，而不是阴影和蒙层（同色纸上的投影是脏灰线，压暗正文会裂出分界）。
+ * 三层各差一档，用法见 [readerOverlayColor] / [readerCardColor]；分段按钮未选中的那几段是
+ * `surfaceContainerHighest`，选中的那段实心填 [primary]。Highest 从前与 High 同值，单独再抬了一档。
  */
 @Composable
 fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
@@ -107,6 +106,32 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         typography = MaterialTheme.typography,
         content = content,
     )
+}
+
+/**
+ * 阅读页浮层的底：菜单顶栏、底部面板、设置面板。必须与纸面差一档 ——
+ * 第一版设置面板就是纸色，又去掉了蒙层，面板的上沿等于不存在：正文直接撞进面板、最后一行被拦腰截断，
+ * 连面板的圆角都看不见（纸色上的纸色）。差了这一档，圆角上沿就是浮层的边。
+ *
+ * 浅纸往深走、深纸往浅走（深色里「浮起来」就是更亮），档位比卡片退一步，卡片才放得上去。
+ */
+@Composable
+@ReadOnlyComposable
+internal fun readerOverlayColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.background.luminance() > 0.5f) scheme.surfaceContainerHigh else scheme.surfaceContainerLow
+}
+
+/**
+ * 设置面板里的分组卡。与 App 设置页同一个思路（见 settingsPageColor / settingsCardColor）：
+ * 浅色是「灰底白卡」—— 卡就是纸色本身，像一张张纸片放在托盘上；深色是「暗底亮卡」，比面板再亮一档。
+ * 卡里未选中的分段按钮是 Highest，在两种纸上都与卡差得开。
+ */
+@Composable
+@ReadOnlyComposable
+internal fun readerCardColor(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return if (scheme.background.luminance() > 0.5f) scheme.surfaceContainerLowest else scheme.surfaceContainerHigh
 }
 
 /**

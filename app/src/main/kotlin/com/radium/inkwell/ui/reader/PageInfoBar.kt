@@ -94,15 +94,8 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
         onDispose { context.unregisterReceiver(receiver) }
     }
 
-    // 全书阅读进度：章节 + 章内页比例
     val bookPercent = remember(pageUi.chapterIndex, pageUi.pageInChapter, pageUi.pageCount, session.chapterCount) {
-        if (session.chapterCount <= 0) 0f
-        else {
-            val pageFraction = if (pageUi.pageCount > 0) {
-                (pageUi.pageInChapter + 1f) / pageUi.pageCount
-            } else 0f
-            ((pageUi.chapterIndex + pageFraction) / session.chapterCount * 100f).coerceIn(0f, 100f)
-        }
+        bookProgressPercent(pageUi, session.chapterCount)
     }
 
     val marginH = with(density) { spec.marginLeftPx.toDp() }
@@ -225,4 +218,14 @@ private fun batteryPercent(intent: Intent?): Int? {
     val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
     val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
     return if (level >= 0 && scale > 0) level * 100 / scale else null
+}
+
+/**
+ * 全书阅读进度（0..100）：章节 + 章内页比例。页脚与阅读菜单的进度行共用一个算法 —— 两处各算一遍的话，
+ * 菜单里写着 32.0%、底下页脚写着 32.1%。
+ */
+internal fun bookProgressPercent(page: ReaderPageUi, chapterCount: Int): Float {
+    if (chapterCount <= 0) return 0f
+    val pageFraction = if (page.pageCount > 0) (page.pageInChapter + 1f) / page.pageCount else 0f
+    return ((page.chapterIndex + pageFraction) / chapterCount * 100f).coerceIn(0f, 100f)
 }

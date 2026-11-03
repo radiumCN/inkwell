@@ -82,7 +82,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 
 | 需求 | 用这个（`app/.../ui/components/`） |
 |---|---|
-| 按钮（带 loading，不撑大） | `PrimaryButton` / `SecondaryButton`（`AppButtons.kt`） |
+| 按钮（带 loading，不撑大） | `PrimaryButton` / `SecondaryButton`（`AppButtons.kt`）；浅底实心的次级按钮用 `TonalButton`（和分段按钮的未选中段同一类，别在一排实心按钮里夹描边按钮） |
 | 图标按钮 | `AppIconButton`（`AppButtons.kt`）；顶栏返回键一律 `BackButton`。**别裸写 `IconButton`** —— 裸写的落到不带 `shapes` 的旧重载，按下去没有 Expressive 的圆角形变，同一条顶栏上就分成两派手感 |
 | 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Expressive `MediumFlexibleTopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏。四类例外仍用经典窄栏，理由写在 `AppTopBar` 的 KDoc 与各页注释里（标题位是交互控件的搜索页/发现页、带多选态的书架与书源管理） |
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（M3 `TextField` 最小 56dp 塞不下），但配色形状取 `TextFieldDefaults.roundedShape` / `tonalColors()`，别自己发明底色 |
