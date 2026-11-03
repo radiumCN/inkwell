@@ -37,9 +37,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import com.radium.inkwell.ui.components.SecondaryButton
@@ -80,19 +78,17 @@ import kotlinx.coroutines.flow.StateFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
-import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
@@ -103,6 +99,16 @@ import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.flip.FLIP_SLOP_DP
 import com.radium.inkwell.ui.theme.argbToHsv
 import com.radium.inkwell.ui.theme.hsvToArgb
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.radium.inkwell.ui.components.SegmentedChoice
+import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.AppTextButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -141,85 +147,34 @@ fun ReaderMenu(
         onReaderSheetOpen(showToc || showSettings)
     }
 
-    // 菜单栏跟随阅读主题的纸张色。从前用 MaterialTheme.surface（白色），
-    // 而正文是米色/夜间色 —— 白条压在纸上非常割裂。
-    val theme = session.settings.theme
-    val barColor = Color(theme.background)
-    val barContent = Color(theme.textColor)
+    // 菜单这一层靠**色阶 + 形状**跟纸面分开，不靠阴影和蒙层：
+    // - 从前顶栏、底栏与纸同色，只隔一根发丝线，看着像页面上下多了两行字，而不是盖上来的一层。
+    // - 也别回到投影 / 压暗：同色纸上 4~8dp 的投影就是一道脏灰线；压暗正文会把米色纸压成灰绿，
+    //   在顶栏底边裂出一道生硬的分界（两条都实测过）。纸书里书签和纸页之间也没有阴影。
+    // 顶栏是比纸深（深色纸上是浅）一档的实色条；底部拆成两块悬浮的圆角条，四周露出纸色 ——
+    // 露出来的那一圈纸，就是「浮在纸上」的全部表达。色阶的约定见 ReaderThemeScope。
+    val scheme = MaterialTheme.colorScheme
+    val barColor = scheme.surfaceContainerHigh
 
     // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
-    // 中间蒙层淡入 —— 让人看得出这是「盖上来的一层」，而不是页面突然换了个样子。
+    // 整层淡入 —— 让人看得出这是「盖上来的一层」，而不是页面突然换了个样子。
     // 退场比入场快（帮手里退场取 fast* 档）：用户已经决定关掉了，界面还慢悠悠淡出会像没反应。
     AnimatedVisibility(
         visible = visible,
         enter = scrimEnter(),
         exit = scrimExit(),
     ) {
-        Column(Modifier.fillMaxSize()) {
-            // 顶栏从上滑入，底栏从下滑入 —— 用 animateEnterExit 而不是再套一层
-            // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
-            // 不投阴影：这条栏和正文是同一个纸色，4dp 的投影落在纸上就是一道脏灰线，
-            // 而它想表达的"浮起来"根本没表达出来。改用一根发丝分隔线 —— 纸书里
-            // 书签和纸页之间也不该有阴影。
-            Surface(
-                color = barColor,
-                contentColor = barContent,
-                modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
-            ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .drawBehind {
-                            drawLine(
-                                color = barContent.copy(alpha = 0.10f),
-                                start = Offset(0f, size.height),
-                                end = Offset(size.width, size.height),
-                                strokeWidth = Dimens.strokeThin.toPx(),
-                            )
-                        }
-                        .padding(horizontal = Dimens.gapXS),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    AppIconButton(onClick = onExit) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            session.bookTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            pageUi.chapterTitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            // 次要文字也跟主题走：M3 的灰色在夜间纸张上会糊掉
-                            color = barContent.copy(alpha = 0.65f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-
-            // 中央区域：**透明**。点一下关菜单；按当前翻页方向滑一下 = 关并翻一页。
-            //
-            // 这里原来压了一层 18% 的黑色蒙层，想表达"菜单是盖上来的一层"。
-            // 代价是正文被压暗：同一张米色纸，顶栏是亮米色、正文成了灰绿，
-            // 在顶栏底边裂出一道生硬的分界线 —— 纸张感全毁了。
-            //
-            // 层次交给顶栏/底栏的阴影就够了。这也是纸书的道理：把书页调暗，
-            // 并不能让压在上面的书签更像书签。
-            val density = LocalDensity.current
-            val slopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
+        val density = LocalDensity.current
+        val slopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
+        Box(Modifier.fillMaxSize()) {
+            // 底层：整块纸面，**透明**。点一下关菜单；按当前翻页方向滑一下 = 关并翻一页。
+            // 铺满全屏而不只是两条栏之间：悬浮条四周露出来的那圈纸也是纸，点它同样该关菜单。
+            // 栏和悬浮条都是 Surface，落在它们身上的触摸被它们吃掉，不会漏到这一层。
+            // 无涟漪：这是块半屏的空白。目录/设置/换源开着时不拦截，否则跟面板里的列表抢手势。
+            // visible 已是 false 时也不挂 —— 退场动画还在播若仍吃手势，关完会短暂翻不了页。
             Box(
                 Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    // 无涟漪：这是块半屏的空白。目录/设置/换源开着时不拦截，
-                    // 否则跟面板里的列表抢手势。visible 已是 false 时也不挂 ——
-                    // 退场动画还在播若仍吃手势，关完会短暂翻不了页。
+                    .fillMaxSize()
                     .menuBodyGesture(
                         enabled = visible &&
                             !showToc &&
@@ -231,112 +186,69 @@ fun ReaderMenu(
                         onFlip = onSwipePage,
                     ),
             )
-
-            // 底栏。与顶栏同规格：不投阴影，只用一根发丝分隔线 ——
-            // 8dp 的投影落在同色的纸上就是一道脏灰线，而且顶栏已经改掉了，
-            // 一边发丝线一边糊阴影，两条栏根本不像一套东西
-            Surface(
-                color = barColor,
-                contentColor = barContent,
-                modifier = Modifier.animateEnterExit(bottomBarEnter(), bottomBarExit()),
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .drawBehind {
-                            drawLine(
-                                color = barContent.copy(alpha = 0.10f),
-                                start = Offset(0f, 0f),
-                                end = Offset(size.width, 0f),
-                                strokeWidth = Dimens.strokeThin.toPx(),
-                            )
-                        }
-                        .navigationBarsPadding()
-                        .padding(vertical = Dimens.gapS)
+            Column(Modifier.fillMaxSize()) {
+                // 顶栏从上滑入，底部从下滑入 —— 用 animateEnterExit 而不是再套一层
+                // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
+                Surface(
+                    color = barColor,
+                    contentColor = scheme.onSurface,
+                    modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
                 ) {
-                    // 章节进度：细轨滑块居中；上一章/下一章用文字链而不是 TextButton ——
-                    // TextButton 有固定最小高度（像一张小卡片），滑块收矮了它还在，整行照样高。
-                    // 页码不单独占一行：拖滑块时系统无障碍会读进度，视觉上留给正文。
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = Dimens.gapL),
+                            .statusBarsPadding()
+                            .padding(horizontal = Dimens.gapXS),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ChapterTextAction(
-                            label = "上一章",
-                            enabled = pageUi.chapterIndex > 0,
-                            color = barContent,
-                            onClick = { onGotoChapter(pageUi.chapterIndex - 1) },
-                        )
-                        AppSlider(
-                            value = if (pageUi.pageCount <= 1) 0f
-                            else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
-                            onValueChange = onSeekPercent,
-                            label = "章内进度",
-                            enabled = pageUi.pageCount > 1,
-                            activeColor = barContent,
-                            inactiveColor = barContent.copy(alpha = 0.2f),
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = Dimens.gapS),
-                        )
-                        ChapterTextAction(
-                            label = "下一章",
-                            enabled = pageUi.chapterIndex + 1 < session.chapterCount,
-                            color = barContent,
-                            onClick = { onGotoChapter(pageUi.chapterIndex + 1) },
-                        )
-                    }
-                    Spacer(Modifier.height(Dimens.gapXS))
-                    HorizontalDivider()
-                    // 四个等分图标按钮：纯图标 + contentDescription，窄屏也能一次摆开，
-                    // 不再走带文字的 ButtonGroup（会溢出成「⋯」或触发布局崩溃）。
-                    // 本地书/滚动模式下不适用的动作保留占位并禁用，位置不跳。
-                    val actionColors = IconButtonDefaults.iconButtonColors(
-                        contentColor = barContent,
-                        disabledContentColor = barContent.copy(alpha = 0.38f),
-                    )
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Dimens.gapS),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        AppIconButton(
-                            onClick = { showToc = true },
-                            colors = actionColors,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "目录")
+                        AppIconButton(onClick = onExit) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出阅读")
                         }
-                        AppIconButton(
-                            onClick = onSearchSources,
-                            enabled = session.isNetBook,
-                            colors = actionColors,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.SwapHoriz, contentDescription = "换源")
-                        }
-                        AppIconButton(
-                            onClick = onToggleAutoFlip,
-                            enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
-                            colors = actionColors,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(
-                                if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                session.bookTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                pageUi.chapterTitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                // 次要文字走纸张主题的 onSurfaceVariant（够 4.5:1），不再手写 0.65 透明度
+                                color = scheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        AppIconButton(
-                            onClick = { showSettings = true },
-                            colors = actionColors,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.Settings, contentDescription = "设置")
-                        }
                     }
+                }
+
+                Spacer(Modifier.weight(1f))
+
+                Column(
+                    Modifier
+                        .animateEnterExit(bottomBarEnter(), bottomBarExit())
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = Dimens.gapM, vertical = Dimens.gapS),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
+                ) {
+                    ProgressCard(
+                        pageUi = pageUi,
+                        chapterCount = session.chapterCount,
+                        color = barColor,
+                        onGotoChapter = onGotoChapter,
+                        onSeekPercent = onSeekPercent,
+                    )
+                    ActionBar(
+                        session = session,
+                        overlay = overlay,
+                        color = barColor,
+                        onShowToc = { showToc = true },
+                        onSearchSources = onSearchSources,
+                        onToggleAutoFlip = onToggleAutoFlip,
+                        onShowSettings = { showSettings = true },
+                    )
                 }
             }
         }
@@ -364,6 +276,9 @@ fun ReaderMenu(
         ModalBottomSheet(
             onDismissRequest = { showSettings = false },
             containerColor = MaterialTheme.colorScheme.surface,
+            // 不压暗正文：面板只占半屏，上面露出来的正文就是排版的实时预览。
+            // 隔着一层 32% 的黑看，行距字距勉强看得出，纸色和亮度根本没法判断
+            scrimColor = Color.Transparent,
         ) {
             TypographyPanel(
                 settings = session.settings,
@@ -404,6 +319,154 @@ private fun ChapterTextAction(
             .padding(horizontal = Dimens.gapXS)
             .wrapContentHeight(align = Alignment.CenterVertically),
     )
+}
+
+/**
+ * 章节进度：上一章 / 细轨滑块 / 下一章，下面一行「第几章 · 第几页」。
+ *
+ * 从前只有一根轨：看不出读到这一章的哪儿、全书的哪儿；拖的时候也没有数字，松手前不知道会落在哪一页。
+ * 拖动是实时跳页的（见 ReaderViewModel.seekToPercent），这行字跟着页码一起变。
+ */
+@Composable
+private fun ProgressCard(
+    pageUi: ReaderPageUi,
+    chapterCount: Int,
+    color: Color,
+    onGotoChapter: (Int) -> Unit,
+    onSeekPercent: (Float) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = color,
+        contentColor = scheme.onSurface,
+    ) {
+        Column(Modifier.padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChapterTextAction(
+                    label = "上一章",
+                    enabled = pageUi.chapterIndex > 0,
+                    color = scheme.onSurface,
+                    onClick = { onGotoChapter(pageUi.chapterIndex - 1) },
+                )
+                AppSlider(
+                    value = if (pageUi.pageCount <= 1) 0f
+                    else pageUi.pageInChapter.toFloat() / (pageUi.pageCount - 1),
+                    onValueChange = onSeekPercent,
+                    label = "章内进度",
+                    enabled = pageUi.pageCount > 1,
+                    activeColor = scheme.primary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = Dimens.gapS),
+                )
+                ChapterTextAction(
+                    label = "下一章",
+                    enabled = pageUi.chapterIndex + 1 < chapterCount,
+                    color = scheme.onSurface,
+                    onClick = { onGotoChapter(pageUi.chapterIndex + 1) },
+                )
+            }
+            Text(
+                progressLabel(pageUi, chapterCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = Dimens.gapXS),
+            )
+        }
+    }
+}
+
+private fun progressLabel(page: ReaderPageUi, chapterCount: Int): String = buildString {
+    append("第 ${page.chapterIndex + 1} / $chapterCount 章")
+    if (page.pageCount > 0) append(" · ${page.pageInChapter + 1} / ${page.pageCount} 页")
+}
+
+/**
+ * 底部操作条。图标配上文字：从前是四个光秃秃的图标，分量一模一样，新用户得挨个点了才知道是什么。
+ * 「设置」做成实心主按钮 —— 读书时调得最多的就是它；目录、换源、自动翻页是文字按钮。
+ * 本地书 / 滚动模式下不适用的动作保留占位并禁用，位置不跳。
+ */
+@Composable
+private fun ActionBar(
+    session: ReaderSessionUi,
+    overlay: ReaderOverlayUi,
+    color: Color,
+    onShowToc: () -> Unit,
+    onSearchSources: () -> Unit,
+    onToggleAutoFlip: () -> Unit,
+    onShowSettings: () -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = color,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(Dimens.gapXS),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BarAction(
+                icon = Icons.AutoMirrored.Filled.List,
+                label = "目录",
+                onClick = onShowToc,
+                modifier = Modifier.weight(1f),
+            )
+            BarAction(
+                icon = Icons.Default.SwapHoriz,
+                label = "换源",
+                onClick = onSearchSources,
+                enabled = session.isNetBook,
+                modifier = Modifier.weight(1f),
+            )
+            BarAction(
+                icon = if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+                label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
+                onClick = onToggleAutoFlip,
+                enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
+                modifier = Modifier.weight(1f),
+            )
+            PrimaryButton(
+                text = "设置",
+                icon = Icons.Default.Tune,
+                onClick = onShowSettings,
+                modifier = Modifier.padding(horizontal = Dimens.gapXS),
+            )
+        }
+    }
+}
+
+/** 操作条上的一个动作：图标在上、字在下。走 [AppTextButton]，按下有 Expressive 的圆角形变 */
+@Composable
+private fun BarAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val content = MaterialTheme.colorScheme.onSurface
+    AppTextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        contentPadding = PaddingValues(vertical = Dimens.gapXS),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = content,
+            disabledContentColor = content.copy(alpha = 0.38f),
+        ),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // 名字由下面的字给，图标不再单独进读屏
+            Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+    }
 }
 
 @Composable
@@ -543,14 +606,18 @@ private val MARGIN_H_OPTIONS = listOf(
 /**
  * 阅读设置面板。
  *
- * 分四页，而不是把十几组「标签 + chip 行」直着堆下去 —— 那样面板长得要滚半天，
- * 而且每组长得都一样（一个小标题压一排 chip），眼睛根本抓不住重点。
- *
- * 分法按「改的频率」而不是按「技术类别」：
- * - 排版：方案、字号、行距、字体、背景、亮度 —— 最常调的，打开面板第一眼就该是它们
+ * 分四页，按「改的频率」而不是按「技术类别」分：
+ * - 排版：字号、行距、亮度、字体、纸张、方案 —— 最常调的，打开面板第一眼就该是它们
  * - 版式：段距、字距、缩进、对齐、标题与边距 —— 调一次就很少再动的细节
- * - 翻页：翻页方式、自动翻页间隔、音量键翻页
+ * - 翻页：翻页方式、自动翻页间隔、音量键翻页、点击区域
  * - 更多：设一次基本不再动的（预加载、屏幕常亮）
+ *
+ * 层次靠三档色阶拉开（见 ReaderThemeScope）：面板底是纸面，设置项收进深一档的分组卡（[ReaderGroup]），
+ * 卡里的分段按钮未选中再深一档、选中的实心填强调色。从前是十几组「小标题 + 一排 chip」平铺在纸上，
+ * 每组长得一模一样，选中的 chip 只是一层淡底，一屏看下来没有任何东西跳出来。
+ *
+ * **只占半屏、不压暗正文**：调排版要看得见效果。从前面板固定 560dp 高、底下还压着一层黑，
+ * 改行距字距时正文被盖住大半，纸色和亮度隔着蒙层更是没法判断。现在上面露出来的正文就是实时预览。
  *
  * Tab 与切换过渡都走 [AppTabRow] / [AppTabContent]（`ui/components`）—— 全应用同一套形态
  * 与节奏，别在这里手写 TabRow。
@@ -570,32 +637,130 @@ private fun TypographyPanel(
     val scroll = rememberScrollState()
     // 换 tab 把滚动复位：否则从「排版」滚到一半切到「翻页」，人会落在空白里发愣
     LaunchedEffect(tab) { scroll.scrollTo(0) }
+    val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    // 内容区定高（别用 heightIn(max)：那只是上限，内容矮时面板跟着缩，切到长的那页又被顶起来）。
+    // 按窗口比例取，大屏封顶：加上 Tab 与拖拽把手，整个面板约半屏
+    val contentHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight)
 
     Column(Modifier.fillMaxWidth()) {
-        // TabRow 钉在顶不滚，只让下面的内容滚 —— 排版页项目多（字号/标题/边距/行距/字体/背景/亮度），
-        // 一屏放不下。从前内容 Column 既没 verticalScroll 也没高度上限，超出的部分被 sheet 直接裁掉、
-        // 还滚不动，背景/亮度全被压在屏幕外。
+        // TabRow 钉在顶不滚，只让下面的内容滚
         AppTabRow(titles = SETTINGS_TABS, selectedIndex = tab, onSelect = { tab = it })
         AppTabContent(
             targetState = tab,
             label = "readerSettingsTab",
             modifier = Modifier
                 .fillMaxWidth()
-                // 定高，别用 heightIn(max)：那只是上限，内容矮时面板跟着缩，
-                // 切到排版页又被顶起来 —— 正是「切换时自动拉高」。定死后切 tab
-                // 只在内部滚；用户要更大视野，拖 sheet 手柄即可。
-                .height(Dimens.sheetEditorMaxHeight)
+                .height(contentHeight)
                 .verticalScroll(scroll)
                 .padding(horizontal = Dimens.screenPadding)
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
         ) { current ->
-            when (current) {
-                0 -> LayoutTab(settings, onUpdate, onPreview, onCommit, typography)
-                1 -> StyleTab(settings, onUpdate)
-                2 -> FlipTab(settings, onUpdate)
-                else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapL)) {
+                when (current) {
+                    0 -> LayoutTab(settings, onUpdate, onPreview, onCommit, typography)
+                    1 -> StyleTab(settings, onUpdate)
+                    2 -> FlipTab(settings, onUpdate)
+                    else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+                }
             }
         }
+    }
+}
+
+/**
+ * 设置面板里的一张分组卡：标题在卡外，用次要文字色（不跟选中态抢强调色）；内容在比纸面深一档的卡里。
+ * 卡内的行自己带左右内缩（[ReaderRow] / [ReaderBlock] / 分组 [SwitchRow] 都是 listHorizontal），
+ * 卡本身只给上下一点留白。
+ */
+@Composable
+private fun ReaderGroup(
+    title: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column {
+        if (title != null) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(start = Dimens.listHorizontal, bottom = Dimens.gapS)
+                    .semantics { heading() },
+            )
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(vertical = Dimens.gapXS),
+            content = content,
+        )
+    }
+}
+
+/**
+ * 卡里一行：标签在左、控件在右；放不下就退成标签在上、控件在下。
+ *
+ * 从前每一项都是「一行小标题 + 一排 chip」上下摞着：高度翻倍，眼睛还得在标题和选项之间来回跳。
+ * 放不放得下按 [slots] 估 —— 控件要几个触控目标宽，再按系统字号放大；大字号、窄屏时宁可摞起来，
+ * 也不把分段按钮挤到文字截断。标签列定宽，同一张卡里各行的控件左边对齐。
+ */
+@Composable
+private fun ReaderRow(
+    label: String,
+    slots: Int,
+    content: @Composable () -> Unit,
+) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
+    ) {
+        val fontScale = LocalDensity.current.fontScale
+        val labelWidth = Dimens.settingLabelWidth * fontScale
+        val labelText: @Composable (Modifier) -> Unit = { m ->
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = m)
+        }
+        if (maxWidth >= labelWidth + Dimens.touchTarget * slots * fontScale) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                labelText(Modifier.width(labelWidth))
+                Box(Modifier.weight(1f)) { content() }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
+                labelText(Modifier)
+                content()
+            }
+        }
+    }
+}
+
+/** 卡里没有标签的一整块（chip 条、九宫格、色板），左右与 [ReaderRow] 同一个内缩 */
+@Composable
+private fun ReaderBlock(content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
+    ) { content() }
+}
+
+/** 几档里选一档：标签 + 分段按钮。档位值是浮点，按 [tolerance] 认当前在哪一档 */
+@Composable
+private fun SegmentRow(
+    label: String,
+    options: List<Pair<String, Float>>,
+    value: Float,
+    tolerance: Float,
+    onSelect: (Float) -> Unit,
+) {
+    ReaderRow(label, slots = options.size) {
+        SegmentedChoice(
+            options = options.map { it.first },
+            selectedIndex = options.indexOfFirst { kotlin.math.abs(it.second - value) < tolerance },
+            onSelect = { onSelect(options[it].second) },
+        )
     }
 }
 
@@ -611,13 +776,58 @@ private fun LayoutTab(
     onCommit: () -> Unit,
     typography: TypographyActions,
 ) {
-    LayoutSchemeSection(settings, typography)
+    // 最常调的三样放第一张卡，打开面板不用滚就在眼前
+    ReaderGroup {
+        ReaderRow("字号", slots = 3) { FontSizeStepper(settings, onUpdate) }
+        SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
+            onUpdate(settings.copy(lineSpacingMult = it))
+        }
+        // 亮度要一整条滑轨才好拖：slots 给足，窄屏上标签自动摞到上面
+        ReaderRow("亮度", slots = 6) { BrightnessControl(settings, onUpdate, onPreview, onCommit) }
+    }
 
-    // 字号：加减按钮 + 当前值，一行搞定。
-    // 走 SecondaryButton 而不是裸 OutlinedButton：后者落到不带 shapes 的旧重载，按下去没有 Expressive 的
-    // 圆角形变，和面板里其他按钮不是一套手感；触控区仍由 M3 按钮自带的 48dp 下限兜着。
-    // 「A−」读屏只会念成「A 减」，补一个说清用途的名字
-    SectionLabel("字号")
+    ReaderGroup("字体") {
+        Box(Modifier.padding(vertical = Dimens.gapS)) {
+            FontSection(
+                settings = settings,
+                actions = typography,
+                onSelect = { onUpdate(settings.copy(fontId = it)) },
+                horizontalPadding = Dimens.listHorizontal,
+            )
+        }
+    }
+
+    ReaderGroup("纸张") {
+        Column(Modifier.padding(vertical = Dimens.gapS)) {
+            ThemeSwatches(settings, onUpdate, horizontalPadding = Dimens.listHorizontal)
+            // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
+            if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
+                Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
+                    CustomPaperEditor(
+                        theme = settings.theme,
+                        onChange = { onPreview(settings.copy(theme = it)) },
+                        onChangeFinished = onCommit,
+                    )
+                }
+            }
+        }
+    }
+
+    ReaderGroup("排版方案") {
+        Box(Modifier.padding(vertical = Dimens.gapS)) {
+            LayoutSchemeSection(settings, typography, horizontalPadding = Dimens.listHorizontal)
+        }
+    }
+}
+
+/**
+ * 字号：加减按钮 + 当前值，一行搞定。
+ * 走 SecondaryButton 而不是裸 OutlinedButton：后者落到不带 shapes 的旧重载，按下去没有 Expressive 的
+ * 圆角形变，和面板里其他按钮不是一套手感；触控区仍由 M3 按钮自带的 48dp 下限兜着。
+ * 「A−」读屏只会念成「A 减」，补一个说清用途的名字
+ */
+@Composable
+private fun FontSizeStepper(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         SecondaryButton(
             text = "A−",
@@ -637,30 +847,15 @@ private fun LayoutTab(
             modifier = Modifier.weight(1f).semantics { contentDescription = "字号增大" },
         )
     }
+}
 
-    SectionLabel("行距")
-    ChipRow(
-        options = LINE_SPACING_OPTIONS.map { it.first },
-        selectedIndex = LINE_SPACING_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.lineSpacingMult) < 0.05f
-        },
-        onSelect = { onUpdate(settings.copy(lineSpacingMult = LINE_SPACING_OPTIONS[it].second)) },
-    )
-
-    FontSection(settings, typography) { onUpdate(settings.copy(fontId = it)) }
-
-    SectionLabel("背景")
-    ThemeSwatches(settings, onUpdate)
-    // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
-    if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-        CustomPaperEditor(
-            theme = settings.theme,
-            onChange = { onPreview(settings.copy(theme = it)) },
-            onChangeFinished = onCommit,
-        )
-    }
-
-    SectionLabel("亮度")
+@Composable
+private fun BrightnessControl(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    onPreview: (ReaderSettings) -> Unit,
+    onCommit: () -> Unit,
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(
             Icons.Default.DarkMode, contentDescription = null,
@@ -681,7 +876,6 @@ private fun LayoutTab(
             Icons.Default.LightMode, contentDescription = null,
             Modifier.size(Dimens.iconSm), tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(12)
         AppFilterChip(
             selected = settings.brightnessOverride == null,
             onClick = {
@@ -692,6 +886,7 @@ private fun LayoutTab(
                 )
             },
             label = "系统",
+            modifier = Modifier.padding(start = Dimens.gapM),
         )
     }
 }
@@ -702,113 +897,78 @@ private fun LayoutTab(
  */
 @Composable
 private fun StyleTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    SectionLabel("段距")
-    ChipRow(
-        options = PARA_SPACING_OPTIONS.map { it.first },
-        selectedIndex = PARA_SPACING_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.paragraphSpacingEm) < 0.05f
-        },
-        onSelect = { onUpdate(settings.copy(paragraphSpacingEm = PARA_SPACING_OPTIONS[it].second)) },
-    )
+    ReaderGroup("间距") {
+        SegmentRow("段距", PARA_SPACING_OPTIONS, settings.paragraphSpacingEm, 0.05f) {
+            onUpdate(settings.copy(paragraphSpacingEm = it))
+        }
+        SegmentRow("字距", LETTER_SPACING_OPTIONS, settings.letterSpacingEm, 0.005f) {
+            onUpdate(settings.copy(letterSpacingEm = it))
+        }
+    }
 
-    SectionLabel("字距")
-    ChipRow(
-        options = LETTER_SPACING_OPTIONS.map { it.first },
-        selectedIndex = LETTER_SPACING_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.letterSpacingEm) < 0.005f
-        },
-        onSelect = { onUpdate(settings.copy(letterSpacingEm = LETTER_SPACING_OPTIONS[it].second)) },
-    )
-
-    SectionLabel("首行缩进")
-    ChipRow(
-        options = INDENT_OPTIONS.map { it.first },
-        selectedIndex = INDENT_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.firstLineIndentEm) < 0.05f
-        },
-        onSelect = { onUpdate(settings.copy(firstLineIndentEm = INDENT_OPTIONS[it].second)) },
-    )
-
-    // 外层已有 screenPadding，关 SettingGroup 水平 inset，卡宽与 Chip 对齐（同 FlipTab）
-    Spacer(Modifier.height(Dimens.gapM))
-    SettingGroup(applyHorizontalInset = false) {
+    ReaderGroup("段落") {
+        SegmentRow("首行缩进", INDENT_OPTIONS, settings.firstLineIndentEm, 0.05f) {
+            onUpdate(settings.copy(firstLineIndentEm = it))
+        }
         SwitchRow(
             title = "两端对齐",
             subtitle = "每行左右都贴齐边距。关掉后行尾参差，但字距不会被拉开",
             checked = settings.justify,
             onCheckedChange = { onUpdate(settings.copy(justify = it)) },
-            position = SettingGroupPosition.Alone,
+            position = SettingGroupPosition.Last,
         )
     }
 
-    SectionLabel("标题字号")
-    ChipRow(
-        options = TITLE_SCALE_OPTIONS.map { it.first },
-        selectedIndex = TITLE_SCALE_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.titleScale) < 0.05f
-        },
-        onSelect = { onUpdate(settings.copy(titleScale = TITLE_SCALE_OPTIONS[it].second)) },
-    )
+    ReaderGroup("标题") {
+        SegmentRow("字号", TITLE_SCALE_OPTIONS, settings.titleScale, 0.05f) {
+            onUpdate(settings.copy(titleScale = it))
+        }
+        SegmentRow("上间距", TITLE_TOP_OPTIONS, settings.titleTopSpacingDp, 1f) {
+            onUpdate(settings.copy(titleTopSpacingDp = it))
+        }
+    }
 
-    SectionLabel("标题上间距")
-    ChipRow(
-        options = TITLE_TOP_OPTIONS.map { it.first },
-        selectedIndex = TITLE_TOP_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.titleTopSpacingDp) < 1f
-        },
-        onSelect = { onUpdate(settings.copy(titleTopSpacingDp = TITLE_TOP_OPTIONS[it].second)) },
-    )
-
-    SectionLabel("头部留白")
-    ChipRow(
-        options = HEADER_TOP_OPTIONS.map { it.first },
-        selectedIndex = HEADER_TOP_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.headerTopSpacingDp) < 2f
-        },
-        onSelect = { onUpdate(settings.copy(headerTopSpacingDp = HEADER_TOP_OPTIONS[it].second)) },
-    )
-
-    SectionLabel("下边距")
-    ChipRow(
-        options = MARGIN_V_OPTIONS.map { it.first },
-        selectedIndex = MARGIN_V_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.marginVerticalDp) < 2f
-        },
-        onSelect = { onUpdate(settings.copy(marginVerticalDp = MARGIN_V_OPTIONS[it].second)) },
-    )
-
-    SectionLabel("左右边距")
-    ChipRow(
-        options = MARGIN_H_OPTIONS.map { it.first },
-        selectedIndex = MARGIN_H_OPTIONS.indexOfFirst {
-            kotlin.math.abs(it.second - settings.marginHorizontalDp) < 2f
-        },
-        onSelect = { onUpdate(settings.copy(marginHorizontalDp = MARGIN_H_OPTIONS[it].second)) },
-    )
+    ReaderGroup("页面") {
+        SegmentRow("头部留白", HEADER_TOP_OPTIONS, settings.headerTopSpacingDp, 2f) {
+            onUpdate(settings.copy(headerTopSpacingDp = it))
+        }
+        SegmentRow("下边距", MARGIN_V_OPTIONS, settings.marginVerticalDp, 2f) {
+            onUpdate(settings.copy(marginVerticalDp = it))
+        }
+        SegmentRow("左右边距", MARGIN_H_OPTIONS, settings.marginHorizontalDp, 2f) {
+            onUpdate(settings.copy(marginHorizontalDp = it))
+        }
+    }
 }
 
 @Composable
 private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    SectionLabel("翻页方式")
-    ChipRow(
-        options = FlipAnimation.entries.map { it.label },
-        selectedIndex = FlipAnimation.entries.indexOf(settings.flipAnimation),
-        onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
-    )
+    ReaderGroup("翻页方式") {
+        ReaderBlock {
+            SegmentedChoice(
+                options = FlipAnimation.entries.map { it.label },
+                selectedIndex = FlipAnimation.entries.indexOf(settings.flipAnimation),
+                onSelect = { onUpdate(settings.copy(flipAnimation = FlipAnimation.entries[it])) },
+            )
+        }
+    }
 
     // 滚动模式没有"页"，自动翻页 / 音量键 / 震动无从谈起 —— 与其留在那儿让人调了没反应，不如藏起来。
     // 点击左右跳整页则反过来：仿真里是主操作，滚动里默认关，单独给开关。
     if (settings.flipAnimation != FlipAnimation.SCROLL) {
-        SectionLabel("自动翻页间隔")
-        ChipRow(
-            options = AUTO_FLIP_OPTIONS.map { "${it}s" },
-            selectedIndex = AUTO_FLIP_OPTIONS.indexOf(settings.autoFlipSeconds),
-            onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
-        )
+        // 七档间隔放不进一排分段按钮，仍用能横滚的 chip 条
+        ReaderGroup("自动翻页间隔") {
+            Box(Modifier.padding(vertical = Dimens.gapS)) {
+                ChipRow(
+                    options = AUTO_FLIP_OPTIONS.map { "${it}s" },
+                    selectedIndex = AUTO_FLIP_OPTIONS.indexOf(settings.autoFlipSeconds),
+                    onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
+                    contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
+                )
+            }
+        }
 
-        // 外层 AppTabContent 已有 screenPadding；SettingGroup 再套 listHorizontal
-        // 会比上面 Chip 左右各再缩一截。关 inset，卡宽与 Chip 行对齐。
-        SettingGroup(applyHorizontalInset = false) {
+        ReaderGroup {
             SwitchRow(
                 title = "音量键翻页",
                 checked = settings.volumeKeyFlip,
@@ -824,9 +984,11 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
             )
         }
 
-        TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) }
+        ReaderGroup("点击区域") {
+            ReaderBlock { TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) } }
+        }
     } else {
-        SettingGroup(applyHorizontalInset = false) {
+        ReaderGroup {
             SwitchRow(
                 title = "点击翻页",
                 subtitle = "打开后按下面的点击区域翻页；默认关，点击只唤出菜单",
@@ -837,7 +999,9 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
         }
         // 关着时分区不生效，摆出来只会让人以为改了没反应
         if (settings.scrollClickToFlip) {
-            TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) }
+            ReaderGroup("点击区域") {
+                ReaderBlock { TapZoneEditor(settings.tapZones) { onUpdate(settings.copy(tapZones = it)) } }
+            }
         }
     }
 }
@@ -853,32 +1017,33 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
 private fun TapZoneEditor(zones: TapZones, onChange: (TapZones) -> Unit) {
     val presets = TapZones.Preset.entries
     val presetIndex = presets.indexOfFirst { it.zones == zones }
-    SectionLabel("点击区域")
-    // 改过任何一格、跟哪个预设都对不上时，补一个选中的「自定义」，让人知道当前不是预设而不是什么都没选
-    ChipRow(
-        options = presets.map { it.label } + if (presetIndex < 0) listOf("自定义") else emptyList(),
-        selectedIndex = if (presetIndex < 0) presets.size else presetIndex,
-        onSelect = { i -> presets.getOrNull(i)?.let { onChange(it.zones) } },
-    )
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = Dimens.gapS),
-        verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
-    ) {
-        for (row in 0..2) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                for (col in 0..2) {
-                    val index = row * 3 + col
-                    TapZoneCell(
-                        action = zones.at(col, row),
-                        position = TAP_ZONE_POSITIONS[index],
-                        // 正中锁死为菜单
-                        onClick = if (index == TapZones.CENTER) null else {
-                            { onChange(zones.with(index, zones.at(col, row).next())) }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+    Column {
+        // 改过任何一格、跟哪个预设都对不上时，补一个选中的「自定义」，让人知道当前不是预设而不是什么都没选
+        ChipRow(
+            options = presets.map { it.label } + if (presetIndex < 0) listOf("自定义") else emptyList(),
+            selectedIndex = if (presetIndex < 0) presets.size else presetIndex,
+            onSelect = { i -> presets.getOrNull(i)?.let { onChange(it.zones) } },
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = Dimens.gapS),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+        ) {
+            for (row in 0..2) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
+                    for (col in 0..2) {
+                        val index = row * 3 + col
+                        TapZoneCell(
+                            action = zones.at(col, row),
+                            position = TAP_ZONE_POSITIONS[index],
+                            // 正中锁死为菜单
+                            onClick = if (index == TapZones.CENTER) null else {
+                                { onChange(zones.with(index, zones.at(col, row).next())) }
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }
@@ -949,15 +1114,17 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
-    SectionLabel("预加载章节")
-    ChipRow(
-        options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
-        selectedIndex = PRELOAD_OPTIONS.indexOf(settings.preloadChapters),
-        onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
-    )
+    ReaderGroup("预加载章节") {
+        ReaderBlock {
+            SegmentedChoice(
+                options = PRELOAD_OPTIONS.map { if (it == 0) "关闭" else "$it 章" },
+                selectedIndex = PRELOAD_OPTIONS.indexOf(settings.preloadChapters),
+                onSelect = { onUpdate(settings.copy(preloadChapters = PRELOAD_OPTIONS[it])) },
+            )
+        }
+    }
 
-    // 外层已有 screenPadding，关 SettingGroup 水平 inset，卡宽与 Chip 对齐（同 FlipTab）。
-        SettingGroup(applyHorizontalInset = false) {
+    ReaderGroup {
         // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
         SwitchRow(
             title = "阅读时保持屏幕常亮",
@@ -988,7 +1155,6 @@ private fun MoreTab(
             position = SettingGroupPosition.Last,
         )
     }
-
 }
 
 /**
@@ -1077,11 +1243,17 @@ private fun CustomPaperEditor(
  * TalkBack 会念出英文的 "paper"。
  */
 @Composable
-private fun ThemeSwatches(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun ThemeSwatches(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    /** 左右内缩放在滚动内容里：色板随内容滚到分组卡的边缘，而不是在内缩线上被截断 */
+    horizontalPadding: Dp = 0.dp,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = horizontalPadding),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         ReaderTheme.ALL.forEach { theme ->
@@ -1155,15 +1327,21 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
 
 private val SETTINGS_TABS = listOf("排版", "版式", "翻页", "更多")
 
+/** 设置面板内容区占窗口高度的比例。加上 Tab 与拖拽把手约半屏，上半屏留给正文当实时预览 */
+private const val PANEL_HEIGHT_FRACTION = 0.42f
+
+/**
+ * 分组卡里的小标题（自定义纸张的「纸色」「字色深浅」）。用次要文字色，与卡外的分组标题同一级 ——
+ * 共享的 SectionHeader 是强调色，放进卡里会跟选中态抢眼。
+ */
 @Composable
 private fun SectionLabel(text: String) {
-    // 收敛到共享 SectionHeader（面板内容 Column 已整体内缩，故不自带左右留白）
-    SectionHeader(text, horizontalInset = false)
-}
-
-@Composable
-private fun Spacer(width: Int) {
-    androidx.compose.foundation.layout.Spacer(Modifier.width(width.dp))
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = Dimens.gapM, bottom = Dimens.gapS),
+    )
 }
 
 /** 自动翻页可选间隔（秒）。太快来不及读，太慢不如自己翻 */

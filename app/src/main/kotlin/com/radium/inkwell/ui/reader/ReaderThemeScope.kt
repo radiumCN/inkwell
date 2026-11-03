@@ -25,6 +25,12 @@ import com.radium.inkwell.reader.api.ReaderTheme
  * [ContentListItem] 的卡片底色读的就是 Low；BottomSheet 默认容器也是 Low。
  * 两者同色时换源列表就「有 ListItem 却看不见卡片」—— 截图里开关行若隐若现、
  * 候选行整片糊进纸底，就是这么来的。Sheet 再显式用 [surface]，卡片用 Low，层次才分得开。
+ *
+ * 菜单与设置面板的层次靠这几档色阶，而不是阴影和蒙层（同色纸上的投影是脏灰线，压暗正文会裂出分界）：
+ * - 纸面：[surface]，正文与设置面板的底；
+ * - 浮层：`surfaceContainerHigh`，菜单顶栏、底部悬浮条、设置面板里的分组卡；
+ * - 控件：`surfaceContainerHighest` 是分段按钮未选中的那几段，选中的那段实心填 [primary]。
+ * Highest 从前与 High 同值，分组卡里的未选中段就和卡片糊成一片，单独再抬一档。
  */
 @Composable
 fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
@@ -34,16 +40,20 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         val fg = Color(theme.textColor)
         val lightPaper = bg.luminance() > 0.5f
 
-        // 强调色：浅色纸上沿用 App 的主色（深蓝，压得住）；深色纸上它会糊掉，
-        // 改用正文色本身 —— 夜间主题的正文色本就是为深色背景挑的
-        val accent = if (theme.isDark) fg else base.primary
-        val onAccent = if (theme.isDark) bg else base.onPrimary
+        // 强调色：沿用 App 的主色，但在这张纸上必须看得清 —— 它也当文字色用（文字按钮、链接），按正文的 4.5:1 要求。
+        // 不够就往远离纸色的方向一点点推（浅纸压深、深纸提亮），色相不变。
+        // 从前深色纸上干脆拿正文色顶替：看是看得清了，可选中态、开关、滑块、小标题全成了正文那一种灰白，
+        // 浮层里没有任何东西是「强调」的 —— 阅读设置面板「层次感差」，一半就差在这。
+        val accent = readableOn(base.primary, bg)
+        // 实心强调色上的字直接用纸色：上面已保证两者对比 ≥ 4.5:1
+        val onAccent = bg
 
         // 浅纸压深、深纸提亮；档位对齐 AppThemes.schemeFrom（深色抬得更狠，否则 OLED 纯黑上看不见卡片）
         fun step(amount: Float) = if (lightPaper) bg.darken(amount) else bg.lighten(amount)
         val containerLow = step(if (lightPaper) 0.04f else 0.10f)
         val containerMid = step(if (lightPaper) 0.07f else 0.14f)
         val containerHigh = step(if (lightPaper) 0.10f else 0.18f)
+        val containerHighest = step(if (lightPaper) 0.16f else 0.26f)
         // 报错色按**纸**的深浅取 M3 基线的浅/深两套，不跟 App 走：App 浅色、纸是夜色时，
         // App 的 error 是深红，压在深色纸上几乎看不见（自定义纸张的对比度警告就是这么糊掉的）
         val errorBase = if (lightPaper) lightColorScheme() else darkColorScheme()
@@ -65,13 +75,13 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
             surfaceContainerLow = containerLow,
             surfaceContainer = containerMid,
             surfaceContainerHigh = containerHigh,
-            surfaceContainerHighest = containerHigh,
+            surfaceContainerHighest = containerHighest,
             // 选中的 Chip 用正文色的淡底，而不是 M3 的紫
             secondaryContainer = fg.copy(alpha = 0.14f),
             onSecondaryContainer = fg,
             // primary / tertiary 两组容器色从前没覆盖，读到的是 App 主题的颜色 —— 纸上冒出一块淡紫/淡蓝。
             // 三组容器要分得开：primary 是强调色的淡底（比 secondary 浓一档），tertiary 退成纸面的实色台阶。
-            // 0.24 是上限：夜色纸上 accent 就是正文色，再浓，容器上的正文色就掉到 4.5:1 以下
+            // 0.24 是上限：强调色在深色纸上是提亮过的，叠得再浓，容器上的正文色就掉到 4.5:1 以下
             primaryContainer = accent.copy(alpha = 0.24f),
             onPrimaryContainer = fg,
             tertiaryContainer = containerHigh,
@@ -98,6 +108,33 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         content = content,
     )
 }
+
+/**
+ * [color] 放在 [paper] 上不够 4.5:1 时，往远离纸色的一端（浅纸往黑、深纸往白）一点点推，直到够为止。
+ * 推的是 sRGB 线性混合，色相基本不变：App 主色是暖褐，推完还是褐，只是深一点 / 亮一点。
+ */
+internal fun readableOn(color: Color, paper: Color): Color {
+    val target = if (paper.luminance() > 0.5f) Color.Black else Color.White
+    var t = 0f
+    var c = color
+    while (contrast(c, paper) < MIN_TEXT_CONTRAST && t < 1f) {
+        t += 0.05f
+        c = Color(
+            red = color.red + (target.red - color.red) * t,
+            green = color.green + (target.green - color.green) * t,
+            blue = color.blue + (target.blue - color.blue) * t,
+        )
+    }
+    return c
+}
+
+private fun contrast(a: Color, b: Color): Float {
+    val hi = maxOf(a.luminance(), b.luminance()) + 0.05f
+    val lo = minOf(a.luminance(), b.luminance()) + 0.05f
+    return hi / lo
+}
+
+private const val MIN_TEXT_CONTRAST = 4.5f
 
 private fun Color.darken(amount: Float): Color =
     Color(

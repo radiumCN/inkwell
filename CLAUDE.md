@@ -90,6 +90,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 带 label 的整页表单输入 | WebDAV / 净化规则等仍用 M3 `OutlinedTextField`（封装层暂无带 label 变体）。意见反馈这类无 label 的整页输入走 `CompactTextArea` / `CompactTextField`，别再塞描边框 |
 | 滑块 | `AppSlider`（`AppSlider.kt`）：挂官方 `Slider`，自绘细轨 + 圆点（槽高对齐 M3 `TrackHeight`）。`activeColor` 只给阅读器浮层（纸色背景）用 |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row`+`FilterChip`）；单个独立 chip 用 `AppFilterChip`（同样为了按压形变的那个重载） |
+| 几档里选一档（固定 2~5 档） | `SegmentedChoice`（`SegmentedChoice.kt`，Expressive 连体按钮组）：选中段实心填强调色，比 chip 的淡底分得清。选项多或会变的（字体、方案、七档间隔）仍用 `ChipRow` |
 | 列表行密度 | 默认 `CompactPadding`；带封面/大图标的行（`BookListRow`、书架列表、`AppIconSheet`）用 `ComfortablePadding` |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`） |

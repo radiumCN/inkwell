@@ -3,7 +3,10 @@ package com.radium.inkwell.ui.components
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -21,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * 带加载态的按钮。
@@ -41,13 +45,20 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     loading: Boolean = false,
+    /** 文字前的小图标（阅读菜单的「设置」）。尺寸与间距照 M3 带图标按钮的规格 */
+    icon: ImageVector? = null,
 ) {
     Button(
         onClick = onClick,
         shapes = ButtonDefaults.shapes(),
         enabled = enabled && !loading,
         modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
+        contentPadding = if (icon != null) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding,
     ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconSm))
+            Spacer(Modifier.width(Dimens.gapS))
+        }
         ButtonContent(text, loading)
     }
 }

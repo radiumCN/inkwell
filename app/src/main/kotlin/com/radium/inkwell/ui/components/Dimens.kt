@@ -91,6 +91,11 @@ object Dimens {
     val strokeThick = 2.dp
     /** 4dp。书封上的阅读进度条（[ReadingProgressMeter]）。与滑块细轨同粗，书架上看是同一种「线」 */
     val progressMeter = 4.dp
+    /**
+     * 「标签在左、控件在右」那种设置行的标签列宽（阅读设置面板）。五个汉字的 bodyMedium 放得下；
+     * 定宽是为了同一张卡里各行的分段按钮左边对齐，而不是跟着标签长短参差
+     */
+    val settingLabelWidth = 80.dp
 
     // ---- 控件 ----
     /** 触控目标下限（Material：48dp）。图标本身可以小，可点区域不能小于它 */

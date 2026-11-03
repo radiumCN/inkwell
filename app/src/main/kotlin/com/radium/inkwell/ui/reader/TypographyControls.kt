@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.reader
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -14,6 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.UserFont
@@ -23,7 +26,6 @@ import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.ui.components.SectionHeader
 
 /**
  * 阅读设置面板里「字体」「排版方案」两块要的数据与动作。打成一包往下传，
@@ -65,17 +67,22 @@ fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
  * 想改某套方案，就先调到满意（此时已不再匹配），再用同名存一次覆盖它。
  */
 @Composable
-internal fun LayoutSchemeSection(settings: ReaderSettings, actions: TypographyActions) {
+internal fun LayoutSchemeSection(
+    settings: ReaderSettings,
+    actions: TypographyActions,
+    /** 左右内缩。放进分组卡时由卡给：chip 条随内容滚到卡的边缘，而不是在内缩线上被截断 */
+    horizontalPadding: Dp = 0.dp,
+) {
     var naming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<LayoutScheme?>(null) }
     val schemes = actions.schemes
     val current = schemes.indexOfFirst { it.matches(settings) }
 
-    SectionHeader("排版方案", horizontalInset = false)
     ChipRow(
         options = schemes.map { it.name },
         selectedIndex = current,
         onSelect = { actions.onApplyScheme(schemes[it]) },
+        contentPadding = PaddingValues(horizontal = horizontalPadding),
         trailing = {
             if (current >= 0) {
                 AppFilterChip(selected = false, onClick = { deleting = schemes[current] }, label = "删除方案")
@@ -89,7 +96,7 @@ internal fun LayoutSchemeSection(settings: ReaderSettings, actions: TypographyAc
             "把现在的字号、字体、行距和边距存起来，换个场景一键切回。纸色不在方案里，仍按日夜各记一套",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = Dimens.gapXS),
+            modifier = Modifier.padding(start = horizontalPadding, end = horizontalPadding, top = Dimens.gapXS),
         )
     }
 
@@ -142,6 +149,8 @@ internal fun FontSection(
     settings: ReaderSettings,
     actions: TypographyActions,
     onSelect: (String) -> Unit,
+    /** 同 [LayoutSchemeSection] 的同名参数 */
+    horizontalPadding: Dp = 0.dp,
 ) {
     var deleting by remember { mutableStateOf<UserFont?>(null) }
     // MIME 不设限：.ttf/.otf 在各家文件管理器里报的类型五花八门（font/ttf、application/x-font-ttf、
@@ -154,11 +163,11 @@ internal fun FontSection(
     val selected = ids.indexOf(settings.fontId).takeIf { it >= 0 } ?: 0
     val currentUserFont = actions.fonts.firstOrNull { it.id == settings.fontId }
 
-    SectionHeader("字体", horizontalInset = false)
     ChipRow(
         options = labels,
         selectedIndex = selected,
         onSelect = { onSelect(ids[it]) },
+        contentPadding = PaddingValues(horizontal = horizontalPadding),
         trailing = {
             if (currentUserFont != null) {
                 AppFilterChip(selected = false, onClick = { deleting = currentUserFont }, label = "删除字体")
