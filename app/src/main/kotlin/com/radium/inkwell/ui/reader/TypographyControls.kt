@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.reader
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -78,26 +79,30 @@ internal fun LayoutSchemeSection(
     val schemes = actions.schemes
     val current = schemes.indexOfFirst { it.matches(settings) }
 
-    ChipRow(
-        options = schemes.map { it.name },
-        selectedIndex = current,
-        onSelect = { actions.onApplyScheme(schemes[it]) },
-        contentPadding = PaddingValues(horizontal = horizontalPadding),
-        trailing = {
-            if (current >= 0) {
-                AppFilterChip(selected = false, onClick = { deleting = schemes[current] }, label = "删除方案")
-            } else {
-                AppFilterChip(selected = false, onClick = { naming = true }, label = "存为方案")
-            }
-        },
-    )
-    if (schemes.isEmpty()) {
-        Text(
-            "把现在的字号、字体、行距和边距存起来，换个场景一键切回。纸色不在方案里，仍按日夜各记一套",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = horizontalPadding, end = horizontalPadding, top = Dimens.gapXS),
+    // chip 条与说明自己摞成一列，不靠调用方：放进 Box 里（分组卡就是这么放的）时，两样会叠在同一处，
+    // 说明文字直接压在「存为方案」上
+    Column {
+        ChipRow(
+            options = schemes.map { it.name },
+            selectedIndex = current,
+            onSelect = { actions.onApplyScheme(schemes[it]) },
+            contentPadding = PaddingValues(horizontal = horizontalPadding),
+            trailing = {
+                if (current >= 0) {
+                    AppFilterChip(selected = false, onClick = { deleting = schemes[current] }, label = "删除方案")
+                } else {
+                    AppFilterChip(selected = false, onClick = { naming = true }, label = "存为方案")
+                }
+            },
         )
+        if (schemes.isEmpty()) {
+            Text(
+                "把现在的字号、字体、行距和边距存起来，换个场景一键切回。纸色不在方案里，仍按日夜各记一套",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = horizontalPadding, end = horizontalPadding, top = Dimens.gapS),
+            )
+        }
     }
 
     if (naming) {
