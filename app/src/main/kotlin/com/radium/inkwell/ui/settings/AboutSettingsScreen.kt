@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SectionHeader
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -87,6 +88,7 @@ fun AboutSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(top = Dimens.gapS),
         ) {
+            SectionHeader("支持")
             SettingGroup {
                 SettingRow(
                     title = "意见反馈",
@@ -106,6 +108,7 @@ fun AboutSettingsScreen(
                     )
                 }
             }
+            SectionHeader("应用信息")
             SettingGroup {
                 SettingRow(
                     title = "版本",

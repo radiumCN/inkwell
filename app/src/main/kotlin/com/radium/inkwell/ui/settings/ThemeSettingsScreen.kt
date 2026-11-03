@@ -1,5 +1,8 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingBlock
+import com.radium.inkwell.ui.components.SegmentedChoice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -38,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.AppSlider
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
@@ -88,64 +90,73 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Dimens.screenPadding)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(top = Dimens.gapS),
         ) {
-            SectionLabel("模式")
-            ChipRow(
-                options = ThemeMode.entries.map { it.label },
-                selectedIndex = ThemeMode.entries.indexOf(config.mode),
-                onSelect = { update(config.copy(mode = ThemeMode.entries[it])) },
-            )
+            // 与别的设置页同一副骨架：分组标题 + 卡片。从前整页内缩 20dp、chip 和色板直接铺在灰底上
+            SectionHeader("模式")
+            SettingGroup {
+                SettingBlock {
+                    SegmentedChoice(
+                        options = ThemeMode.entries.map { it.label },
+                        selectedIndex = ThemeMode.entries.indexOf(config.mode),
+                        onSelect = { update(config.copy(mode = ThemeMode.entries[it])) },
+                    )
+                }
+            }
 
-            SectionLabel("日间主题")
-            PresetRow(
+            SectionHeader("日间主题")
+            ThemeCard {
+                PresetRow(
                 presets = AppThemes.lightPresets,
                 wallpaper = wallpaperLight.background to wallpaperLight.primary,
                 selectedId = config.lightPreset,
                 customAccent = Color(config.customLightSeed),
                 customBg = Color(config.customLightBg),
                 onSelect = { update(config.copy(lightPreset = it)) },
-            )
-            if (config.lightPreset == AppThemes.CUSTOM) {
-                CustomThemeEditor(
-                    dark = false,
-                    seed = Color(config.customLightSeed),
-                    background = Color(config.customLightBg),
-                    onChange = { seed, bg ->
-                        update(
-                            config.copy(
-                                customLightSeed = seed.toArgbLong(),
-                                customLightBg = bg.toArgbLong(),
-                            )
-                        )
-                    },
                 )
+                if (config.lightPreset == AppThemes.CUSTOM) {
+                    CustomThemeEditor(
+                        dark = false,
+                        seed = Color(config.customLightSeed),
+                        background = Color(config.customLightBg),
+                        onChange = { seed, bg ->
+                            update(
+                                config.copy(
+                                    customLightSeed = seed.toArgbLong(),
+                                    customLightBg = bg.toArgbLong(),
+                                )
+                            )
+                        },
+                    )
+                }
             }
 
-            SectionLabel("夜间主题")
-            PresetRow(
+            SectionHeader("夜间主题")
+            ThemeCard {
+                PresetRow(
                 presets = AppThemes.darkPresets,
                 wallpaper = wallpaperDark.background to wallpaperDark.primary,
                 selectedId = config.darkPreset,
                 customAccent = Color(config.customDarkSeed),
                 customBg = Color(config.customDarkBg),
                 onSelect = { update(config.copy(darkPreset = it)) },
-            )
-            if (config.darkPreset == AppThemes.CUSTOM) {
-                CustomThemeEditor(
-                    dark = true,
-                    seed = Color(config.customDarkSeed),
-                    background = Color(config.customDarkBg),
-                    onChange = { seed, bg ->
-                        update(
-                            config.copy(
-                                customDarkSeed = seed.toArgbLong(),
-                                customDarkBg = bg.toArgbLong(),
-                            )
-                        )
-                    },
                 )
+                if (config.darkPreset == AppThemes.CUSTOM) {
+                    CustomThemeEditor(
+                        dark = true,
+                        seed = Color(config.customDarkSeed),
+                        background = Color(config.customDarkBg),
+                        onChange = { seed, bg ->
+                            update(
+                                config.copy(
+                                    customDarkSeed = seed.toArgbLong(),
+                                    customDarkBg = bg.toArgbLong(),
+                                )
+                            )
+                        },
+                    )
+                }
             }
 
             Box(Modifier.height(Dimens.gapXXL))
@@ -153,10 +164,15 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
     }
 }
 
+/**
+ * 日间 / 夜间主题那张卡：上面一排色板（横滚到卡的边缘，见 [PresetRow]），选中自定义时下面展开编辑器。
+ * 编辑器和色板一样在卡内、左右与行内文字对齐。
+ */
 @Composable
-private fun SectionLabel(text: String) {
-    // 收敛到共享 SectionHeader（本页内容 Column 已整体内缩，故不再让它自带左右留白）
-    SectionHeader(text, horizontalInset = false)
+private fun ThemeCard(content: @Composable () -> Unit) {
+    SettingGroup {
+        Column(Modifier.padding(vertical = Dimens.gapM)) { content() }
+    }
 }
 
 /**
@@ -175,7 +191,10 @@ private fun PresetRow(
 ) {
     // 横向可滚：壁纸 + 5 个预设 + 自定义 = 7 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
     Row(
-        Modifier.horizontalScroll(rememberScrollState()),
+        Modifier
+            .horizontalScroll(rememberScrollState())
+            // 内缩放在滚动内容里：色板随内容滚到卡片边缘，而不是在内缩线上被截断
+            .padding(horizontal = Dimens.listHorizontal),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         ThemeSwatch(
@@ -293,7 +312,9 @@ private fun CustomThemeEditor(
     val previewScheme = remember(seed, bg, dark) { AppThemes.schemeFrom(seed, bg, dark) }
 
     Surface(
-        Modifier.fillMaxWidth().padding(top = Dimens.gapM),
+        Modifier
+            .fillMaxWidth()
+            .padding(start = Dimens.listHorizontal, end = Dimens.listHorizontal, top = Dimens.gapM),
         shape = MaterialTheme.shapes.medium,
         // 编辑器外壳走当前主题的容器槽，别用半透明 surfaceVariant —— 深色/自定义下会发灰发脏
         color = MaterialTheme.colorScheme.surfaceContainerLow,

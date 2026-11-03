@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SectionHeader
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -78,6 +79,7 @@ fun DeveloperSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(top = Dimens.gapS),
         ) {
+            SectionHeader("日志")
             SettingGroup {
                 SwitchRow(
                     title = "日志记录",
@@ -111,6 +113,7 @@ fun DeveloperSettingsScreen(
                     position = SettingGroupPosition.Last,
                 )
             }
+            SectionHeader("开发者模式")
             SettingGroup {
                 SettingRow(
                     title = "关闭开发者模式",

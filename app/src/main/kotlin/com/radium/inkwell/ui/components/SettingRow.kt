@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -139,24 +140,15 @@ fun settingsStackListColors() =
 @Composable
 fun SettingGroup(
     modifier: Modifier = Modifier,
-    /**
-     * 是否自带左右 [Dimens.listHorizontal]。
-     * 父级已经有水平边距时（阅读设置面板外层已有 screenPadding）关掉，
-     * 否则开关卡会比上面的 Chip 行左右各再缩一截。
-     */
-    applyHorizontalInset: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // 从前有个 applyHorizontalInset 开关，给「整页已经内缩 20dp」的页面关掉卡片自带的 16dp。
+    // 设置类页面统一成一副骨架之后（见 SettingBlock），没有页面再整页内缩，开关也就撤了 ——
+    // 留着只会让下一个页面又长出第二套边距
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (applyHorizontalInset) {
-                    Modifier.padding(horizontal = Dimens.listHorizontal)
-                } else {
-                    Modifier
-                },
-            )
+            .padding(horizontal = Dimens.listHorizontal)
             .padding(vertical = Dimens.gapS),
         shape = MaterialTheme.shapes.large,
         color = settingsCardColor(),
@@ -250,6 +242,46 @@ fun SettingRow(
             },
         )
     }
+}
+
+/**
+ * 分组卡里一整块不是「行」的内容：表单（输入框 + 按钮）、分段按钮、说明文字。
+ * 左右内缩与行内文字对齐（[Dimens.listHorizontal]），块内各项按 [Dimens.gapM] 拉开。
+ *
+ * 设置类页面只有一种骨架：灰底 + [SectionHeader] + [SettingGroup]，**所有控件都装在卡里**。
+ * 从前 WebDAV、主题外观两页是另一套 —— 整页内缩 20dp、输入框和色板直接铺在灰底上、只有个别开关塞进卡里，
+ * 卡片还比别的页每边窄 4dp，从别的页切进来左右边缘跳一下。卡里放的不是行时就用这个块。
+ */
+@Composable
+fun SettingBlock(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapM),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+        content = content,
+    )
+}
+
+/**
+ * 分组卡下面的说明小字（「会同步什么」「时长怎么算」）。左边与 [SectionHeader] 对齐 ——
+ * 标题、卡、脚注是一组东西，起点不该三处各不相同。
+ */
+@Composable
+fun SettingFootnote(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
+        modifier = modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+    )
 }
 
 /**

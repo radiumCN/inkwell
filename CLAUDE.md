@@ -95,6 +95,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。内部是 `PrimaryTabRow`（短粗圆角指示条，Secondary 那根细线看不出切换）；切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SectionHeader`（`SettingRow.kt`；内部走 `ContentListItem`）。设置主页那一列入口行带 `icon`（圆底图标），二级页保持纯文字 |
 | 设置分组卡 | `SettingGroup` + `SettingRow(..., position = First/Middle/Last/Alone)` / `SwitchRow(..., position = …)`；底栏/选择面板等「一条一卡」保持 `position = null` |
+| 设置类页面骨架 | **只有一种**：灰底 + `SectionHeader` + `SettingGroup`（左右 16dp），控件全部装进卡里。卡里不是「行」的内容（表单、分段按钮、说明）包 `SettingBlock`；卡下的说明小字用 `SettingFootnote`。别再整页内缩 20dp、把输入框和色板直接铺在灰底上（WebDAV、主题外观从前就是这样，卡片比别页窄一截） |
 | 内容列表行（可点/单选/多选） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow` |
 | 从 N 项选一个（底部面板） | `OptionPickerSheet`（`OptionPicker.kt`） |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |

@@ -1,5 +1,9 @@
 package com.radium.inkwell.ui.webdav
 
+import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SettingBlock
+import com.radium.inkwell.ui.components.SettingFootnote
+import com.radium.inkwell.ui.components.SegmentedChoice
 import android.content.ClipData
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,7 +50,6 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
@@ -94,17 +97,22 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
                 // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
                 .consumeWindowInsets(padding)
                 .imePadding()
-                .padding(Dimens.screenPadding)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                .verticalScroll(rememberScrollState())
+                .padding(top = Dimens.gapS, bottom = Dimens.gapXL),
         ) {
-            ChipRow(
-                options = listOf("官方同步", "自备 WebDAV"),
-                selectedIndex = if (state.provider == WebDavProvider.OFFICIAL) 0 else 1,
-                onSelect = {
-                    viewModel.setProvider(if (it == 0) WebDavProvider.OFFICIAL else WebDavProvider.CUSTOM)
-                },
-            )
+            // 与别的设置页同一副骨架：分组标题 + 卡片，控件都装在卡里（见 SettingBlock）
+            SectionHeader("同步方式")
+            SettingGroup {
+                SettingBlock {
+                    SegmentedChoice(
+                        options = listOf("官方同步", "自备 WebDAV"),
+                        selectedIndex = if (state.provider == WebDavProvider.OFFICIAL) 0 else 1,
+                        onSelect = {
+                            viewModel.setProvider(if (it == 0) WebDavProvider.OFFICIAL else WebDavProvider.CUSTOM)
+                        },
+                    )
+                }
+            }
             if (state.provider == WebDavProvider.OFFICIAL) {
                 OfficialSection(state, viewModel)
             } else {
@@ -172,27 +180,32 @@ private fun OfficialSection(state: WebDavUiState, viewModel: WebDavViewModel) {
 @Composable
 private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) {
     val context = LocalContext.current
-    Text(
-        "已连接官方同步" + state.officialEmail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-        PrimaryButton(
-            text = "立即同步",
-            onClick = viewModel::syncNow,
-            enabled = !state.busy && state.configured,
-            loading = state.syncing,
-            modifier = Modifier.weight(1f),
-        )
-        SecondaryButton(
-            text = "连接信息",
-            onClick = { viewModel.showConnectionInfo(true) },
-            enabled = !state.busy,
-            modifier = Modifier.weight(1f),
-        )
+    SectionHeader("账号")
+    SettingGroup {
+        SettingBlock {
+            Text(
+                "已连接官方同步" + state.officialEmail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                PrimaryButton(
+                    text = "立即同步",
+                    onClick = viewModel::syncNow,
+                    enabled = !state.busy && state.configured,
+                    loading = state.syncing,
+                    modifier = Modifier.weight(1f),
+                )
+                SecondaryButton(
+                    text = "连接信息",
+                    onClick = { viewModel.showConnectionInfo(true) },
+                    enabled = !state.busy,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
-    SettingGroup(applyHorizontalInset = false) {
+    SettingGroup {
         SwitchRow(
             title = "自动同步",
             checked = state.autoSync,
@@ -200,7 +213,8 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             position = SettingGroupPosition.Alone,
         )
     }
-    SettingGroup(applyHorizontalInset = false) {
+    SectionHeader("管理")
+    SettingGroup {
         SettingRow(
             title = "重新生成应用码",
             onClick = viewModel::askRegenerate,
@@ -226,81 +240,91 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
 
 @Composable
 private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
-    Text(
-        if (state.registrationOpen) {
-            "用邮箱收取验证码即可。没有账号会自动开通。"
-        } else {
-            "暂未开放新账号，已有账号仍可用邮箱验证码登录。"
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    OutlinedTextField(
-        value = state.email,
-        onValueChange = viewModel::setEmail,
-        label = { Text("邮箱") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    CodeRow(state, viewModel)
-    PrimaryButton(
-        text = "验证并开启同步",
-        onClick = viewModel::submitOfficial,
-        enabled = !state.busy,
-        loading = state.testing,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    SectionHeader("登录")
+    SettingGroup {
+        SettingBlock {
+            Text(
+                if (state.registrationOpen) {
+                    "用邮箱收取验证码即可。没有账号会自动开通。"
+                } else {
+                    "暂未开放新账号，已有账号仍可用邮箱验证码登录。"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = state.email,
+                onValueChange = viewModel::setEmail,
+                label = { Text("邮箱") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            CodeRow(state, viewModel)
+            PrimaryButton(
+                text = "验证并开启同步",
+                onClick = viewModel::submitOfficial,
+                enabled = !state.busy,
+                loading = state.testing,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
     OfficialPrivacyNote()
 }
 
 @Composable
 private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
-    OutlinedTextField(
-        value = state.url,
-        onValueChange = viewModel::setUrl,
-        label = { Text("服务器地址") },
-        placeholder = { Text("https://dav.jianguoyun.com/dav/") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    if (state.url.isNotBlank() && !state.url.trim().startsWith("https://", ignoreCase = true)) {
-        Text(
-            "该地址不是 HTTPS，账号与密码将以明文在网络上传输。公网请务必改用 https://",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
+    SectionHeader("服务器")
+    SettingGroup {
+        SettingBlock {
+            OutlinedTextField(
+                value = state.url,
+                onValueChange = viewModel::setUrl,
+                label = { Text("服务器地址") },
+                placeholder = { Text("https://dav.jianguoyun.com/dav/") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (state.url.isNotBlank() && !state.url.trim().startsWith("https://", ignoreCase = true)) {
+                Text(
+                    "该地址不是 HTTPS，账号与密码将以明文在网络上传输。公网请务必改用 https://",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            OutlinedTextField(
+                value = state.davUsername,
+                onValueChange = viewModel::setDavUsername,
+                label = { Text("账号") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SecretField(
+                value = state.davPassword,
+                onValueChange = viewModel::setDavPassword,
+                label = "密码 / 应用密码",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                SecondaryButton(
+                    text = "测试并保存",
+                    onClick = viewModel::testAndSave,
+                    enabled = !state.busy,
+                    loading = state.testing,
+                    modifier = Modifier.weight(1f),
+                )
+                PrimaryButton(
+                    text = "立即同步",
+                    onClick = viewModel::syncNow,
+                    enabled = !state.busy && state.configured,
+                    loading = state.syncing,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
-    OutlinedTextField(
-        value = state.davUsername,
-        onValueChange = viewModel::setDavUsername,
-        label = { Text("账号") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    SecretField(
-        value = state.davPassword,
-        onValueChange = viewModel::setDavPassword,
-        label = "密码 / 应用密码",
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-        SecondaryButton(
-            text = "测试并保存",
-            onClick = viewModel::testAndSave,
-            enabled = !state.busy,
-            loading = state.testing,
-            modifier = Modifier.weight(1f),
-        )
-        PrimaryButton(
-            text = "立即同步",
-            onClick = viewModel::syncNow,
-            enabled = !state.busy && state.configured,
-            loading = state.syncing,
-            modifier = Modifier.weight(1f),
-        )
-    }
-    SettingGroup(applyHorizontalInset = false) {
+    SettingGroup {
         SwitchRow(
             title = "自动同步",
             checked = state.autoSync,
@@ -314,36 +338,27 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
 private fun SyncFooter(state: WebDavUiState) {
     // 失败比成功新才说：之后成功过就不再翻旧账。重试就是上面那个「立即同步」
     if (state.lastSyncErrorAt > state.lastSyncAt) {
-        Text(
+        SettingFootnote(
             "上次同步失败（${formatRelativeTime(state.lastSyncErrorAt)}）：${state.lastSyncError}",
-            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
     }
     if (state.lastSyncAt > 0) {
-        Text(
+        SettingFootnote(
             "上次同步：" + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
                 .format(Date(state.lastSyncAt)),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    Text(
+    SettingFootnote(
         "会同步：书架、阅读进度、阅读时长、书源、订阅源、净化规则，以及阅读与应用设置（含排版方案）。\n" +
             "不会同步：本地书的文件、导入的字体和已缓存的章节。换设备后，本地书与字体需要重新导入。\n" +
             "两边都改过时，以较新的为准。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
 @Composable
 private fun OfficialPrivacyNote() {
-    Text(
-        "每位用户独立空间，互不可见。传输走 HTTPS，登录凭据只保存在本机。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    SettingFootnote("每位用户独立空间，互不可见。传输走 HTTPS，登录凭据只保存在本机。")
 }
 
 @Composable

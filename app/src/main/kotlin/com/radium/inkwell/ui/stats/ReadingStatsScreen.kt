@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.stats
 
+import com.radium.inkwell.ui.components.SettingFootnote
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -127,12 +128,10 @@ private fun StatsContent(ui: ReadingStatsUi, modifier: Modifier) {
             }
         }
 
-        Text(
+        SettingFootnote(
             "只算翻页之间的时间：在一页上停超过 3 分钟，多出来的不算（多半是人走开了）。" +
                 "配了 WebDAV 的话，各台设备的时长随同步合在一起",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
+            modifier = Modifier.padding(top = Dimens.gapS),
         )
     }
 }
