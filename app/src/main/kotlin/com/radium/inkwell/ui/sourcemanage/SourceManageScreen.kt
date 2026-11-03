@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.sourcemanage
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -299,7 +300,8 @@ fun SourceManageScreen(
             )
         } else {
             // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
-            Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+            // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
+            Column(Modifier.fillMaxSize().padding(padding.exceptBottom()).consumeWindowInsets(padding)) {
             // 几百个书源，没有搜索和筛选就只能一路滑
             SearchField(
                 value = query,
@@ -395,7 +397,7 @@ fun SourceManageScreen(
             } else LazyColumn(
                 // 上面压着搜索框：edge-to-edge 下键盘弹起会盖住列表下半截，最后几条滚不出来
                 Modifier.fillMaxSize().imePadding(),
-                contentPadding = ContentListDefaults.listContentPadding(),
+                contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(visible, key = { it.id }) { source ->

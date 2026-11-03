@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.legal
 
+import com.radium.inkwell.ui.components.exceptBottom
 import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -44,10 +45,11 @@ fun DisclaimerScreen(onBack: () -> Unit) {
             text = body,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom())
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Dimens.screenPadding)
-                .padding(top = Dimens.gapM, bottom = Dimens.gapXL),
+                .padding(top = Dimens.gapM, bottom = Dimens.gapXL + padding.calculateBottomPadding()),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )

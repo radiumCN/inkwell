@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.exceptBottom
 import com.radium.inkwell.ui.components.SectionHeader
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -72,9 +73,10 @@ fun AppearanceSettingsScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom())
                 .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS),
+                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             // 按「改的是哪儿」分两组：整个 App 的样子 / 书架这一页。「发现」入口长在书架顶栏上，
             // 从前却单独一组挂在最后，跟同样管书架的「书架显示」隔开了

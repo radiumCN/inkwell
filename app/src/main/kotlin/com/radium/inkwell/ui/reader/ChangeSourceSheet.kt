@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.sheetContentInsets
+import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,8 +50,12 @@ fun ChangeSourceSheet(
             // Sheet 用 surface（纸色）；列表卡片读 surfaceContainerLow。
             // 默认两者都走 Low 时候选行会糊进底色，看起来像没有 Expressive 卡片。
             containerColor = MaterialTheme.colorScheme.surface,
+            // 候选列表滚到手势条下面，见 sheetContentInsets
+            contentWindowInsets = { sheetContentInsets() },
         ) {
-        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+        // 底部留白与导航栏高度垫在各状态的末尾（从前垫在这一层上，列表在手势条上方就截断了）
+        val bottomInset = Dimens.gapXL + sheetBottomInset()
+        Column(Modifier.fillMaxWidth()) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -105,7 +111,7 @@ fun ChangeSourceSheet(
             )
             when {
                 overlay.changingSource || (overlay.searchingSources && candidates.isEmpty()) -> Box(
-                    Modifier.fillMaxWidth().padding(Dimens.gapXL),
+                    Modifier.fillMaxWidth().padding(Dimens.gapXL).padding(bottom = bottomInset),
                     contentAlignment = Alignment.Center,
                 ) { AppLoadingIndicator() }
                 candidates.isEmpty() -> Text(
@@ -120,12 +126,14 @@ fun ChangeSourceSheet(
                         else ->
                             "其他 ${overlay.sourcesTotal} 个书源都没有找到这本书"
                     },
-                    Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL),
+                    Modifier
+                        .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL)
+                        .padding(bottom = bottomInset),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 else -> LazyColumn(
-                    Modifier.heightIn(max = Dimens.sheetListMaxHeight),
-                    contentPadding = ContentListDefaults.listContentPadding(),
+                    Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
+                    contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
                     if (overlay.sourcesTotal > 0 && overlay.sourcesDone < overlay.sourcesTotal &&

@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.detail
 
+import com.radium.inkwell.ui.components.exceptBottom
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -140,7 +142,12 @@ fun BookDetailScreen(
 
             // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
             val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
-            LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState) {
+            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding.exceptBottom()),
+                state = listState,
+                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
+            ) {
                 item {
                     Header(
                         book = b,

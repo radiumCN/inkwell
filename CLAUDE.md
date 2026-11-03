@@ -119,6 +119,7 @@ App 走 **M3 Expressive**。主题入口有两个 —— 全局 `InkwellTheme`�
 - **对比度**：正文 ≥ 4.5:1（见「颜色」）。阅读纸张主题在 `ReaderThemeContrastTest` 里钉死 ≥ 7:1，新增纸色配色不合格测试直接挂。
 - **系统返回键**：有暂态浮层（菜单/面板/选区/多选模式）时用 `BackHandler` 先收起它们，再退页面。
 - **edge-to-edge / 键盘**：可滚动的表单/列表在 `enableEdgeToEdge`（`MainActivity`）下键盘会遮挡，给它们加 `Modifier.imePadding()`。
+- **内容滚到手势条下面**：可滚动的页面外层用 `padding(padding.exceptBottom())`（`EdgeToEdge.kt`），导航栏高度 `padding.calculateBottomPadding()` 垫在**滚动内容末尾**（Lazy 列表进 `contentPadding`，滚动 Column 加在 `verticalScroll` 之后）。别再 `Modifier.padding(padding)` 整块抬上去 —— 列表会在手势条上方截断、下面空一条底色。不滚动的加载 / 空态 / 错误态照旧整块 `padding(padding)`。会滚动的底部弹层同理：`contentWindowInsets = { sheetContentInsets() }`，列表末尾垫 `sheetBottomInset()`（目录、阅读设置、`OptionPickerSheet`、换源）；只有几行的弹层用 M3 默认值
 
 ---
 

@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.rss
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -60,7 +61,8 @@ fun RssArticlesScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
+        Column(Modifier.fillMaxSize().padding(padding.exceptBottom())) {
             // 只有真的分了类才显示 —— 单分类的源不该被一行没得选的 chip 占掉屏幕
             if (state.sorts.size > 1) {
                 ChipRow(
@@ -88,7 +90,7 @@ fun RssArticlesScreen(
                 )
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = ContentListDefaults.listContentPadding(),
+                    contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
                     items(state.articles, key = { it.key }) { article ->

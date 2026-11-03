@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.bookshelf
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,12 +44,14 @@ internal fun WelcomeState(
     onSkip: () -> Unit,
     onOpenDisclaimer: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 垫在滚动内容末尾的导航栏高度：外层只让开顶栏，内容滚到手势条下面（见 exceptBottom） */
+    bottomInset: Dp = 0.dp,
 ) {
     Column(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(vertical = Dimens.gapXXL),
+            .padding(top = Dimens.gapXXL, bottom = Dimens.gapXXL + bottomInset),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Column(

@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.search
 
+import com.radium.inkwell.ui.components.exceptBottom
+import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -186,7 +188,8 @@ fun SearchScreen(
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
-        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+        // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
+        Column(Modifier.fillMaxSize().padding(padding.exceptBottom()).consumeWindowInsets(padding)) {
             AnimatedVisibility(
                 visible = state.searching || state.searchPaused,
                 enter = expandEnter(),
@@ -219,6 +222,7 @@ fun SearchScreen(
             val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
             if (showHistory) {
                 SearchHistoryList(
+                    bottomInset = padding.calculateBottomPadding(),
                     history = state.history,
                     onSearch = viewModel::searchFromHistory,
                     onRemove = viewModel::removeHistory,
@@ -261,7 +265,7 @@ fun SearchScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.imePadding(),
-                    contentPadding = ContentListDefaults.listContentPadding(),
+                    contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
                     // key 必须与合并键是同一个（SearchHit.key）：拿代表条目的 sourceId|bookUrl 当 key 的话，
@@ -363,6 +367,8 @@ fun SearchScreen(
  */
 @Composable
 private fun SearchHistoryList(
+    /** 垫在列表末尾的导航栏高度，见 exceptBottom */
+    bottomInset: Dp,
     history: List<String>,
     onSearch: (String) -> Unit,
     onRemove: (String) -> Unit,
@@ -372,7 +378,7 @@ private fun SearchHistoryList(
     // 键盘弹着时历史多半在它底下，同结果列表一样让开
     LazyColumn(
         modifier = Modifier.imePadding(),
-        contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.gapL),
+        contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.gapL + bottomInset),
         verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
     ) {
         item(key = "header") {

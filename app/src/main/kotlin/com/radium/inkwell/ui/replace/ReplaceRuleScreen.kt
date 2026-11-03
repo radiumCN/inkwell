@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.replace
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,11 +100,14 @@ fun ReplaceRuleScreen(
                 )
             }
         } else {
+            // 内容滚到手势条下面（见 exceptBottom）
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier.fillMaxSize().padding(padding.exceptBottom()),
                 // 底部给悬浮的「新建」按钮让位（56dp 高 + 16dp 边距）：不留的话，最后一条行尾的开关与删除
-                // 正好压在按钮下面，还滚不出来
-                contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.touchTarget + Dimens.gapXXL),
+                // 正好压在按钮下面，还滚不出来。按钮本身坐在导航栏上面，所以再加上导航栏的高度
+                contentPadding = ContentListDefaults.listContentPadding(
+                    bottom = Dimens.touchTarget + Dimens.gapXXL + padding.calculateBottomPadding(),
+                ),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(state.rules, key = { it.id }) { rule ->

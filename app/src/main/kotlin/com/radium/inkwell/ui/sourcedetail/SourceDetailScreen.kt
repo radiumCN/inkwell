@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.sourcedetail
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -86,13 +87,15 @@ fun SourceDetailScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom())
                 // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
                 .consumeWindowInsets(padding)
                 // 顶上有测试关键词输入框：edge-to-edge 下键盘弹起会盖住下面的测试报告与规则
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(Dimens.screenPadding)
-                .verticalScroll(rememberScrollState()),
+                .padding(bottom = padding.calculateBottomPadding()),
         ) {
             // 一键冒烟：源好不好，跑一遍搜索→详情→目录→正文最直观
             Row(

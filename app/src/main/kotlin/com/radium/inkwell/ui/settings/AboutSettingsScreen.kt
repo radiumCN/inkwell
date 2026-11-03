@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.exceptBottom
 import com.radium.inkwell.ui.components.SectionHeader
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
@@ -84,9 +85,10 @@ fun AboutSettingsScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom())
                 .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS),
+                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             SectionHeader("支持")
             SettingGroup {

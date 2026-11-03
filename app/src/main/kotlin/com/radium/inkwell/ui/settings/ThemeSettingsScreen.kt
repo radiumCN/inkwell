@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.exceptBottom
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SegmentedChoice
@@ -89,9 +90,10 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom())
                 .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS),
+                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             // 与别的设置页同一副骨架：分组标题 + 卡片。从前整页内缩 20dp、chip 和色板直接铺在灰底上
             SectionHeader("模式")

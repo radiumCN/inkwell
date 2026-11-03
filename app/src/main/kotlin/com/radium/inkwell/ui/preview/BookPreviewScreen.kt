@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.preview
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -104,7 +105,11 @@ fun BookPreviewScreen(
                 onSecondary = if (state.sources.size > 1) ({ sourcePickerOpen = true }) else null,
             )
 
-            else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            else -> LazyColumn(
+                Modifier.fillMaxSize().padding(padding.exceptBottom()),
+                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
+            ) {
                 // 加载中也画头部：搜索结果里的书名、封面、简介早就在 state 里了（见 BookPreviewViewModel），
                 // 从前只给一个转圈 —— 卡在慢源上最多要等三个源各 15 秒，人连点的是哪本都看不见。
                 // 换源入口在头部里（多于一个源时），不必干等超时。

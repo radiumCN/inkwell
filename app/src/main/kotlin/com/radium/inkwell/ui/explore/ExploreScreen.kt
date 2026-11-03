@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.explore
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,7 +124,8 @@ fun ExploreScreen(
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
+        Column(Modifier.fillMaxSize().padding(padding.exceptBottom())) {
             // 库还没读回来：先空着。不能落进下面的空态 —— 那会每次进页都闪一下「没有可用的发现来源」
             if (!state.sourcesLoaded) return@Column
             if (state.sources.isEmpty()) {
@@ -165,7 +167,7 @@ fun ExploreScreen(
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = ContentListDefaults.listContentPadding(),
+                    contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
                 ) {
                     items(state.books, key = { it.exploreKey }) { book ->

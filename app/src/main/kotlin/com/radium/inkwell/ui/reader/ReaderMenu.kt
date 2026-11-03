@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.sheetContentInsets
+import com.radium.inkwell.ui.components.sheetBottomInset
 import com.radium.inkwell.ui.components.TonalButton
 import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.background
@@ -272,6 +274,8 @@ fun ReaderMenu(
         ModalBottomSheet(
             onDismissRequest = { showToc = false },
             containerColor = MaterialTheme.colorScheme.surface,
+            // 目录滚到手势条下面，见 sheetContentInsets
+            contentWindowInsets = { sheetContentInsets() },
         ) {
             TocList(
                 toc = tocItems,
@@ -293,6 +297,8 @@ fun ReaderMenu(
             // 不压暗正文：面板只占半屏，上面露出来的正文就是排版的实时预览。
             // 隔着一层 32% 的黑看，行距字距勉强看得出，纸色和亮度根本没法判断
             scrimColor = Color.Transparent,
+            // 设置项滚到手势条下面，见 sheetContentInsets
+            contentWindowInsets = { sheetContentInsets() },
         ) {
             TypographyPanel(
                 settings = session.settings,
@@ -497,7 +503,9 @@ private fun TocList(
         )
         if (filtered.isEmpty()) {
             Box(
-                Modifier.fillMaxWidth().padding(vertical = Dimens.gapXXL),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = Dimens.gapXXL, bottom = Dimens.gapXXL + sheetBottomInset()),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -506,10 +514,12 @@ private fun TocList(
                 )
             }
         } else {
+            // 导航栏高度垫在列表末尾、也加进高度上限：列表一直铺到屏幕底、滚到手势条下面，看得见的条数不变
+            val bottomInset = sheetBottomInset()
             LazyColumn(
                 state = listState,
-                modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight),
-                contentPadding = ContentListDefaults.listContentPadding(),
+                modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
+                contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(filtered, key = { it.index }) { item ->
@@ -658,10 +668,11 @@ private fun TypographyPanel(
             label = "readerSettingsTab",
             modifier = Modifier
                 .fillMaxWidth()
-                .height(contentHeight)
+                // 导航栏高度加进定高、也垫在滚动内容末尾：面板铺到屏幕底、设置项滚到手势条下面，看得见的高度不变
+                .height(contentHeight + sheetBottomInset())
                 .verticalScroll(scroll)
                 .padding(horizontal = Dimens.screenPadding)
-                .padding(top = Dimens.gapM, bottom = Dimens.gapXXL),
+                .padding(top = Dimens.gapM, bottom = Dimens.gapXXL + sheetBottomInset()),
         ) { current ->
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapL)) {
                 when (current) {

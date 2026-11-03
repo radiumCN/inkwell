@@ -1,5 +1,9 @@
 package com.radium.inkwell.ui.settings
 
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Palette
@@ -9,7 +13,7 @@ import androidx.compose.material.icons.filled.AutoDelete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.AltRoute
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Info
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.data.repo.describeSyncError
@@ -151,17 +155,22 @@ fun SettingsScreen(
         topBar = { AppTopBar("设置", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        Column(
+        // 版本号从前钉在滚动区外面的页脚：列表在页脚上方就截断了，手势条底下垫的是一块空底色。
+        // 现在它是滚动内容的最后一行，整页能滚到手势条下面（见 exceptBottom）。内容不满一屏时仍压在底部：
+        // 滚动区最矮也是一整屏高（heightIn(min)），中间那个 weight 撑开 —— Column 在最大高度无界时，
+        // 按最小高度分配 weight，所以滚动容器里也撑得开
+        BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding.exceptBottom()),
         ) {
+            val viewport = maxHeight
             Column(
                 Modifier
-                    .weight(1f)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(top = Dimens.gapS, bottom = Dimens.gapL),
+                    .heightIn(min = viewport)
+                    .padding(top = Dimens.gapS),
             ) {
                 SettingsOverviewCard(
                     reading = readingSummary,
@@ -244,7 +253,7 @@ fun SettingsScreen(
                     )
                     SettingRow(
                         title = "更新渠道",
-                        icon = Icons.Default.AltRoute,
+                        icon = Icons.AutoMirrored.Filled.AltRoute,
                         value = updateCheck.channel.label,
                         onClick = { showChannelPicker = true },
                         position = SettingGroupPosition.Last,
@@ -259,22 +268,23 @@ fun SettingsScreen(
                         position = SettingGroupPosition.Alone,
                     )
                 }
-            }
 
-            Text(
-                "Inkwell  v${updateCheck.currentVersion}",
-                Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = Dimens.rowHorizontal,
-                        end = Dimens.rowHorizontal,
-                        top = Dimens.gapM,
-                        bottom = Dimens.gapXL,
-                    ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Inkwell  v${updateCheck.currentVersion}",
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = Dimens.rowHorizontal,
+                            end = Dimens.rowHorizontal,
+                            top = Dimens.gapXL,
+                            bottom = Dimens.gapXL + padding.calculateBottomPadding(),
+                        ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 

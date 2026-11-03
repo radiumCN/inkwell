@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.rss
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -101,8 +102,13 @@ fun RssArticleScreen(
         LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(horizontal = Dimens.screenPadding),
+                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+                .padding(padding.exceptBottom()),
+            contentPadding = PaddingValues(
+                start = Dimens.screenPadding,
+                end = Dimens.screenPadding,
+                bottom = padding.calculateBottomPadding(),
+            ),
         ) {
             item(key = "title", contentType = "title") {
                 Column {

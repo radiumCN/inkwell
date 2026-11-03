@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.components
 
+import com.radium.inkwell.ui.components.sheetContentInsets
+import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -69,18 +71,22 @@ fun OptionPickerSheet(
         sheetState = sheetState,
         // Sheet 用 surface；选项行读 surfaceContainerLow。默认都走 Low 时卡片糊进底色。
         containerColor = MaterialTheme.colorScheme.surface,
+        // 选项多时列表滚到手势条下面，见 sheetContentInsets
+        contentWindowInsets = { sheetContentInsets() },
     ) {
-        Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+        Column(Modifier.fillMaxWidth()) {
             Text(
                 title,
                 Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
                 style = MaterialTheme.typography.titleMedium,
             )
             header?.invoke()
+            // 底部留白与导航栏高度都垫在列表末尾（从前垫在外层 Column 上，列表在手势条上方就截断了）
+            val bottomInset = Dimens.gapXL + sheetBottomInset()
             LazyColumn(
-                Modifier.heightIn(max = Dimens.sheetListMaxHeight),
+                Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
                 state = listState,
-                contentPadding = ContentListDefaults.listContentPadding(),
+                contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(options, key = { it.id }) { opt ->

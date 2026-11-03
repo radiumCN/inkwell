@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.bookshelf
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ReportDrawnWhen
@@ -15,8 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -105,7 +104,6 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
 import com.radium.inkwell.util.BiometricAuth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -512,7 +510,8 @@ fun BookshelfScreen(
                     onRestore = onOpenWebDav,
                     onSkip = viewModel::finishOnboarding,
                     onOpenDisclaimer = onOpenDisclaimer,
-                    modifier = Modifier.padding(padding),
+                    modifier = Modifier.padding(padding.exceptBottom()),
+                    bottomInset = padding.calculateBottomPadding(),
                 )
             }
         } else if (allBooks.isEmpty() || allHidden) {
@@ -526,15 +525,9 @@ fun BookshelfScreen(
             )
         } else {
             // 沉浸式底部：只吃顶栏/两侧的 inset，**不吃底部导航栏的**——底部让给下面的网格，
-            // 由它用 contentPadding 把导航栏高度让出来，于是书封能滚到系统导航条下面（edge-to-edge）
-            val layoutDirection = LocalLayoutDirection.current
-            Column(
-                Modifier.fillMaxSize().padding(
-                    top = padding.calculateTopPadding(),
-                    start = padding.calculateStartPadding(layoutDirection),
-                    end = padding.calculateEndPadding(layoutDirection),
-                )
-            ) {
+            // 由它用 contentPadding 把导航栏高度让出来，于是书封能滚到系统导航条下面（edge-to-edge）。
+            // 全应用的列表页都照这个写法，见 exceptBottom
+            Column(Modifier.fillMaxSize().padding(padding.exceptBottom())) {
                 // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
                 // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
                 // 「展开需验证」直接挂在条上，不再套一层设置弹层。

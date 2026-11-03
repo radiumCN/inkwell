@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.rss
 
+import com.radium.inkwell.ui.components.exceptBottom
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -135,9 +136,10 @@ fun RssSourceScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
+            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
-                contentPadding = ContentListDefaults.listContentPadding(),
+                Modifier.fillMaxSize().padding(padding.exceptBottom()),
+                contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
             ) {
                 items(list, key = { it.id }) { source ->

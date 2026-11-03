@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.stats
 
+import com.radium.inkwell.ui.components.exceptBottom
+import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.SettingFootnote
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -78,20 +79,21 @@ fun ReadingStatsScreen(
                 hint = "翻开一本书读几页，时长就会记在这里；配了 WebDAV 的话，各台设备的时长会合在一起",
                 modifier = Modifier.padding(padding),
             )
-            else -> StatsContent(ui, Modifier.padding(padding))
+            else -> StatsContent(ui, padding)
         }
     }
 }
 
 @Composable
-private fun StatsContent(ui: ReadingStatsUi, modifier: Modifier) {
+private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
     val s = ui.summary
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
+            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            .padding(padding.exceptBottom())
             .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(bottom = Dimens.gapXL),
+            .padding(bottom = Dimens.gapXL + padding.calculateBottomPadding()),
     ) {
         TodayCard(s, Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS))
         Row(
