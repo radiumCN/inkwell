@@ -229,11 +229,15 @@ fun SettingRow(
         )
     } else {
         // 纯展示行（版本、许可证…）：用无点击重载，避免 enabled=false 把右侧 value 洗淡。
+        // verticalAlignment 必须显式给：官方默认是「行内可用高度过约 56dp 就改顶对齐」，带 subtitle 的行
+        // 被两行最小高度撑过了线，标题副标题全贴在上半截、下面空一大块（阅读记录「今年读得最多」）。
+        // 可点那一支走 ContentListItem，早就钉了居中，所以从前只有纯展示行歪
         ListItem(
             modifier = rowModifier.fillMaxWidth(),
             leadingContent = leading,
             trailingContent = trailingContent,
             supportingContent = supporting,
+            verticalAlignment = Alignment.CenterVertically,
             shapes = shapes,
             colors = colors,
             contentPadding = ContentListDefaults.CompactPadding,
