@@ -96,6 +96,8 @@ object Dimens {
      * 定宽是为了同一张卡里各行的分段按钮左边对齐，而不是跟着标签长短参差
      */
     val settingLabelWidth = 80.dp
+    /** 设置主页行首图标的圆底（M3 列表的「头像」尺寸）；里面的图标用 [iconMd] */
+    val settingIcon = 40.dp
 
     // ---- 控件 ----
     /** 触控目标下限（Material：48dp）。图标本身可以小，可点区域不能小于它 */

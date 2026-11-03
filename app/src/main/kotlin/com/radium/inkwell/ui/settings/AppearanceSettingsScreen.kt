@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SectionHeader
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,6 +76,9 @@ fun AppearanceSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(top = Dimens.gapS),
         ) {
+            // 按「改的是哪儿」分两组：整个 App 的样子 / 书架这一页。「发现」入口长在书架顶栏上，
+            // 从前却单独一组挂在最后，跟同样管书架的「书架显示」隔开了
+            SectionHeader("应用")
             SettingGroup {
                 SettingRow(
                     title = "主题外观",
@@ -85,21 +89,22 @@ fun AppearanceSettingsScreen(
                     title = "应用图标",
                     value = appIcon.label,
                     onClick = { showIconPicker = true },
-                    position = SettingGroupPosition.Middle,
+                    position = SettingGroupPosition.Last,
                 )
+            }
+            SectionHeader("书架")
+            SettingGroup {
                 SettingRow(
                     title = "书架显示",
                     value = bookshelfLayout.label,
                     onClick = { showLayoutPicker = true },
-                    position = SettingGroupPosition.Last,
+                    position = SettingGroupPosition.First,
                 )
-            }
-            SettingGroup {
                 SwitchRow(
                     title = "显示「发现」入口",
                     checked = exploreEnabled,
                     onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
-                    position = SettingGroupPosition.Alone,
+                    position = SettingGroupPosition.Last,
                 )
             }
             Spacer(Modifier.height(Dimens.gapXL))

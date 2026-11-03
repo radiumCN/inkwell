@@ -1,5 +1,21 @@
 package com.radium.inkwell.ui.settings
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.AutoDelete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.AltRoute
+import androidx.compose.material.icons.filled.Info
+import com.radium.inkwell.data.repo.WebDavRepository
+import com.radium.inkwell.data.repo.describeSyncError
+import com.radium.inkwell.util.LocalNetworkPermissionMissing
+import com.radium.inkwell.ui.stats.summarize
+import kotlinx.coroutines.flow.flowOn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,10 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.ReadingStatsRepository
-import com.radium.inkwell.data.prefs.WebDavConfig
 import com.radium.inkwell.data.prefs.WebDavPrefs
-import com.radium.inkwell.ui.components.formatRelativeTime
-import com.radium.inkwell.ui.stats.formatDuration
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import com.radium.inkwell.ui.components.AppAlertDialog
@@ -69,20 +82,21 @@ fun SettingsScreen(
     onOpenReading: () -> Unit,
     onOpenRss: () -> Unit,
     onOpenWebDav: () -> Unit,
-    onOpenUpdate: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
     val cache = koinInject<ChapterContentCache>()
     val readingStats = koinInject<ReadingStatsRepository>()
     val webDavPrefs = koinInject<WebDavPrefs>()
     val syncConfig by webDavPrefs.config.collectAsStateWithLifecycle(initialValue = null)
-    // 行尾直接给今天的时长：点进去之前就知道今天读了多少，这一行才不只是个入口
-    val todayReading by remember(readingStats) {
-        readingStats.observeAll().map { rows ->
-            val today = LocalDate.now().toEpochDay()
-            rows.filter { it.day == today }.sumOf { it.millis }
-        }
-    }.collectAsStateWithLifecycle(initialValue = 0L)
+    // 概览卡要的今日 / 连续 / 累计。整张表在内存里汇总，行数是「设备 × 天 × 书」，几千行而已
+    val readingSummary by remember(readingStats) {
+        readingStats.observeAll()
+            .map { rows -> summarize(rows, LocalDate.now()) }
+            .flowOn(Dispatchers.Default)
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val webDavRepo = koinInject<WebDavRepository>()
+    /** 概览卡上点了「立即同步」、还没回来 */
+    var syncing by remember { mutableStateOf(false) }
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -91,6 +105,31 @@ fun SettingsScreen(
     val messages = remember { MessageBus() }
     CollectMessages(messages, snackbar)
     val updateCheck = rememberUpdateCheckState(messages)
+    var showSourcePicker by remember { mutableStateOf(false) }
+    var showChannelPicker by remember { mutableStateOf(false) }
+
+    /**
+     * 概览卡上的「立即同步」。跑在页面的协程作用域上：离开设置页就取消 —— 与 WebDAV 页的「立即同步」
+     * 同一个取舍（那边跟着 ViewModel 走）。取消是安全的，同步本来就要扛住被进程回收（见 WebDavRepository）。
+     * 局域网 NAS 缺「附近设备」权限时，授权的说明与系统弹框都在 WebDAV 页，直接把人带过去。
+     */
+    fun syncNow() {
+        if (syncing) return
+        syncing = true
+        scope.launch {
+            val result = webDavRepo.sync()
+            syncing = false
+            val error = result.exceptionOrNull()
+            when {
+                error is LocalNetworkPermissionMissing -> {
+                    messages.emit(describeSyncError(error))
+                    onOpenWebDav()
+                }
+                error != null -> messages.emit("同步失败：" + describeSyncError(error))
+                else -> messages.emit(result.getOrDefault("同步完成"))
+            }
+        }
+    }
     var confirmClearCache by remember { mutableStateOf(false) }
     var showPrunePicker by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
@@ -124,47 +163,56 @@ fun SettingsScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(top = Dimens.gapS, bottom = Dimens.gapL),
             ) {
+                SettingsOverviewCard(
+                    reading = readingSummary,
+                    sync = syncConfig,
+                    syncing = syncing,
+                    onOpenStats = onOpenReadingStats,
+                    onOpenWebDav = onOpenWebDav,
+                    onSyncNow = ::syncNow,
+                )
+
+                SectionHeader("阅读与外观")
                 SettingGroup {
                     SettingRow(
-                        title = "阅读记录",
-                        value = if (todayReading > 0) "今天 ${formatDuration(todayReading)}" else null,
-                        onClick = onOpenReadingStats,
-                        position = SettingGroupPosition.Alone,
-                    )
-                }
-                SettingGroup {
-                    SettingRow(
-                        title = "外观",
-                        onClick = onOpenAppearance,
+                        title = "阅读与规则",
+                        icon = Icons.AutoMirrored.Filled.MenuBook,
+                        onClick = onOpenReading,
                         position = SettingGroupPosition.First,
                     )
                     SettingRow(
-                        title = "阅读与规则",
-                        onClick = onOpenReading,
+                        title = "外观",
+                        icon = Icons.Default.Palette,
+                        onClick = onOpenAppearance,
                         position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "订阅源",
+                        icon = Icons.Default.RssFeed,
                         onClick = onOpenRss,
                         position = SettingGroupPosition.Last,
                     )
                 }
+
+                SectionHeader("同步与存储")
                 SettingGroup {
+                    // 同步状态与「立即同步」在顶上的概览卡里，这一行只是进 WebDAV 页的入口
                     SettingRow(
                         title = "WebDAV 备份同步",
-                        // 同步是后台静默跑的，坏了只有这里看得见：不必点进去才知道上回同步成没成
-                        value = syncConfig?.let(::syncStatusLabel),
+                        icon = Icons.Default.CloudSync,
                         onClick = onOpenWebDav,
                         position = SettingGroupPosition.First,
                     )
                     SettingRow(
                         title = "自动清理已读缓存",
+                        icon = Icons.Default.AutoDelete,
                         value = cacheAutoPruneLabel(pruneDays),
                         onClick = { showPrunePicker = true },
                         position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "清除正文缓存",
+                        icon = Icons.Default.DeleteSweep,
                         value = when {
                             clearingCache -> "正在清除…"
                             cacheBytes < 0 -> "正在统计…"
@@ -177,21 +225,28 @@ fun SettingsScreen(
                     )
                 }
 
-                SectionHeader("版本与更新")
+                SectionHeader("更新")
                 SettingGroup {
                     SettingRow(
                         title = "检查更新",
-                        value = if (updateCheck.checking) {
-                            "正在检查…"
-                        } else {
-                            "${updateCheck.source.label} · ${updateCheck.channel.label}"
-                        },
+                        icon = Icons.Default.SystemUpdate,
+                        value = if (updateCheck.checking) "正在检查…" else null,
                         onClick = updateCheck.check,
                         position = SettingGroupPosition.First,
                     )
+                    // 更新源 / 渠道从前单独占一个二级页（整页就这两行），现在直接摆在这里，点了弹选择面板
                     SettingRow(
-                        title = "更新源与渠道",
-                        onClick = onOpenUpdate,
+                        title = "更新源",
+                        icon = Icons.Default.Public,
+                        value = updateCheck.source.label,
+                        onClick = { showSourcePicker = true },
+                        position = SettingGroupPosition.Middle,
+                    )
+                    SettingRow(
+                        title = "更新渠道",
+                        icon = Icons.Default.AltRoute,
+                        value = updateCheck.channel.label,
+                        onClick = { showChannelPicker = true },
                         position = SettingGroupPosition.Last,
                     )
                 }
@@ -199,6 +254,7 @@ fun SettingsScreen(
                 SettingGroup {
                     SettingRow(
                         title = "关于",
+                        icon = Icons.Default.Info,
                         onClick = onOpenAbout,
                         position = SettingGroupPosition.Alone,
                     )
@@ -223,6 +279,28 @@ fun SettingsScreen(
     }
 
     updateCheck.UpdateDialog()
+
+    if (showSourcePicker) {
+        UpdateSourcePicker(
+            current = updateCheck.source,
+            onPick = { picked ->
+                showSourcePicker = false
+                scope.launch { appPrefs.setUpdateSource(picked) }
+            },
+            onDismiss = { showSourcePicker = false },
+        )
+    }
+
+    if (showChannelPicker) {
+        UpdateChannelPicker(
+            current = updateCheck.channel,
+            onPick = { picked ->
+                showChannelPicker = false
+                scope.launch { appPrefs.setUpdateChannel(picked) }
+            },
+            onDismiss = { showChannelPicker = false },
+        )
+    }
 
     if (showPrunePicker) {
         OptionPickerSheet(
@@ -287,15 +365,4 @@ fun SettingsScreen(
 private fun cacheAutoPruneLabel(days: Int): String = when (days) {
     0 -> "关闭"
     else -> "$days 天"
-}
-
-/**
- * 设置页 WebDAV 行尾的一句：没开、上回失败了、多久之前同步过。失败只在比上次成功更新时才说 ——
- * 之后成功过一次就不再提（见 WebDavPrefs.markSynced）。
- */
-private fun syncStatusLabel(c: WebDavConfig): String? = when {
-    !c.isConfigured -> "未开启"
-    c.lastSyncErrorAt > c.lastSyncAt -> "上次同步失败"
-    c.lastSyncAt > 0 -> "${formatRelativeTime(c.lastSyncAt)}同步"
-    else -> null
 }

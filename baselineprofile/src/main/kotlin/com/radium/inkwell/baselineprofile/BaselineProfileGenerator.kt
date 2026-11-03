@@ -6,6 +6,7 @@ import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.Until
 import org.junit.Rule
@@ -102,7 +103,8 @@ class BaselineProfileGenerator {
         // 和书架：设置页 0 条、阅读器 1 条，进设置、进书全回到解释执行，卡顿就是这么来的。
         // 所以现在一律走 [tap]：找不到就当场失败，宁可这次不更新 profile，也别交一份残缺的。
         tap(By.desc("设置"), "书架顶栏的设置齿轮")
-        tap(By.text("关于"), "设置 → 关于")
+        // 「关于」在设置页最底下：顶上加了概览卡、各组加了标题之后，矮一点的模拟器一屏装不下，得先滚到它
+        tap(By.text("关于"), "设置 → 关于", scrollToFind = true)
         back()
         tap(By.text("阅读与规则"), "设置 → 阅读与规则")
         tap(By.text("书源管理"), "阅读与规则 → 书源管理")
@@ -168,7 +170,17 @@ class BaselineProfileGenerator {
         device.hasObject(By.desc("搜索")) && device.hasObject(By.desc("设置"))
 
     /** 等到元素出现再点。找不到直接失败 —— 见 generate() 里那段「静默跳过 + 返回键退出 App」的事故 */
-    private fun MacrobenchmarkScope.tap(selector: BySelector, what: String) {
+    /**
+     * @param scrollToFind 目标可能在一屏之外：先等页面出来，屏上没有就把页面里能滚的那块往下滚到它出现。
+     *   UiAutomator 只认屏上看得见的节点，Compose 的 verticalScroll 里滚出去的行找不到
+     */
+    private fun MacrobenchmarkScope.tap(selector: BySelector, what: String, scrollToFind: Boolean = false) {
+        if (scrollToFind) {
+            device.wait(Until.hasObject(By.scrollable(true)), UI_TIMEOUT_MS)
+            if (!device.hasObject(selector)) {
+                device.findObject(By.scrollable(true))?.scrollUntil(Direction.DOWN, Until.findObject(selector))
+            }
+        }
         // 找到与点下之间页面可能重组（转场还在走、列表刚挂上），手里那个节点随即作废，
         // click() 抛 StaleObjectException —— CI 第二轮在「书源管理」上真碰到过。重新找一次再点
         repeat(TAP_ATTEMPTS) { attempt ->

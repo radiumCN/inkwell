@@ -121,9 +121,6 @@ data object AppearanceSettingsRoute : NavKey
 data object ReadingSettingsRoute : NavKey
 
 @Serializable
-data object UpdateSettingsRoute : NavKey
-
-@Serializable
 data object AboutSettingsRoute : NavKey
 
 @Serializable
@@ -158,7 +155,6 @@ data object DeveloperSettingsRoute : NavKey
  * │            └ 替换规则 (3)
  * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4)
  * ├─ WebDAV (2)
- * ├─ 更新 (2)
  * └─ 关于 (2) ─┬ 意见反馈 (3)
  *              ├ 免责声明 (3)
  *              └ 开发者选项 (3)
@@ -174,7 +170,6 @@ internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is ReadingStatsRoute,
     is AppearanceSettingsRoute,
     is ReadingSettingsRoute,
-    is UpdateSettingsRoute,
     is AboutSettingsRoute,
     is WebDavSettingsRoute,
     is RssSourceRoute,

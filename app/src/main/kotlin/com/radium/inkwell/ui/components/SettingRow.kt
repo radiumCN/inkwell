@@ -1,5 +1,12 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Column
@@ -175,8 +182,14 @@ fun SettingRow(
     onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
     position: SettingGroupPosition? = null,
+    /**
+     * 行首图标，放在浅色圆底里（[SettingIcon]）。只给设置主页那种「一列入口」用：十几行纯文字长得一模一样，
+     * 找一项只能挨行读，图标是扫一眼就能落上去的锚点。二级页保持纯文字 —— 每页就几行，图标只会添乱。
+     */
+    icon: ImageVector? = null,
 ) {
     val grouped = position != null
+    val leading: (@Composable () -> Unit)? = icon?.let { { SettingIcon(it) } }
     val supporting: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
             Text(it, style = MaterialTheme.typography.bodySmall)
@@ -212,6 +225,7 @@ fun SettingRow(
         ContentListItem(
             onClick = onClick,
             modifier = rowModifier,
+            leadingContent = leading,
             trailingContent = trailingContent,
             supportingContent = supporting,
             colors = colors,
@@ -225,6 +239,7 @@ fun SettingRow(
         // 纯展示行（版本、许可证…）：用无点击重载，避免 enabled=false 把右侧 value 洗淡。
         ListItem(
             modifier = rowModifier.fillMaxWidth(),
+            leadingContent = leading,
             trailingContent = trailingContent,
             supportingContent = supporting,
             shapes = shapes,
@@ -233,6 +248,27 @@ fun SettingRow(
             content = {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
             },
+        )
+    }
+}
+
+/**
+ * 设置行的行首图标：secondaryContainer 的圆底 + onSecondaryContainer 的图标。
+ * 用容器色而不是 primary：一页十来个图标全是强调色，强调就不成其为强调了。纯装饰，不进读屏（行标题就是名字）。
+ */
+@Composable
+private fun SettingIcon(icon: ImageVector) {
+    Box(
+        Modifier
+            .size(Dimens.settingIcon)
+            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(Dimens.iconMd),
+            tint = MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }

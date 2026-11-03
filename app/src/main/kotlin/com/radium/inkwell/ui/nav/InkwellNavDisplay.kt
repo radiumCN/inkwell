@@ -66,7 +66,6 @@ import com.radium.inkwell.ui.settings.AppearanceSettingsScreen
 import com.radium.inkwell.ui.settings.ReadingSettingsScreen
 import com.radium.inkwell.ui.settings.SettingsScreen
 import com.radium.inkwell.ui.settings.ThemeSettingsScreen
-import com.radium.inkwell.ui.settings.UpdateSettingsScreen
 import com.radium.inkwell.ui.sourcedetail.SourceDetailScreen
 import com.radium.inkwell.ui.sourcedetail.SourceDetailViewModel
 import com.radium.inkwell.ui.sourcemanage.SourceManageScreen
@@ -286,7 +285,6 @@ fun InkwellNavDisplay() {
                     onOpenReading = { nav.go(ReadingSettingsRoute) },
                     onOpenRss = { nav.go(RssSourceRoute) },
                     onOpenWebDav = { nav.go(WebDavSettingsRoute) },
-                    onOpenUpdate = { nav.go(UpdateSettingsRoute) },
                     onOpenAbout = { nav.go(AboutSettingsRoute) },
                 )
             }
@@ -312,11 +310,6 @@ fun InkwellNavDisplay() {
                     onOpenSources = { nav.go(SourceManageRoute) },
                     onOpenReplaceRules = { nav.go(ReplaceRuleRoute) },
                 )
-            }
-            entry<UpdateSettingsRoute>(
-                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),
-            ) {
-                UpdateSettingsScreen(onBack = { nav.back() })
             }
             entry<AboutSettingsRoute>(
                 metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.SETTINGS),

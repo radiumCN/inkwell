@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SectionHeader
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +57,7 @@ fun ReadingSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(top = Dimens.gapS),
         ) {
+            SectionHeader("规则")
             SettingGroup {
                 SettingRow(
                     title = "书源管理",
@@ -68,6 +70,7 @@ fun ReadingSettingsScreen(
                     position = SettingGroupPosition.Last,
                 )
             }
+            SectionHeader("换源")
             SettingGroup {
                 SwitchRow(
                     title = "自动换源",
@@ -82,6 +85,7 @@ fun ReadingSettingsScreen(
                     position = SettingGroupPosition.Last,
                 )
             }
+            SectionHeader("搜索")
             SettingGroup {
                 // 关掉会顺带清空已有历史（见 AppPrefs.setSearchHistoryEnabled），副标题得把这个后果说在前面
                 SwitchRow(
