@@ -117,6 +117,14 @@ object ContentListDefaults {
         )
     }
 
+    /**
+     * 装在一张卡里（[groupedCardItem]）、又要标出选中项的行（详情页目录的当前章）：平时透明、让卡露出来，
+     * 选中时照 [colors] 换成淡强调底。底带被外面卡的 squircle 裁着，首尾行的圆角不会戳出去
+     */
+    @Composable
+    @ReadOnlyComposable
+    fun groupedColors(): ContentListColors = colors(containerColor = Color.Transparent)
+
     /** 标题字号：照 Miuix `BasicComponent` 的标题（headline1 = 17sp，Medium） */
     val titleStyle: TextStyle
         @Composable @ReadOnlyComposable
@@ -323,7 +331,11 @@ fun ContentListItem(
 /**
  * 目录章名行。详情 / 预览 / 阅读菜单共用，当前章走选中色。
  *
- * @param inset 为 true 时自带左右内缩与行距（详情页 LazyColumn 里夹着全宽 Header 时用）
+ * 页面上的目录（详情、预览）装进一张卡：`modifier = Modifier.groupedCardItem(i, n)`、`inset = false`、
+ * [colors] 给 [ContentListDefaults.groupedColors]、[corners] 给直角 —— 和书架列表、搜索结果同一种「灰底白卡」。
+ * 阅读菜单的目录面板保持一条一卡（面板里的选择列表照旧）。
+ *
+ * @param inset 为 true 时自带左右内缩与行距（一条一卡、夹在全宽内容之间时用）
  */
 @Composable
 fun ChapterListItem(
@@ -333,6 +345,8 @@ fun ChapterListItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     inset: Boolean = true,
+    colors: ContentListColors = ContentListDefaults.colors(),
+    corners: SquircleCorners = ContentListDefaults.Corners,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
     ContentListItem(
@@ -340,6 +354,8 @@ fun ChapterListItem(
         onClick = onClick,
         modifier = if (inset) modifier.then(ContentListDefaults.rowChrome()) else modifier,
         enabled = enabled,
+        colors = colors,
+        corners = corners,
         trailingContent = trailingContent,
         content = {
             Text(

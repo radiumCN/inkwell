@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.unit.Dp
 import com.radium.inkwell.ui.components.AppDropdownMenu
@@ -28,18 +28,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
-import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
+import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SquircleCorners
+import com.radium.inkwell.ui.components.ToolbarTitle
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.BookIntro
@@ -59,7 +64,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.radium.inkwell.ui.components.animationsEnabled
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
@@ -91,33 +95,40 @@ fun BookDetailScreen(
     val scope = rememberCoroutineScope()
     val motionOn = animationsEnabled()
 
-    val topBarScroll = rememberAppTopBarScroll()
+    // 窄栏，不用大标题栏：这一页的标题就是书名。从前停在顶部时是 32sp 的「书籍详情」压在 20sp 的书名上面 ——
+    // 两行标题，大的那行没有信息量。栏里的书名等头部的书名滚到栏底下才淡出来（见 ToolbarTitleReveal）
+    val reveal = rememberToolbarTitleReveal(listState)
     // 整页换上封面的强调色（只换 primary 一族，底色不动），见 CoverTintedTheme
     CoverTintedTheme(rememberCoverSeed(book?.coverPath)) {
         AppScaffold(
-            modifier = Modifier.topBarScroll(topBarScroll),
             topBar = {
-                // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画。
+                // 双栏布局里详情页是右侧面板，没有返回键。
                 // 顶栏是页面底色的玻璃：停在顶部时它糊的就是头部最上面那截封面，从上往下渐渐变清、化进头部（见 barBlur）
-                AppTopBar(
-                    "书籍详情",
-                    topBarScroll,
-                    onBack = onBack.takeIf { showBack },
-                ) {
-                    if (book?.type == BookType.NET) {
-                        AppIconButton(
-                            onClick = { viewModel.refresh() },
-                            enabled = !refreshing,
-                            // 刷新中图标换成转圈，名字跟着它走：转圈本身没有名字
-                            modifier = if (refreshing) Modifier.semantics { contentDescription = "正在刷新目录" } else Modifier,
-                        ) {
-                            if (refreshing) {
-                                AppLoadingIndicator(size = Dimens.buttonSpinner)
-                            } else {
-                                Icon(MiuixIcons.Refresh, contentDescription = "刷新目录")
+                AppToolbar(
+                    modifier = reveal.bar,
+                    navigationIcon = if (showBack) {
+                        { BackButton(onClick = onBack) }
+                    } else {
+                        null
+                    },
+                    actions = {
+                        if (book?.type == BookType.NET) {
+                            AppIconButton(
+                                onClick = { viewModel.refresh() },
+                                enabled = !refreshing,
+                                // 刷新中图标换成转圈，名字跟着它走：转圈本身没有名字
+                                modifier = if (refreshing) Modifier.semantics { contentDescription = "正在刷新目录" } else Modifier,
+                            ) {
+                                if (refreshing) {
+                                    AppLoadingIndicator(size = Dimens.buttonSpinner)
+                                } else {
+                                    Icon(MiuixIcons.Refresh, contentDescription = "刷新目录")
+                                }
                             }
                         }
-                    }
+                    },
+                ) {
+                    ToolbarTitle(book?.title.orEmpty(), Modifier.graphicsLayer { alpha = reveal.titleAlpha })
                 }
             },
             snackbarHost = { AppSnackbarHost(snackbar) },
@@ -153,6 +164,7 @@ fun BookDetailScreen(
                 item {
                     Header(
                         book = b,
+                        titleModifier = reveal.title,
                         topInset = padding.calculateTopPadding(),
                         chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
                         cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
@@ -163,29 +175,25 @@ fun BookDetailScreen(
                     )
                 }
                 item {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = Dimens.rowHorizontal, end = Dimens.gapS),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
-                            "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
-                            Modifier.weight(1f).padding(vertical = Dimens.gapS),
-                            style = MiuixTheme.textStyles.headline2,
-                            fontWeight = FontWeight.Medium,
-                        )
+                    // 分组小标题，和设置页、书源页的一样（从前是 16sp 的一行字 + 分隔线）
+                    SectionHeader(
+                        // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
+                        "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
                         // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
                         // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
-                        if (currentPos >= 0) {
-                            AppTextButton("定位当前章", onClick = {
-                                val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
-                                scope.launch {
-                                    if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
-                                }
-                            })
-                        }
-                    }
-                    HorizontalDivider()
+                        trailing = if (currentPos >= 0) {
+                            {
+                                AppTextButton("定位当前章", onClick = {
+                                    val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
+                                    scope.launch {
+                                        if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                                    }
+                                })
+                            }
+                        } else {
+                            null
+                        },
+                    )
                 }
                 when {
                     // 还在读章节表：留白，别先画「没有章节」再换成目录
@@ -232,12 +240,17 @@ fun BookDetailScreen(
                         }
                     }
                     else -> {
-                        items(chapters, key = { it.index }) { chapter ->
+                        // 整个目录装进一张卡（灰底白卡，同书架列表、搜索结果），从前是一章一张小卡、卡间留缝
+                        itemsIndexed(chapters, key = { _, it -> it.index }) { i, chapter ->
                             val current = chapter.index == b.readChapterIndex && b.readAt > 0
                             ChapterListItem(
                                 title = chapter.title,
                                 selected = current,
                                 onClick = { viewModel.openChapter(chapter.index) },
+                                modifier = Modifier.groupedCardItem(i, chapters.size),
+                                inset = false,
+                                colors = ContentListDefaults.groupedColors(),
+                                corners = SquircleCorners.Square,
                             )
                         }
                     }
@@ -263,6 +276,8 @@ private fun offlineRangeHint(range: OfflineRange): String = when (range) {
 @Composable
 private fun Header(
     book: BookEntity,
+    /** 挂在书名上：它滚到栏底下以后，栏里才淡出书名（ToolbarTitleReveal） */
+    titleModifier: Modifier,
     topInset: Dp,
     chapterCount: Int,
     cachedCount: Int,
@@ -274,10 +289,12 @@ private fun Header(
     Box {
         // 底的终点是页面底 surface（Miuix 的分层），与 Scaffold 画布同色，化进去不留边
         CoverHeaderBackground(book.title, book.coverPath, Modifier.matchParentSize())
+        // 左右与下面目录卡的边对齐（listHorizontal）：封面、按钮、简介和目录卡是一条竖线。
+        // 从前是 screenPadding（20dp），比目录卡（16dp）往里缩一截，两个按钮比下面的卡窄
         Column(
             Modifier
                 .padding(top = topInset)
-                .padding(Dimens.screenPadding),
+                .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.screenPadding),
             verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
         ) {
             Row {
@@ -295,6 +312,7 @@ private fun Header(
                 Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                     Text(
                         book.title,
+                        modifier = titleModifier,
                         style = MiuixTheme.textStyles.title3,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

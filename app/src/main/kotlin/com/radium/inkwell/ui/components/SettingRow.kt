@@ -4,13 +4,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -47,18 +50,40 @@ fun SectionHeader(
     modifier: Modifier = Modifier,
     /** 调用方的内容 Column 已整体内缩时设 false，避免左右留白叠加两次 */
     horizontalInset: Boolean = true,
+    /**
+     * 行尾的一个文字按钮（目录的「定位当前章」）。有它时这一行垫到触控高度、按钮与小标题竖直居中，
+     * 按钮的字右边对齐卡片里的字（行尾留白扣掉按钮自带的 [Dimens.gapM] 内边距）
+     */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val start = if (horizontalInset) Dimens.listHorizontal * 2 else Dimens.listHorizontal
-    SmallTitle(
-        text = text,
-        modifier = modifier,
-        insideMargin = PaddingValues(
-            start = start,
-            end = start,
-            top = Dimens.sectionHeaderTop,
-            bottom = Dimens.gapS,
-        ),
-    )
+    if (trailing == null) {
+        SmallTitle(
+            text = text,
+            modifier = modifier,
+            insideMargin = PaddingValues(
+                start = start,
+                end = start,
+                top = Dimens.sectionHeaderTop,
+                bottom = Dimens.gapS,
+            ),
+        )
+        return
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(top = Dimens.gapS, end = start - Dimens.gapM)
+            .heightIn(min = Dimens.touchTarget),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SmallTitle(
+            text = text,
+            modifier = Modifier.weight(1f),
+            insideMargin = PaddingValues(start = start, end = Dimens.gapS),
+        )
+        trailing()
+    }
 }
 
 /**

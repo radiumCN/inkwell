@@ -12,16 +12,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
-import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
+import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SquircleCorners
+import com.radium.inkwell.ui.components.ToolbarTitle
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.PrimaryButton
@@ -68,10 +75,15 @@ fun BookPreviewScreen(
         viewModel.openReader.collect(onRead)
     }
 
-    val topBarScroll = rememberAppTopBarScroll()
+    // 窄栏，栏里的书名等头部的书名滚到栏底下才淡出 —— 同书籍详情（理由见那边与 ToolbarTitleReveal）
+    val listState = rememberLazyListState()
+    val reveal = rememberToolbarTitleReveal(listState)
     AppScaffold(
-        modifier = Modifier.topBarScroll(topBarScroll),
-        topBar = { AppTopBar("书籍详情", topBarScroll, onBack = onBack) },
+        topBar = {
+            AppToolbar(modifier = reveal.bar, navigationIcon = { BackButton(onClick = onBack) }) {
+                ToolbarTitle(state.title, Modifier.graphicsLayer { alpha = reveal.titleAlpha })
+            }
+        },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         when {
@@ -113,6 +125,7 @@ fun BookPreviewScreen(
             // 只让开两侧：顶栏高度垫在列表开头、导航栏垫在末尾，内容滚到玻璃顶栏与手势条下面（见 AppScaffold）
             else -> LazyColumn(
                 Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
+                state = listState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding(),
                     bottom = padding.calculateBottomPadding(),
@@ -125,6 +138,7 @@ fun BookPreviewScreen(
                 item {
                     Header(
                         state, viewModel,
+                        titleModifier = reveal.title,
                         loading = state.loading,
                     )
                 }
@@ -147,20 +161,18 @@ fun BookPreviewScreen(
                     }
                     return@LazyColumn
                 }
-                item {
-                    Text(
-                        "目录 · 共 ${state.chapters.size} 章",
-                        Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
-                        style = MiuixTheme.textStyles.headline2,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-                items(state.chapters, key = { it.index }) { chapter ->
+                // 目录：分组小标题 + 整个装进一张卡，同书籍详情
+                item { SectionHeader("目录 · 共 ${state.chapters.size} 章") }
+                itemsIndexed(state.chapters, key = { _, it -> it.index }) { i, chapter ->
                     ChapterListItem(
                         title = chapter.title,
                         selected = false,
                         onClick = { viewModel.read(chapter.index) },
+                        modifier = Modifier.groupedCardItem(i, state.chapters.size),
                         enabled = !state.busy,
+                        inset = false,
+                        colors = ContentListDefaults.groupedColors(),
+                        corners = SquircleCorners.Square,
                     )
                 }
                 item { Spacer(Modifier.height(Dimens.gapXL)) }
@@ -214,12 +226,15 @@ private fun SwitchSourceButton(
 private fun Header(
     state: BookPreviewUiState,
     viewModel: BookPreviewViewModel,
+    /** 挂在书名上：它滚到栏底下以后，栏里才淡出书名（ToolbarTitleReveal） */
+    titleModifier: Modifier,
     /** 详情与目录还在取：书名等先按搜索结果画，按钮先置灰（没目录可读、可加） */
     loading: Boolean = false,
 ) {
 
+    // 左右与下面目录卡的边对齐（listHorizontal），同书籍详情
     Column(
-        Modifier.padding(Dimens.screenPadding),
+        Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Row {
@@ -237,6 +252,7 @@ private fun Header(
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                 Text(
                     state.title,
+                    modifier = titleModifier,
                     style = MiuixTheme.textStyles.title3,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
