@@ -18,11 +18,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.detect.FormField
-import com.radium.inkwell.core.source.isPrivateNetworkHost
-import com.radium.inkwell.core.source.isPrivateNetworkLiteral
+import com.radium.inkwell.data.source.WebViewNetworkGuard
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
-import java.util.concurrent.ConcurrentHashMap
 
 /** 网页里提交的一次表单（[WebMode.Capture] 下报上来） */
 data class CapturedForm(val action: String, val method: String, val charset: String?, val fields: List<FormField>)
@@ -42,10 +39,10 @@ enum class WebMode {
  * 向导里的网页：用户在这里搜一次（P2），或者点一下告诉向导「目录 / 正文在这」（P3）。
  *
  * 和阅读器的渲染回退（WebViewPageRenderer）是两回事 —— 那个是后台无界面地跑完脚本取 HTML，
- * 这个是给人看、给人点的。但有两条照抄它：
+ * 这个是给人看、给人点的。但有两条与它一致：
  * - **UA 一致**：用抓取客户端的 [SourceHttpClient.DEFAULT_UA]。站点按 UA 给不同的页面，用户在这里看到的
  *   和引擎抓到的必须是同一套，否则用户点中的链接在静态页里根本找不到。
- * - **内网拦截**：页面里的脚本同样不许碰内网（请求在 IO 线程上按主机解析判断，跳转只能认字面量）。
+ * - **内网拦截**：页面里的脚本同样不许碰内网，与它共用 [WebViewNetworkGuard]。
  *
  * 脚本桥对页面上的**所有** frame 开放（广告 iframe 也调得到）。所以桥只上报数据、不做任何事；
  * 报上来的东西由 ViewModel 校验（表单必须是这个站的、点选结果要在静态页上重认一遍）。
@@ -97,24 +94,29 @@ fun WizardWebView(
                     BRIDGE,
                 )
                 webViewClient = object : WebViewClient() {
-                    private val verdicts = ConcurrentHashMap<String, Boolean>()
+                    private val guard = WebViewNetworkGuard()
 
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                        val host = request.url.host ?: return null
-                        val blocked = verdicts.getOrPut(host) { isPrivateNetworkHost(host) }
-                        return if (blocked) blockedResponse() else null
-                    }
+                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                        guard.intercept(request)
 
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                        request.url.host?.let { isPrivateNetworkLiteral(it) } ?: false
+                        guard.blocksNavigation(request)
 
                     override fun onPageStarted(view: WebView, startedUrl: String, favicon: Bitmap?) {
                         pageUrl(startedUrl)
                     }
 
+                    /**
+                     * 页面第一次画出来就装上脚本：用户只点得到看得见的东西。从前等 [onPageFinished] ——
+                     * 广告多的页要等所有子资源加载完，这期间点目录里的一章会真的跳走、提交的 POST 搜索也没记下。
+                     * 每页都要重装（脚本随页面一起没了）；两处都装，靠脚本里的标记只装一次。
+                     */
+                    override fun onPageCommitVisible(view: WebView, visibleUrl: String) {
+                        view.evaluateJavascript(script, null)
+                    }
+
                     override fun onPageFinished(view: WebView, finishedUrl: String) {
                         pageUrl(finishedUrl)
-                        // 每页都要重装：脚本随页面一起没了
                         view.evaluateJavascript(script, null)
                     }
                 }
@@ -124,10 +126,6 @@ fun WizardWebView(
         onRelease = { it.destroy() },
     )
 }
-
-private fun blockedResponse() = WebResourceResponse(
-    "text/plain", "utf-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)),
-)
 
 private fun parseForm(json: String): CapturedForm? = runCatching {
     val o = JSONObject(json)
@@ -148,17 +146,27 @@ private const val BRIDGE = "InkwellBridge"
 
 /**
  * 记下表单提交。两条路都要截：用户点按钮 / 回车走 `submit` 事件；站点脚本自己调 `form.submit()`
- * 不触发这个事件，所以把原型上的 submit 也包一层。重复注入（同一页 onPageFinished 来两次）靠标记挡掉。
+ * 不触发这个事件，所以把原型上的 submit 也包一层。重复注入（同一页装了两次）靠标记挡掉。
+ *
+ * 表单的 action / method / 编码 / 字段列表都从 `HTMLFormElement.prototype` 上的原生 getter 读，不读 `f.action`：
+ * 表单里有个 `<input name="action">` 时，`f.action` 拿到的是那个输入框（DOM clobbering），捕获被悄悄丢掉；
+ * 有 `name="method"` 的字段，POST 搜索就成了 GET。原生 getter 还顺手把 action 解析成了绝对地址。
  */
 private val CAPTURE_JS = """
     (function () {
       if (window.__inkwellCapture) return;
       window.__inkwellCapture = true;
+      var proto = HTMLFormElement.prototype;
+      function prop(f, name) {
+        var d = Object.getOwnPropertyDescriptor(proto, name);
+        return d && d.get ? d.get.call(f) : undefined;
+      }
       function report(f) {
         try {
           var fields = [];
-          for (var i = 0; i < f.elements.length; i++) {
-            var el = f.elements[i];
+          var els = prop(f, 'elements');
+          for (var i = 0; i < els.length; i++) {
+            var el = els[i];
             if (!el.name || el.disabled) continue;
             var t = (el.type || '').toLowerCase();
             if (t === 'submit' || t === 'button' || t === 'image' || t === 'reset' || t === 'file') continue;
@@ -166,16 +174,16 @@ private val CAPTURE_JS = """
             fields.push({ name: el.name, value: el.value || '', type: t });
           }
           $BRIDGE.onSubmit(JSON.stringify({
-            action: f.action || location.href,
-            method: f.method || 'get',
-            charset: f.acceptCharset || document.characterSet || '',
+            action: prop(f, 'action') || location.href,
+            method: prop(f, 'method') || 'get',
+            charset: prop(f, 'acceptCharset') || document.characterSet || '',
             fields: fields
           }));
         } catch (e) {}
       }
       document.addEventListener('submit', function (e) { report(e.target); }, true);
-      var native = HTMLFormElement.prototype.submit;
-      HTMLFormElement.prototype.submit = function () { report(this); return native.apply(this, arguments); };
+      var native = proto.submit;
+      proto.submit = function () { report(this); return native.apply(this, arguments); };
     })();
 """.trimIndent()
 

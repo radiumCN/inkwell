@@ -2,7 +2,6 @@ package com.radium.inkwell.data.source
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.net.Uri
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -12,9 +11,6 @@ import androidx.core.net.toUri
 import com.radium.inkwell.core.source.FetchedPage
 import com.radium.inkwell.core.source.PageRenderer
 import com.radium.inkwell.core.source.isPrivateNetworkHost
-import com.radium.inkwell.core.source.isPrivateNetworkLiteral
-import java.io.ByteArrayInputStream
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -87,22 +83,6 @@ class WebViewPageRenderer(
 
     private class RenderFailed(message: String) : Exception(message)
 
-    /** 一次渲染内的内网判定，按主机缓存：一页几十个子请求多半是同几个域，别每个都解析一次 */
-    private class HostGuard {
-        private val verdicts = ConcurrentHashMap<String, Boolean>()
-
-        fun blocks(uri: Uri): Boolean {
-            // data:/blob:/about: 没有主机，不出网；file:/content: 已在 settings 里关掉
-            val host = uri.host ?: return false
-            return verdicts.getOrPut(host) { isPrivateNetworkHost(host) }
-        }
-    }
-
-    /** 每次新建：响应体是流，复用会被上一次读空 */
-    private fun blockedResponse() = WebResourceResponse(
-        "text/plain", "utf-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)),
-    )
-
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(userAgent: String?): WebView = WebView(context).apply {
         settings.javaScriptEnabled = true
@@ -119,27 +99,19 @@ class WebViewPageRenderer(
     /** 加载页面，等 onPageFinished；主文档加载失败直接放弃 */
     private suspend fun loadPage(wv: WebView, url: String, headers: Map<String, String>) =
         suspendCancellableCoroutine { cont ->
-            val guard = HostGuard()
+            val guard = WebViewNetworkGuard()
             wv.webViewClient = object : WebViewClient() {
                 /**
-                 * 页面里的脚本、XHR、子框架同样不许碰内网。书源的 SSRF 防护只装在 OkHttp 上，
-                 * WebView 的请求由 Chromium 自己发，从前一路畅通：渲染一个公网页，它的脚本就能去读
-                 * `http://192.168.1.1/`，再由规则里的 `java.ajax` 把结果发回书源作者的服务器。
-                 * Android 17 起应用拿到局域网权限（WebDAV 连 NAS 要用）后，WebView 也跟着能连局域网。
-                 *
-                 * 这个回调跑在 WebView 的 IO 线程上，可以解析 DNS。
+                 * 页面里的脚本、XHR、子框架同样不许碰内网（见 [WebViewNetworkGuard]）：否则渲染一个公网页，
+                 * 它的脚本就能去读 `http://192.168.1.1/`，再由规则里的 `java.ajax` 把结果发回书源作者的服务器。
                  */
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest,
-                ): WebResourceResponse? = if (guard.blocks(request.url)) blockedResponse() else null
+                ): WebResourceResponse? = guard.intercept(request)
 
-                /**
-                 * 跳转（含主文档的 302）。这里在主线程上，做 DNS 会直接抛异常，只能认字面量：
-                 * 内网 IP、localhost。跳去的若是域名，新请求随后还会经过 [shouldInterceptRequest]。
-                 */
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                    request.url.host?.let { isPrivateNetworkLiteral(it) } ?: false
+                    guard.blocksNavigation(request)
 
                 override fun onPageFinished(view: WebView, finishedUrl: String) {
                     if (cont.isActive) cont.resume(Unit)
