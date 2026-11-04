@@ -49,12 +49,25 @@ class SiteAnalyzerTest {
 
     private fun engine() = BookSourceEngine(http, { emptyList() })
 
+    /** 假渲染器：/js/1234/ 渲染后才是完整的目录页 */
+    private val renderer = object : com.radium.inkwell.core.source.PageRenderer {
+        override suspend fun render(url: String, headers: Map<String, String>, userAgent: String?) =
+            if (url.contains("/js/1234/")) {
+                com.radium.inkwell.core.source.FetchedPage(url, 200, DetectFixtures.biqugeToc(), "utf-8")
+            } else {
+                null
+            }
+    }
+
     /** 两个站：PC 笔趣阁式（目录即详情页、正文分两页）、手机站（目录在另一页、目录分页） */
     private inner class Site : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse {
             val path = request.path.orEmpty()
             val body = when {
                 path == "/book/1234/" -> DetectFixtures.biqugeToc(chapters = 30, latest = 6)
+                // 目录要等脚本画出来的站：静态页是个空壳，见 [renderer]
+                path == "/js/1234/" -> "<html><head><title>加载中</title></head><body><div id=\"app\">加载中…</div></body></html>"
+                path == "/forbidden/" -> return MockResponse().setResponseCode(403)
                 path == "/book/1234/100001.html" -> DetectFixtures.brContent(paragraphs = 4, nextPage = "/book/1234/100001_2.html")
                 path == "/book/1234/100001_2.html" -> DetectFixtures.brContent(paragraphs = 3).replace("这是第", "后半页第")
                 path.startsWith("/book/1234/") -> DetectFixtures.brContent()
@@ -179,6 +192,55 @@ class SiteAnalyzerTest {
         val run = SiteAnalyzer(http).dryRun(rule, book.bookUrl, keyword = "剑")
         assertEquals(5, run.searchCount)
         assertEquals("剑之书1", run.samples[RuleField.SearchName]?.output)
+    }
+
+    /**
+     * 目录要渲染的站：引擎先静态抓一次（空的）、再渲染。从前每栏取第一次的记录 ——
+     * 概览说「目录 30 章」，章节列表那栏却是「0 个节点」，诱人去改一条本来没毛病的规则。
+     */
+    @Test
+    fun `dry run shows the rendered result on script drawn pages`() = runBlocking {
+        val (_, rule) = buildSource("$base/book/1234/")
+        val run = SiteAnalyzer(http, renderer).dryRun(rule, "$base/js/1234/", keyword = null)
+        assertEquals(30, run.chapterCount)
+        assertEquals("示例之书", run.samples[RuleField.BookName]?.output)
+        assertEquals("30 个节点", run.samples[RuleField.ChapterList]?.output)
+    }
+
+    /** 试抓要和正式引擎一样跑脚本、套全局净化：否则写 @js: 的规则试抓说不行，存进去却能用 */
+    @Test
+    fun `dry run runs scripts and global purify like the app engine`() = runBlocking {
+        val (book, rule) = buildSource("$base/book/1234/")
+        val scripted = RuleField.BookName.set(rule, "@js:'脚本书名'")
+        val analyzer = SiteAnalyzer(
+            http,
+            scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
+            globalPurify = { listOf(com.radium.inkwell.core.source.PurifyRule("正文", "内容", isRegex = false)) },
+        )
+        val run = analyzer.dryRun(scripted, book.bookUrl, keyword = null)
+        assertEquals("脚本书名", run.samples[RuleField.BookName]?.output)
+        assertTrue(run.samples[RuleField.Content]?.output.orEmpty().contains("这是第1段内容"))
+    }
+
+    /** 被拒（403、人机验证）不是网址填错了：要说清楚，别让用户去换网址 */
+    @Test
+    fun `blocked pages say why instead of blaming the url`() = runBlocking {
+        val e = kotlin.test.assertFailsWith<com.radium.inkwell.core.source.SourceException> {
+            SiteAnalyzer(http).analyzeBook("$base/forbidden/")
+        }
+        assertTrue(e.message.orEmpty().contains("拒绝"), e.message)
+    }
+
+    /** 点选围绕刚认过的那份页面重认，不再下载一遍（必要时还要排队等渲染） */
+    @Test
+    fun `picking does not download the page again`() = runBlocking {
+        val analyzer = SiteAnalyzer(http)
+        val book = analyzer.analyzeBook("$base/book/1234/")
+        val chapter = analyzer.analyzeChapter(book.tocCandidates.first().sampleChapter.url)
+        val before = server.requestCount
+        assertNotNull(analyzer.pickToc(book.tocUrl, book.tocCandidates.first().chapters[3].url))
+        assertNotNull(analyzer.pickContent(chapter.url, DetectFixtures.paragraph(2)))
+        assertEquals(before, server.requestCount)
     }
 
     // ---- 搜索 ----

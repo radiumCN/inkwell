@@ -10,6 +10,8 @@ import com.radium.inkwell.core.source.FetchTrace
 import com.radium.inkwell.core.source.RuleTrace
 import com.radium.inkwell.core.source.RuleTraceCollector
 import com.radium.inkwell.core.source.PageRenderer
+import com.radium.inkwell.core.source.PurifyRule
+import com.radium.inkwell.core.source.js.ScriptRuntime
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.SearchRuleSet
 import com.radium.inkwell.core.source.SourceException
@@ -93,6 +95,8 @@ data class ChapterPageAnalysis(
 class SiteAnalyzer(
     private val http: SourceHttpClient,
     private val renderer: PageRenderer? = null,
+    private val scriptRuntime: ScriptRuntime? = null,
+    private val globalPurify: (BookSourceRule) -> List<PurifyRule> = { emptyList() },
 ) {
 
     /**
@@ -103,7 +107,7 @@ class SiteAnalyzer(
 
     /** 公开入口自己切 IO（与 [com.radium.inkwell.core.source.BookSourceEngine] 同约定），调用方在哪个线程都安全 */
     suspend fun analyzeBook(url: String): BookPageAnalysis = withContext(Dispatchers.IO) {
-        val entry = load(url, render = false) ?: throw SourceException("打不开这个网址：$url")
+        val entry = loadEntry(url, "打不开这个网址")
         val book = bookPageOf(entry)
         val fromChapter = entry.location().takeIf { book !== entry }
         val plain = inspectBook(book, render = false).copy(fromChapterUrl = fromChapter)
@@ -114,7 +118,7 @@ class SiteAnalyzer(
     }
 
     suspend fun analyzeChapter(url: String): ChapterPageAnalysis = withContext(Dispatchers.IO) {
-        val doc = load(url, render = false) ?: throw SourceException("打不开这一章：$url")
+        val doc = loadEntry(url, "打不开这一章")
         val plain = inspectChapter(doc, render = false)
         val best = plain.contentCandidates.firstOrNull()?.textLength ?: 0
         if (best >= MIN_CONTENT_CHARS || renderer == null) return@withContext plain
@@ -158,21 +162,26 @@ class SiteAnalyzer(
     /**
      * 用户在网页上点了目录里的一章：围绕这条链接重认目录（[TocDetector.detectAround]）。
      * 网页（WebView）里的链接在静态 HTML 里找不到时，再用渲染后的页面认一次 —— 目录是脚本画出来的站就是这样。
+     * 用的是刚认过的那份页面（[recentPages]），点一下不再下载一遍。
      */
     suspend fun pickToc(tocUrl: String, linkUrl: String): TocCandidate? = withContext(Dispatchers.IO) {
-        load(tocUrl, render = false)?.let { TocDetector.detectAround(it, linkUrl) }
-            ?: if (renderer != null) load(tocUrl, render = true)?.let { TocDetector.detectAround(it, linkUrl) } else null
+        recallOrLoad(tocUrl, render = false)?.let { TocDetector.detectAround(it, linkUrl) }
+            ?: if (renderer != null) recallOrLoad(tocUrl, render = true)?.let { TocDetector.detectAround(it, linkUrl) } else null
     }
 
     /** 用户在网页上点了正文里的一段：围绕点中的文字重认正文块（[ContentDetector.detectAround]） */
     suspend fun pickContent(chapterUrl: String, snippet: String): ContentCandidate? = withContext(Dispatchers.IO) {
-        load(chapterUrl, render = false)?.let { ContentDetector.detectAround(it, snippet) }
-            ?: if (renderer != null) load(chapterUrl, render = true)?.let { ContentDetector.detectAround(it, snippet) } else null
+        recallOrLoad(chapterUrl, render = false)?.let { ContentDetector.detectAround(it, snippet) }
+            ?: if (renderer != null) recallOrLoad(chapterUrl, render = true)?.let { ContentDetector.detectAround(it, snippet) } else null
     }
+
+    /** 向导退出时调：清掉为点选留着的那几页 DOM，单例别一直攥着 */
+    fun forgetPages() = synchronized(recentPages) { recentPages.clear() }
 
     /**
      * 按 [rule] 用引擎把整条链路走一遍，记下每个字段取到了什么（见 [DryRun]）。
-     * 用的是带调试记录的**正式**引擎配置（同一个抓取客户端、同一个渲染回退），这里抓得到，加书后就抓得到。
+     * 引擎配置与正式的一样（同一个抓取客户端、脚本运行时、渲染回退、全局净化）：这里抓得到，加书后就抓得到；
+     * 少了脚本运行时，写 `@js:` 的规则在这里说不行、存进去却能用。
      *
      * @param keyword 非空且规则带搜索时，最后再搜一次
      */
@@ -180,12 +189,14 @@ class SiteAnalyzer(
         val traces = java.util.Collections.synchronizedList(ArrayList<RuleTrace>())
         val eng = BookSourceEngine(
             http,
+            globalPurify = globalPurify,
             trace = object : RuleTraceCollector {
                 override fun onFetch(trace: FetchTrace) = Unit
                 override fun onRule(trace: RuleTrace) {
                     traces += trace
                 }
             },
+            scriptRuntime = scriptRuntime,
             renderer = renderer,
         )
         val failures = LinkedHashMap<String, String>()
@@ -209,11 +220,17 @@ class SiteAnalyzer(
         } else {
             null
         }
-        val first = HashMap<Pair<String, String>, RuleTrace>()
-        for (t in traces.toList()) first.putIfAbsent(t.stage to t.fieldName, t)
+        // 每栏取第一条「取到了东西」的记录，都没取到才退回第一条。要渲染的站，引擎先静态抓一遍（全空）、
+        // 再渲染：只看第一条的话，概览说「目录 30 章」，章节列表那栏却是「0 个节点」，诱人去改一条没毛病的规则
+        val chosen = HashMap<Pair<String, String>, RuleTrace>()
+        for (t in traces.toList()) {
+            val key = t.stage to t.fieldName
+            val held = chosen[key]
+            if (held == null || (!foundSomething(held) && foundSomething(t))) chosen[key] = t
+        }
         val samples = HashMap<RuleField, FieldSample>()
         for (f in RuleField.entries) {
-            first[f.stage to f.traceName]?.let { samples[f] = FieldSample(it.output, it.error) }
+            chosen[f.stage to f.traceName]?.let { samples[f] = FieldSample(it.output, it.error) }
         }
         content?.elements
             ?.filterIsInstance<com.radium.inkwell.core.model.ContentElement.Paragraph>()
@@ -231,6 +248,13 @@ class SiteAnalyzer(
     } catch (e: Exception) {
         failures[name] = e.message ?: e.javaClass.simpleName
         null
+    }
+
+    /** 这条记录取到了东西：有输出、不是空串；列表规则的输出是「N 个节点」，0 个不算 */
+    private fun foundSomething(t: RuleTrace): Boolean {
+        val out = t.output ?: return false
+        if (out.isBlank()) return false
+        return !(t.fieldName == "list" && out.startsWith("0 "))
     }
 
     /**
@@ -293,27 +317,82 @@ class SiteAnalyzer(
     )
 
     /**
-     * 抓一页并解析。失败返回 null 由调用方决定怎么兜：入口页打不开要报错，
-     * 「查看目录」点进去打不开只是放弃这条路、用详情页上认出来的。取消照常往外抛。
+     * 抓一页并解析。失败返回 null 由调用方决定怎么兜：「查看目录」点进去打不开只是放弃这条路、
+     * 用详情页上认出来的。入口页走 [loadEntry]，要把原因说清。取消照常往外抛。
      */
-    private suspend fun load(url: String, render: Boolean): Document? {
-        val page: FetchedPage = try {
-            if (render) {
-                renderer?.render(url) ?: return null
-            } else {
-                http.fetch(url)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            return null
+    private suspend fun load(url: String, render: Boolean): Document? = try {
+        fetchDoc(url, render)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * 入口页（用户给的网址、样本章）：抓不到要说清为什么。被拒、证书坏了、内网、找不到这个站，
+     * 都不是「网址填错了」—— 从前一律报「打不开这个网址」，用户只会去换一个网址再试。
+     */
+    private suspend fun loadEntry(url: String, what: String): Document = try {
+        fetchDoc(url, render = false) ?: throw SourceException("$what：$url")
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: SourceException) {
+        throw e
+    } catch (e: Exception) {
+        throw SourceException(explainFailure(what, e), e)
+    }
+
+    private suspend fun fetchDoc(url: String, render: Boolean): Document? {
+        val page: FetchedPage = if (render) renderer?.render(url) ?: return null else http.fetch(url)
+        val doc = Jsoup.parse(page.bodyText, page.finalUrl)
+        synchronized(recentPages) {
+            recentPages[pageKey(url, render)] = doc
+            recentPages[pageKey(page.finalUrl, render)] = doc
         }
-        return Jsoup.parse(page.bodyText, page.finalUrl)
+        return doc
+    }
+
+    private suspend fun recallOrLoad(url: String, render: Boolean): Document? =
+        synchronized(recentPages) { recentPages[pageKey(url, render)] } ?: load(url, render)
+
+    private fun pageKey(url: String, render: Boolean) = (if (render) "R " else "S ") + url
+
+    /**
+     * 最近认过的几页（解析好的 DOM），只给点选读：用户在网页上点一下，要围绕它重认的正是刚认过的那份页面，
+     * 不必再下载一遍（目录要渲染的站还得和阅读器排队等 WebView）。识别入口照常现抓，
+     * 别把上一次向导的旧页面认给这一次；向导退出时 [forgetPages] 清掉。
+     */
+    private val recentPages = object : LinkedHashMap<String, Document>(RECENT_PAGES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Document>?): Boolean =
+            size > RECENT_PAGES
     }
 
     companion object {
         /** 静态页正文不到这么多字，多半是脚本渲染的，值得等一次 WebView */
         private const val MIN_CONTENT_CHARS = 100
+
+        /** 为点选留着的页数：书页、目录页、样本章，静态与渲染各一份 */
+        private const val RECENT_PAGES = 6
+
+        private val HTTP_STATUS = Regex("^HTTP (\\d{3})")
+
+        /** 抓取失败 → 给用户看的一句话（见 [loadEntry]） */
+        internal fun explainFailure(what: String, e: Exception): String {
+            val msg = e.message.orEmpty()
+            val status = HTTP_STATUS.find(msg)?.groupValues?.get(1)?.toInt()
+            return when {
+                // 内网拦截也是 UnknownHostException，得先于「找不到网站」判断
+                msg.startsWith("拒绝访问内网地址") -> "$what：这个地址指向本机或局域网，不允许访问"
+                status == 401 || status == 403 || status == 503 ->
+                    "$what：网站拒绝了访问（HTTP $status），可能要登录或人机验证"
+                status == 404 -> "$what：网站上没有这一页（HTTP 404），检查一下网址"
+                status != null -> "$what：网站出错了（HTTP $status）"
+                e is javax.net.ssl.SSLException -> "$what：网站的安全证书有问题"
+                e is java.net.UnknownHostException -> "$what：找不到这个网站，检查一下网址"
+                e is java.io.InterruptedIOException -> "$what：网站响应太慢"
+                else -> "$what：${msg.ifBlank { e.javaClass.simpleName }}"
+            }
+        }
 
         /** 试抓挑样本章的范围：开头这么多章里第一个正经章节（同 [TocCandidate.sampleChapter]） */
         private const val SAMPLE_WINDOW = 10

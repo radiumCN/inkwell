@@ -128,4 +128,27 @@ class SearchDetectorsTest {
         val d = SearchListDetector.detect(Jsoup.parse(DetectFixtures.searchSingle("剑"), "https://www.example.com/s"), "剑", "/book/#/")
         assertEquals(SearchDetection.TooFew(1), d)
     }
+
+    /** 按生成的规则在页面上取出所有结果的书名 —— 引擎就是这么取的：列表选出条目，书名规则在每条上求值 */
+    private fun titlesOf(html: String, rules: com.radium.inkwell.core.source.SearchRuleSet): List<String> {
+        val doc = Jsoup.parse(html, "https://www.example.com/search.php")
+        return LegadoSelector.elements(doc, rules.bookList!!)
+            .mapNotNull { LegadoSelector.strings(it, rules.name!!).firstOrNull() }
+    }
+
+    /** 每个链接自己就是一条时，同一个容器里的作者链接不能被当成书 */
+    @Test
+    fun `inline results do not pick up the author links`() {
+        val html = DetectFixtures.searchInline("剑", 3)
+        val r = found(html).rules
+        assertEquals(listOf("剑行1", "剑行2", "剑行3"), titlesOf(html, r))
+    }
+
+    /** 列表规则多选进来的条目（广告项）上，书名规则必须取不到东西，否则它就成了一条搜索结果 */
+    @Test
+    fun `an ad item in the list is not a result`() {
+        val html = DetectFixtures.searchWithAd("剑", 3)
+        val r = found(html).rules
+        assertEquals(listOf("剑项1", "剑项2", "剑项3"), titlesOf(html, r))
+    }
 }

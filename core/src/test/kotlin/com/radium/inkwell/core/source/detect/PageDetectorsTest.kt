@@ -25,6 +25,29 @@ class PageDetectorsTest {
         assertEquals(42, ChapterTitles.numberOf("正文 第四十二章 风起"))
         assertEquals(7, ChapterTitles.numberOf("007 夜行"))
         assertNull(ChapterTitles.numberOf("楔子"))
+        // 逐位写法：从前每一位都覆盖上一位，「二〇五」成了 5
+        assertEquals(205, ChapterTitles.parseNumber("二〇五"))
+        assertEquals(123, ChapterTitles.parseNumber("一二三"))
+        // 阿拉伯数字配单位、两个数字连着没有单位隔开：说不清是多少，返回 null 而不是猜一个
+        assertNull(ChapterTitles.parseNumber("12万"))
+        assertNull(ChapterTitles.parseNumber("二十一二"))
+    }
+
+    /** 逐位写的章节号解析错了，正序目录会被当成倒序、整本书倒着读 */
+    @Test
+    fun `digit by digit chapter numbers keep an ascending toc ascending`() {
+        val digits = listOf("〇", "一", "二", "三", "四", "五", "六", "七", "八", "九")
+        val html = buildString {
+            append("<html><body><ul id=\"chapters\">")
+            // 整体升序、个位一路往下：只认最后一位的解析器会看成「9、8、7…」，判成倒序
+            for (n in listOf(109, 118, 127, 136, 145, 154, 163, 172)) {
+                val cn = n.toString().map { digits[it - '0'] }.joinToString("")
+                append("<li><a href=\"/b/9/$n.html\">第${cn}章 夜行</a></li>")
+            }
+            append("</ul></body></html>")
+        }
+        val best = TocDetector.detect(doc(html, "https://www.example.com/b/9/")).first()
+        assertFalse(best.reversed)
     }
 
     @Test

@@ -109,8 +109,17 @@ val appModule = module {
         )
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
-    // 新建书源的页面识别：与引擎共用抓取客户端（同一套 UA、Cookie、私网防护）和 WebView 渲染回退
-    single { com.radium.inkwell.core.source.detect.SiteAnalyzer(http = get(), renderer = get()) }
+    // 新建书源的页面识别：与引擎共用抓取客户端（同一套 UA、Cookie、私网防护）、WebView 渲染回退、
+    // 脚本运行时与全局净化 —— 「高级」页的试抓要和加书后的正式引擎一个样
+    single {
+        val replaceRules = get<ReplaceRuleRepository>()
+        com.radium.inkwell.core.source.detect.SiteAnalyzer(
+            http = get(),
+            renderer = get(),
+            scriptRuntime = get(),
+            globalPurify = { source -> replaceRules.purifyFor(source) },
+        )
+    }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
     // 更新用的通用 HTTP 客户端（检查 + 下载安装包 + 反馈上报）
     single {

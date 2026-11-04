@@ -49,8 +49,9 @@ object SearchListDetector {
         val perLink = items.toSet().size < items.size || group.relTags.size == 1
         val rows = if (perLink) members.map { it.el } else items
 
-        val list = listRule(doc, group, rows, perLink) ?: return SearchDetection.TooFew(members.size)
-        val title = if (perLink) "" else titleSelector(rows, members.map { it.el }) ?: return SearchDetection.TooFew(members.size)
+        val titles = members.map { it.el }
+        val (list, title) = pickRules(doc, group, rows, titles, perLink, hrefFilterOf(members.first().url))
+            ?: return SearchDetection.TooFew(members.size)
         val header = if (!perLink) tableHeader(rows) else emptyMap()
         val rules = SearchRuleSet(
             bookList = list,
@@ -77,15 +78,42 @@ object SearchListDetector {
         return links.filter { SiteLinks.shapeOf(it.url) == dominant }
     }
 
-    // ---- 列表 ----
+    // ---- 列表 + 书名 ----
 
-    /** 选出每一条结果的规则：从短到长试，取第一个按顺序恰好选出这些条目的 */
-    private fun listRule(doc: Document, group: LinkGroup, rows: List<Element>, perLink: Boolean): String? {
+    /**
+     * 列表规则 + 书名选择器，取第一对「按引擎的取法正好取出这些书」的（见 [yieldsExactly]）。
+     *
+     * 两样要一起验：列表规则多选进来的条目（表头行、广告项）本身无害，只要书名选择器在它们上面取不到东西 ——
+     * 引擎拿不到书名就跳过这一条。从前只验了「列表按顺序选得到每一条结果」：同一个 `<p>` 里排着的作者链接、
+     * 和结果同 class 的广告项，都成了搜索结果。
+     */
+    private fun pickRules(
+        doc: Document,
+        group: LinkGroup,
+        rows: List<Element>,
+        titles: List<Element>,
+        perLink: Boolean,
+        hrefFilter: String?,
+    ): Pair<String, String>? {
+        val titleForms = if (perLink) listOf("") else titleForms(rows, titles, hrefFilter)
+        val listForms = listForms(group, rows, perLink, hrefFilter)
+        for (title in titleForms) {
+            for (list in listForms) {
+                if (yieldsExactly(doc, list, title, titles)) return list to title
+            }
+        }
+        return null
+    }
+
+    /** 列表规则的候选，从短到长 */
+    private fun listForms(group: LinkGroup, rows: List<Element>, perLink: Boolean, hrefFilter: String?): List<String> {
         val cSel = CssPaths.unique(group.container)
         val forms = if (perLink) {
-            listOf(
+            listOfNotNull(
                 "$cSel ${group.relTags.takeLast(2).joinToString(" ")}",
                 "$cSel > ${group.relTags.joinToString(" > ")}",
+                // 每个链接自己就是一条、旁边还排着作者链接：只能按地址把书挑出来
+                hrefFilter?.let { "$cSel a$it" },
             )
         } else {
             val tag = group.relTags[0]
@@ -93,26 +121,38 @@ object SearchListDetector {
                 .reduce { a, b -> a intersect b }
             shared.map { "$cSel > $tag.$it" } + "$cSel > $tag"
         }
-        return forms.distinct().map { "@css:$it" }.firstOrNull { rule ->
-            val got = LegadoSelector.elements(doc, rule)
-            // 表头行、广告行这类多出来的条目允许存在：书名规则在它们上面取不到东西，引擎会跳过
-            got.containsAllInOrder(rows)
-        }
+        return forms.distinct().map { "@css:$it" }
     }
-
-    private fun List<Element>.containsAllInOrder(expected: List<Element>): Boolean {
-        var i = 0
-        for (el in this) if (i < expected.size && el === expected[i]) i++
-        return i == expected.size
-    }
-
-    // ---- 书名 / 地址 ----
 
     /**
-     * 每条结果里恰好选中书名链接的选择器（不含提取器）。CSS 写法在前，读得懂、对小改版宽容；
-     * 都不行就按下标：`tag.td.0@tag.a.0` —— Legado 的下标作用于匹配集，表格里第几列第几个链接，稳。
+     * 按引擎的取法 —— 列表选出条目，每条上用书名选择器取元素（[title] 为空时条目自己就是书名链接）——
+     * 取出来的恰好是 [titles]、顺序一致。取不到的条目跳过（引擎也跳过），一条上取到两个就不行（引擎会把它们拼起来）。
      */
-    private fun titleSelector(rows: List<Element>, titles: List<Element>): String? {
+    private fun yieldsExactly(doc: Document, list: String, title: String, titles: List<Element>): Boolean {
+        val got = LegadoSelector.elements(doc, list).mapNotNull { row ->
+            if (title.isEmpty()) return@mapNotNull row
+            val hits = LegadoSelector.elements(row, title)
+            if (hits.size > 1) return false
+            hits.firstOrNull()
+        }
+        return got.size == titles.size && got.indices.all { got[it] === titles[it] }
+    }
+
+    /**
+     * 按书的地址挑链接的 CSS 条件：地址形状里第一个数字之前的那段（`/book/#/` → `[href*="/book/"]`）。
+     * 只剩一个 `/` 的形状（`/#.html`）挑不出什么，不用。
+     */
+    private fun hrefFilterOf(url: String): String? {
+        val literal = SiteLinks.shapeOf(url).substringBefore('#')
+        if (literal.length < 2 || '"' in literal) return null
+        return "[href*=\"$literal\"]"
+    }
+
+    /**
+     * 每条结果里恰好选中书名链接的选择器（不含提取器），按优先顺序列出所有验证过的。CSS 写法在前，读得懂、
+     * 对小改版宽容；都不行就按下标：`tag.td.0@tag.a.0` —— Legado 的下标作用于匹配集，表格里第几列第几个链接，稳。
+     */
+    private fun titleForms(rows: List<Element>, titles: List<Element>, hrefFilter: String?): List<String> {
         val forms = buildList {
             val linkClasses = titles.map { t -> t.classNames().filter(CssPaths::isStable).toSet() }.reduce { a, b -> a intersect b }
             linkClasses.forEach { add("@css:a.$it") }
@@ -126,10 +166,12 @@ object SearchListDetector {
                     add("@css:$parentTag a")
                 }
             }
+            // 和结果长得一样的广告项：只有按地址才分得开
+            hrefFilter?.let { add("@css:a$it") }
             add("@css:a")
             indexPath(rows.first(), titles.first())?.let { add(it) }
         }
-        return forms.distinct().firstOrNull { sel ->
+        return forms.distinct().filter { sel ->
             rows.indices.all { i -> LegadoSelector.elements(rows[i], sel).singleOrNull() === titles[i] }
         }
     }

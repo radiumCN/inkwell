@@ -196,4 +196,27 @@ internal object DetectFixtures {
 
     /** 只有一条结果 */
     fun searchSingle(keyword: String) = searchList(keyword, count = 1)
+
+    /** 老站「一行一本」：书名链接直接排在一个 <p> 里，每本后面跟着作者链接，没有包住一本书的元素 */
+    fun searchInline(keyword: String, count: Int = 3) = buildString {
+        append("<html><body>")
+        append(NAV)
+        append("""<p class="list">""")
+        for (n in 1..count) {
+            append("""<a href="/book/${4000 + n}/">${keyword}行$n</a> / <a href="/author/${90 + n}/">作者$n</a><br>""")
+        }
+        append("</p></body></html>")
+    }
+
+    /** 结果列表里夹着一条广告项：和结果同样是 li.item > a，只是链到别处 */
+    fun searchWithAd(keyword: String, count: Int = 3) = buildString {
+        append("<html><body>")
+        append(NAV)
+        append("""<ul class="books">""")
+        for (n in 1..count) {
+            append("""<li class="item"><a href="/book/${5000 + n}/">${keyword}项$n</a></li>""")
+            if (n == 1) append("""<li class="item"><a href="/promo/1.html">限时免费，点我领取</a></li>""")
+        }
+        append("</ul></body></html>")
+    }
 }

@@ -551,6 +551,11 @@ class SourceWizardViewModel(
         }
     }
 
+    /** 识别器是单例，为点选留着的那几页 DOM 跟着向导一起走 */
+    override fun onCleared() {
+        analyzer.forgetPages()
+    }
+
     /** 样本章认不出正文时给的话；认出来了返回 null */
     private fun chapterProblem(result: Result<ChapterPageAnalysis>): String? {
         result.exceptionOrNull()?.let { return failureText(it) }

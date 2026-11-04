@@ -42,17 +42,28 @@ internal object ChapterTitles {
         return LEADING_NUMBER.find(title)?.groupValues?.get(1)?.toIntOrNull()
     }
 
-    /** 阿拉伯数字（含全角）或中文数字（含大写）。混写、超出 Int 的返回 null */
+    /** 阿拉伯数字（含全角）或中文数字（含大写；带单位「一百零五」、逐位「一〇五」都认）。混写、超出 Int 的返回 null */
     fun parseNumber(raw: String): Int? {
         val s = raw.map { c -> if (c in '０'..'９') '0' + (c - '０') else c }.joinToString("")
         if (s.all { it.isDigit() }) return s.toIntOrNull()
+        // 没有十百千万：逐位写法「二〇五」「一二三」，一位一位读
+        if (s.none { it in CN_UNIT_VALUES }) {
+            return s.map { CN_DIGIT_VALUES[it] ?: return null }.joinToString("").toIntOrNull()
+        }
+        // 阿拉伯数字配单位（「12万」）说不清是多少，不猜
+        if (s.any { it in '0'..'9' }) return null
         var total = 0L
         var section = 0L
         var number = 0L
+        var pending = false
         for (c in s) {
             val digit = CN_DIGIT_VALUES[c]
             if (digit != null) {
+                // 「一百零三」的零只是占位；两个非零数字连着、中间没有单位（「二十一二」）就不是个数
+                if (digit == 0) continue
+                if (pending) return null
                 number = digit.toLong()
+                pending = true
                 continue
             }
             when (val unit = CN_UNIT_VALUES[c] ?: return null) {
@@ -65,6 +76,7 @@ internal object ChapterTitles {
                 else -> section += (if (number == 0L && unit == 10) 1L else number) * unit
             }
             number = 0
+            pending = false
         }
         val v = total + section + number
         return if (v > Int.MAX_VALUE) null else v.toInt()
