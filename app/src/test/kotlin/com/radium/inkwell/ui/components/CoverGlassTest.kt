@@ -5,7 +5,6 @@ import androidx.compose.ui.graphics.luminance
 import com.radium.inkwell.ui.theme.AppThemes
 import top.yukonga.miuix.kmp.theme.Colors
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -123,20 +122,5 @@ class CoverGlassTest {
             assertTrue(contrast(s.secondaryVariant, floor) >= 4.5f, "提示胶囊正文对比不足 dark=$dark")
             assertTrue(contrast(action, floor) >= 4.5f, "提示胶囊操作键推不到 4.5:1 dark=$dark action=$action")
         }
-    }
-
-    @Test
-    fun `顶栏只在底边那一条里淡出`() {
-        val fade = 48f
-        // 收起的窄栏（状态栏 + 52dp，约 3 倍密度）：满强度一直到离底边 fade 处
-        val collapsed = barFadeGradient(heightPx = 288f, fadePx = fade)
-        assertEquals(1f - fade / 288f, collapsed.startFraction, 1e-4f)
-        assertEquals(1f, collapsed.endFraction)
-        // 展开的大标题栏更高，淡出带的绝对高度不变
-        val expanded = barFadeGradient(heightPx = 480f, fadePx = fade)
-        assertEquals(fade, (expanded.endFraction - expanded.startFraction) * 480f, 1e-2f)
-        // 还没量出来 / 矮过淡出带：整条都在淡，起止点也不能相等（ProgressiveBlur 不收）
-        assertEquals(0f, barFadeGradient(heightPx = 0f, fadePx = fade).startFraction)
-        assertEquals(0f, barFadeGradient(heightPx = 30f, fadePx = fade).startFraction)
     }
 }

@@ -8,16 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
@@ -92,48 +86,39 @@ fun AppScaffold(
 }
 
 /**
- * 栏的毛玻璃：对 [LocalBarBackdrop] 取样，叠一层 80% 的栏底色（Miuix 示例 App 的参数）。
+ * 栏的毛玻璃：对 [LocalBarBackdrop] 取样的**渐进**模糊 —— 状态栏那头糊得最重，往下越来越清，到栏底边糊和叠色
+ * 一起淡到零，内容是从栏底下一点点化进去的，没有一道「栏的下边」。参数照 Miuix 示例 App 设置里的
+ * 「Progressive」顶栏（`BlurredBar`）：渐变铺满整条栏、曲线 2.2（前大半截几乎满强度，到下面才快速变清），
+ * 叠一层三成的栏底色；半径取示例模糊页 Progressive Blur 那一档的 20。
  * 不在 [AppScaffold] 里时原样返回 —— 调用方此时该给栏实色底。
  * [tint] 自带的透明度会乘进去：关于页停在顶部时传透明色，栏就只糊不叠色，彩色头部从栏底下透上来。
  *
- * 是**渐进**模糊（miuix-blur 的 progressiveTextureBlur，Miuix 文档点名的「导航栏、边缘淡出」用法）：栏的主体满强度，
- * 只在最底下 [BAR_FADE] 那一条里糊和叠色一起淡到零。内容滚进栏底下时是慢慢化进去的，栏底边不再是一道硬线。
- *
- * 淡出带按 dp 定，不按比例：大标题栏收起前后高度差一倍多，按比例的话展开时淡出带会伸进大标题那一行。
- * 也不往栏外面伸：停在顶部时内容的第一行就贴着栏底边，伸出去的那截会把它糊掉一条边。16dp 落在窄栏标题
- * 下面的留白里（52dp 的行、标题上下各留十几 dp），渐变曲线是 smoothstep，开头那截几乎还是满强度，标题底下照样糊得住。
+ * 从前是「满强度 + 八成底色，只在最底下 16dp 里淡出」：八成底色基本就是一条实色栏，16dp 的淡出在手机上看不出来，
+ * 被指出「渐变没有实现」。渐变按比例铺满整条，大标题栏折叠时跟着高度一起伸缩，不用量高度。
+ * 标题那一行落在渐变的后半截，背后的内容只糊了一半 —— 这正是 HyperOS 的样子。放进 bottomContent 的东西落在
+ * 最清的那一头：chip、搜索框自己有底色，不靠栏托字；纯文字的那几条（搜索页的结果数）列表滚上来时背后几乎是原样。
  */
 @Composable
 internal fun Modifier.barBlur(tint: Color): Modifier {
     val backdrop = LocalBarBackdrop.current ?: return this
     val colors = BlurDefaults.blurColors(blendColors = listOf(BlendColorEntry(color = tint.copy(alpha = tint.alpha * BAR_TINT_ALPHA))))
-    val fadePx = with(LocalDensity.current) { BAR_FADE.toPx() }
-    // 大标题栏随滚动折叠，高度每帧在变：读到最新的高度才换得出那条按 dp 算的淡出带
-    var heightPx by remember { mutableIntStateOf(0) }
-    val gradient = remember(heightPx, fadePx) { barFadeGradient(heightPx.toFloat(), fadePx) }
-    return this
-        .onSizeChanged { heightPx = it.height }
-        .progressiveTextureBlur(
-            backdrop = backdrop,
-            shape = RectangleShape,
-            blurRadius = BAR_BLUR_RADIUS,
-            gradient = gradient,
-            colors = colors,
-        )
+    return progressiveTextureBlur(
+        backdrop = backdrop,
+        shape = RectangleShape,
+        blurRadius = BAR_BLUR_RADIUS,
+        gradient = BAR_GRADIENT,
+        colors = colors,
+    )
 }
-
-/** 从上往下：满强度一直到离底边 [fadePx] 处，再淡到底边为零。栏还没量出来（或矮过淡出带）时整条都在淡 */
-internal fun barFadeGradient(heightPx: Float, fadePx: Float): ProgressiveBlur =
-    ProgressiveBlur.Top.copy(startFraction = if (heightPx > fadePx) 1f - fadePx / heightPx else 0f)
 
 /** 当前栏是否走毛玻璃（是的话栏自己的底色要给透明） */
 @Composable
 @ReadOnlyComposable
 internal fun barBlurActive(): Boolean = LocalBarBackdrop.current != null
 
-private const val BAR_BLUR_RADIUS = 25f
-private val BAR_FADE = Dimens.gapL
-private const val BAR_TINT_ALPHA = 0.8f
+private const val BAR_BLUR_RADIUS = 20f
+private const val BAR_TINT_ALPHA = 0.3f
+private val BAR_GRADIENT = ProgressiveBlur.Top.copy(curve = 2.2f)
 
 /**
  * 页面主滚动区的 HyperOS 手感：拉到头的弹性回弹 + 甩到头轻震一下。挂在 `LazyColumn` / `verticalScroll` 的

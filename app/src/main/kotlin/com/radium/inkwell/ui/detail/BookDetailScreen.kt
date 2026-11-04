@@ -98,7 +98,7 @@ fun BookDetailScreen(
             modifier = Modifier.topBarScroll(topBarScroll),
             topBar = {
                 // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画。
-                // 顶栏是页面底色的玻璃：停在顶部时它糊的就是头部最上面那截封面，栏底边再渐进地化进头部（见 barBlur）
+                // 顶栏是页面底色的玻璃：停在顶部时它糊的就是头部最上面那截封面，从上往下渐渐变清、化进头部（见 barBlur）
                 AppTopBar(
                     "书籍详情",
                     topBarScroll,

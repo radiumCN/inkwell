@@ -40,7 +40,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * **颜色跟内容区走**：默认 `surface`（与 Miuix `Scaffold` 默认画布、也就是页面底一致）。
  * 页面底若另取了色（阅读相关的纸色页），[containerColor] 传同一个，否则顶栏与内容之间一道缝。
- * 在 [AppScaffold] 里时顶栏是**毛玻璃**：栏本身透明，对滚到下面的内容取样模糊、再叠一层八成的 [containerColor]。
+ * 在 [AppScaffold] 里时顶栏是**毛玻璃**：栏本身透明，对滚到下面的内容做渐进模糊（上重下轻）、叠一层淡淡的 [containerColor]（见 barBlur）。
  *
  * [bottomContent] 放「贴在标题下面、不随内容滚走」的东西（分类 chip 条、页签）：放进顶栏，
  * 列表就能从它下面滚过去、一起被毛玻璃盖住；放在内容区顶上的话，那一截永远挡着列表。
