@@ -1,7 +1,6 @@
 package com.radium.inkwell.ui.bookshelf
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +36,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 
 /**
  * 书架顶上的「继续阅读」：最近在读的那本放大摆出来，点一下回到上次的位置。
@@ -70,8 +70,7 @@ internal fun ContinueReadingCard(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(AppShapes.large)
-            .background(MiuixTheme.colorScheme.primaryContainer)
+            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge)
             // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
             .semantics(mergeDescendants = true) {}
             .combinedClickable(

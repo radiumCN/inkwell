@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import com.radium.inkwell.ui.theme.AppShapes
@@ -23,12 +22,13 @@ import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.clickable
+import top.yukonga.miuix.kmp.squircle.squircleClip
 
 /**
  * 主按钮：Miuix 实心强调色按钮（`buttonColorsPrimary`），带加载态。
@@ -85,6 +85,9 @@ fun SecondaryButton(
 /**
  * 卡片里的小号实心按钮（阅读设置的字号加减）。底色是 `surfaceContainerHighest` ——
  * 和同一张卡里 [SegmentedChoice] 的未选中段同一档，不是卡片上再浮一块默认按钮灰。
+ *
+ * 高度与圆角也对齐 [SegmentedChoice] 的槽（48dp、[AppShapes.radiusMedium]）：它俩在阅读设置里上下挨着，
+ * Miuix 按钮默认的 16dp 圆角配 12dp 的槽，同一张卡里两种弯法，装上就被指出「圆角不统一」。
  */
 @Composable
 fun TonalButton(
@@ -97,7 +100,10 @@ fun TonalButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        minHeight = Dimens.buttonMinHeight,
+        cornerRadius = AppShapes.radiusMedium,
+        minHeight = Dimens.touchTarget,
+        // 上下不留内边距、高度交给 minHeight：默认的 13dp 上下边距加上 17sp 的行高会撑到 49~50dp，比槽高出一线
+        insideMargin = PaddingValues(horizontal = Dimens.gapL),
         colors = ButtonDefaults.buttonColors(
             color = scheme.surfaceContainerHighest,
             contentColor = scheme.onSurfaceContainerHighest,
@@ -164,12 +170,12 @@ fun BackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
 /**
  * 行内文字按钮（展开/收起、撤销、停止校验、书籍行尾的「加入」）：强调色文字、无底色，按下时压一层 Miuix 反馈。
  *
- * Miuix 的 `TextButton` 只收一个字符串、而且是**有底色**的按钮，不是这种文字链；这里用可点 [Surface] 自己排。
+ * Miuix 的 `TextButton` 只收一个字符串、而且是**有底色**的按钮，不是这种文字链；这里自己排。
+ * 按压压暗的那一块裁成 [AppShapes.radiusMedium] 的 squircle（和 Miuix 按钮同一种弯法）。
  * 不要拿它冒充 [PrimaryButton] / [SecondaryButton] —— 那是实心主操作。
  *
  * 可点高度保底 [Dimens.touchTarget]（文字本身只有一行高），左右留 [Dimens.gapM]。
- * 读屏角色要自己补：Miuix 可点 Surface 的 clickable 不带 role（它的 Button / IconButton 才带），
- * 不补的话读屏念不出「按钮」，听着不像能点的东西。
+ * 读屏角色要自己补（clickable 的 role）：不补的话读屏念不出「按钮」，听着不像能点的东西。
  *
  * @param contentColor 文字色。默认强调色；危险操作（停止、删除）传 `error`
  */
@@ -182,18 +188,14 @@ fun AppTextButton(
     contentColor: Color = MiuixTheme.colorScheme.primary,
     content: @Composable RowScope.() -> Unit,
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier
-            .defaultMinSize(minHeight = Dimens.touchTarget)
-            .semantics { role = Role.Button },
-        enabled = enabled,
-        shape = AppShapes.medium,
-        color = Color.Transparent,
-        contentColor = if (enabled) contentColor else contentColor.copy(alpha = contentColor.alpha * DISABLED_ALPHA),
-    ) {
+    val tint = if (enabled) contentColor else contentColor.copy(alpha = contentColor.alpha * DISABLED_ALPHA)
+    CompositionLocalProvider(LocalContentColor provides tint) {
         Box(
-            Modifier.defaultMinSize(minHeight = Dimens.touchTarget).padding(contentPadding),
+            modifier
+                .defaultMinSize(minHeight = Dimens.touchTarget)
+                .squircleClip(AppShapes.radiusMedium)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .padding(contentPadding),
             contentAlignment = Alignment.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, content = content)

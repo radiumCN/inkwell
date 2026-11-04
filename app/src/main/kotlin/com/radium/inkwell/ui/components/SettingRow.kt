@@ -1,8 +1,6 @@
 package com.radium.inkwell.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,16 +8,12 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -39,7 +33,6 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
-import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -84,16 +77,16 @@ enum class SettingGroupPosition {
 }
 
 /**
- * 组内行的切角：从 [SettingGroup] 用的 [AppShapes.large] 直接派生，只把不该圆的那一侧压成直角。
- * 哪天组卡的圆角改了，组内行的按压反馈跟着变，两层角对得上。
+ * 组内行的切角：从 [SettingGroup] 的圆角（[AppShapes.radiusLarge]）直接派生，只把不该圆的那一侧压成直角。
+ * 哪天组卡的圆角改了，组内行跟着变，两层角对得上。是 squircle 的角（[squircleSurface]），和 Miuix 卡片同一种弯法。
  */
-internal fun settingGroupItemShape(position: SettingGroupPosition): Shape {
-    val group = AppShapes.large
+internal fun settingGroupItemCorners(position: SettingGroupPosition): SquircleCorners {
+    val r = AppShapes.radiusLarge
     return when (position) {
-        SettingGroupPosition.Alone -> group
-        SettingGroupPosition.First -> group.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
-        SettingGroupPosition.Middle -> RectangleShape
-        SettingGroupPosition.Last -> group.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize)
+        SettingGroupPosition.Alone -> SquircleCorners.all(r)
+        SettingGroupPosition.First -> SquircleCorners(topStart = r, topEnd = r, bottomEnd = 0.dp, bottomStart = 0.dp)
+        SettingGroupPosition.Middle -> SquircleCorners.Square
+        SettingGroupPosition.Last -> SquircleCorners(topStart = 0.dp, topEnd = 0.dp, bottomEnd = r, bottomStart = r)
     }
 }
 
@@ -162,7 +155,7 @@ fun SettingRow(
     trailing: @Composable (() -> Unit)? = null,
     position: SettingGroupPosition? = null,
     /**
-     * 行首图标，放在淡强调色的圆角方底里（[SettingIcon]）。只给设置主页那种「一列入口」用：十几行纯文字长得一模一样，
+     * 行首图标（[SettingIcon]，光秃秃的线条图标，不垫底板）。只给设置主页那种「一列入口」用：十几行纯文字长得一模一样，
      * 找一项只能挨行读，图标是扫一眼就能落上去的锚点。二级页保持纯文字 —— 每页就几行，图标只会添乱。
      */
     icon: ImageVector? = null,
@@ -264,8 +257,7 @@ private fun RowValue(text: String) {
 @Composable
 private fun Modifier.standaloneRowCard(): Modifier = this
     .then(ContentListDefaults.rowChrome())
-    .clip(ContentListDefaults.Shape)
-    .background(settingsCardColor())
+    .squircleSurface(settingsCardColor(), ContentListDefaults.Corners)
 
 /**
  * 分组卡里一整块不是「行」的内容：表单（输入框 + 按钮）、分段按钮、说明文字。
@@ -307,24 +299,20 @@ fun SettingFootnote(
 }
 
 /**
- * 设置行的行首图标：淡强调底（`tertiaryContainer`）的圆角方块 + 强调色图标 —— HyperOS 设置页的彩色小方块，
- * 只是不一行一个颜色：一页十来个图标全是饱和色，强调就不成其为强调了。纯装饰，不进读屏（行标题就是名字）。
+ * 设置行的行首图标：线条图标本身，不垫底板，颜色与标题同一个 `onSurface`。
+ *
+ * 从前垫过一块淡强调色的圆角方块（照 HyperOS 设置页的彩色小方块），装上后的反馈是「图标外面套了个容器」——
+ * HyperOS 那些方块是图标自己的画面（一图一色、图形撑满），把单色线条图标放进一块同色系淡底里，看着只是多了一层框。
+ * 也别给强调色：一页十来个图标全是强调色，强调就不成其为强调了。纯装饰，不进读屏（行标题就是名字）。
  */
 @Composable
 private fun SettingIcon(icon: ImageVector) {
-    Box(
-        Modifier
-            .size(Dimens.settingIcon)
-            .squircleBackground(MiuixTheme.colorScheme.tertiaryContainer, AppShapes.radiusMedium),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(Dimens.iconMd),
-            tint = MiuixTheme.colorScheme.onTertiaryContainer,
-        )
-    }
+    Icon(
+        icon,
+        contentDescription = null,
+        modifier = Modifier.size(Dimens.iconMd),
+        tint = MiuixTheme.colorScheme.onSurface,
+    )
 }
 
 /**
@@ -367,8 +355,7 @@ fun SwitchRow(
 @Composable
 fun Modifier.groupedCardItem(index: Int, count: Int): Modifier = this
     .padding(horizontal = Dimens.listHorizontal)
-    .clip(settingGroupItemShape(groupPosition(index, count)))
-    .background(settingsCardColor())
+    .squircleSurface(settingsCardColor(), settingGroupItemCorners(groupPosition(index, count)))
 
 /** 第 [index] 项（共 [count] 项）在一张卡里的位置 */
 fun groupPosition(index: Int, count: Int): SettingGroupPosition = when {

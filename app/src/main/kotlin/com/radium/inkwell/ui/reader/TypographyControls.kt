@@ -87,6 +87,8 @@ internal fun LayoutSchemeSection(
             selectedIndex = current,
             onSelect = { actions.onApplyScheme(schemes[it]) },
             contentPadding = PaddingValues(horizontal = horizontalPadding),
+            // 选中态与阅读设置面板里的分段按钮一致（实心强调色），见 ChipRow
+            solidSelection = true,
             trailing = {
                 if (current >= 0) {
                     AppFilterChip(selected = false, onClick = { deleting = schemes[current] }, label = "删除方案")
@@ -173,6 +175,7 @@ internal fun FontSection(
         selectedIndex = selected,
         onSelect = { onSelect(ids[it]) },
         contentPadding = PaddingValues(horizontal = horizontalPadding),
+        solidSelection = true,
         trailing = {
             if (currentUserFont != null) {
                 AppFilterChip(selected = false, onClick = { deleting = currentUserFont }, label = "删除字体")

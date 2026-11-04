@@ -1,7 +1,6 @@
 package com.radium.inkwell.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,7 +13,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +21,7 @@ import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -72,9 +71,9 @@ fun SegmentedChoice(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    // 内圆角 = 槽的圆角 − 内缩，两层圆角才是同心的
-                    .clip(AppShapes.small)
-                    .background(container)
+                    // 内圆角 = 槽的圆角 − 内缩，两层圆角才是同心的。和槽一样走 squircle（HyperOS 的连续曲率）：
+                    // 外槽是 squircle、里面这块是普通圆弧的话，两层弯法不一样，贴得这么近一眼就看得出
+                    .squircleSurface(container, AppShapes.radiusSmall)
                     .selectable(
                         selected = selected,
                         onClick = { onSelect(i) },

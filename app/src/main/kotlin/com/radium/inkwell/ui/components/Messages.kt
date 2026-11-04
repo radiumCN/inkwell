@@ -23,7 +23,6 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.SnackbarData
 import top.yukonga.miuix.kmp.basic.SnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -86,9 +85,9 @@ fun AppSnackbar(
     val scope = rememberCoroutineScope()
     val container = scheme.onSecondaryVariant
     val action = remember(scheme.primary, container) { AppThemes.readableOn(scheme.primary, container) }
-    Surface(
+    AppSurface(
+        cornerRadius = AppShapes.radiusExtraLarge,
         modifier = modifier,
-        shape = AppShapes.extraLarge,
         color = container,
         contentColor = scheme.secondaryVariant,
     ) {

@@ -40,6 +40,8 @@ import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.ui.graphics.RectangleShape
+import top.yukonga.miuix.kmp.squircle.squircleClip
 
 /**
  * 选中文字后的操作条。
@@ -75,12 +77,13 @@ fun SelectionToolbar(
             modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
-                .readerGlass(pageBackdrop, AppShapes.large, overlayColor)
+                // 圆角用 squircle 遮罩裁（和 Miuix 卡片同一种弯法），玻璃本身铺成直角、被这层一起裁进去
+                .squircleClip(AppShapes.radiusLarge)
+                .readerGlass(pageBackdrop, RectangleShape, overlayColor)
                 // 点在表单空白处别漏到纸面：纸面那层的「点空白取消选区」会把正在填的表单连同选区一起收掉
                 .blockTouchesBelow(),
             color = fill,
             contentColor = MiuixTheme.colorScheme.onSurface,
-            shape = AppShapes.large,
         ) {
             Column(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)) {
                 Text(

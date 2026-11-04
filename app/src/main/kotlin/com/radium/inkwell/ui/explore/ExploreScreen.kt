@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppMenuItem
@@ -53,6 +51,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowUpDown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.SearchDevice
 
 @Composable
 fun ExploreScreen(
@@ -162,7 +161,7 @@ fun ExploreScreen(
         if (!state.sourcesLoaded) return@AppScaffold
         if (state.sources.isEmpty()) {
             EmptyState(
-                icon = Icons.Outlined.Explore,
+                icon = MiuixIcons.SearchDevice,
                 title = "没有可用的发现来源",
                 hint = "导入带发现页规则后，可在此浏览分类列表",
                 actionLabel = "去导入规则",
@@ -180,7 +179,7 @@ fun ExploreScreen(
                 modifier = Modifier.padding(padding),
             )
             state.books.isEmpty() -> EmptyState(
-                icon = Icons.Outlined.Explore,
+                icon = MiuixIcons.SearchDevice,
                 title = "这个分类没有内容",
                 actionLabel = "重试",
                 onAction = { viewModel.retry() },

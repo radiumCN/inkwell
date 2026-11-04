@@ -49,17 +49,19 @@ private fun rememberWallpaperColors(dark: Boolean): Colors {
  * 页面颜色一律走 `MiuixTheme.colorScheme` 语义槽位，字体走 `MiuixTheme.textStyles`；
  * Miuix 没有的圆角与动效见 [AppTheme]。
  *
- * 用的是 `MiuixTheme(colors = …)` 那个重载，不是 `MiuixTheme(controller = …)`：配色是我们自己从
- * 「强调色 + 背景色」推导的（[AppThemes.schemeFrom]），controller 那一支只在壁纸配色时借来生成颜色。
- * 两个重载装的东西不一样 —— colors 版**不提供** `LocalContentColor`，所以根上必须再铺一层 [Surface]
- * 把内容色设成 onSurface，否则没写颜色的 Text / Icon 一律是黑的，深色主题下黑字压黑底。
+ * 走 Miuix 文档推荐的入口 `MiuixTheme(controller = ThemeController(…))`（主题系统一节的
+ * 「Controller 中的自定义配色」）：配色是我们自己解析好的（预设 / 自定义 / 壁纸，见 [rememberResolvedScheme]），
+ * 按当前日夜放进 controller 对应的那一侧，模式给 `Light` / `Dark`。比 `MiuixTheme(colors = …)` 多两样东西：
+ * `LocalContentColor`（没写颜色的 Text / Icon 跟着 onBackground 走，深色下不会黑字压黑底）和
+ * `MiuixTheme.colorSchemeMode`。
  *
- * 这层 [Surface] 还有第二个用处：NavDisplay 的 shared-axis 旧页只让出 1/4，缝隙里没有别的 Compose 节点可画；
+ * 根上仍铺一层 [Surface]：NavDisplay 的 shared-axis 旧页只让出 1/4，缝隙里没有别的 Compose 节点可画；
  * 若不铺底色，就会透到 Activity 的 windowBackground。底色取 `surface` —— Miuix 的**页面底**是 surface，
- * 不是 background（background 是弹窗与底部面板的底）。
+ * 不是 background（background 是弹窗与底部面板的底）。内容色顺带设成 onSurface（页面上的字是 onSurface）。
  *
  * 注意：另两处局部主题（阅读器浮层的 [com.radium.inkwell.ui.reader.ReaderThemeScope]、书籍详情的封面取色
- * `CoverTintedTheme`）同样是 `MiuixTheme(colors = …)`，从外层配色 copy 出来只改相关槽位；
+ * `CoverTintedTheme`）用的是 `MiuixTheme(colors = …)`（文档里的「直接使用」）：它们是在全局主题里
+ * 局部覆盖几个槽位，不是另起一套日夜模式，没有 controller 可言；
  * [LocalMotionScheme] 不会被它们盖掉，「移除动画」一路传进去。
  */
 @Composable
@@ -68,11 +70,19 @@ fun InkwellTheme(
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val scheme = rememberResolvedScheme(config, systemDark).first
+    val (scheme, dark) = rememberResolvedScheme(config, systemDark)
+    // 日夜已经在 rememberResolvedScheme 里按用户设置解析过了，这里只把结果放进对应的一侧
+    val controller = remember(scheme, dark) {
+        if (dark) {
+            ThemeController(ColorSchemeMode.Dark, darkColors = scheme)
+        } else {
+            ThemeController(ColorSchemeMode.Light, lightColors = scheme)
+        }
+    }
     // 用户在系统设置里切「移除动画」时只换方案对象，不换调用点：按 animate 拆成两个 MiuixTheme 调用点
     // 的话，子树换槽位重建，滚动位置、展开态之类全丢
     val motion = if (animationsEnabled()) AppMotionScheme.Default else AppMotionScheme.Instant
-    MiuixTheme(colors = scheme) {
+    MiuixTheme(controller = controller) {
         CompositionLocalProvider(LocalMotionScheme provides motion) {
             Surface(
                 modifier = Modifier.fillMaxSize(),

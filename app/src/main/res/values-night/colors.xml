@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 与 AppThemes 默认夜间「暖黑」一致；用户选了纯黑等会在运行时被 scheme.background 覆盖。 -->
-    <color name="inkwell_window_background">#17140F</color>
+    <!-- 与默认配色 AppThemes.HYPEROS 的深色页面底（Miuix darkColorScheme 的 surface，纯黑）一致；
+         选了别的预设会在运行时被 scheme.surface 覆盖。 -->
+    <color name="inkwell_window_background">#000000</color>
 </resources>

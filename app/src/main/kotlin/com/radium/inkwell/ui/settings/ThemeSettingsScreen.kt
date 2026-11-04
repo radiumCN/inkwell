@@ -52,7 +52,6 @@ import com.radium.inkwell.ui.theme.toHsv
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import com.radium.inkwell.ui.theme.AppShapes
@@ -65,6 +64,7 @@ import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
+import com.radium.inkwell.ui.components.AppSurface
 
 @Composable
 fun ThemeSettingsScreen(onBack: () -> Unit) {
@@ -322,11 +322,11 @@ private fun CustomThemeEditor(
     val bg = currentBg()
     val previewScheme = remember(seed, bg, dark) { AppThemes.schemeFrom(seed, bg, dark) }
 
-    Surface(
-        Modifier
+    AppSurface(
+        cornerRadius = AppShapes.radiusMedium,
+        modifier = Modifier
             .fillMaxWidth()
             .padding(start = Dimens.listHorizontal, end = Dimens.listHorizontal, top = Dimens.gapM),
-        shape = AppShapes.medium,
         // 编辑器是卡里再凹一层的托盘：取页面底 surface（浅色比卡深一档、深色比卡暗一档），
         // 别用半透明色 —— 深色/自定义下会发灰发脏
         color = MiuixTheme.colorScheme.surface,
@@ -334,14 +334,11 @@ private fun CustomThemeEditor(
         Column(Modifier.padding(Dimens.gapL)) {
             // 实时预览照 Miuix 的分层画三样：页面底（surface）上的标题与强调按钮、一张卡片（surfaceContainer）、
             // 一行选中项（tertiaryContainer）。只预览底色与强调色的话，换主题后卡片、选中行的颜色对不上预览
-            Surface(
-                Modifier.fillMaxWidth(),
-                shape = AppShapes.medium,
+            AppSurface(
+                cornerRadius = AppShapes.radiusMedium,
+                modifier = Modifier.fillMaxWidth(),
                 color = previewScheme.surface,
-                border = BorderStroke(
-                    Dimens.strokeThin,
-                    MiuixTheme.colorScheme.dividerLine,
-                ),
+                borderColor = MiuixTheme.colorScheme.dividerLine,
             ) {
                 Column(Modifier.padding(Dimens.gapM)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -373,11 +370,11 @@ private fun CustomThemeEditor(
                             )
                         }
                     }
-                    Surface(
-                        Modifier
+                    AppSurface(
+                        cornerRadius = AppShapes.radiusMedium,
+                        modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = Dimens.gapS),
-                        shape = AppShapes.medium,
                         color = previewScheme.surfaceContainer,
                     ) {
                         Row(
@@ -411,11 +408,11 @@ private fun CustomThemeEditor(
                             }
                         }
                     }
-                    Surface(
-                        Modifier
+                    AppSurface(
+                        cornerRadius = AppShapes.radiusMedium,
+                        modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = Dimens.gapXS),
-                        shape = AppShapes.medium,
                         color = previewScheme.tertiaryContainer,
                     ) {
                         Text(

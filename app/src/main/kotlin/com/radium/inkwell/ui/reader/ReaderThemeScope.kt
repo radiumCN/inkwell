@@ -38,11 +38,11 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         val secondaryText = Color(theme.secondaryTextColor)
         val lightPaper = bg.luminance() > 0.5f
 
-        // 强调色：沿用 App 的主色，但在这张纸上必须看得清 —— 它也当文字色用（文字按钮、链接），按正文的 4.5:1 要求。
-        // 不够就往远离纸色的方向一点点推（浅纸压深、深纸提亮），色相不变。
+        // 强调色：有色的纸从纸的色相里取（见 paperAccent），无色的纸沿用 App 主色。无论哪种，在这张纸上都必须看得清 ——
+        // 它也当文字色用（文字按钮、链接），按正文的 4.5:1 要求，不够就往远离纸色的方向一点点推（浅纸压深、深纸提亮）。
         // 从前深色纸上干脆拿正文色顶替：看是看得清了，可选中态、开关、滑块、小标题全成了正文那一种灰白，
         // 浮层里没有任何东西是「强调」的 —— 阅读设置面板「层次感差」，一半就差在这。
-        val accent = readableOn(base.primary, bg)
+        val accent = readableOn(paperAccent(bg, base.primary), bg)
         // 实心强调色上的字直接用纸色：上面已保证两者对比 ≥ 4.5:1
         val onAccent = bg
 
@@ -153,8 +153,56 @@ internal fun readerOverlayColor(): Color = MiuixTheme.colorScheme.background
 internal fun readerCardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
 
 /**
+ * 阅读浮层的强调色**跟着纸走**：有颜色的纸取纸的色相，压成一个够浓的强调色；无色的纸（净白、灰岩、夜色、纯黑……）
+ * 才沿用 App 主色 [appAccent]。结果还要过一道 [readableOn]，这里只管色相。
+ *
+ * 从前一律用 App 主色。App 默认换成 HyperOS 蓝之后，象牙纸的设置面板上，选中的分段是一块深蓝、选中的 chip
+ * 是蓝混米色的一层灰、滑块又是另一种淡蓝，三种蓝压在暖色纸上，被指出「主题颜色不一致」。
+ * 无色的纸配蓝没有冲突（HyperOS 自己就是白底配蓝），所以只换有色的那几款。
+ *
+ * - 黄到橙这一段（米、象牙、牛皮，色相 15°~70°）统一取 [WARM_ACCENT_HUE] 的褐色：照纸的色相取，
+ *   45° 上下压浓了是发绿的土黄，难看；褐色才是这几款纸上读着顺眼的那一种「墨」。
+ * - 其余（青竹、墨蓝、自定义的粉纸……）直接用纸的色相。
+ * - 浓度、明度按纸的深浅各取一档：浅纸上是压深的浓色，深纸上是提亮的柔色（对齐 App 深色预设的强调色）。
+ */
+internal fun paperAccent(paper: Color, appAccent: Color): Color {
+    val max = maxOf(paper.red, paper.green, paper.blue)
+    val min = minOf(paper.red, paper.green, paper.blue)
+    val saturation = if (max <= 0f) 0f else (max - min) / max
+    if (saturation < NEUTRAL_PAPER_SATURATION) return appAccent
+    val hue = hueOf(paper.red, paper.green, paper.blue, max, min)
+    val accentHue = if (hue in WARM_PAPER_HUES) WARM_ACCENT_HUE else hue
+    return if (paper.luminance() > 0.5f) {
+        Color.hsv(accentHue, LIGHT_PAPER_ACCENT_SATURATION, LIGHT_PAPER_ACCENT_VALUE)
+    } else {
+        Color.hsv(accentHue, DARK_PAPER_ACCENT_SATURATION, DARK_PAPER_ACCENT_VALUE)
+    }
+}
+
+/** RGB → 色相（0~360°）。不走 android.graphics.Color：那是 Android 桩，JVM 单测里调不了 */
+private fun hueOf(r: Float, g: Float, b: Float, max: Float, min: Float): Float {
+    val delta = max - min
+    if (delta <= 0f) return 0f
+    val h = when (max) {
+        r -> ((g - b) / delta).mod(6f)
+        g -> (b - r) / delta + 2f
+        else -> (r - g) / delta + 4f
+    }
+    return h * 60f
+}
+
+/** 纸的 HSV 饱和度低于它就算「无色」：灰岩（0.03）是暖灰但几乎无色，象牙（0.06）已经看得出米色 */
+private const val NEUTRAL_PAPER_SATURATION = 0.05f
+private val WARM_PAPER_HUES = 15f..70f
+private const val WARM_ACCENT_HUE = 30f
+private const val LIGHT_PAPER_ACCENT_SATURATION = 0.6f
+private const val LIGHT_PAPER_ACCENT_VALUE = 0.5f
+private const val DARK_PAPER_ACCENT_SATURATION = 0.45f
+private const val DARK_PAPER_ACCENT_VALUE = 0.85f
+
+/**
  * [color] 放在 [paper] 上不够 4.5:1 时，往远离纸色的一端（浅纸往黑、深纸往白）一点点推，直到够为止。
- * 推的是 sRGB 线性混合，色相基本不变：App 主色是暖褐，推完还是褐，只是深一点 / 亮一点。
+ * 推的是 sRGB 线性混合，色相基本不变：强调色是褐，推完还是褐，只是深一点 / 亮一点。
  */
 internal fun readableOn(color: Color, paper: Color): Color {
     val target = if (paper.luminance() > 0.5f) Color.Black else Color.White

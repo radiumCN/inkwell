@@ -9,12 +9,11 @@ kotlin = "2.4.21"
 ksp = "2.3.12"
 coroutines = "1.11.0"
 serialization = "1.12.0"
-# 用的是 **compose-bom-alpha**，不是稳定的 compose-bom。
-# 当初是为了 M3 Expressive（那批 API 只活在 material3 1.5.0-alpha 通道，稳定 BOM 给不到）。
-# UI 换成 Miuix、material3 已从依赖里删掉之后，这条理由没了 —— 但退回稳定 BOM 会把整栈从 1.13 beta
-# 降到 1.12，是另一件要单独验证的事，没有跟着换库一起做。在那之前照旧：alpha BOM 把整栈钉在同一快照，
-# 升 BOM 前先读 release notes 的 breaking change，别盲升。
-composeBom = "2026.10.01"
+# **稳定的 compose-bom**（Compose 1.12.x）。从前用 compose-bom-alpha（1.13 beta）是为了 M3 Expressive，
+# 那批 API 只活在 material3 alpha 通道；UI 换成 Miuix、material3 删掉之后这条理由没了。
+# 回稳定版的直接理由：Miuix 0.9.4 是对着 Compose 1.12 构建的，跑在 1.13 beta 上等于拿它没测过的二进制组合碰运气。
+# 升 BOM 前先读 release notes 的 breaking change，并对一下 Miuix 当前版本对着哪一版 Compose 构建，别盲升。
+composeBom = "2026.09.00"
 # UI 组件库：Miuix（HyperOS 设计语言，Compose Multiplatform）。只依赖 foundation，不依赖 material3 组件。
 # 0.x 实验线，作者明说 API 可能不打招呼就改 —— 升级前先读 release notes 的 breaking change，
 # 跟 BOM 一样别盲升。它对着 Compose 1.12 构建，在我们的 alpha BOM（1.13 beta）上会被抬版本运行。
@@ -23,9 +22,8 @@ activityCompose = "1.13.0"
 # Navigation 3（与 Nav2 navigation-compose 不兼容，整图迁移）
 navigation3 = "1.2.0"
 # Material 3 Adaptive + Nav3 ListDetailSceneStrategy
-# compose-bom-alpha 把整组 adaptive 钉在 1.4.0-alpha 线上，写 1.3.0 也会被抬到这个数 ——
-# 照实写，免得排查时照着 toml 以为跑的是稳定版
-material3Adaptive = "1.4.0-alpha03"
+# 与稳定 BOM（2026.09.00）带的 adaptive 版本一致。从前 alpha BOM 把整组钉在 1.4.0-alpha 线上
+material3Adaptive = "1.3.0"
 # 与 compose BOM 传递拉起的版本对齐：写低了也会被 compose 的依赖抬到这个数，
 # 声明和实际不符只会让下次排查照着 toml 找错方向
 lifecycle = "2.11.0"
@@ -71,7 +69,7 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 
-compose-bom = { module = "androidx.compose:compose-bom-alpha", version.ref = "composeBom" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 compose-ui-text = { module = "androidx.compose.ui:ui-text" }

@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +25,8 @@ import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.Notes
+import top.yukonga.miuix.kmp.icon.MiuixIcons
 
 /**
  * 第一次打开、书架还是空的时候，代替「书架空空如也」出现的欢迎页。
@@ -64,7 +64,7 @@ internal fun WelcomeState(
             verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
         ) {
             Icon(
-                Icons.Outlined.AutoStories,
+                MiuixIcons.Notes,
                 contentDescription = null,
                 modifier = Modifier.size(Dimens.iconXL),
                 tint = MiuixTheme.colorScheme.primary,

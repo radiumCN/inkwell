@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -49,9 +47,13 @@ import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.components.AppScaffold
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.icon.extended.Notes
+import top.yukonga.miuix.kmp.icon.MiuixIcons
 
 /**
  * 阅读记录：今天读了多久、连续几天、本周/今年/累计，近几个月的每日热力图，今年读得最多的书。
@@ -75,7 +77,7 @@ fun ReadingStatsScreen(
         when {
             ui == null -> LoadingState(Modifier.padding(padding))
             ui.summary.isEmpty -> EmptyState(
-                icon = Icons.Outlined.AutoStories,
+                icon = MiuixIcons.Notes,
                 title = "还没有阅读记录",
                 hint = "翻开一本书读几页，时长就会记在这里；配了 WebDAV 的话，各台设备的时长会合在一起",
                 modifier = Modifier.padding(padding),
@@ -150,8 +152,7 @@ private fun TodayCard(s: ReadingSummary, modifier: Modifier) {
     Column(
         modifier
             .fillMaxWidth()
-            .clip(AppShapes.large)
-            .background(MiuixTheme.colorScheme.primaryContainer)
+            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge)
             .semantics(mergeDescendants = true) {}
             .padding(Dimens.gapXL),
     ) {
@@ -175,10 +176,10 @@ private fun TodayCard(s: ReadingSummary, modifier: Modifier) {
 
 @Composable
 private fun StatTile(label: String, value: String, modifier: Modifier) {
-    Surface(
+    Card(
         modifier = modifier.semantics(mergeDescendants = true) {},
-        color = settingsCardColor(),
-        shape = AppShapes.large,
+        cornerRadius = AppShapes.radiusLarge,
+        colors = CardDefaults.defaultColors(color = settingsCardColor()),
     ) {
         Column(Modifier.padding(horizontal = Dimens.gapM, vertical = Dimens.gapM)) {
             Text(label, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)

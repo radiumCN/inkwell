@@ -28,18 +28,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppFilterChip
@@ -746,7 +745,7 @@ private fun SourceListRow(
             modifier = modifier,
             // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
             colors = ContentListDefaults.colors(containerColor = Color.Transparent),
-            shape = RectangleShape,
+            corners = SquircleCorners.Square,
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,
@@ -759,7 +758,7 @@ private fun SourceListRow(
             modifier = modifier,
             // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
             colors = ContentListDefaults.colors(containerColor = Color.Transparent),
-            shape = RectangleShape,
+            corners = SquircleCorners.Square,
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,

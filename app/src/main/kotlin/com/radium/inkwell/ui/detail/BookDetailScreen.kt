@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.unit.Dp
 import com.radium.inkwell.ui.components.AppDropdownMenu
@@ -69,6 +67,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.Report
 
 @Composable
 fun BookDetailScreen(
@@ -129,7 +128,7 @@ fun BookDetailScreen(
             if (b == null) {
                 if (state.loaded) {
                     EmptyState(
-                        icon = Icons.Outlined.Warning,
+                        icon = MiuixIcons.Report,
                         title = "书籍不存在",
                         hint = "它可能已被删除",
                         actionLabel = "返回",

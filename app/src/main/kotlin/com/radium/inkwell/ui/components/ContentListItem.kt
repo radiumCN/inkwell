@@ -2,7 +2,6 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -19,9 +18,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -78,8 +75,8 @@ object ContentListDefaults {
         .padding(horizontal = Dimens.listHorizontal)
         .padding(vertical = ListSpacing / 2)
 
-    /** 独立成卡的行的圆角：与 Miuix 卡片同档（16dp） */
-    val Shape: Shape = AppShapes.large
+    /** 独立成卡的行的圆角：与 Miuix 卡片同档（16dp）、同一种 squircle 弯法 */
+    val Corners: SquircleCorners = SquircleCorners.all(AppShapes.radiusLarge)
 
     /**
      * 行的配色。默认底是卡片色 `surfaceContainer`（浅色白卡、深色亮一档），坐在页面底 `surface` 上。
@@ -175,7 +172,7 @@ fun ContentListItem(
     onLongClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ContentListColors = ContentListDefaults.colors(),
-    shape: Shape = ContentListDefaults.Shape,
+    corners: SquircleCorners = ContentListDefaults.Corners,
     interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit,
 ) {
@@ -196,7 +193,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         contentPadding = contentPadding,
         colors = colors,
-        shape = shape,
+        corners = corners,
         content = content,
     )
 }
@@ -215,7 +212,7 @@ fun ContentListItem(
     onLongClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ContentListColors = ContentListDefaults.colors(),
-    shape: Shape = ContentListDefaults.Shape,
+    corners: SquircleCorners = ContentListDefaults.Corners,
     content: @Composable () -> Unit,
 ) {
     ListRow(
@@ -237,7 +234,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         contentPadding = contentPadding,
         colors = colors,
-        shape = shape,
+        corners = corners,
         content = content,
     )
 }
@@ -261,7 +258,7 @@ fun ContentListItem(
     onLongClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ContentListColors = ContentListDefaults.colors(),
-    shape: Shape = ContentListDefaults.Shape,
+    corners: SquircleCorners = ContentListDefaults.Corners,
     interactionSource: MutableInteractionSource? = null,
     role: Role = Role.Checkbox,
     content: @Composable () -> Unit,
@@ -285,7 +282,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         contentPadding = contentPadding,
         colors = colors,
-        shape = shape,
+        corners = corners,
         content = content,
     )
 }
@@ -303,7 +300,7 @@ fun ContentListItem(
     supportingContent: (@Composable () -> Unit)? = null,
     contentPadding: PaddingValues = ContentListDefaults.CompactPadding,
     colors: ContentListColors = ContentListDefaults.colors(),
-    shape: Shape = ContentListDefaults.Shape,
+    corners: SquircleCorners = ContentListDefaults.Corners,
     content: @Composable () -> Unit,
 ) {
     ListRow(
@@ -318,7 +315,7 @@ fun ContentListItem(
         supportingContent = supportingContent,
         contentPadding = contentPadding,
         colors = colors,
-        shape = shape,
+        corners = corners,
         content = content,
     )
 }
@@ -392,7 +389,7 @@ private fun ListRow(
     supportingContent: (@Composable () -> Unit)?,
     contentPadding: PaddingValues,
     colors: ContentListColors,
-    shape: Shape,
+    corners: SquircleCorners,
     content: @Composable () -> Unit,
 ) {
     val container = if (selected) colors.selectedContainerColor else colors.containerColor
@@ -402,8 +399,7 @@ private fun ListRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(container)
+            .squircleSurface(container, corners)
             .then(interaction)
             .heightIn(min = Dimens.listItemMinHeight)
             .padding(contentPadding),

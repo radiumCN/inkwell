@@ -30,11 +30,16 @@ object AppTheme {
 
 /**
  * 圆角刻度。Miuix 组件自己按 Dp 收圆角（`cornerRadius = 16.dp` 这类参数），没有主题级的 Shapes，
- * 所以这里同时给两种形态：Shape（`clip` / `background` / `border` 用；类型是 RoundedCornerShape，能 `copy` 出切角版本）与 Dp 半径
- * （Miuix 组件的 `cornerRadius` 参数、`Modifier.squircleClip` / `squircleBackground` 用）。
+ * 所以这里同时给两种形态：Dp 半径（Miuix 组件的 `cornerRadius`、`miuix-squircle` 的修饰符用）与 Shape。
  *
- * 卡片、列表行、按钮这类「面」优先走 squircle（HyperOS 的连续曲率圆角，API 33 以下自动退回普通圆角）；
- * 小尺寸的标签、缩略图用普通圆角就够，连续曲率在 4~8dp 上看不出来。
+ * **12dp 及以上的「面」一律 squircle**（HyperOS 的连续曲率圆角，Miuix 的卡片、按钮、面板、页签全是它）：
+ * 卡片用 Miuix `Card`，其余的面用 `AppSurface` / `Modifier.squircleSurface`，描边 `squircleBorder`，
+ * 分组卡里按角切的行用 `SquircleCorners`（都在 ui/components/AppSurface.kt）。
+ * 别再 `clip(AppShapes.large)` / `Surface(shape = …)`：那是普通圆弧，夹在 Miuix 组件中间，弯法差一截，
+ * 装上后被指出「圆角不统一」。
+ *
+ * Shape 只剩给**小半径**用：4~8dp 的标签、封面、热力图格子。连续曲率在这么小的半径上看不出来
+ * （miuix-squircle 文档：差异在中到大半径时最明显），而 squircle 每个都要开一个离屏层 —— 书架一屏几十本封面，不值。
  *
  * 刻度与 M3 时代一致：4 / 8 / 12 / 16 / 28。16 对齐 Miuix 卡片（`CardDefaults.CornerRadius`），
  * 28 对齐 Miuix 底部面板（`BottomSheetDefaults.cornerRadius`）。

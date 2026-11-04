@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.radium.inkwell.reader"
     compileSdk = 37
-    // 与 :app 同步：Compose 1.13.0-beta01 要求按 37.1 编译（见 app/build.gradle.kts）
+    // 与 :app 同步按 37.1 编译（理由见 app/build.gradle.kts）
     compileSdkMinor = 1
 
     defaultConfig {

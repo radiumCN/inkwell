@@ -22,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -33,6 +32,7 @@ import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppFormField
@@ -212,7 +212,7 @@ private fun RuleRow(
         modifier = modifier,
         // 底与圆角由外面的卡（groupedCardItem）画，行本身透明、直角
         colors = ContentListDefaults.plainColors(),
-        shape = RectangleShape,
+        corners = SquircleCorners.Square,
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 删除在前、开关在后：与书源/订阅列表的行尾一致。图标走摘要色 ——

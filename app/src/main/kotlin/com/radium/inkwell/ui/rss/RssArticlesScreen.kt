@@ -13,11 +13,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.core.util.htmlToPlainText
+import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppTopBar
@@ -135,7 +135,7 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit, modifier: Modif
         modifier = modifier,
         // 底与圆角由外面的卡（groupedCardItem）画，行本身透明、直角
         colors = ContentListDefaults.plainColors(),
-        shape = RectangleShape,
+        corners = SquircleCorners.Square,
         trailingContent = article.image?.takeIf { it.isNotBlank() }?.let { url ->
             {
                 BookCover(

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -78,12 +77,15 @@ private fun rememberFieldStyle(
     )
 }
 
-/** squircle 底 + 聚焦描边。描边用普通圆角：1dp 的线上看不出连续曲率，squircle 描边反而要多一层着色器 */
+/**
+ * squircle 底 + 聚焦描边。描边也走 squircle（`squircleBorder`，按 path 画、不要着色器，比底色那层还便宜）：
+ * 从前描边是普通圆弧，和 squircle 的底差一点点弯法，聚焦时圆角那一段描边和底色边缘错开一线。
+ */
 @Composable
 private fun Modifier.fieldChrome(style: FieldStyle, radius: Dp): Modifier {
     val base = squircleBackground(style.container, radius)
     val border = style.focusedBorder ?: return base
-    return base.border(Dimens.strokeThin, border, RoundedCornerShape(radius))
+    return base.squircleBorder(Dimens.strokeThin, border, radius)
 }
 
 /**

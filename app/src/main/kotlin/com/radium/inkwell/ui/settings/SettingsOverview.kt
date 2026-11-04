@@ -7,10 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +31,9 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.UploadCloud
+import top.yukonga.miuix.kmp.icon.extended.Report
+import top.yukonga.miuix.kmp.icon.extended.CloudFill
 
 /**
  * 设置主页顶上的概览：今天读了多久、同步得怎么样，外加一个「立即同步」。
@@ -105,9 +104,9 @@ internal fun SettingsOverviewCard(
         ) {
             Icon(
                 when {
-                    !configured -> Icons.Outlined.CloudOff
-                    failed -> Icons.Outlined.ErrorOutline
-                    else -> Icons.Outlined.CloudDone
+                    !configured -> MiuixIcons.UploadCloud
+                    failed -> MiuixIcons.Report
+                    else -> MiuixIcons.CloudFill
                 },
                 contentDescription = null,
                 tint = content,

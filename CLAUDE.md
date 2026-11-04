@@ -54,23 +54,27 @@ App 的 UI 库是 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（Hyper
 - **侧滑返回用线性 tween**（`PageSlideMode.Predictive` / `PREDICTIVE_BACK_MS`）：侧滑时转场按手势进度 seek，spring 曲线前段太陡，页面在进度三成就冲到头、之后不跟手。别改成令牌 spring。
 - 以上三处（页面进退、阅读器开合、侧滑返回）是动效层仅有的刻意例外。
 
-### 主题入口 → `MiuixTheme(colors = …)`
+### 主题入口 → `MiuixTheme(controller = …)`
 
-主题入口有两个 —— 全局 `InkwellTheme`（`ui/theme/Theme.kt`）与阅读页浮层的 `ReaderThemeScope` —— 另有一处**局部覆盖**：书籍详情的封面取色 `CoverTintedTheme`（`ui/detail/CoverTint.kt`），只换 primary / tertiaryContainer 一族、其余照抄外层。三处都是 `MiuixTheme(colors = …)`，从外层配色 `copy` 出来改相关槽位。
+**以 Miuix 官方文档为准**（https://compose-miuix-ui.github.io/miuix/zh_CN/guide/getting-started 及侧栏的主题系统、颜色、平滑圆角、模糊、工具函数、图标各页）。新写法、新组件先对一遍文档，文档有推荐写法的照推荐写。
+
+全局 `InkwellTheme`（`ui/theme/Theme.kt`）走文档推荐的 `MiuixTheme(controller = ThemeController(…))`：配色由 `rememberResolvedScheme` 解析好，按当前日夜放进 controller 的 `lightColors` / `darkColors` 那一侧（文档「Controller 中的自定义配色」）。另有两处**局部覆盖**用文档里「直接使用」的 `MiuixTheme(colors = …)`：阅读页浮层的 `ReaderThemeScope`，书籍详情的封面取色 `CoverTintedTheme`（`ui/detail/CoverTint.kt`，只换 primary / tertiaryContainer 一族）。它们从外层配色 `copy` 出来改相关槽位，不是另起一套日夜模式。
 
 两条坑，编译和单测都看不出来：
-- **colors 版 `MiuixTheme` 不提供 `LocalContentColor`**（controller 版才提供）。所以 `InkwellTheme` 根上铺了一层 Miuix `Surface`（`contentColor = onSurface`），`ReaderThemeScope` 也补了一层。新加主题入口时照做，否则没写颜色的 Text / Icon 一律是黑的，深色下黑字压黑底。
+- **colors 版 `MiuixTheme` 不提供 `LocalContentColor`**（controller 版才提供）。`ReaderThemeScope` 因此自己补了一层；新加局部主题时照做，否则没写颜色的 Text / Icon 一律是黑的，深色下黑字压黑底。`InkwellTheme` 根上那层 Miuix `Surface` 另有用处（转场缝隙里的页面底），别删。
 - **`MiuixTheme` 只持有一个 `Colors` 实例、换主题时原地改值**。别拿 `MiuixTheme.colorScheme` 对象当 `remember` 的 key —— 它永远不变，切了日夜，派生出来的颜色还停在上一套。key 用具体槽位的值（`base.primary`、`base.surfaceContainer`）。
 
 **默认配色是 `AppThemes.HYPEROS`**：Miuix 自带的 `lightColorScheme()` / `darkColorScheme()` 原样用（浅色 #F7F7F7 灰底白卡、#3482FF 蓝；深色纯黑底），只把 `primaryContainer` 一对换成 M3 含义的淡强调底。暖纸、青竹等品牌预设照旧可选，走 `schemeFrom`。
 
 「跟随壁纸」是一个预设 id（`AppThemes.DYNAMIC`），日/夜两槽都能选；颜色由 Miuix `ThemeController`（Monet 模式、不给 keyColor）读系统调色板生成。解析统一走 `rememberResolvedScheme`（MainActivity 设窗体底色、`InkwellTheme` 铺整树共用这一个结果），别在别处直接调 `AppThemes.resolve` 而漏掉壁纸配色。
 
-代价记清楚：Miuix 是 **0.x 实验线**，作者明说 API 可能不打招呼就改；它对着 Compose 1.12 构建，跑在我们的 `compose-bom-alpha`（1.13 beta）上。升 Miuix 或 BOM 前先读 release notes 的 breaking change 段，别盲升。（BOM 当初为 M3 Expressive 才走 alpha 线，这条理由已经没了，回稳定 BOM 是可以单独评估的事。）
+代价记清楚：Miuix 是 **0.x 实验线**，作者明说 API 可能不打招呼就改。Compose 用**稳定 BOM**，和 Miuix 构建时对的那一版 Compose（0.9.4 → 1.12）保持一致（从前为 M3 Expressive 走 alpha BOM、跑在 1.13 beta 上，那是 Miuix 没测过的组合）。升 Miuix 或 BOM 前先读 release notes 的 breaking change 段，再对一下两边的 Compose 版本，别盲升。
 
 ### 圆角 → `AppShapes`（`ui/theme/AppTheme.kt`）
 
-Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16，对齐 Miuix 卡片)/`extraLarge`(28，对齐 Miuix 底部面板)，每档同时给 Shape（`AppShapes.medium`，用于 `clip`/`background`/`border`）和 Dp 半径（`AppShapes.radiusMedium`，用于 Miuix 组件的 `cornerRadius` 参数与 `Modifier.squircleClip/squircleBackground`）。卡片、按钮这类「面」优先 squircle（HyperOS 的连续曲率圆角）。**不要**裸写 `RoundedCornerShape(12.dp)`。
+Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16，对齐 Miuix 卡片)/`extraLarge`(28，对齐 Miuix 底部面板)，用 Dp 半径（`AppShapes.radiusMedium`）。
+
+**12dp 及以上的「面」一律 squircle**（HyperOS 的连续曲率圆角，`miuix-squircle`；Miuix 的卡片、按钮、面板、页签全是它）：卡片用 Miuix `Card`，其余的面用 `AppSurface`，修饰符级别用 `Modifier.squircleSurface` / `squircleClip`，描边 `squircleBorder`，分组卡里按角切的行用 `SquircleCorners`（后三样都在 `ui/components/AppSurface.kt`）。毛玻璃要圆角时，外面套 `squircleClip`、玻璃本身给 `RectangleShape`（见 `SelectionToolbar`）。**别**再 `clip(AppShapes.large)` / Miuix `Surface(shape = …)` —— 那是普通圆弧，夹在 Miuix 组件中间弯法差一截，被指出过「圆角不统一」。Shape（`AppShapes.small` 等）只留给 4~8dp 的标签、封面、热力图格子：连续曲率在小半径上看不出来，而 squircle 每个都开一个离屏层，书架一屏几十本封面不值。挨在一起的控件同一档：分段槽、页签槽、卡里的按钮都是 48dp 高 + `radiusMedium`，槽里的浮块 `radiusSmall`。**不要**裸写 `RoundedCornerShape(12.dp)`。
 
 ### 颜色 → `MiuixTheme.colorScheme` 语义槽位
 
@@ -78,7 +82,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 - **分层照 HyperOS，不照 M3**：页面底是 `surface`、卡片是 `surfaceContainer`、弹窗与底部面板是 `background`。浅色「灰底白卡」（卡就是预设纸色），深色「黑底亮卡」。M3 习惯里「页面 = background」在这里是错的。
 - **槽位含义与 M3 不同**：`secondary` 是关着的开关轨道、`secondaryVariant` 是默认按钮底、`secondaryContainer` 是输入框底（都是中性灰）；淡强调底 + 强调色字用 `tertiaryContainer` / `onTertiaryContainer`（下拉菜单选中项、选中 chip、设置图标底）；`primaryContainer` / `onPrimaryContainer` Miuix 组件不读，保留 M3 含义。
 - 正文性小字用 `onSurfaceVariantSummary`（对比度在 `AppThemesTest` 里钉住 ≥ 4.5:1，页面底和卡片上都测），**不要**用 `outline` / `dividerLine`（那是给边框/分隔线的）。
-- **唯一例外**：阅读器**内容区**颜色（纸色/字色）走 `ReaderTheme` / `ReaderThemeScope`（`app/.../ui/reader/ReaderThemeScope.kt`），这是有意的独立主题；但阅读器 UI 的尺寸/动效仍走上面的令牌。阅读器里的浮层用 `ReaderThemeScope` 包裹，让开关/滑块/分隔线自动协调，别挨个传色。浮层底用 `readerOverlayColor()`、浮层里的卡用 `readerCardColor()`。
+- **唯一例外**：阅读器**内容区**颜色（纸色/字色）走 `ReaderTheme` / `ReaderThemeScope`（`app/.../ui/reader/ReaderThemeScope.kt`），这是有意的独立主题；但阅读器 UI 的尺寸/动效仍走上面的令牌。阅读器里的浮层用 `ReaderThemeScope` 包裹，让开关/滑块/分隔线自动协调，别挨个传色。浮层底用 `readerOverlayColor()`、浮层里的卡用 `readerCardColor()`。浮层的强调色**跟纸走**（`paperAccent`）：有色的纸取纸的色相（米色一族统一是褐），无色的纸才用 App 主色 —— HyperOS 蓝压在米色纸上不协调。
 
 ### 排版 → `MiuixTheme.textStyles`
 
@@ -102,11 +106,11 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 多行文本输入 | `CompactTextArea`（同文件）：同一套底色，高度 `textAreaMinHeight`，圆角 `radiusLarge`。**不要**用胶囊圆角 —— 160dp 高的框会变成两头大圆 |
 | 带 label 的整页表单输入 | `AppFormField`（同文件，Miuix `TextField` 的浮动 label；报错时描边换 error 色、`supportingText` 在框外）。意见反馈这类无 label 的整页输入走 `CompactTextArea` / `CompactTextField` |
 | 滑块 | `AppSlider`（`AppSlider.kt`，Miuix `Slider` 胶囊粗轨）：给 `label`（读屏名字）；夹在两行字之间的传 `height = Dimens.sliderCompact`。`activeColor` 只给阅读器浮层（纸色背景）用 |
-| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row` + chip）；单个独立 chip 用 `AppFilterChip`。Miuix 没有 chip，这两个是自画的 HyperOS 胶囊（选中 `tertiaryContainer`） |
+| 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row` + chip）；单个独立 chip 用 `AppFilterChip`。Miuix 没有 chip，这两个是自画的 HyperOS 胶囊（选中 `tertiaryContainer`）。和 `SegmentedChoice` 同处一张面板时（阅读设置）传 `solidSelection = true`，选中态与分段一样实心填强调色，别让一张面板里出现两种「选中」 |
 | 几档里选一档（固定 2~5 档） | `SegmentedChoice`（`SegmentedChoice.kt`）：灰槽里浮起一块，选中段实心填强调色（不是白块 —— 白块在白卡上分不清）。选项多或会变的（字体、方案、七档间隔）仍用 `ChipRow` |
 | 列表行密度 | 默认 `CompactPadding`；带封面/大图标的行（`BookListRow`、书架列表、`AppIconSheet`）用 `ComfortablePadding` |
-| 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。Tab 是 Miuix `TabRow`（胶囊页签，按内容定宽）；放在卡片/面板上时 `containerColor` 传面板底色。切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
-| 设置行 / 开关行 / 选择行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SpinnerSettingRow` / `SectionHeader`（`SettingRow.kt`）。`SettingRow` 就是 Miuix `ArrowPreference`（可点，行尾 ›）/ `BasicComponent`（纯展示）；`SwitchRow` 是 `BasicComponent` + 纯展示的 `Switch`，整行一个开关语义 —— **别用 Miuix `SwitchPreference`**，它是「行 + 开关」双焦点。「标题 + 当前值、点开选一个」用 `SpinnerSettingRow`（Miuix `WindowSpinnerPreference`，选项从这一行上弹出）。设置主页那一列入口行带 `icon`（淡强调底的圆角方块），二级页保持纯文字 |
+| 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。Tab 是 Miuix `TabRowWithContour`（灰槽里浮起一块卡片色，格子均分槽宽），高度与圆角对齐 `SegmentedChoice`；`containerColor` 是槽色，要和浮块（`surfaceContainer`）差一档。别换回 Miuix `TabRow`（一格一个描边框，像一排按钮）。调用方给左右边距，和下面的内容对齐。切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
+| 设置行 / 开关行 / 选择行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SpinnerSettingRow` / `SectionHeader`（`SettingRow.kt`）。`SettingRow` 就是 Miuix `ArrowPreference`（可点，行尾 ›）/ `BasicComponent`（纯展示）；`SwitchRow` 是 `BasicComponent` + 纯展示的 `Switch`，整行一个开关语义 —— **别用 Miuix `SwitchPreference`**，它是「行 + 开关」双焦点。「标题 + 当前值、点开选一个」用 `SpinnerSettingRow`（Miuix `WindowSpinnerPreference`，选项从这一行上弹出）。设置主页那一列入口行带 `icon`（光秃秃的线条图标、`onSurface` 色，**不垫底板** —— 垫过淡强调色方块，被指出「图标外面套了个容器」），二级页保持纯文字 |
 | 设置分组卡 | `SettingGroup`（Miuix `Card`）+ `SettingRow(..., position = First/Middle/Last/Alone)` / `SwitchRow(..., position = …)`；底栏/选择面板等「一条一卡」保持 `position = null` |
 | 设置类页面骨架 | **只有一种**：灰底（`surface`）+ `SectionHeader` + `SettingGroup`（左右 16dp），控件全部装进卡里。卡里不是「行」的内容（表单、分段按钮、说明）包 `SettingBlock`；卡下的说明小字用 `SettingFootnote`。小标题、卡里的字、脚注左边在同一条竖线上 |
 | 内容列表行（可点/单选/多选/纯展示） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow`。页面上的列表（书架列表、搜索结果、书源列表）**装进卡片**：每行 `Modifier.groupedCardItem(index, count)` + `ContentListDefaults.plainColors()`，行间不加 `spacedBy`（HyperOS 是灰底白卡，不是通栏的行）。槽位只替你设颜色，**字号要显式给**：`ContentListDefaults.titleStyle` / `supportingStyle` / `overlineStyle`（Miuix 没有给子树设字号的公开入口，裸 `Text` 会是 17sp）。长按、单选、多选语义都在这里，别为了长按另搓 Row |
@@ -118,13 +122,14 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 阅读进度（静止的读数） | `ReadingProgressMeter`（`Common.kt`）：书封底边、「继续阅读」卡片，4dp 细线。任务进度条表示「有活在跑」，静止的进度别用 `DeterminateProgressBar` |
 | 相对时间（「3 小时前」「昨天」） | `formatRelativeTime`（`RelativeTime.kt`），按日历天而不是 24 小时算 |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`，`SnackbarHostState` 是 Miuix 的）。**居中、随文案收窄的胶囊**（短提示是药丸，长提示才横向展开）。页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
+| 不是卡片、也不是按钮的圆角面（提示条、阅读页小提示、预览框） | `AppSurface`（`AppSurface.kt`）：Miuix `Surface` 的 squircle 版，`borderColor` 给描边。卡片用 Miuix `Card`。别用 Miuix `Surface(shape = …)`（普通圆弧） |
 | 对话框 | `AppAlertDialog`（`AppDialog.kt`，Miuix `WindowDialog`）：居中标题 + 正文/内容 + 等宽 `SecondaryButton` / `PrimaryButton`。调用方照旧条件组合；取消/点外面先播退场动画再回调，收起中的点击一律吞掉。`confirmLoading` 期间次按钮是「取消这次操作」（立刻回调、弹窗留着），要禁掉就传 `dismissEnabled = false`。别手搓居中 `Surface` 冒充弹层 |
 
 对话框与底部面板背后的页面会模糊（`DialogWindowBlur`，`WindowBlur.kt`，系统跨窗口模糊 `blurBehindRadius`）：封装里已经调了，自己另写弹层时也放进弹层内容里调。系统关了跨窗口模糊时自动退回只压暗。
 
 弹层一律用 Miuix 的 **`Window*`** 系列（`WindowDialog` / `WindowBottomSheet` / `WindowDropdownPopup`），**不用 `Overlay*`**：Overlay 要挂在 Miuix `Scaffold` 的弹层宿主上，而我们是 Nav3 多个 entry 各一个 Scaffold、阅读器浮层又不在 Scaffold 里；Window 系列开独立窗口，放在哪都能弹。
 
-图标：一律先找 `MiuixIcons`（`miuix-icons`，HyperOS 线条图标：Back / More / Search / Delete / Add / Close / Settings / Share / Refresh / Edit / Copy / Hide / Replace / Tune / Clear / Recent / Sort / SelectAll / Import / Update / Info …；`MiuixIcons.Basic.*` 是 Check / ArrowRight / ArrowUpDown / SearchCleanup 这几个小件）。它没有的（发现、RSS、深浅色、云同步状态、错误/警告）用 `material-icons-extended` 的 **`Icons.Outlined.*`** —— 线条版才和 Miuix 一个画风，别用 `Icons.Default`（实心）。多选角标用 Miuix `Checkbox`，不用一对图标拼。
+图标：一律先找 `MiuixIcons`（`miuix-icons`，HyperOS 线条图标：Back / More / Search / Delete / Add / Close / Settings / Share / Refresh / Edit / Copy / Hide / Replace / Tune / Clear / Recent / Sort / SelectAll / Import / Update / Info …；`MiuixIcons.Basic.*` 是 Check / ArrowRight / ArrowUpDown / SearchCleanup 这几个小件）。对应关系：发现 → `SearchDevice`（指南针形）、警告 / 错误 → `Report`、成功 → `Ok`、书 / 空书架 → `Notes`、云同步 → `UploadCloud`（未配置）/ `CloudFill`（已同步）。只有 Miuix 真没有的（目前只剩 RSS）才用 `material-icons-extended` 的 **`Icons.Outlined.*`** —— 线条版才和 Miuix 一个画风，别用 `Icons.Default`（实心）。新加图标前先翻一遍 0.9.x 的图标表（文档「图标」页，或 `miuix-icons` 包里 `icon/extended` 下的类名）。多选角标用 Miuix `Checkbox`，不用一对图标拼。
 
 出现「多个页面重复相似 UI」时，抽成组件而不是复制。
 

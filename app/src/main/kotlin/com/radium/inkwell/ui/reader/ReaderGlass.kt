@@ -18,7 +18,10 @@ import top.yukonga.miuix.kmp.blur.textureBlur
  * 叠的颜色仍是浮层色（[readerOverlayColor]，比纸深 / 亮一档）：模糊只让纸上的字隐约透出来，
  * 「盖在纸上的一层」靠的还是那一档色阶和圆角，不是阴影或压暗（理由见 ReaderMenu）。
  *
- * 参数与 App 顶栏的毛玻璃一致（模糊 25、叠色 80%，Miuix 示例 App 的取值）。
+ * 叠色 80% 与 App 顶栏一致，**模糊半径却大得多**（[READER_GLASS_BLUR_RADIUS]，App 顶栏是 25dp）：
+ * App 顶栏底下是滚过去的列表，一片一片的内容糊开是均匀的；阅读菜单底下是**不动**的一页纸，顶栏正好压在页眉那一行
+ * 小字上。25dp 只够把那一行字糊成一块边界清楚的灰影，恰好垫在返回键和书名后面，装上后被看成「返回键外面套了个容器」。
+ * 半径放大到一行字的好几倍，它就摊成看不出形状的一层薄雾；正文那几行在底栏下面也一样，摊成均匀的一层。
  * [backdrop] 为 null 时原样返回，调用方给实色底。
  */
 @Composable
@@ -44,5 +47,6 @@ internal fun Modifier.readerGlass(backdrop: LayerBackdrop?, shape: Shape, tint: 
  */
 internal fun Modifier.blockTouchesBelow(): Modifier = this.pointerInput(Unit) {}
 
-private const val READER_GLASS_BLUR_RADIUS = 25f
+/** dp（miuix-blur 按 dp 收半径，上限 150） */
+private const val READER_GLASS_BLUR_RADIUS = 60f
 private const val READER_GLASS_TINT_ALPHA = 0.8f

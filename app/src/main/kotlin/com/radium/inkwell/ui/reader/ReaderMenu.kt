@@ -2,7 +2,6 @@ package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.ui.components.sheetBottomInset
 import com.radium.inkwell.ui.components.TonalButton
-import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,9 +30,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,6 +95,8 @@ import com.radium.inkwell.ui.components.SegmentedChoice
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -110,6 +109,8 @@ import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.squircle.squircleBorder
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -151,19 +152,21 @@ fun ReaderMenu(
         onReaderSheetOpen(showToc || showSettings)
     }
 
-    // 菜单这一层靠**色阶 + 形状**跟纸面分开，不靠阴影和蒙层：
+    // 菜单这一层靠**色阶 + 毛玻璃**跟纸面分开，不靠阴影和蒙层：
     // - 从前顶栏、底栏与纸同色，只隔一根发丝线，看着像页面上下多了两行字，而不是盖上来的一层。
     // - 也别回到投影 / 压暗：同色纸上 4~8dp 的投影就是一道脏灰线；压暗正文会把米色纸压成灰绿，
     //   在顶栏底边裂出一道生硬的分界（两条都实测过）。纸书里书签和纸页之间也没有阴影。
-    // 顶栏是比纸深（深色纸上是浅）一档的条，朝正文那一侧是大圆角；底部是两块同色的悬浮圆角条
-    // （进度、操作），四周露出纸色。圆角的边、露出来的那圈纸，就是「盖在纸上」的全部表达。
-    // 三条栏都是 HyperOS 的毛玻璃（readerGlass）：对正文取样模糊、再叠八成的浮层色 —— 底下的字隐约透出来，
-    // 色阶仍是那一档，上面这两条结论不变。浮层底色与点「设置」弹出的面板同一个（见 readerOverlayColor）。
+    // 两条栏都是比纸深（深色纸上是浅）一档的 HyperOS 毛玻璃（readerGlass）：对正文取样模糊、再叠八成的浮层色。
+    // 浮层底色与点「设置」弹出的面板同一个（见 readerOverlayColor）。
+    //
+    // **两条栏都通栏、不带圆角**（HyperOS 的玻璃栏就是这样）。从前顶栏朝正文一侧是大圆角，底部是两块悬浮的圆角条
+    // （进度、操作）四周露出纸色 —— 装上后被指出「图标外面套了个容器」：返回键、四个操作像是各装在一张卡片里；
+    // 再加上悬浮条、顶栏、设置面板、面板里的卡片各是一种圆角，「弹出层的圆角不统一」。
+    // 现在圆角只留给真正弹出来的那一层（目录、设置面板），两条常驻的栏是贴边的平条。
     val scheme = MiuixTheme.colorScheme
     val barColor = readerOverlayColor()
     // 毛玻璃时栏自己不铺底（底由 readerGlass 画），否则实色把模糊整个盖住
     val barFill = if (pageBackdrop != null) Color.Transparent else barColor
-    val topBarShape = AppShapes.extraLarge.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize)
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
 
     // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
@@ -201,16 +204,17 @@ fun ReaderMenu(
                 Surface(
                     color = barFill,
                     contentColor = scheme.onSurface,
-                    shape = topBarShape,
                     modifier = Modifier
                         .animateEnterExit(topBarEnter(), topBarExit())
-                        .readerGlass(pageBackdrop, topBarShape, barColor)
+                        .readerGlass(pageBackdrop, RectangleShape, barColor)
                         .blockTouchesBelow(),
                 ) {
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
+                            // 与 App 的窄顶栏同高（AppToolbar），左右同样只留 gapXS（48dp 的图标按钮自带一圈可点区）
+                            .height(Dimens.toolbarHeight)
                             .padding(horizontal = Dimens.gapXS),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -244,38 +248,27 @@ fun ReaderMenu(
 
                 Spacer(Modifier.weight(1f))
 
-                Column(
-                    Modifier
+                // 底栏：一条通栏，进度在上、四个操作在下，一直铺到屏幕底（手势条那一截也是玻璃）
+                Surface(
+                    color = barFill,
+                    contentColor = scheme.onSurface,
+                    modifier = Modifier
                         .animateEnterExit(bottomBarEnter(), bottomBarExit())
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = Dimens.gapM, vertical = Dimens.gapS),
-                    verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
+                        .readerGlass(pageBackdrop, RectangleShape, barColor)
+                        .blockTouchesBelow(),
                 ) {
-                    Surface(
-                        shape = AppShapes.extraLarge,
-                        color = barFill,
-                        contentColor = scheme.onSurface,
-                        modifier = Modifier
-                            .readerGlass(pageBackdrop, AppShapes.extraLarge, barColor)
-                            .blockTouchesBelow(),
+                    Column(
+                        Modifier
+                            .navigationBarsPadding()
+                            .padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS),
                     ) {
                         ChapterProgress(
                             pageUi = pageUi,
                             chapterCount = session.chapterCount,
                             onGotoChapter = onGotoChapter,
                             onSeekPercent = onSeekPercent,
-                            modifier = Modifier.padding(horizontal = Dimens.gapS, vertical = Dimens.gapXS),
                         )
-                    }
-                    Surface(
-                        shape = AppShapes.extraLarge,
-                        color = barFill,
-                        contentColor = scheme.onSurface,
-                        modifier = Modifier
-                            .readerGlass(pageBackdrop, AppShapes.extraLarge, barColor)
-                            .blockTouchesBelow(),
-                    ) {
                         MenuActions(
                             session = session,
                             overlay = overlay,
@@ -283,7 +276,6 @@ fun ReaderMenu(
                             onSearchSources = onSearchSources,
                             onToggleAutoFlip = onToggleAutoFlip,
                             onShowSettings = { showSettings = true },
-                            modifier = Modifier.padding(Dimens.gapXS),
                         )
                     }
                 }
@@ -688,14 +680,14 @@ private fun TypographyPanel(
     val contentHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight)
 
     Column(Modifier.fillMaxWidth()) {
-        // TabRow 钉在顶不滚，只让下面的内容滚
+        // TabRow 钉在顶不滚，只让下面的内容滚。左右与下面的分组卡对齐（从前贴着面板两边，
+        // 「排版」「更多」两格被面板边切掉一截）。槽是 surfaceContainerHighest（比面板深一档），
+        // 浮起的那一格是卡片色 —— 和下面卡里分段按钮的槽同一种长相
         AppTabRow(
             titles = SETTINGS_TABS,
             selectedIndex = tab,
             onSelect = { tab = it },
-            // 透出面板自己的底色；默认的 surface 是纸色，会在面板顶上横出一条纸色的带子。
-            // 选中那一格是卡片色（surfaceContainer），与面板差一档，透明底上照样分得清
-            containerColor = Color.Transparent,
+            modifier = Modifier.padding(horizontal = Dimens.screenPadding),
         )
         AppTabContent(
             targetState = tab,
@@ -743,12 +735,13 @@ private fun ReaderGroup(
                     .semantics { heading() },
             )
         }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(AppShapes.large)
-                .background(readerCardColor())
-                .padding(vertical = Dimens.gapXS),
+        // Miuix 的卡片（squircle 圆角，和面板、按钮、分段同一种弯法）。从前是 clip(RoundedCornerShape)，
+        // 普通圆弧夹在一堆 squircle 中间，几种圆角放一起就显得不统一
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = AppShapes.radiusLarge,
+            insideMargin = PaddingValues(vertical = Dimens.gapXS),
+            colors = CardDefaults.defaultColors(color = readerCardColor()),
             content = content,
         )
     }
@@ -837,8 +830,9 @@ private fun LayoutTab(
         SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
             onUpdate(settings.copy(lineSpacingMult = it))
         }
-        // 亮度要一整条滑轨才好拖：slots 给足，窄屏上标签自动摞到上面
-        ReaderRow("亮度", slots = 6) { BrightnessControl(settings, onUpdate, onPreview, onCommit) }
+        // 和字号、行距一样「标签在左、控件在右」：从前 slots 给到 6，常见宽度的手机上一律摞成两行，
+        // 「亮度」两个字孤零零占一行，跟上面两行排法不一样。现在控件只剩滑轨 + 「系统」，4 格放得下
+        ReaderRow("亮度", slots = 4) { BrightnessControl(settings, onUpdate, onPreview, onCommit) }
     }
 
     ReaderGroup("字体") {
@@ -911,11 +905,8 @@ private fun BrightnessControl(
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
 ) {
+    // 滑轨两头不再放月亮 / 太阳图标：标签已经写着「亮度」，两个图标挤掉的是滑轨的长度（放进一行后只剩一百出头 dp）
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            Icons.Outlined.DarkMode, contentDescription = null,
-            Modifier.size(Dimens.iconSm), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        )
         AppSlider(
             value = settings.brightnessOverride ?: 0.5f,
             onValueChange = { v ->
@@ -924,11 +915,7 @@ private fun BrightnessControl(
             onValueChangeFinished = onCommit,
             label = "亮度",
             enabled = settings.brightnessOverride != null,
-            modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
-        )
-        Icon(
-            Icons.Outlined.LightMode, contentDescription = null,
-            Modifier.size(Dimens.iconSm), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.weight(1f),
         )
         AppFilterChip(
             selected = settings.brightnessOverride == null,
@@ -941,6 +928,7 @@ private fun BrightnessControl(
             },
             label = "系统",
             modifier = Modifier.padding(start = Dimens.gapM),
+            solidSelection = true,
         )
     }
 }
@@ -1018,6 +1006,7 @@ private fun FlipTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit
                     selectedIndex = AUTO_FLIP_OPTIONS.indexOf(settings.autoFlipSeconds),
                     onSelect = { onUpdate(settings.copy(autoFlipSeconds = AUTO_FLIP_OPTIONS[it])) },
                     contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
+                    solidSelection = true,
                 )
             }
         }
@@ -1077,6 +1066,7 @@ private fun TapZoneEditor(zones: TapZones, onChange: (TapZones) -> Unit) {
             options = presets.map { it.label } + if (presetIndex < 0) listOf("自定义") else emptyList(),
             selectedIndex = if (presetIndex < 0) presets.size else presetIndex,
             onSelect = { i -> presets.getOrNull(i)?.let { onChange(it.zones) } },
+            solidSelection = true,
         )
         Column(
             Modifier
@@ -1112,7 +1102,6 @@ private fun TapZoneCell(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
-    val shape = AppShapes.small
     // 面板在 ReaderThemeScope 里，颜色都是从纸色派生的（见那里）：下一页是强调色的淡底、最显眼；
     // 上一页是正文色 14% 的灰底、淡一档；菜单再淡一档（正文色 6%），像纸面上一级浅浅的台阶；
     // 无动作不铺底只描边，像「这格空着」。四态靠色相 + 浓淡 + 有无底色拉开。
@@ -1126,11 +1115,14 @@ private fun TapZoneCell(
     Box(
         modifier
             .heightIn(min = Dimens.touchTarget)
-            .clip(shape)
-            .background(container)
+            // 和分段按钮的浮块同一档圆角、同一种 squircle 弯法
+            .squircleSurface(container, AppShapes.radiusSmall)
             .then(
-                if (action == TapAction.NONE) Modifier.border(Dimens.strokeThin, scheme.dividerLine, shape)
-                else Modifier
+                if (action == TapAction.NONE) {
+                    Modifier.squircleBorder(Dimens.strokeThin, scheme.dividerLine, AppShapes.radiusSmall)
+                } else {
+                    Modifier
+                }
             )
             .then(
                 if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick)

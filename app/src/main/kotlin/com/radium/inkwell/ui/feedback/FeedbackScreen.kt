@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckCircle
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Info
 import androidx.compose.runtime.Composable
@@ -49,6 +47,7 @@ import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.Ok
 
 @Composable
 fun FeedbackScreen(
@@ -200,7 +199,7 @@ private fun SubmittedState(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            Icons.Outlined.CheckCircle,
+            MiuixIcons.Ok,
             contentDescription = null,
             tint = MiuixTheme.colorScheme.primary,
             modifier = Modifier.size(Dimens.iconXL),

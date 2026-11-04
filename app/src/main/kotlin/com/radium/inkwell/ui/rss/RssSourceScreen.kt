@@ -18,12 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.RssSourceEntity
+import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
@@ -154,7 +154,7 @@ fun RssSourceScreen(
                         enabled = source.enabled,
                         // 底与圆角由外面的卡画，行本身透明、直角
                         colors = ContentListDefaults.plainColors(),
-                        shape = RectangleShape,
+                        corners = SquircleCorners.Square,
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 // 删除图标走摘要色：outline / dividerLine 只给边框/分隔线用，

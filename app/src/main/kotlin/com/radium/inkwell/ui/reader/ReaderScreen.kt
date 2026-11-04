@@ -93,9 +93,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import com.radium.inkwell.ui.theme.AppShapes
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.ui.graphics.luminance
+import com.radium.inkwell.ui.components.AppSurface
 
 /** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
 private const val AUTO_CHANGED_HINT_MS = 8_000L
@@ -273,8 +274,13 @@ fun ReaderScreen(
     val activity = LocalActivity.current
     BrightnessEffect(activity, session.settings.brightnessOverride)
     KeepScreenOnEffect(activity, session.settings.keepScreenOn)
-    // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复
-    ImmersiveEffect(activity, immersive = !overlay.menuVisible)
+    // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复；露出来时图标明暗跟纸走、退出阅读页还给 App 主题
+    ImmersiveEffect(
+        activity,
+        immersive = !overlay.menuVisible,
+        lightPaper = !session.settings.theme.isDark,
+        lightApp = MiuixTheme.colorScheme.surface.luminance() > 0.5f,
+    )
 
     val paper = remember(session.settings.theme.background) { Color(session.settings.theme.background) }
     val pageBackdrop = rememberLayerBackdrop {
@@ -556,9 +562,9 @@ fun ReaderScreen(
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             ReaderThemeScope(session.settings.theme) {
-                Surface(
-                    Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                    shape = AppShapes.medium,
+                AppSurface(
+                    cornerRadius = AppShapes.radiusMedium,
+                    modifier = Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
                     // 纸面上的小提示条：比纸面深/亮一档（surfaceContainerHigh），不投影 —— 同色纸上的阴影是脏灰线
                     color = MiuixTheme.colorScheme.surfaceContainerHigh,
                 ) {
@@ -832,14 +838,23 @@ private fun BrightnessEffect(activity: Activity?, brightness: Float?) {
     }
 }
 
+/**
+ * 沉浸：读的时候藏起系统栏，呼出菜单时放出来。
+ *
+ * 放出来的系统栏压在阅读菜单的顶栏 / 底栏上，图标明暗得跟**纸**走（[lightPaper]），不能沿用 MainActivity 按 App 主题设的那一套：
+ * App 是深色、纸是象牙时，状态栏的时间和信号是白字压在浅色顶栏上，几乎看不见（反过来也一样）。
+ * 退出阅读页时还给 App 主题（[lightApp]）—— MainActivity 那边是 SideEffect，根组合不重组就不会再设一遍。
+ */
 @Composable
-private fun ImmersiveEffect(activity: Activity?, immersive: Boolean) {
-    DisposableEffect(activity, immersive) {
+private fun ImmersiveEffect(activity: Activity?, immersive: Boolean, lightPaper: Boolean, lightApp: Boolean) {
+    DisposableEffect(activity, immersive, lightPaper, lightApp) {
         val window = activity?.window
         if (window != null) {
             val controller = WindowInsetsControllerCompat(window, window.decorView)
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.isAppearanceLightStatusBars = lightPaper
+            controller.isAppearanceLightNavigationBars = lightPaper
             if (immersive) {
                 controller.hide(WindowInsetsCompat.Type.systemBars())
             } else {
@@ -847,10 +862,13 @@ private fun ImmersiveEffect(activity: Activity?, immersive: Boolean) {
             }
         }
         onDispose {
-            // 退出阅读页恢复系统栏
+            // 退出阅读页恢复系统栏，图标明暗还给 App 主题（换纸 / 开合菜单时这里也会先跑一遍，紧接着被新的一轮设回来）
             activity?.window?.let {
-                WindowInsetsControllerCompat(it, it.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
+                WindowInsetsControllerCompat(it, it.decorView).apply {
+                    show(WindowInsetsCompat.Type.systemBars())
+                    isAppearanceLightStatusBars = lightApp
+                    isAppearanceLightNavigationBars = lightApp
+                }
             }
         }
     }

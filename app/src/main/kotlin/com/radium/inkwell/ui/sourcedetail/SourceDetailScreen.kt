@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
@@ -34,13 +33,14 @@ import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SecondaryButton
-import androidx.compose.material.icons.outlined.Warning
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.Report
+import top.yukonga.miuix.kmp.icon.MiuixIcons
 
 /**
  * 书源详情：只读展示规则原文 + 一键全链路测试。书源不在应用内编辑，改规则请重新导入。
@@ -77,7 +77,7 @@ fun SourceDetailScreen(
         }
         if (state.missing) {
             EmptyState(
-                icon = Icons.Outlined.Warning,
+                icon = MiuixIcons.Report,
                 title = "书源不存在",
                 hint = "它可能已被删除",
                 actionLabel = "返回",

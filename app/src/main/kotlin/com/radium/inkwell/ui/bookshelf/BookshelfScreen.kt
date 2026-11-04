@@ -30,16 +30,13 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.ui.state.ToggleableState
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.ToolbarTitle
-import com.radium.inkwell.ui.components.settingGroupItemShape
+import com.radium.inkwell.ui.components.settingGroupItemCorners
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -119,11 +116,14 @@ import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.icon.extended.SearchDevice
+import top.yukonga.miuix.kmp.icon.extended.Notes
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -557,7 +557,7 @@ fun BookshelfScreen(
                         if (exploreEnabled) {
                             AppIconButton(onClick = onOpenExplore) {
                                 // Miuix 图标里没有罗盘，用 Material 的线条版，与 Miuix 的线条图标一个笔触
-                                Icon(Icons.Outlined.Explore, contentDescription = "发现")
+                                Icon(MiuixIcons.SearchDevice, contentDescription = "发现")
                             }
                         }
                         // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
@@ -614,7 +614,7 @@ fun BookshelfScreen(
             }
         } else if (!showShelf) {
             EmptyState(
-                icon = Icons.Outlined.AutoStories,
+                icon = MiuixIcons.Notes,
                 title = "书架空空如也",
                 hint = "导入本地 txt / EPUB / MOBI，或搜索已导入的规则",
                 actionLabel = "导入本地书",
@@ -673,7 +673,7 @@ fun BookshelfScreen(
                     // 当前分组下没有可见的书（未分组也算一个分组）。筛选条留在上面，空态只占内容区。
                     // 隐藏区未展开时被藏起来的书也不算「有」，提示文案里同样一个字不提隐藏。
                     books.isEmpty() -> EmptyState(
-                        icon = Icons.Outlined.AutoStories,
+                        icon = MiuixIcons.Notes,
                         title = "这个分组还没有书",
                         hint = "长按书封「设置分组」可以把书移进来，或在上方切换分组",
                         modifier = Modifier.padding(top = topInset, bottom = bottomInset),
@@ -948,7 +948,7 @@ private fun BookShelfListRow(
     }
 
     val colors = ContentListDefaults.plainColors()
-    val shape = settingGroupItemShape(position)
+    val corners = settingGroupItemCorners(position)
     if (selectionMode) {
         ContentListItem(
             checked = selected,
@@ -961,7 +961,7 @@ private fun BookShelfListRow(
             supportingContent = supportingContent,
             contentPadding = ContentListDefaults.ComfortablePadding,
             colors = colors,
-            shape = shape,
+            corners = corners,
             content = headline,
         )
     } else {
@@ -974,7 +974,7 @@ private fun BookShelfListRow(
             supportingContent = supportingContent,
             contentPadding = ContentListDefaults.ComfortablePadding,
             colors = colors,
-            shape = shape,
+            corners = corners,
             content = headline,
         )
     }
@@ -1205,20 +1205,21 @@ private fun HiddenStatusBar(
 ) {
     // 开关显示的是偏好本身；能不能拨：能验证就能开关，不能验证则只许关
     val toggleEnabled = biometricAvailable || requireAuth
-    Surface(
-        modifier
+    // 与 SettingGroup 同一种卡：Miuix Card（squircle 圆角、卡片色）
+    Card(
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal)
             // 与 SettingGroup 上下同一档留白
             .padding(vertical = Dimens.gapS),
-        shape = AppShapes.large,
-        color = settingsCardColor(),
+        cornerRadius = AppShapes.radiusLarge,
+        colors = CardDefaults.defaultColors(color = settingsCardColor()),
     ) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 开关区吃掉剩余宽度；按压反馈的形用 Middle（直角），外层 Surface 裁出大圆角，
+            // 开关区吃掉剩余宽度；按压反馈的形用 Middle（直角），外层卡片裁出大圆角，
             // 避免 Alone 四角圆贴到 ✕ 左侧看起来像两块卡。
             ContentListItem(
                 checked = requireAuth,
@@ -1234,7 +1235,7 @@ private fun HiddenStatusBar(
                     )
                 },
                 colors = ContentListDefaults.plainColors(),
-                shape = settingGroupItemShape(SettingGroupPosition.Middle),
+                corners = settingGroupItemCorners(SettingGroupPosition.Middle),
                 content = {
                     Text(
                         when {

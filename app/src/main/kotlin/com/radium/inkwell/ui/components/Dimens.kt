@@ -108,8 +108,6 @@ object Dimens {
      * 定宽是为了同一张卡里各行的分段按钮左边对齐，而不是跟着标签长短参差
      */
     val settingLabelWidth = 80.dp
-    /** 设置主页行首图标的圆角方底（HyperOS 设置页那种彩色小方块）；里面的图标用 [iconMd] */
-    val settingIcon = 40.dp
 
     // ---- 控件 ----
     /**
