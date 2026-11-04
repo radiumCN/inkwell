@@ -24,6 +24,8 @@ import org.jsoup.nodes.Document
  * @param tocLink 目录在另一页时，详情页上指向它的规则（→ `ruleBookInfo.tocUrl`）
  * @param tocNextPage 目录分页时「下一页」的规则（→ `ruleToc.nextTocUrl`）
  * @param rendered 静态 HTML 里认不出目录、是 WebView 执行完页面脚本后才认出来的
+ * @param fromChapterUrl 用户给的其实是一章（[BookInfoDetector.isChapterPage]），已顺着「目录」跳到书页；
+ *   [bookUrl] 是跳过去的那一页
  */
 data class BookPageAnalysis(
     val bookUrl: String,
@@ -33,7 +35,11 @@ data class BookPageAnalysis(
     val tocCandidates: List<TocCandidate>,
     val tocNextPage: DetectedField?,
     val rendered: Boolean = false,
+    val fromChapterUrl: String? = null,
 )
+
+/** 只认书页、不认目录的结果（[SiteAnalyzer.peekBook]）：书页地址（章节页已跳过）+ 书籍信息 */
+data class BookPeek(val bookUrl: String, val info: DetectedBookInfo)
 
 /** 章节页的识别结果；[nextPage] → `ruleContent.nextContentUrl`（一章分几页的站） */
 data class ChapterPageAnalysis(
@@ -59,11 +65,14 @@ class SiteAnalyzer(
 
     /** 公开入口自己切 IO（与 [com.radium.inkwell.core.source.BookSourceEngine] 同约定），调用方在哪个线程都安全 */
     suspend fun analyzeBook(url: String): BookPageAnalysis = withContext(Dispatchers.IO) {
-        val doc = load(url, render = false) ?: throw SourceException("打不开这个网址：$url")
-        val plain = inspectBook(doc, render = false)
+        val entry = load(url, render = false) ?: throw SourceException("打不开这个网址：$url")
+        val book = bookPageOf(entry)
+        val fromChapter = entry.location().takeIf { book !== entry }
+        val plain = inspectBook(book, render = false).copy(fromChapterUrl = fromChapter)
         if (plain.tocCandidates.isNotEmpty() || renderer == null) return@withContext plain
-        val rendered = load(url, render = true) ?: return@withContext plain
-        inspectBook(rendered, render = true).takeIf { it.tocCandidates.isNotEmpty() } ?: plain
+        val rendered = load(book.location(), render = true) ?: return@withContext plain
+        inspectBook(rendered, render = true).copy(fromChapterUrl = fromChapter)
+            .takeIf { it.tocCandidates.isNotEmpty() } ?: plain
     }
 
     suspend fun analyzeChapter(url: String): ChapterPageAnalysis = withContext(Dispatchers.IO) {
@@ -77,11 +86,24 @@ class SiteAnalyzer(
     }
 
     /**
-     * 只认书名、作者、封面、简介，不找目录。用已有书源按网址打开一本书时，预览页要个书名占位 ——
-     * 书源自己的详情规则未必认得出（不少源的书名只在搜索结果里给）。一页静态抓取，失败返回空。
+     * 只认书页地址与书名、作者、封面、简介，不找目录。用已有书源按网址打开一本书时用：
+     * 给的若是一章，书页地址要换成目录那页（书源的详情规则是照书页写的）；预览页还要个书名占位 ——
+     * 书源自己的详情规则未必认得出（不少源的书名只在搜索结果里给）。抓不到就原样返回 [url]、信息为空。
      */
-    suspend fun peekBookInfo(url: String): DetectedBookInfo = withContext(Dispatchers.IO) {
-        load(url, render = false)?.let { BookInfoDetector.detect(it) } ?: DetectedBookInfo()
+    suspend fun peekBook(url: String): BookPeek = withContext(Dispatchers.IO) {
+        val entry = load(url, render = false) ?: return@withContext BookPeek(url, DetectedBookInfo())
+        val book = bookPageOf(entry)
+        BookPeek(book.location(), BookInfoDetector.detect(book))
+    }
+
+    /**
+     * 入口页若是一章，顺着「目录」（没有就「返回书页」）跳到书页；不是章节页、或跳不过去就原样返回。
+     * 跳过去的那页本身可能还是详情页，完整目录在更深一层 —— 那一步由 [inspectBook] 照常处理。
+     */
+    private suspend fun bookPageOf(entry: Document): Document {
+        if (!BookInfoDetector.isChapterPage(entry)) return entry
+        val link = BookInfoDetector.findTocLink(entry) ?: BookInfoDetector.findBookPageLink(entry) ?: return entry
+        return load(link.value, render = false) ?: entry
     }
 
     private suspend fun inspectBook(doc: Document, render: Boolean): BookPageAnalysis {

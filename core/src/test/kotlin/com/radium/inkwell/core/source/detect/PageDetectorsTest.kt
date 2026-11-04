@@ -165,6 +165,15 @@ class PageDetectorsTest {
     }
 
     @Test
+    fun `tells chapter pages from book pages`() {
+        assertTrue(BookInfoDetector.isChapterPage(doc(DetectFixtures.brContent(), "https://www.example.com/book/1234/100001.html")))
+        assertFalse(BookInfoDetector.isChapterPage(doc(DetectFixtures.biqugeToc())))
+        assertFalse(BookInfoDetector.isChapterPage(doc(DetectFixtures.mobileDetail("https://m.example.com"), "https://m.example.com/book/88/")))
+        // 有正文、没有上一章 / 下一章导航：不当章节页（详情页的长简介就是这样）
+        assertFalse(BookInfoDetector.isChapterPage(doc(DetectFixtures.divContent())))
+    }
+
+    @Test
     fun `toc link on a mobile detail page`() {
         val base = "https://m.example.com"
         val link = assertNotNull(BookInfoDetector.findTocLink(doc(DetectFixtures.mobileDetail(base), "$base/book/88/")))

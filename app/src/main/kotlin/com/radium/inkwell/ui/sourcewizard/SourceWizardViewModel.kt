@@ -6,6 +6,7 @@ import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.detect.BookPageAnalysis
+import com.radium.inkwell.core.source.detect.BookPeek
 import com.radium.inkwell.core.source.detect.ChapterPageAnalysis
 import com.radium.inkwell.core.source.detect.DetectedBookInfo
 import com.radium.inkwell.core.source.detect.SiteAnalyzer
@@ -130,8 +131,9 @@ class SourceWizardViewModel(
     }
 
     /**
-     * 用已有书源打开这本书：交给预览页，加书架、阅读都走它。预览页要个书名占位 ——
-     * 已有书源的详情规则未必认得出书名（不少源的书名只在搜索结果里给），先在页面上认一下。
+     * 用已有书源打开这本书：交给预览页，加书架、阅读都走它。先在页面上认一下：
+     * 给的若是一章，书的地址换成目录那页（书源的详情规则是照书页写的，拿章节页去套什么都认不出）；
+     * 预览页还要个书名占位 —— 已有书源的详情规则未必认得出书名（不少源的书名只在搜索结果里给）。
      */
     fun openWithExisting() {
         val rule = _state.value.existing ?: return
@@ -139,12 +141,13 @@ class SourceWizardViewModel(
         job?.cancel()
         job = viewModelScope.launch {
             _state.update { it.copy(openingExisting = true) }
-            val info = attempt(PEEK_TIMEOUT_MS) { analyzer.peekBookInfo(url) }.getOrDefault(DetectedBookInfo())
+            val peek = attempt(PEEK_TIMEOUT_MS) { analyzer.peekBook(url) }.getOrDefault(BookPeek(url, DetectedBookInfo()))
+            val info = peek.info
             _state.update { it.copy(openingExisting = false, existing = null) }
             _openBook.emit(
                 SearchResult(
                     title = info.name?.value.orEmpty(),
-                    bookUrl = url,
+                    bookUrl = peek.bookUrl,
                     author = info.author?.value,
                     coverUrl = info.coverUrl?.value,
                     intro = info.intro?.value,

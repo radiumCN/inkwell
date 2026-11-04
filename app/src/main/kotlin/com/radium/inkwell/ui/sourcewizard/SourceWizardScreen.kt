@@ -279,6 +279,7 @@ private fun choiceLabels(labels: List<String>): List<String> =
     if (labels.toSet().size == labels.size) labels else labels.indices.map { "第 ${it + 1} 组" }
 
 private fun tocNotes(book: BookPageAnalysis, toc: TocCandidate): String = buildList {
+    if (book.fromChapterUrl != null) add("你给的是其中一章，已经跳到这本书的目录页来认")
     if (book.tocCandidates.size > 1) add("认出了几组链接，默认选的是最像目录的那组；头尾不对就换一组")
     if (book.tocLink != null) add("目录在另一页，已经点进去认过了")
     if (book.tocNextPage != null) add("目录分了好几页，这里只数了第一页，加书时会自动翻完")

@@ -101,6 +101,28 @@ class SiteAnalyzerTest {
         assertTrue(paragraphs.any { it.contains("后半页第1段正文") })
     }
 
+    /**
+     * 用户粘的是正在读的那一章：要跳到目录页再认。从前直接在章节页上认 —— 唯一的 h1 是章节名，
+     * 被当成了书名；章节地址当书的地址存下来，详情、目录全从这一章去认。
+     */
+    @Test
+    fun `chapter page url resolves to the book page`() = runBlocking {
+        val chapterUrl = "$base/book/1234/100002.html"
+        val (book, rule) = buildSource(chapterUrl)
+        assertEquals("$base/book/1234/", book.bookUrl)
+        assertEquals(chapterUrl, book.fromChapterUrl)
+        assertEquals("示例之书", book.info.name?.value)
+        assertEquals(30, book.tocCandidates.first().chapters.size)
+
+        val detail = engine().getDetail(rule, book.bookUrl)
+        assertEquals("示例之书", detail.title)
+
+        // 「用已有书源打开」走的那条：同样换成书页地址
+        val peek = SiteAnalyzer(http).peekBook(chapterUrl)
+        assertEquals("$base/book/1234/", peek.bookUrl)
+        assertEquals("示例之书", peek.info.name?.value)
+    }
+
     @Test
     fun `mobile site follows the toc link and paginates`() = runBlocking {
         val (book, rule) = buildSource("$base/book/88/")

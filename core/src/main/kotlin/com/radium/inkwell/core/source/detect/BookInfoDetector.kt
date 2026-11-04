@@ -32,12 +32,17 @@ object BookInfoDetector {
      * 「查看完整目录」这类链接：手机站的详情页通常只列最新十来章，完整目录在另一页。
      * 返回的 [DetectedField.value] 是目录页的绝对地址。
      */
-    fun findTocLink(doc: Document): DetectedField? {
+    fun findTocLink(doc: Document): DetectedField? = findLink(doc, TOC_LINK)
+
+    /** 章节页上回书页的链接（「返回书页」「书籍详情」）；没有「目录」链接时退而求其次 */
+    fun findBookPageLink(doc: Document): DetectedField? = findLink(doc, BOOK_PAGE_LINK)
+
+    private fun findLink(doc: Document, pattern: Regex): DetectedField? {
         val host = SiteLinks.hostOf(doc.location()) ?: return null
         val self = doc.location().substringBefore('#')
         for (a in doc.body()?.select("a[href]").orEmpty()) {
             val link = SiteLinks.linkOf(a, host) ?: continue
-            if (!TOC_LINK.matches(link.text) || link.url == self) continue
+            if (!pattern.matches(link.text) || link.url == self) continue
             if (link.text.any { it in SiteLinks.SELECTOR_UNSAFE }) continue
             val selector = "a:contains(${link.text})"
             val first = CssPaths.select(doc, selector)?.firstNotNullOfOrNull { SiteLinks.linkOf(it, host) }
@@ -91,6 +96,30 @@ object BookInfoDetector {
     private val TOC_LINK = Regex(
         "^(查看|进入|点击|浏览|返回)?\\s*(完整|全部|所有)?\\s*(目录|章节|章节目录|章节列表|目录列表)\\s*[>›»→]*$",
     )
+
+    private val BOOK_PAGE_LINK = Regex("^(返回)?\\s*(书页|书籍详情|作品详情|书籍首页|小说首页|返回书架)\\s*[>›»→]*$")
+
+    /**
+     * 章节页的「上一章 / 下一章」导航。目录页、详情页没有这一对，章节页几乎都有 ——
+     * 区分用户给的是哪种页面，靠它最稳。
+     */
+    private val CHAPTER_NAV = Regex("^[<‹«←]*\\s*(上|下)\\s*一?\\s*(章|节|回)\\s*[>›»→]*$")
+
+    /**
+     * 是不是章节页：有上一章 / 下一章导航，又有一大块正文。
+     *
+     * 用户粘过来的常是正在读的那一章。章节页上唯一的 h1 是章节名，拿去当书名就错了；
+     * 地址当书的地址存下来，详情、目录都从这一章去认，一路认偏。
+     */
+    fun isChapterPage(doc: Document): Boolean {
+        val hasNav = doc.body()?.select("a")?.any { CHAPTER_NAV.matches(it.text().trim()) } ?: false
+        if (!hasNav) return false
+        val best = ContentDetector.detect(doc, limit = 1).firstOrNull() ?: return false
+        return best.textLength >= CHAPTER_PAGE_MIN_CHARS
+    }
+
+    /** 章节页正文至少这么多字：分页章节的第一页也有上千字，详情页的简介很少过两百 */
+    private const val CHAPTER_PAGE_MIN_CHARS = 200
 
     private const val MAX_TITLE = 40
     private const val MAX_AUTHOR = 30
