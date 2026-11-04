@@ -167,6 +167,19 @@ class BookSourceEngine(
         }
 
     /**
+     * 按书源的 searchUrl 抓搜索结果页、不解析。「新建书源」要在结果页上认列表：认的必须是**引擎**
+     * 发出去的那个请求拿回来的页面（方法、body、编码、请求头都照 searchUrl 的选项走），
+     * 拿 WebView 里看到的页面去认，规则可能套不上引擎抓到的静态页。只要求有 searchUrl，不要求有 ruleSearch。
+     */
+    suspend fun fetchSearchPage(source: BookSourceRule, keyword: String, page: Int = 1): FetchedPage =
+        engineIo {
+            val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
+                ?: throw SourceException("书源「${source.name}」未配置搜索地址")
+            val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
+            fetchByRequest(source, searchUrl, vars, "search")
+        }
+
+    /**
      * 地址模板里有 page 变量才谈得上翻页 —— 没有它，请求「第 2 页」拿回来的还是第 1 页。
      * Legado 的搜索/发现没有独立的 nextPage 规则，全靠 searchUrl/exploreUrl 里的 {{page}} 重发请求。
      */

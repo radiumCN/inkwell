@@ -87,11 +87,11 @@ object BookInfoDetector {
         return own.length <= MAX_AUTHOR_LINE && AUTHOR_OWN_REGEX.containsMatchIn(own)
     }
 
-    private const val AUTHOR_OWN = "^.{0,3}作.{0,6}者.{0,3}[：:]"
+    internal const val AUTHOR_OWN = "^.{0,3}作.{0,6}者.{0,3}[：:]"
     private val AUTHOR_OWN_REGEX = Regex(AUTHOR_OWN)
 
     /** 剥掉「作者：」前缀，以及作者名后面同一行的其他字段 */
-    private val AUTHOR_STRIP = Regex("^[^：:]*[：:][\\s\\u00a0]*|[\\s\\u00a0].*$")
+    internal val AUTHOR_STRIP = Regex("^[^：:]*[：:][\\s\\u00a0]*|[\\s\\u00a0].*$")
 
     private val TOC_LINK = Regex(
         "^(查看|进入|点击|浏览|返回)?\\s*(完整|全部|所有)?\\s*(目录|章节|章节目录|章节列表|目录列表)\\s*[>›»→]*$",

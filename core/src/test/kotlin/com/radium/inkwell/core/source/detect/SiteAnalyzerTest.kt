@@ -43,6 +43,8 @@ class SiteAnalyzerTest {
         server.shutdown()
     }
 
+    private val GBK = java.nio.charset.Charset.forName("GBK")
+
     private val http get() = SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true)
 
     private fun engine() = BookSourceEngine(http, { emptyList() })
@@ -59,18 +61,32 @@ class SiteAnalyzerTest {
                 path == "/book/88/" -> DetectFixtures.mobileDetail(base)
                 path.startsWith("/book/88/all_") -> DetectFixtures.mobileTocPage(path.substringAfter("all_").substringBefore('.').toInt())
                 path.startsWith("/book/88/") -> DetectFixtures.pContent()
+                path.startsWith("/search.php") ->
+                    DetectFixtures.searchList(request.requestUrl?.queryParameter("q").orEmpty())
+                // 老站的 GBK POST 搜索：按 GBK 解 body、按 GBK 回页面。引擎要是按 UTF-8 发，这里解出来的是乱码词
+                path.startsWith("/modules/article/search.php") && request.method == "POST" -> {
+                    val form = String(request.body.readByteArray(), GBK)
+                    val key = form.split('&').map { it.split('=', limit = 2) }
+                        .firstOrNull { it[0] == "searchkey" }?.getOrNull(1)
+                        ?.let { java.net.URLDecoder.decode(it, GBK) }.orEmpty()
+                    return MockResponse()
+                        .setHeader("Content-Type", "text/html; charset=gbk")
+                        .setBody(okio.Buffer().write(DetectFixtures.searchTable(key).toByteArray(GBK)))
+                }
                 else -> return MockResponse().setResponseCode(404)
             }
             return MockResponse().setHeader("Content-Type", "text/html; charset=utf-8").setBody(body)
         }
     }
 
-    private suspend fun buildSource(bookUrl: String): Pair<BookPageAnalysis, BookSourceRule> {
+    private suspend fun buildSource(bookUrl: String, search: SearchSetup? = null): Pair<BookPageAnalysis, BookSourceRule> {
         val analyzer = SiteAnalyzer(http)
         val book = analyzer.analyzeBook(bookUrl)
         val toc = book.tocCandidates.first()
         val chapter = analyzer.analyzeChapter(toc.chapters.first().url)
-        val rule = SourceDraftBuilder.build("测试站", book, toc, chapter, chapter.contentCandidates.first(), group = "自建")
+        val rule = SourceDraftBuilder.build(
+            "测试站", book, toc, chapter, chapter.contentCandidates.first(), group = "自建", search = search,
+        )
         // 走一遍 JSON：存库、导出、同步都是这份文本，别只在内存对象上测
         return book to BookSourceRule.fromJson(rule.toJson())
     }
@@ -121,6 +137,86 @@ class SiteAnalyzerTest {
         val peek = SiteAnalyzer(http).peekBook(chapterUrl)
         assertEquals("$base/book/1234/", peek.bookUrl)
         assertEquals("示例之书", peek.info.name?.value)
+    }
+
+    // ---- 试抓（高级页） ----
+
+    @Test
+    fun `dry run reports what each field picked up`() = runBlocking {
+        val (book, rule) = buildSource("$base/book/1234/")
+        val run = SiteAnalyzer(http).dryRun(rule, book.bookUrl, keyword = null)
+        assertTrue(run.failures.isEmpty(), run.failures.toString())
+        assertEquals("示例之书", run.samples[RuleField.BookName]?.output)
+        assertEquals("某作者", run.samples[RuleField.BookAuthor]?.output)
+        assertEquals(30, run.chapterCount)
+        assertEquals("第1章 山门之外（1）", run.samples[RuleField.ChapterName]?.output)
+        assertEquals("第1章 山门之外（1）", run.sampleChapterTitle)
+        // 正文一栏是净化之后的正文开头
+        assertTrue(run.samples[RuleField.Content]?.output.orEmpty().contains("这是第1段正文"))
+        assertNull(run.searchCount)
+    }
+
+    @Test
+    fun `dry run shows where a broken rule stops the chain`() = runBlocking {
+        val (book, rule) = buildSource("$base/book/1234/")
+        val broken = RuleField.Content.set(rule, "@css:#nope@html")
+        val run = SiteAnalyzer(http).dryRun(broken, book.bookUrl, keyword = null)
+        assertEquals(30, run.chapterCount)
+        assertNotNull(run.failures[STAGE_CONTENT])
+        // 替换规则生效与否看正文预览：把「正文」两个字换掉
+        val purified = RuleField.ReplaceRegex.set(rule, "##正文##内容")
+        val clean = SiteAnalyzer(http).dryRun(purified, book.bookUrl, keyword = null)
+        assertTrue(clean.samples[RuleField.Content]?.output.orEmpty().contains("这是第1段内容"))
+    }
+
+    @Test
+    fun `dry run includes search when the source has it`() = runBlocking {
+        val template = assertNotNull(
+            SearchTemplates.fromForm("$base/search.php", "get", null, listOf(FormField("q", "剑", "search"))),
+        )
+        val search = SiteAnalyzer(http).analyzeSearch(template, "剑", "$base/book/1234/").setup
+        val (book, rule) = buildSource("$base/book/1234/", search = search)
+        val run = SiteAnalyzer(http).dryRun(rule, book.bookUrl, keyword = "剑")
+        assertEquals(5, run.searchCount)
+        assertEquals("剑之书1", run.samples[RuleField.SearchName]?.output)
+    }
+
+    // ---- 搜索 ----
+
+    @Test
+    fun `get form search round trips through the engine`() = runBlocking {
+        val template = assertNotNull(
+            SearchTemplates.fromForm("$base/search.php", "get", "UTF-8", listOf(FormField("q", "剑", "search"))),
+        )
+        val analysis = SiteAnalyzer(http).analyzeSearch(template, "剑", "$base/book/1234/")
+        // 侧栏六本「热门推荐」没混进来
+        assertEquals(5, analysis.results.size)
+        val first = analysis.results.first()
+        assertEquals("剑之书1", first.title)
+        assertEquals("写手1", first.author)
+        assertEquals("$base/cover/2001.jpg", first.coverUrl)
+        assertEquals("$base/book/2001/", first.bookUrl)
+
+        // 存进书源（走一遍 JSON）后换个词照样能搜
+        val (_, rule) = buildSource("$base/book/1234/", search = analysis.setup)
+        val again = engine().search(rule, "刀")
+        assertEquals("刀之书1", again.items.first().title)
+    }
+
+    @Test
+    fun `gbk post search round trips through the engine`() = runBlocking {
+        val template = assertNotNull(
+            SearchTemplates.fromForm(
+                "$base/modules/article/search.php", "post", "GBK",
+                listOf(FormField("searchtype", "articlename", "hidden"), FormField("searchkey", "剑", "text")),
+            ),
+        )
+        val analysis = SiteAnalyzer(http).analyzeSearch(template, "剑", "$base/book/1234/")
+        assertEquals(4, analysis.results.size)
+        val first = analysis.results.first()
+        assertEquals("剑表1", first.title)
+        assertEquals("表作者1", first.author)
+        assertEquals("第1章 开篇1", first.latestChapter)
     }
 
     @Test

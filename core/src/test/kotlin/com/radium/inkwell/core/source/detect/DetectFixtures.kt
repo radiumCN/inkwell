@@ -158,4 +158,42 @@ internal object DetectFixtures {
         for (i in 1..paragraphs) append("<div>${paragraph(i)}</div>")
         append("</div></div></body></html>")
     }
+
+    /**
+     * 列表式搜索结果：`div.result-list > div.result-item`，封面懒加载（真地址在 data-original），
+     * 书名在 h3 里，作者带「作者：」前缀，还有一行最新章节。侧栏「热门推荐」也链到书页（同一地址形状）。
+     */
+    fun searchList(keyword: String, count: Int = 5) = buildString {
+        append("<html><body>")
+        append(NAV)
+        append("""<div class="result-list">""")
+        for (n in 1..count) {
+            append("""<div class="result-item">""")
+            append("""<a href="/book/${2000 + n}/"><img src="/img/loading.gif" data-original="/cover/${2000 + n}.jpg"></a>""")
+            append("""<div class="info"><h3><a href="/book/${2000 + n}/">${keyword}之书$n</a></h3>""")
+            append("""<p class="author">作者：写手$n</p>""")
+            append("""<p>最新：<a href="/book/${2000 + n}/999.html">第999章 终局$n</a></p></div>""")
+            append("</div>")
+        }
+        append("</div>")
+        append("""<div class="hot"><h3>热门推荐</h3><ul>""")
+        for (n in 1..6) append("""<li><a href="/book/${7000 + n}/">热门之书$n</a></li>""")
+        append("</ul></div></body></html>")
+    }
+
+    /** 表格式搜索结果（老站）：表头一行 th，数据行 书名 / 最新章节 / 作者 / 字数 */
+    fun searchTable(keyword: String, count: Int = 4) = buildString {
+        append("<html><head><meta charset=\"gbk\"></head><body>")
+        append(NAV)
+        append("""<table class="grid"><tr><th>文章名称</th><th>最新章节</th><th>作者</th><th>字数</th></tr>""")
+        for (n in 1..count) {
+            append("""<tr><td class="odd"><a href="/book/${3000 + n}/">${keyword}表$n</a></td>""")
+            append("""<td class="even"><a href="/book/${3000 + n}/1.html">第1章 开篇$n</a></td>""")
+            append("""<td class="odd">表作者$n</td><td class="even">${n}0万</td></tr>""")
+        }
+        append("</table></body></html>")
+    }
+
+    /** 只有一条结果 */
+    fun searchSingle(keyword: String) = searchList(keyword, count = 1)
 }

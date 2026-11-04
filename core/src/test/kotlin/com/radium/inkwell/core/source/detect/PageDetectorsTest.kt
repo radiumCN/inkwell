@@ -173,6 +173,47 @@ class PageDetectorsTest {
         assertFalse(BookInfoDetector.isChapterPage(doc(DetectFixtures.divContent())))
     }
 
+    // ---- 点选纠错 ----
+
+    @Test
+    fun `picking a link selects the group around it`() {
+        val d = doc(DetectFixtures.biqugeToc(chapters = 30, latest = 6))
+        // 点了一章：就是完整目录（最新章节块照样排掉）
+        val toc = assertNotNull(TocDetector.detectAround(d, "https://www.example.com/book/1234/100007.html"))
+        assertEquals(30, toc.chapters.size)
+        assertEquals("第1章 山门之外（1）", toc.chapters.first().title)
+        // 点了页脚推荐：用户说那才是（哪怕自动识别不这么排），就给那一组
+        val rec = assertNotNull(TocDetector.detectAround(d, "https://www.example.com/book/5003/"))
+        assertTrue(rec.chapters.all { it.title.startsWith("另一本书") })
+        // 点的不在任何一组里
+        assertNull(TocDetector.detectAround(d, "https://www.example.com/nowhere.html"))
+    }
+
+    @Test
+    fun `picking text selects the content block around it`() {
+        // 点中某一段 <p>：正文块是它的父亲
+        val p = ContentDetector.detectAround(doc(DetectFixtures.pContent()), DetectFixtures.paragraph(3))
+        assertEquals("@css:div.read-content@html", p?.rule)
+        // 老站整章一个 div：网页里 innerText 带换行和缩进，比对前去掉空白
+        val br = ContentDetector.detectAround(
+            doc(DetectFixtures.brContent()),
+            "\n    " + DetectFixtures.paragraph(2).chunked(7).joinToString("\n"),
+        )
+        assertEquals("@css:#content@html", br?.rule)
+        assertNull(ContentDetector.detectAround(doc(DetectFixtures.pContent()), "页面上没有的一段话啊"))
+    }
+
+    @Test
+    fun `rule fields read back what they write`() {
+        var rule = com.radium.inkwell.core.source.BookSourceRule(bookSourceUrl = "https://www.example.com")
+        for (f in RuleField.entries) rule = f.set(rule, "  rule-${f.name}  ")
+        for (f in RuleField.entries) assertEquals("rule-${f.name}", f.get(rule), f.name)
+        // 清空 = 删掉这一项
+        rule = RuleField.NextTocUrl.set(rule, "   ")
+        assertNull(rule.ruleToc?.nextTocUrl)
+        assertEquals("rule-ChapterList", rule.ruleToc?.chapterList)
+    }
+
     @Test
     fun `toc link on a mobile detail page`() {
         val base = "https://m.example.com"

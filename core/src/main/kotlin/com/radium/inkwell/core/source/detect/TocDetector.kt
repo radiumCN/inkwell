@@ -2,7 +2,6 @@ package com.radium.inkwell.core.source.detect
 
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.util.IdentityHashMap
 
 /** 目录里识别出的一章 */
 data class DetectedChapter(val title: String, val url: String)
@@ -56,8 +55,8 @@ object TocDetector {
         val links = SiteLinks.collect(doc)
         if (links.size < MIN_CHAPTERS) return emptyList()
         val pageUrl = doc.location()
-        val ranked = group(links)
-            .mapNotNull { (container, relTags, members) -> score(container, relTags, members, pageUrl) }
+        val ranked = LinkGroups.of(links, MIN_CHAPTERS)
+            .mapNotNull { g -> score(g.container, g.relTags, g.members, pageUrl) }
             .sortedByDescending { it.score }
         // 同一批章节换个容器、或多兜了几条导航，都算同一个候选；只留分高的那个
         val picked = mutableListOf<Group>()
@@ -70,36 +69,21 @@ object TocDetector {
             .take(limit)
     }
 
-    // ---- 分组 ----
-
-    private data class RawGroup(val container: Element, val relTags: List<String>, val members: List<SiteLink>)
-
-    private fun group(links: List<SiteLink>): List<RawGroup> {
-        val byContainer = IdentityHashMap<Element, HashMap<String, MutableList<Int>>>()
-        links.forEachIndexed { i, link ->
-            val path = ArrayList<String>()
-            path += link.el.normalName()
-            var p = link.el.parent()
-            var up = 0
-            while (p != null && up < MAX_UP) {
-                val key = path.asReversed().joinToString(">")
-                byContainer.getOrPut(p) { HashMap() }.getOrPut(key) { mutableListOf() } += i
-                if (p.normalName() == "body") break
-                path += p.normalName()
-                p = p.parent()
-                up++
-            }
-        }
-        val raw = byContainer.flatMap { (container, byPath) ->
-            byPath.mapNotNull { (key, idx) ->
-                if (idx.size < MIN_CHAPTERS) null else Triple(container, key, idx)
-            }
-        }
-        // 深的容器先来：同一批链接只留最近公共祖先那一组
-        val seen = HashSet<List<Int>>()
-        return raw.sortedByDescending { (container, _, _) -> container.parents().size }
-            .filter { (_, _, idx) -> seen.add(idx) }
-            .map { (container, key, idx) -> RawGroup(container, key.split('>'), idx.map { links[it] }) }
+    /**
+     * 用户在网页上点了目录里的一章（[linkUrl]）：只在**包含这条链接**的分组里挑分最高、规则生成得出来的那组。
+     *
+     * 自动识别排前面的是分最高的组；被它「重合」掉的组（[overlaps]）根本进不了候选 —— 真目录恰好
+     * 跟一个更大的错误分组重合时，换候选也换不到它。点选绕开这一步：用户点中的链接说了算。
+     */
+    fun detectAround(doc: Document, linkUrl: String): TocCandidate? {
+        val target = linkUrl.substringBefore('#')
+        val links = SiteLinks.collect(doc)
+        val pageUrl = doc.location()
+        return LinkGroups.of(links, MIN_CHAPTERS)
+            .filter { g -> g.members.any { it.url == target } }
+            .mapNotNull { g -> score(g.container, g.relTags, g.members, pageUrl) }
+            .sortedByDescending { it.score }
+            .firstNotNullOfOrNull { toCandidate(doc, it) }
     }
 
     // ---- 打分 ----
@@ -196,8 +180,8 @@ object TocDetector {
      * 2. 按位置：`dd:gt(13)`。最新块固定十二条时可用，但书不满十二章时会切掉正文开头，所以排第二。
      */
     private fun exclusionSelectors(cSel: String, g: Group): List<String> {
-        val firstMain = childOnPath(g.container, g.members[g.lead].el) ?: return emptyList()
-        val lastLead = childOnPath(g.container, g.members[g.lead - 1].el) ?: return emptyList()
+        val firstMain = LinkGroups.childOnPath(g.container, g.members[g.lead].el) ?: return emptyList()
+        val lastLead = LinkGroups.childOnPath(g.container, g.members[g.lead - 1].el) ?: return emptyList()
         if (firstMain === lastLead) return emptyList()
         val itemTag = g.relTags[0]
         val rest = g.relTags.drop(1).joinToString(" ")
@@ -210,13 +194,6 @@ object TocDetector {
         }
         out += "$cSel > $itemTag:gt(${lastLead.elementSiblingIndex()})$tail"
         return out
-    }
-
-    /** [el] 往上走到 [container] 的直接子元素 */
-    private fun childOnPath(container: Element, el: Element): Element? {
-        var cur: Element? = el
-        while (cur != null && cur.parent() !== container) cur = cur.parent()
-        return cur
     }
 
     /**
@@ -246,9 +223,6 @@ object TocDetector {
 
     /** 判断正倒序至少要能抠出这么多个序号 */
     private const val MIN_NUMBERED = 5
-
-    /** 从链接往上最多看几层容器：分卷目录 `div#catalog > div.volume > div > ul > li > a` 要五层 */
-    private const val MAX_UP = 8
 
     private const val MISFIT_WEIGHT = 2.0
     private const val SHORT_TITLE_FACTOR = 0.3

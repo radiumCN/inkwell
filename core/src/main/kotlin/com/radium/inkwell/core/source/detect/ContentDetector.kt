@@ -49,15 +49,34 @@ object ContentDetector {
             picked += pair
             if (picked.size >= limit) break
         }
-        return picked.map { (el, s) ->
-            ContentCandidate(
-                rule = "@css:${CssPaths.unique(el)}@html",
-                textLength = s.textLength,
-                preview = el.text().take(PREVIEW_CHARS),
-                score = s.score,
-            )
-        }
+        return picked.map { (el, s) -> candidateOf(el, s) }
     }
+
+    /**
+     * 用户在网页上点了正文里的一段（[snippet] 是点中元素的文字开头）：找到页面上含这段字的最深元素，
+     * 再从它往上挑得分最高的那一层。点中的常是一个 `<p>`，正文块是它的父亲；点中老站整章一个
+     * `div#content` 时，它自己就是。网页与静态 HTML 的空白不一样（innerText 带换行），比对前都去掉空白。
+     */
+    fun detectAround(doc: Document, snippet: String): ContentCandidate? {
+        val needle = snippet.filterNot(Char::isWhitespace).take(SNIPPET_CHARS)
+        if (needle.length < MIN_SNIPPET_CHARS) return null
+        val body = doc.body() ?: return null
+        val hit = body.allElements
+            .filter { it.normalName() !in SKIP_TAGS && it.text().filterNot(Char::isWhitespace).contains(needle) }
+            .maxByOrNull { it.parents().size }
+            ?: return null
+        return (listOf(hit) + hit.parents().takeWhile { it !== body.parent() })
+            .mapNotNull { el -> scoreOf(el)?.let { el to it } }
+            .maxByOrNull { it.second.score }
+            ?.let { (el, s) -> candidateOf(el, s) }
+    }
+
+    private fun candidateOf(el: Element, s: Scored) = ContentCandidate(
+        rule = "@css:${CssPaths.unique(el)}@html",
+        textLength = s.textLength,
+        preview = el.text().take(PREVIEW_CHARS),
+        score = s.score,
+    )
 
     private class Scored(val textLength: Int, val score: Double)
 
@@ -122,4 +141,8 @@ object ContentDetector {
     /** 一段「无块级后代的 div」最长多少字还算一段；再长就是整章塞在一个元素里，自己当正文块 */
     private const val MAX_INLINE_PARAGRAPH = 1000
     private const val PREVIEW_CHARS = 160
+
+    /** 点选比对用点中文字的前这么多个字：够认出是哪一段，又不至于跨进下一段（网页与静态页的分段可能不同） */
+    private const val SNIPPET_CHARS = 20
+    private const val MIN_SNIPPET_CHARS = 4
 }
