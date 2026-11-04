@@ -65,6 +65,8 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import com.radium.inkwell.ui.components.AppSurface
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.radium.inkwell.ui.components.sinkOnPress
 
 @Composable
 fun ThemeSettingsScreen(onBack: () -> Unit) {
@@ -242,7 +244,9 @@ private fun ThemeSwatch(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         // 外层只定尺寸、托住右下角的选中对勾；可点的圆在里层 —— 按压反馈（Miuix 的压暗）要裁成圆的，
         // 圆色板按下去冒出一个方块很难看；裁切若放在外层，会把伸出圆外的对勾一起裁掉
-        Box(Modifier.size(Dimens.swatch)) {
+        // 下沉挂在外层：右下角的对勾跟着色板一起沉（见 sinkOnPress）
+        val press = remember { MutableInteractionSource() }
+        Box(Modifier.size(Dimens.swatch).sinkOnPress(press)) {
             Box(
                 Modifier
                     .matchParentSize()
@@ -258,7 +262,7 @@ private fun ThemeSwatch(
                     // 十个色块无从区分（名字 Text 在可点区之外）
                     .selectable(
                         selected = selected,
-                        interactionSource = null,
+                        interactionSource = press,
                         indication = LocalIndication.current,
                         role = Role.RadioButton,
                         onClick = onClick,

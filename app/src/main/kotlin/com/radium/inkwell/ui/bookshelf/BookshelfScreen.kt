@@ -124,6 +124,8 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.icon.extended.SearchDevice
 import top.yukonga.miuix.kmp.icon.extended.Notes
+import androidx.compose.foundation.LocalIndication
+import com.radium.inkwell.ui.components.sinkOnPress
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -1059,6 +1061,8 @@ private fun BookCard(
     val cover = remember { CoverAnchor() }
     // 与 BookCover 的 shape 对齐 —— 选中描边若用 medium，封面却是 small，就会看出「框套框」
     val coverShape = AppShapes.small
+    // 按下整本书（封面连书名）微微沉下去，HyperOS 桌面图标那种手感；见 sinkOnPress
+    val press = remember { MutableInteractionSource() }
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -1067,6 +1071,7 @@ private fun BookCard(
         // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
         // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
         modifier
+            .sinkOnPress(press)
             .semantics(mergeDescendants = true) {
                 // 多选时整张卡就是一个 Checkbox：读屏报「已选中/未选中」，
                 // 而不是「封面装饰图标 + 可点击区」两个焦点。
@@ -1076,6 +1081,8 @@ private fun BookCard(
                 }
             }
             .combinedClickable(
+                interactionSource = press,
+                indication = LocalIndication.current,
                 // 平时整张卡就是一个按钮（点开读、长按出菜单）；多选时角色由上面的 Checkbox 给
                 role = if (selectionMode) null else Role.Button,
                 onClick = { onClick(cover.boundsInWindow()) },

@@ -113,6 +113,9 @@ import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.radium.inkwell.ui.components.sinkOnPress
 
 @Composable
 fun ReaderMenu(
@@ -1321,6 +1324,8 @@ private fun ThemeSwatches(
 
 @Composable
 private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Unit) {
+    // 按下色块微微沉下去（见 sinkOnPress）
+    val press = remember { MutableInteractionSource() }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
@@ -1330,6 +1335,7 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
                 // 色块 52dp（Dimens.swatch，与设置页色板同尺寸），仍 ≥48dp 触控下限；
                 // clip 必须在 selectable 之前 —— 否则按压反馈是方的，会溢出这个圆形色块的边界
                 .size(Dimens.swatch)
+                .sinkOnPress(press)
                 .clip(CircleShape)
                 .background(Color(theme.background))
                 .border(
@@ -1339,7 +1345,13 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
                     shape = CircleShape,
                 )
                 // 整块作为单选目标带上纸张名与选中态：否则读屏聚焦未选中色块只会念"文"，分不清是哪款
-                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                .selectable(
+                    selected = selected,
+                    interactionSource = press,
+                    indication = LocalIndication.current,
+                    role = Role.RadioButton,
+                    onClick = onClick,
+                )
                 .semantics { contentDescription = theme.label },
             contentAlignment = Alignment.Center,
         ) {
