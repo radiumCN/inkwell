@@ -2,6 +2,8 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -13,7 +15,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -65,17 +66,39 @@ fun Modifier.squircleSurface(color: Color, corners: SquircleCorners): Modifier =
 /**
  * Miuix squircle 轮廓的 [Shape]：和 squircle 修饰符同一条曲线（`addSquircleRect`，Miuix 自己拿它对齐着色器那条边）。
  *
- * **只给要 Shape 参数的地方用**，目前是毛玻璃（[CoverGlassCard]）：玻璃的边缘高光沿 shape 画，给直角的话
- * 高光在四个角被外面的 squircleClip 裁掉一截。裁切与底色仍用 squircle 修饰符 —— 那是着色器遮罩、边缘抗锯齿；
+ * **只给要 Shape 参数的地方用**，目前是毛玻璃（[CoverGlassCard]、提示胶囊、选中文字后的替换表单）：
+ * 玻璃取样的范围按这条曲线裁。裁切整块内容与底色仍用 squircle 修饰符 —— 那是着色器遮罩、边缘抗锯齿；
  * 这里是路径，拿来 clip 整块内容不如修饰符。
+ *
+ * 是 [CornerBasedShape] 的子类，这一点**别改回普通 Shape**：miuix-blur 的边缘高光是着色器按「圆角矩形」算的，
+ * 只从 CornerBasedShape 里读圆角半径，认不出的 Shape 一律按**短边的一半**画 —— 卡片中间就多出一个胶囊形的椭圆
+ * （0.5.1-beta.1 真这样过，在书架「继续阅读」卡上被指出来）。这里报给高光的是同一个半径：圆角矩形和这条 squircle
+ * 在角上最多差半径的百分之一出头（16dp 的角不到 0.2dp），高光贴着玻璃的边走，被外面 squircleClip 裁掉的也就一个像素上下。
  */
-fun squircleShape(radius: Dp): Shape = SquircleShape(radius)
+fun squircleShape(radius: Dp): Shape = SquircleShape(CornerSize(radius))
 
-private data class SquircleShape(val radius: Dp) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Generic(
-            Path().apply { addSquircleRect(size.width, size.height, with(density) { radius.toPx() }) },
-        )
+private class SquircleShape(corner: CornerSize) : CornerBasedShape(corner, corner, corner, corner) {
+    // 四个角只认 topStart：我们只造四角同半径的（squircleShape 一个参数），没人会按角 copy
+    override fun copy(
+        topStart: CornerSize,
+        topEnd: CornerSize,
+        bottomEnd: CornerSize,
+        bottomStart: CornerSize,
+    ): CornerBasedShape = SquircleShape(topStart)
+
+    // 半径已经由 CornerBasedShape 换成像素、并按尺寸收过（胶囊高度不够两倍半径时缩成半高）
+    override fun createOutline(
+        size: Size,
+        topStart: Float,
+        topEnd: Float,
+        bottomEnd: Float,
+        bottomStart: Float,
+        layoutDirection: LayoutDirection,
+    ): Outline = Outline.Generic(Path().apply { addSquircleRect(size.width, size.height, topStart) })
+
+    override fun equals(other: Any?): Boolean = other is SquircleShape && other.topStart == topStart
+
+    override fun hashCode(): Int = topStart.hashCode()
 }
 
 /**

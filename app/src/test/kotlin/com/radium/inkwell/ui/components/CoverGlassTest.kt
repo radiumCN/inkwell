@@ -1,10 +1,16 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.theme.AppThemes
 import top.yukonga.miuix.kmp.theme.Colors
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -122,5 +128,16 @@ class CoverGlassTest {
             assertTrue(contrast(s.secondaryVariant, floor) >= 4.5f, "提示胶囊正文对比不足 dark=$dark")
             assertTrue(contrast(action, floor) >= 4.5f, "提示胶囊操作键推不到 4.5:1 dark=$dark action=$action")
         }
+    }
+
+    @Test
+    fun `玻璃的 squircle 形状把圆角半径交给边缘高光`() {
+        // miuix-blur 的边缘高光只从 CornerBasedShape 读圆角半径，认不出的 Shape 按短边的一半画 ——
+        // 卡片中间多出一个胶囊形的椭圆（0.5.1-beta.1 的「继续阅读」卡）
+        val shape = assertIs<CornerBasedShape>(squircleShape(16.dp))
+        val size = Size(900f, 400f)
+        val density = Density(3f)
+        assertEquals(48f, shape.topStart.toPx(size, density))
+        assertEquals(48f, shape.bottomEnd.toPx(size, density))
     }
 }
