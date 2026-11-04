@@ -26,6 +26,7 @@ import top.yukonga.miuix.kmp.blur.highlight.rememberTiltLight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.LocalContentColor
@@ -35,13 +36,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 封面毛玻璃卡：这本书的封面放大铺满整张卡，上面盖一层 HyperOS 的玻璃。书架「继续阅读」、设置页概览、
  * 阅读记录「今天」三张卡用它 —— 一页上唯一带颜色的面，颜色就是这本书自己的。
  *
- * 一层一层往上（Miuix 示例 App 模糊页「Texture Blur」「Progressive Blur」两节的做法）：
+ * 一层一层往上（Miuix 示例 App 模糊页「Texture Blur」那一节的做法）：
  * 1. **封面**：[BookCover] 裁切铺满，录进这张卡自己的图层。没封面 / 抓不下来时是按书名取色的默认封面，
  *    糊开是一整片那个颜色，每本书照样有自己的色。
- * 2. **玻璃**：渐进模糊 —— 顶上最糊（[CARD_BLUR_RADIUS]，示例「Texture Blur」的 100），往下渐渐变清，
- *    底边透出封面本来的样子。混色用示例的 Colored Thick，边缘高光用它的 Small Container 那档。
- * 3. **薄底**：一层卡片色（[coverGlassVeil]）。渐进模糊的混色是随模糊一起淡出的，到了清楚的那一头，
- *    字底下就只剩封面原图 —— 深色封面上的黑字、白封面上的白字都读不清。这层底**不跟着淡出**，
+ * 2. **玻璃**：整片一样糊（[CARD_BLUR_RADIUS]，示例「Texture Blur」的 100），**不渐变**。混色用示例的
+ *    Colored Thick，边缘高光用它的 Small Container 那档。0.5.1-beta.2 之前这里是渐进模糊（顶上糊、底边透出
+ *    封面原图），被指出「这个卡片不需要渐变，直接用模糊」—— 渐变只给顶栏和详情页头部。
+ * 3. **薄底**：一层卡片色（[coverGlassVeil]）。糊得再狠，一张几乎纯黑 / 纯白的封面糊开还是那个颜色，
+ *    压上 Colored Thick 也只是提亮或压暗一点：深色封面上的黑字、白封面上的白字照样读不清。
  *    字永远压在「封面 + 至少这么多卡片色」上；对比度在 CoverGlassTest 里按最坏的封面
  *    （浅色主题纯黑、深色主题纯白）钉住 ≥ 4.5:1。
  *
@@ -54,7 +56,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 下一帧再变成封面玻璃，闪一下。
  *
  * 圆角是与 Miuix 卡片同档的 squircle：外面 squircleClip 裁封面与按压反馈，玻璃本身给同一条曲线的 [squircleShape] ——
- * 边缘高光沿 shape 画，给直角的话高光在四个角被裁掉一截。
+ * 边缘高光按 shape 报的圆角半径画，给直角的话高光在四个角被裁掉一截，给认不出半径的 Shape 则多出一个椭圆（见 squircleShape）。
  *
  * @param tiltHighlight 边缘高光跟着手机倾斜移动（Miuix `rememberTiltLight`，陀螺仪驱动，示例 App 的 Texture Blur
  *   默认就开着）。只给书架「继续阅读」这一张开：它是首页最显眼的一块，其余两张在设置里，不值得为它们开传感器。
@@ -109,11 +111,10 @@ fun CoverGlassCard(
         Box(
             Modifier
                 .matchParentSize()
-                .progressiveTextureBlur(
+                .textureBlur(
                     backdrop = backdrop,
                     shape = shape,
                     blurRadius = CARD_BLUR_RADIUS,
-                    gradient = ProgressiveBlur.Top,
                     colors = colors,
                     highlight = if (tiltHighlight && animationsEnabled()) rememberTiltHighlight(dark) else smallGlassHighlight(dark),
                 )
