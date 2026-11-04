@@ -88,6 +88,13 @@ object Dimens {
     val iconMd = 24.dp
     /** 48dp。空状态正中那个 */
     val iconXL = 48.dp
+    /**
+     * 64dp。弹窗头部的应用图标（更新弹窗）：比空状态的线条图标大一档 —— 它是一张有底色的图，
+     * 48dp 放在弹窗顶上像个列表行的缩略图，撑不起「头部」
+     */
+    val dialogHeroIcon = 64.dp
+    /** 88dp。关于页头部的应用图标：整页的主角，照 HyperOS「关于手机」与 Miuix 示例关于页的尺寸 */
+    val aboutHeroIcon = 88.dp
     /** 整页加载态的转圈（[AppLoadingIndicator] 默认尺寸）。与 Miuix 圆形进度的 30dp 默认值相近、落在栅格上 */
     val loadingIndicator = 32.dp
 
