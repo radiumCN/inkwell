@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,14 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.RssSourceEntity
-import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
@@ -51,7 +48,6 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
-import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -69,6 +65,8 @@ fun RssSourceScreen(
     var showUrlImport by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<RssSourceEntity?>(null) }
+    // 长按哪个源，就从哪一行上弹出它的菜单（同书架长按一本书）
+    var menuTarget by remember { mutableStateOf<String?>(null) }
 
     val fileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -146,26 +144,17 @@ fun RssSourceScreen(
                 ),
                 overscrollEffect = null,
             ) {
-                // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝
+                // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝。
+                // 行尾只有开关（HyperOS 的列表行尾就是一个开关或一个 ›）；删除收进长按菜单 —— 从前行尾是
+                // 「删除图标 + 开关」，48dp 的垃圾桶紧挨着开关，挤，也容易手滑点到
                 itemsIndexed(list, key = { _, it -> it.id }) { index, source ->
-                    ContentListItem(
-                        onClick = { onOpenSource(source.id) },
-                        modifier = Modifier.groupedCardItem(index, list.size),
-                        enabled = source.enabled,
-                        // 底与圆角由外面的卡画，行本身透明、直角
-                        colors = ContentListDefaults.plainColors(),
-                        corners = SquircleCorners.Square,
-                        trailingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 删除图标走摘要色：outline / dividerLine 只给边框/分隔线用，
-                                // 拿它画可点的图标在浅色下对比度不够
-                                AppIconButton(onClick = { deleteTarget = source }) {
-                                    Icon(
-                                        MiuixIcons.Delete,
-                                        contentDescription = "删除",
-                                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    )
-                                }
+                    // 菜单和行放进同一个 Box，从这一行上弹出来（见 AppDropdownMenu）
+                    Box(Modifier.groupedCardItem(index, list.size)) {
+                        ContentListItem(
+                            onClick = { onOpenSource(source.id) },
+                            onLongClick = { menuTarget = source.id },
+                            enabled = source.enabled,
+                            trailingContent = {
                                 Switch(
                                     checked = source.enabled,
                                     onCheckedChange = { viewModel.setEnabled(source.id, it) },
@@ -174,25 +163,35 @@ fun RssSourceScreen(
                                         contentDescription = "启用「${source.name}」"
                                     },
                                 )
-                            }
-                        },
-                        supportingContent = {
-                            Text(
-                                source.id,
-                                style = ContentListDefaults.supportingStyle,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        content = {
-                            Text(
-                                source.name,
-                                style = ContentListDefaults.titleStyle,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                    )
+                            },
+                            supportingContent = {
+                                Text(
+                                    source.id,
+                                    style = ContentListDefaults.supportingStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            content = {
+                                Text(
+                                    source.name,
+                                    style = ContentListDefaults.titleStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                        AppDropdownMenu(
+                            expanded = menuTarget == source.id,
+                            onDismissRequest = { menuTarget = null },
+                            items = listOf(
+                                AppMenuItem("删除", onClick = {
+                                    menuTarget = null
+                                    deleteTarget = source
+                                }),
+                            ),
+                        )
+                    }
                 }
             }
         }

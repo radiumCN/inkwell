@@ -22,9 +22,7 @@ import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
-import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.SectionHeader
-import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
@@ -170,9 +168,6 @@ fun BookPreviewScreen(
                         onClick = { viewModel.read(chapter.index) },
                         modifier = Modifier.groupedCardItem(i, state.chapters.size),
                         enabled = !state.busy,
-                        inset = false,
-                        colors = ContentListDefaults.groupedColors(),
-                        corners = SquircleCorners.Square,
                     )
                 }
                 item { Spacer(Modifier.height(Dimens.gapXL)) }

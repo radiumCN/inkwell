@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -69,7 +69,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.ChipRow
-import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.cardMargin
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.settingsCardColor
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -88,11 +90,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.SegmentedChoice
-import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Card
@@ -517,13 +519,14 @@ private fun TocList(
 
     Column {
         // SearchField 默认的底是 surfaceContainerHigh（「页面上的搜索栏」那一档）；浅色纸上浮层恰好也是这一档，
-        // 框会整个隐身。这里换成卡片色 —— 搜索框与下面的章节卡同一层，浅纸深纸都浮得起来
+        // 框会整个隐身。这里换成面板里的卡片色 —— 搜索框与下面的目录卡同一层，浅纸深纸都浮得起来。
+        // 左右与目录卡对齐（面板里的卡离两边 cardMargin）
         SearchField(
             value = query,
             onValueChange = { query = it },
             placeholder = "搜索章节",
-            containerColor = MiuixTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapXS),
+            containerColor = settingsCardColor(),
+            modifier = Modifier.padding(horizontal = cardMargin(), vertical = Dimens.gapXS),
         )
         if (filtered.isEmpty()) {
             Box(
@@ -539,7 +542,8 @@ private fun TocList(
                 )
             }
         } else {
-            // 导航栏高度垫在列表末尾、也加进高度上限：列表一直铺到屏幕底、滚到手势条下面，看得见的条数不变
+            // 导航栏高度垫在列表末尾、也加进高度上限：列表一直铺到屏幕底、滚到手势条下面，看得见的条数不变。
+            // 章节拼成一张卡（同详情页的目录），不再一章一张小卡、行间留缝
             val bottomInset = sheetBottomInset()
             LazyColumn(
                 state = listState,
@@ -547,16 +551,15 @@ private fun TocList(
                     .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
                     // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
                     .pageScroll(),
-                contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
-                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                contentPadding = PaddingValues(top = Dimens.gapS, bottom = bottomInset),
                 overscrollEffect = null,
             ) {
-                items(filtered, key = { it.index }) { item ->
+                itemsIndexed(filtered, key = { _, it -> it.index }) { i, item ->
                     ChapterListItem(
                         title = item.title,
                         selected = item.index == current,
                         onClick = { onSelect(item.index) },
-                        inset = false,
+                        modifier = Modifier.groupedCardItem(i, filtered.size),
                         trailingContent = if (showCacheState && item.cached) {
                             {
                                 // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
@@ -683,14 +686,14 @@ private fun TypographyPanel(
     val contentHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight)
 
     Column(Modifier.fillMaxWidth()) {
-        // TabRow 钉在顶不滚，只让下面的内容滚。左右与下面的分组卡对齐（从前贴着面板两边，
+        // TabRow 钉在顶不滚，只让下面的内容滚。左右与下面的分组卡对齐（面板里的卡离两边 cardMargin；从前贴着面板两边，
         // 「排版」「更多」两格被面板边切掉一截）。槽是 surfaceContainerHighest（比面板深一档），
         // 浮起的那一格是卡片色 —— 和下面卡里分段按钮的槽同一种长相
         AppTabRow(
             titles = SETTINGS_TABS,
             selectedIndex = tab,
             onSelect = { tab = it },
-            modifier = Modifier.padding(horizontal = Dimens.screenPadding),
+            modifier = Modifier.padding(horizontal = cardMargin()),
         )
         AppTabContent(
             targetState = tab,
@@ -701,7 +704,7 @@ private fun TypographyPanel(
                 .height(contentHeight + sheetBottomInset())
                 .pageScroll()
                 .verticalScroll(scroll, overscrollEffect = null)
-                .padding(horizontal = Dimens.screenPadding)
+                .padding(horizontal = cardMargin())
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL + sheetBottomInset()),
         ) { current ->
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapL)) {

@@ -322,7 +322,7 @@ internal fun colorIndex(title: String): Int {
 /**
  * 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点。
  *
- * 默认白卡（[settingsStackListColors]），坐在页面底 `surface` 的灰上。
+ * 装进卡片用（每行 [groupedCardItem]）：行本身透明，底色与圆角由卡画。
  */
 @Composable
 fun BookListRow(
@@ -337,7 +337,7 @@ fun BookListRow(
     trailingEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    colors: ContentListColors = settingsStackListColors(),
+    colors: ContentListColors = ContentListDefaults.plainColors(),
 ) {
     val overline: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
@@ -403,8 +403,8 @@ fun BookListRow(
             trailingContent = trailing,
             overlineContent = overline,
             supportingContent = supporting,
-            // 48×64 书封：用 Comfortable，Compact 会贴边
-            contentPadding = ContentListDefaults.ComfortablePadding,
+            // 48×64 书封比三行字还高：它撑开行高，上下只留 8dp
+            contentPadding = ContentListDefaults.MediaPadding,
             colors = colors,
             content = titleContent,
         )
@@ -415,7 +415,7 @@ fun BookListRow(
             trailingContent = trailing,
             overlineContent = overline,
             supportingContent = supporting,
-            contentPadding = ContentListDefaults.ComfortablePadding,
+            contentPadding = ContentListDefaults.MediaPadding,
             colors = colors,
             content = titleContent,
         )

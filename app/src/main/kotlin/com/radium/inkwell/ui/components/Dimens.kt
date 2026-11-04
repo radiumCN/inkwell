@@ -37,15 +37,15 @@ object Dimens {
     val screenPadding = 20.dp
     /** 设置行的左右内边距（少数尚未迁到 ContentListItem 的表单行仍用） */
     val rowHorizontal = 20.dp
-    /** 设置行上下内边距（少数尚未迁到 ContentListItem 的表单行仍用）。圆角列表行请用 [listVertical] */
+    /** 设置行上下内边距（少数尚未迁到 ContentListItem 的表单行仍用）。列表行请用 ContentListItem */
     val rowVertical = 10.dp
     /** 内容列表行（书籍、书源、文章、设置卡片）的左右内边距 */
     val listHorizontal = 16.dp
     /**
-     * 内容列表 / 设置卡片行的上下内边距（Compact 默认密度）。
+     * 紧凑的上下内边距：列表上面压着的状态行（导入中、校验进度）、阅读页浮层里的小块。
      *
-     * 取 4 而非 8：两行字（标题 + 副标题）再叠 8+8，卡片相对字重显得虚高，
-     * 设置页一屏少看一组。触控高度靠行的最小高度 [listItemMinHeight] 兜住。
+     * 列表行本身**不**用它：行的上下边距是 `ContentListDefaults.DefaultPadding` 的 16dp（同 Miuix `BasicComponent`）。
+     * 从前列表行用的就是这 4dp，两三行字的行挤在卡里，和同一页上 Miuix 原生的设置行不是一个密度。
      */
     val listVertical = 4.dp
     /**

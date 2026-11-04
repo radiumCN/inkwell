@@ -2,7 +2,6 @@ package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.sheetBottomInset
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
@@ -24,7 +24,11 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SwitchRow
+import com.radium.inkwell.ui.components.cardMargin
+import com.radium.inkwell.ui.components.groupedCardItem
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -44,8 +48,8 @@ fun ChangeSourceSheet(
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-        // 面板底取浮层色（ReaderThemeScope 里的 background，AppBottomSheet 默认就读它），候选行是卡片色 ——
-        // 两者差一档，卡片才浮得起来；同色时候选行会糊进底色，看起来像没有卡片。
+        // 面板底取浮层色（ReaderThemeScope 里的 background，AppBottomSheet 默认就读它），卡片是卡片色 ——
+        // 两者差一档，卡片才浮得起来（AppBottomSheet 经 CardLayer 给到下面的 SettingGroup / groupedCardItem）。
         // 标题行带进度分数与「重新搜索」，自己排，不用面板自带的居中标题。
         // 候选列表会滚到手势条下面：导航栏高度垫在各状态末尾，不让面板在外面垫
         AppBottomSheet(
@@ -54,11 +58,14 @@ fun ChangeSourceSheet(
         ) {
         // 底部留白与导航栏高度垫在各状态的末尾（从前垫在这一层上，列表在手势条上方就截断了）
         val bottomInset = Dimens.gapXL + sheetBottomInset()
+        // 抬头、提示这些卡外的字，左边与卡里的字对齐：卡离面板边 cardMargin，卡里的行再缩 listHorizontal
+        val textInset = cardMargin() + Dimens.listHorizontal
         Column(Modifier.fillMaxWidth()) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
+                    // 行尾的「重新搜索」自带 gapM 的内边距：扣掉它，按钮的字右边才对得上卡里的字
+                    .padding(start = textInset, end = textInset - Dimens.gapM, top = Dimens.gapS, bottom = Dimens.gapS),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -81,6 +88,7 @@ fun ChangeSourceSheet(
                         style = MiuixTheme.textStyles.body2,
                         fontWeight = FontWeight.Medium,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(end = Dimens.gapM),
                     )
                 } else if (!overlay.changingSource) {
                     // 会话内复用上次结果；书源有增删/站点恢复时用这个主动重搜
@@ -92,19 +100,22 @@ fun ChangeSourceSheet(
                 DeterminateProgressBar(
                     progress = (overlay.sourcesDone.toFloat() / overlay.sourcesTotal).coerceIn(0f, 1f),
                     modifier = Modifier.padding(
-                        horizontal = Dimens.screenPadding,
+                        horizontal = cardMargin(),
                         vertical = Dimens.gapXS,
                     ),
                 )
             }
             // 作者匹配开关：书源返回的作者字段太脏，卡死了就一个源都换不到；
-            // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式
-            SwitchRow(
-                title = "匹配作者",
-                subtitle = if (overlay.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
-                checked = overlay.checkAuthor,
-                onCheckedChange = onToggleCheckAuthor,
-            )
+            // 拨一下就地重筛已搜到的结果，不重新发请求。走共享 SwitchRow，与设置页一套行式、一样装在卡里
+            SettingGroup {
+                SwitchRow(
+                    title = "匹配作者",
+                    subtitle = if (overlay.checkAuthor) "只显示同一作者的书" else "只认书名，不看作者",
+                    checked = overlay.checkAuthor,
+                    onCheckedChange = onToggleCheckAuthor,
+                    position = SettingGroupPosition.Alone,
+                )
+            }
             when {
                 overlay.changingSource || (overlay.searchingSources && candidates.isEmpty()) -> Box(
                     Modifier.fillMaxWidth().padding(Dimens.gapXL).padding(bottom = bottomInset),
@@ -123,7 +134,7 @@ fun ChangeSourceSheet(
                             "其他 ${overlay.sourcesTotal} 个书源都没有找到这本书"
                     },
                     Modifier
-                        .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL)
+                        .padding(horizontal = textInset, vertical = Dimens.gapL)
                         .padding(bottom = bottomInset),
                     style = MiuixTheme.textStyles.body2,
                 )
@@ -132,8 +143,8 @@ fun ChangeSourceSheet(
                         .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
                         // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
                         .pageScroll(),
-                    contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
-                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                    // 上面垫一格：和「匹配作者」那张卡之间凑够两卡之间的一档（SettingGroup 自己只留了一半）
+                    contentPadding = PaddingValues(top = Dimens.gapS, bottom = bottomInset),
                     overscrollEffect = null,
                 ) {
                     if (overlay.sourcesTotal > 0 && overlay.sourcesDone < overlay.sourcesTotal &&
@@ -142,16 +153,18 @@ fun ChangeSourceSheet(
                         item(key = "incomplete-hint") {
                             Text(
                                 "上次搜索未完成（已查 ${overlay.sourcesDone}/${overlay.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
-                                Modifier.padding(vertical = Dimens.gapS),
+                                Modifier.padding(horizontal = textInset, vertical = Dimens.gapS),
                                 style = MiuixTheme.textStyles.footnote1,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                     }
-                    items(candidates, key = { "${it.sourceId}|${it.bookUrl}" }) { c ->
+                    // 候选拼成一张卡（同页面上的列表），不再一源一张小卡、行间留缝
+                    itemsIndexed(candidates, key = { _, it -> "${it.sourceId}|${it.bookUrl}" }) { i, c ->
                         ChangeSourceCandidateRow(
                             candidate = c,
                             onClick = { onApplySource(c) },
+                            modifier = Modifier.groupedCardItem(i, candidates.size),
                         )
                     }
                 }
@@ -170,6 +183,7 @@ fun ChangeSourceSheet(
 private fun ChangeSourceCandidateRow(
     candidate: SearchResult,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val sourceLabel = candidate.sourceDisplayName()
     val supporting = buildList {
@@ -179,6 +193,7 @@ private fun ChangeSourceCandidateRow(
 
     ContentListItem(
         onClick = onClick,
+        modifier = modifier,
         overlineContent = {
             Text(
                 sourceLabel,

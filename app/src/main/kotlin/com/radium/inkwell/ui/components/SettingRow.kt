@@ -11,11 +11,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -42,21 +46,19 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 分组小标题：Miuix [SmallTitle]（subtitle 字号、`onBackgroundVariant` 灰）。全 App 的分组标题一套字号/颜色。
  *
  * 左边对齐**卡片里的文字**（卡片外边距 + 行内边距），不是对齐卡片边 —— HyperOS 设置页就是这么排的：
- * 小标题、行标题在同一条竖线上。
+ * 小标题、行标题在同一条竖线上。卡片外边距随所在的层走（[cardMargin]：页面 16dp、底部面板 24dp）。
  */
 @Composable
 fun SectionHeader(
     text: String,
     modifier: Modifier = Modifier,
-    /** 调用方的内容 Column 已整体内缩时设 false，避免左右留白叠加两次 */
-    horizontalInset: Boolean = true,
     /**
-     * 行尾的一个文字按钮（目录的「定位当前章」）。有它时这一行垫到触控高度、按钮与小标题竖直居中，
+     * 行尾的一个文字按钮（目录的「定位当前章」、搜索历史的「清空」）。有它时这一行垫到触控高度、按钮与小标题竖直居中，
      * 按钮的字右边对齐卡片里的字（行尾留白扣掉按钮自带的 [Dimens.gapM] 内边距）
      */
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val start = if (horizontalInset) Dimens.listHorizontal * 2 else Dimens.listHorizontal
+    val start = cardMargin() + Dimens.listHorizontal
     if (trailing == null) {
         SmallTitle(
             text = text,
@@ -124,17 +126,26 @@ internal fun settingGroupItemCorners(position: SettingGroupPosition): SquircleCo
 @Composable
 fun settingsPageColor(): Color = MiuixTheme.colorScheme.surface
 
-/** 设置分组卡底色：Miuix 的卡片色 `surfaceContainer`（浅色白卡、深色亮一档的灰卡） */
-@Composable
-fun settingsCardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
-
 /**
- * 设置栈灰底上的内容列表行色。现在就是 [ContentListDefaults.colors] 的默认值（卡片色），
- * 留着名字是让书籍列表这类「灰底上一张张白卡」的页面读起来和设置页是一回事。
+ * 卡片坐在哪一层：卡的底色、卡离两边多远。页面上是灰底白卡（`surfaceContainer`、[Dimens.listHorizontal]）；
+ * [AppBottomSheet] 里换成面板那一套（见那里的 KDoc）。分组卡、拼成卡的列表行、分组小标题、卡下脚注都从这里取 ——
+ * 放进面板就自动对上，调用方不用挨个传。
  */
+@Immutable
+class CardLayer(val color: Color, val margin: Dp)
+
+/** null = 页面（默认那一套） */
+internal val LocalCardLayer = staticCompositionLocalOf<CardLayer?> { null }
+
+/** 分组卡底色：页面上是 Miuix 的卡片色 `surfaceContainer`（浅色白卡、深色亮一档的灰卡），面板里见 [CardLayer] */
 @Composable
-fun settingsStackListColors() =
-    ContentListDefaults.colors(containerColor = settingsCardColor())
+@ReadOnlyComposable
+fun settingsCardColor(): Color = LocalCardLayer.current?.color ?: MiuixTheme.colorScheme.surfaceContainer
+
+/** 卡片离两边的距离：页面上 [Dimens.listHorizontal]，面板里见 [CardLayer] */
+@Composable
+@ReadOnlyComposable
+fun cardMargin(): Dp = LocalCardLayer.current?.margin ?: Dimens.listHorizontal
 
 /**
  * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张 Miuix [Card]
@@ -151,7 +162,7 @@ fun SettingGroup(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.listHorizontal)
+            .padding(horizontal = cardMargin())
             .padding(vertical = Dimens.gapS),
         cornerRadius = AppShapes.radiusLarge,
         colors = CardDefaults.defaultColors(color = settingsCardColor()),
@@ -169,7 +180,7 @@ fun SettingGroup(
  * 「标题 + 当前值、点开从几项里选一个」的行别用它弹面板，用 [SpinnerSettingRow]。
  *
  * @param position 非 null 表示在 [SettingGroup] 内（卡片负责底色与圆角，按压反馈被卡片裁进圆角）。
- *   底栏 / 面板里「一条一卡」的场景保持 null，行自己画一张卡。
+ *   null 时行自己画一张卡 —— 现在没有页面这么用：底部面板里的行也装进 [SettingGroup]（见 [ContentListItem] 的「形态」）。
  */
 @Composable
 fun SettingRow(
@@ -319,7 +330,7 @@ fun SettingFootnote(
         text,
         style = MiuixTheme.textStyles.footnote1,
         color = color,
-        modifier = modifier.padding(horizontal = Dimens.listHorizontal * 2, vertical = Dimens.gapXS),
+        modifier = modifier.padding(horizontal = cardMargin() + Dimens.listHorizontal, vertical = Dimens.gapXS),
     )
 }
 
@@ -371,15 +382,15 @@ fun SwitchRow(
 }
 
 /**
- * 内容列表（书架列表、搜索结果、书源列表）装进卡片：Lazy 列表里一行一个 item，相邻的行拼成一张圆角卡 ——
- * 第一行圆上角、最后一行圆下角、中间直角，左右露出页面底（与 [SettingGroup] 同一档外边距）。
- * HyperOS 的列表就是灰底上的白卡，不是通栏的行。
+ * 内容列表（书架列表、搜索结果、书源列表、目录……页面上的和底部面板里的都算）装进卡片：Lazy 列表里一行一个 item，
+ * 相邻的行拼成一张圆角卡 —— 第一行圆上角、最后一行圆下角、中间直角，左右露出页面底（与 [SettingGroup] 同一档外边距，
+ * 底色与外边距随所在的层走，见 [CardLayer]）。HyperOS 的列表就是灰底上的白卡，不是通栏的行。
  *
- * 行本身要透明（[ContentListDefaults.plainColors]），底色由这里画；行间别再加 `spacedBy`，否则卡会断开。
+ * 行本身透明、直角（[ContentListItem] 的默认值），底色与圆角由这里画、按压反馈也被这里裁；行间别再加 `spacedBy`，否则卡会断开。
  */
 @Composable
 fun Modifier.groupedCardItem(index: Int, count: Int): Modifier = this
-    .padding(horizontal = Dimens.listHorizontal)
+    .padding(horizontal = cardMargin())
     .squircleSurface(settingsCardColor(), settingGroupItemCorners(groupPosition(index, count)))
 
 /** 第 [index] 项（共 [count] 项）在一张卡里的位置 */

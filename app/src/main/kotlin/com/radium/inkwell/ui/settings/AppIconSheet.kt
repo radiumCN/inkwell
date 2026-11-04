@@ -2,7 +2,6 @@ package com.radium.inkwell.ui.settings
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +17,8 @@ import androidx.compose.ui.res.painterResource
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.util.AppIcon
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.AppBottomSheet
@@ -50,16 +51,13 @@ fun AppIconSheet(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(
-                        start = Dimens.screenPadding,
-                        end = Dimens.screenPadding,
-                        bottom = Dimens.gapM,
-                    ),
+                    .padding(horizontal = cardMargin())
+                    .padding(bottom = Dimens.gapS),
             )
 
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
-            ) {
+            // 几个图标拼成一张卡（面板里的列表也装进卡，见 AppBottomSheet）；从前一个图标一张小卡，
+            // 卡和面板同一个白，平时看不见，选中的那张淡强调底像一块孤零零的圆角色块
+            SettingGroup {
                 AppIcon.entries.forEach { icon ->
                     IconRow(
                         icon = icon,
@@ -79,7 +77,6 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
     ContentListItem(
         selected = selected,
         onClick = onClick,
-        modifier = ContentListDefaults.rowChrome(),
         leadingContent = {
             Box(
                 Modifier
@@ -123,7 +120,8 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
         supportingContent = {
             Text(icon.description, style = ContentListDefaults.supportingStyle)
         },
-        contentPadding = ContentListDefaults.ComfortablePadding,
+        // 52dp 的图标预览比两行字高：它撑开行高，上下只留 8dp
+        contentPadding = ContentListDefaults.MediaPadding,
         content = {
             Text(icon.label, style = ContentListDefaults.titleStyle)
         },
