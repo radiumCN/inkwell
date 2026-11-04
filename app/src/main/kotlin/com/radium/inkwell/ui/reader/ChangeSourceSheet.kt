@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -127,9 +128,13 @@ fun ChangeSourceSheet(
                     style = MiuixTheme.textStyles.body2,
                 )
                 else -> LazyColumn(
-                    Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
+                    Modifier
+                        .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
+                        // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
+                        .pageScroll(),
                     contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
                     verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                    overscrollEffect = null,
                 ) {
                     if (overlay.sourcesTotal > 0 && overlay.sourcesDone < overlay.sourcesTotal &&
                         !overlay.searchingSources

@@ -14,8 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import top.yukonga.miuix.kmp.icon.basic.SearchCleanup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -156,7 +155,7 @@ fun SearchField(
                         modifier = Modifier.heightIn(max = Dimens.searchFieldHeight),
                     ) {
                         Icon(
-                            Icons.Default.Close,
+                            MiuixIcons.Basic.SearchCleanup,
                             contentDescription = "清空",
                             Modifier.size(Dimens.iconSm),
                             tint = style.placeholder,

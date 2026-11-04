@@ -2,15 +2,15 @@ package com.radium.inkwell.ui.rss
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,6 +29,7 @@ import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
@@ -37,13 +39,13 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
-import com.radium.inkwell.ui.components.settingsStackListColors
 import com.radium.inkwell.ui.components.topBarScroll
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
@@ -74,11 +76,11 @@ fun RssSourceScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = {
-            AppTopBar("订阅", topBarScroll, onBack = onBack, containerColor = pageColor) {
+            AppTopBar("订阅", topBarScroll, onBack = onBack, containerColor = pageColor, actions = {
                 Box {
                     // 导入进行中（粘地址要联网抓 feed）换成转圈：从前这个状态 VM 里有、页面从没读过，点了像没点上
                     if (importing) {
@@ -117,17 +119,17 @@ fun RssSourceScreen(
                         ),
                     )
                 }
-            }
+            })
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // null = 库还没读回来：先空着，别闪一下「还没有订阅源」
-        val list = sources ?: return@Scaffold
+        val list = sources ?: return@AppScaffold
         if (list.isEmpty() && importing) {
             LoadingState(Modifier.padding(padding), label = "正在导入订阅源…")
         } else if (list.isEmpty()) {
             EmptyState(
-                icon = Icons.Default.RssFeed,
+                icon = Icons.Outlined.RssFeed,
                 title = "还没有订阅源",
                 hint = "直接粘一个 RSS/Atom 地址就能订阅，也支持导入 Legado 订阅源",
                 actionLabel = "添加订阅源",
@@ -135,17 +137,24 @@ fun RssSourceScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            // 只让开两侧：顶栏高度垫在列表开头（列表滚到毛玻璃顶栏下面），导航栏高度垫在末尾（见 AppScaffold）
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding.exceptBottom()),
-                contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = padding.calculateBottomPadding(),
+                ),
+                overscrollEffect = null,
             ) {
-                items(list, key = { it.id }) { source ->
+                // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝
+                itemsIndexed(list, key = { _, it -> it.id }) { index, source ->
                     ContentListItem(
                         onClick = { onOpenSource(source.id) },
+                        modifier = Modifier.groupedCardItem(index, list.size),
                         enabled = source.enabled,
-                        colors = settingsStackListColors(),
+                        // 底与圆角由外面的卡画，行本身透明、直角
+                        colors = ContentListDefaults.plainColors(),
+                        shape = RectangleShape,
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 // 删除图标走摘要色：outline / dividerLine 只给边框/分隔线用，

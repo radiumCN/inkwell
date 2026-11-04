@@ -1,6 +1,10 @@
 package com.radium.inkwell.ui.bookshelf
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.groupPosition
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ReportDrawnWhen
@@ -27,13 +31,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.foundation.shape.CircleShape
-import com.radium.inkwell.ui.components.AppBottomSheet
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.ui.state.ToggleableState
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppMenuItem
@@ -65,13 +65,12 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroupPosition
-import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.settingsCardColor
 import com.radium.inkwell.ui.components.settingsPageColor
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
@@ -92,15 +91,11 @@ import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
-import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.EmptyState
@@ -110,18 +105,19 @@ import com.radium.inkwell.ui.components.expandExit
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.Badge
+import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.PullToRefresh
 import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
@@ -304,8 +300,8 @@ fun BookshelfScreen(
         }
     }
 
-    // 隐藏区收起时（✕、长按收摊、切后台自动收起），还开着的长按面板 / 分组 / 删除弹窗若指着一本
-    // 隐藏书，一并关掉 —— 否则切回来书架已经收好，面板上却还摊着那本隐藏书的书名。
+    // 隐藏区收起时（✕、长按收摊、切后台自动收起），还开着的长按菜单 / 分组 / 删除弹窗若指着一本
+    // 隐藏书，一并关掉 —— 否则切回来书架已经收好，菜单 / 弹窗上却还摊着那本隐藏书的书名。
     // 宽屏右栏的详情交给导航层（onHiddenCollapsed）。只认「开 → 收」这一下：进页时本来就是收着的，
     // 那时去动导航栈，正赶上侧滑返回的话会把栈多弹一层。
     val currentOnHiddenCollapsed by rememberUpdatedState(onHiddenCollapsed)
@@ -336,10 +332,131 @@ fun BookshelfScreen(
         )
     }
 
+    // 指着隐藏书的菜单/弹窗，在隐藏区收起的那一帧就别画了（状态由上面的 LaunchedEffect 清，它晚一帧）
+    fun BookEntity.stillVisible() = showHidden || !hidden
+
+    // 「全部隐藏」要按**整个书架**判，不能拿分组筛选后的 books 判：选中一个恰好没有可见书的
+    // 分组时 books 也是空的，若在这里整页换成空态，筛选条跟着一起消失，用户就没法切回「全部」了 ——
+    // 分组为空另有列表里的提示。
+    //
+    // 书全被隐藏了也走这同一个空态。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
+    // 必须和真正的空书架一模一样（连「导入本地书」按钮也在）：别人看不出区别，而你知道长按标题能回来。
+    // 从前是两段各写一份，全隐藏那份漏了导入按钮，一眼就和真空架对不上 —— 所以合成一个分支。
+    val allHidden = allBooks.isNotEmpty() && hiddenCount == allBooks.size && !showHidden
+    // 欢迎页只给真正空、且从没用过的书架（全藏起来的不算，见 WelcomeState）。
+    // 标记还没读到（null）时两样都先不画：别先闪一下普通空态再换成欢迎页
+    val showWelcome = allBooks.isEmpty() && onboarded != true
+    // 有书可摆：Room 第一帧到了、不是欢迎页也不是空态。隐藏区状态条与分组筛选条只在这时出现
+    val showShelf = shelfReady && !showWelcome && allBooks.isNotEmpty() && !allHidden
+
+    /**
+     * 钉在顶栏下面、不随书滚走的两样：隐藏区状态条、分组筛选条。放进顶栏的 bottomContent（多选栏也放，
+     * 挑书时照样能切分组），书就能从它们下面滚过去、一起被毛玻璃盖住 —— 放在内容区顶上的话，
+     * 那一截永远挡着书架，玻璃顶栏下面也就没东西可透。
+     */
+    val shelfHeader: @Composable () -> Unit = {
+        if (showShelf) {
+            Column {
+                // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
+                // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
+                // 「展开需验证」直接挂在条上，不再套一层设置弹层。
+                AnimatedVisibility(
+                    visible = showHidden,
+                    enter = expandEnter(),
+                    exit = expandExit(),
+                ) {
+                    HiddenStatusBar(
+                        requireAuth = requireAuth,
+                        biometricAvailable = biometricAvailable,
+                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+                        // ✕ = 退出整个隐藏区（状态条收起 + 书藏回去），与长按标题一键收摊等价
+                        onCollapse = { viewModel.collapseHiddenAll() },
+                    )
+                }
+
+                // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕。
+                // 收敛到共享 ChipRow（与发现页/订阅页同一形态、同一首尾边距）
+                if (groups.isNotEmpty()) {
+                    val chipOptions = listOf("全部") + groups + listOf("未分组")
+                    val selectedChip = when (group) {
+                        null -> 0
+                        BookshelfViewModel.UNGROUPED -> chipOptions.lastIndex
+                        else -> (groups.indexOf(group) + 1).coerceAtLeast(0)
+                    }
+                    ChipRow(
+                        options = chipOptions,
+                        selectedIndex = selectedChip,
+                        onSelect = { i ->
+                            groupSwitchFrom = books
+                            viewModel.setGroup(
+                                when (i) {
+                                    0 -> null
+                                    chipOptions.lastIndex -> BookshelfViewModel.UNGROUPED
+                                    // chipOptions[0] 是「全部」，所以分组下标 = i-1
+                                    else -> groups[i - 1]
+                                }
+                            )
+                        },
+                        contentPadding = PaddingValues(
+                            horizontal = Dimens.listHorizontal,
+                            vertical = Dimens.gapXS,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 长按一本书的操作菜单：从这本书上弹出来（HyperOS 的长按菜单），不再从屏幕底升起一整块面板 ——
+     * 人的视线本来就落在长按的那本书上。和书放进同一个 Box，菜单按这个 Box 定位。
+     *
+     * 按 id 而不是整个实体对比：菜单开着时追更 / 进度回写会换来一份新的 BookEntity，按相等比就当场收起了。
+     * 收起时只清自己那份：快速长按另一本书时，上一本的菜单收起不该把新目标也清掉。
+     */
+    val bookMenu: @Composable (BookEntity) -> Unit = { book ->
+        AppDropdownMenu(
+            expanded = actionTarget?.id == book.id && book.stillVisible(),
+            onDismissRequest = { if (actionTarget?.id == book.id) actionTarget = null },
+            items = buildList {
+                add(AppMenuItem("书籍详情", onClick = { onOpenDetail(book.id) }))
+                add(
+                    AppMenuItem(
+                        "设置分组",
+                        summary = book.groupName.ifBlank { "未分组" },
+                        onClick = {
+                            groupInput = book.groupName
+                            groupTarget = book
+                        },
+                    ),
+                )
+                // 「多选」不带说明：说明里若写「批量删除、分组或隐藏」，平时这一项就把藏书功能写在了脸上
+                add(AppMenuItem("多选", onClick = { viewModel.startSelection(book.id) }))
+                // 「从书架隐藏」只在隐藏区打开时出现 —— 平时长按看不到，别人想不到能藏书。
+                if (showHidden) {
+                    add(
+                        AppMenuItem(
+                            if (book.hidden) "取消隐藏" else "从书架隐藏",
+                            summary = if (book.hidden) "重新显示在书架上" else "书、进度、缓存都还在，只是列表里不显示",
+                            onClick = { viewModel.setHidden(book.id, !book.hidden) },
+                        ),
+                    )
+                }
+                add(
+                    AppMenuItem(
+                        "从书架删除",
+                        summary = "本地文件与缓存将一并删除",
+                        onClick = { deleteTarget = book },
+                    ),
+                )
+            },
+        )
+    }
+
     // 与设置页同一套画布：页面底 surface（见 settingsPageColor），进出设置不再闪色。
-    // 顶栏与画布同色、不随滚动变色，否则滚动时顶出一道色缝
+    // 顶栏与画布同色（在 AppScaffold 里是同色的毛玻璃），否则滚动时顶出一道色缝
     val pageColor = settingsPageColor()
-    Scaffold(
+    AppScaffold(
         // 这两条顶栏刻意留窄栏（AppToolbar），不换 AppTopBar 的折叠大标题：一是进出多选会在两种
         // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，大标题那一行
         // 放不下这两样。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
@@ -400,6 +517,7 @@ fun BookshelfScreen(
                             )
                         }
                     },
+                    bottomContent = shelfHeader,
                 ) {
                     ToolbarTitle("已选 ${selected.size} 本")
                 }
@@ -438,7 +556,8 @@ fun BookshelfScreen(
                         // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
                         if (exploreEnabled) {
                             AppIconButton(onClick = onOpenExplore) {
-                                Icon(Icons.Default.Explore, contentDescription = "发现")
+                                // Miuix 图标里没有罗盘，用 Material 的线条版，与 Miuix 的线条图标一个笔触
+                                Icon(Icons.Outlined.Explore, contentDescription = "发现")
                             }
                         }
                         // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
@@ -472,6 +591,7 @@ fun BookshelfScreen(
                             Icon(MiuixIcons.Settings, contentDescription = "设置")
                         }
                     },
+                    bottomContent = shelfHeader,
                 )
             }
         },
@@ -479,31 +599,22 @@ fun BookshelfScreen(
     ) { padding ->
         // Room 第一帧还没到：先空着。这时 allBooks 的空不代表书架是空的，落进下面的空态
         // 就是每次启动都先闪一下「书架空空如也 / 导入本地书」。本地库通常几十毫秒就回来，转圈也只会一闪
-        if (!shelfReady) return@Scaffold
-        // 「全部隐藏」要按**整个书架**判，不能拿分组筛选后的 books 判：选中一个恰好没有可见书的
-        // 分组时 books 也是空的，若在这里整页换成空态，筛选条跟着一起消失，用户就没法切回「全部」了 ——
-        // 分组为空另有下面 ChipRow 之下的提示。
-        //
-        // 书全被隐藏了也走这同一个空态。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
-        // 必须和真正的空书架一模一样（连「导入本地书」按钮也在）：别人看不出区别，而你知道长按标题能回来。
-        // 从前是两段各写一份，全隐藏那份漏了导入按钮，一眼就和真空架对不上 —— 所以合成一个分支。
-        val allHidden = allBooks.isNotEmpty() && hiddenCount == allBooks.size && !showHidden
-        // 欢迎页只给真正空、且从没用过的书架（全藏起来的不算，见 WelcomeState）。
-        // 标记还没读到（null）时两样都先不画：别先闪一下普通空态再换成欢迎页
-        if (allBooks.isEmpty() && onboarded != true) {
+        if (!shelfReady) return@AppScaffold
+        if (showWelcome) {
             if (onboarded == false) {
                 WelcomeState(
                     onImport = ::launchImport,
                     onRestore = onOpenWebDav,
                     onSkip = viewModel::finishOnboarding,
                     onOpenDisclaimer = onOpenDisclaimer,
-                    modifier = Modifier.padding(padding.exceptBottom()),
+                    modifier = Modifier.padding(padding.horizontalOnly()),
+                    topInset = padding.calculateTopPadding(),
                     bottomInset = padding.calculateBottomPadding(),
                 )
             }
-        } else if (allBooks.isEmpty() || allHidden) {
+        } else if (!showShelf) {
             EmptyState(
-                icon = Icons.Default.AutoStories,
+                icon = Icons.Outlined.AutoStories,
                 title = "书架空空如也",
                 hint = "导入本地 txt / EPUB / MOBI，或搜索已导入的规则",
                 actionLabel = "导入本地书",
@@ -511,295 +622,180 @@ fun BookshelfScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            // 沉浸式底部：只吃顶栏/两侧的 inset，**不吃底部导航栏的**——底部让给下面的网格，
-            // 由它用 contentPadding 把导航栏高度让出来，于是书封能滚到系统导航条下面（edge-to-edge）。
-            // 全应用的列表页都照这个写法，见 exceptBottom
-            Column(Modifier.fillMaxSize().padding(padding.exceptBottom())) {
-                // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
-                // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
-                // 「展开需验证」直接挂在条上，不再套一层设置弹层。
-                AnimatedVisibility(
-                    visible = showHidden,
-                    enter = expandEnter(),
-                    exit = expandExit(),
-                ) {
-                    HiddenStatusBar(
-                        requireAuth = requireAuth,
-                        biometricAvailable = biometricAvailable,
-                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
-                        // ✕ = 退出整个隐藏区（状态条收起 + 书藏回去），与长按标题一键收摊等价
-                        onCollapse = { viewModel.collapseHiddenAll() },
-                    )
+            // 书铺满整屏、滚到玻璃顶栏下面：外层只让开两侧；顶栏（连同钉在它下面的状态条、筛选条）的高度
+            // 垫在列表开头，导航栏的高度垫在末尾 —— 书封既能滚到顶栏下面透出来，也能滚到手势条下面，
+            // 而第一排、最后一排仍能完整露出来（见 AppScaffold / horizontalOnly）
+            val topInset = padding.calculateTopPadding()
+            val bottomInset = padding.calculateBottomPadding()
+            // Miuix 的下拉刷新（HyperOS 那种把内容往下拽、顶上冒出圆圈与一行状态字）。
+            // 状态字默认是英文，这里换成中文 —— 书架下拉干的是「追更」，字也照这个说
+            PullToRefresh(
+                isRefreshing = refreshing,
+                onRefresh = { viewModel.refreshAll() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding.horizontalOnly()),
+                pullToRefreshState = rememberPullToRefreshState(),
+                // 它只用 top：刷新圈从顶栏下沿冒出来，而不是藏在玻璃顶栏后面
+                contentPadding = PaddingValues(top = topInset),
+                refreshTexts = REFRESH_TEXTS,
+            ) {
+                // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
+                // 写进 items 里就是每本书挂一个
+                val motionOn = animationsEnabled()
+                // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects。
+                // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
+                // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
+                // 才看得出「这几本是插进来的」。
+                // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
+                // 后者仍会走一遍动画机器，只是时长为零。
+                val motion = AppTheme.motionScheme
+                // 多选时收起卡片：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上。
+                // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
+                // 卡片收起（多选）时它回到网格里，照样能选
+                val hero = continueReading?.takeIf { !selectionMode }
+                val shelfItems = if (hero == null) books else books.filter { it.id != hero.book.id }
+                // 平时长按 = 单本操作菜单；已在多选里则长按继续勾选切换。
+                // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
+                fun longPress(book: BookEntity) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (selectionMode) viewModel.toggleSelect(book.id) else actionTarget = book
                 }
-
-                // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕。
-                // 收敛到共享 ChipRow（与发现页/订阅页同一形态、同一首尾边距）
-                if (groups.isNotEmpty()) {
-                    val chipOptions = listOf("全部") + groups + listOf("未分组")
-                    val selectedChip = when (group) {
-                        null -> 0
-                        BookshelfViewModel.UNGROUPED -> chipOptions.lastIndex
-                        else -> (groups.indexOf(group) + 1).coerceAtLeast(0)
+                fun click(book: BookEntity, bounds: Rect?) {
+                    if (selectionMode) viewModel.toggleSelect(book.id)
+                    else {
+                        // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
+                        viewModel.freezeShelfOrder()
+                        onOpenBook(book.id, originOf(bounds, windowSize))
                     }
-                    ChipRow(
-                        options = chipOptions,
-                        selectedIndex = selectedChip,
-                        onSelect = { i ->
-                            groupSwitchFrom = books
-                            viewModel.setGroup(
-                                when (i) {
-                                    0 -> null
-                                    chipOptions.lastIndex -> BookshelfViewModel.UNGROUPED
-                                    // chipOptions[0] 是「全部」，所以分组下标 = i-1
-                                    else -> groups[i - 1]
-                                }
-                            )
-                        },
-                        contentPadding = PaddingValues(
-                            horizontal = Dimens.listHorizontal,
-                            vertical = Dimens.gapXS,
-                        ),
-                    )
                 }
-                // Miuix 的下拉刷新（HyperOS 那种把内容往下拽、顶上冒出圆圈与一行状态字）。
-                // 状态字默认是英文，这里换成中文 —— 书架下拉干的是「追更」，字也照这个说
-                PullToRefresh(
-                    isRefreshing = refreshing,
-                    onRefresh = { viewModel.refreshAll() },
-                    modifier = Modifier.fillMaxSize(),
-                    pullToRefreshState = rememberPullToRefreshState(),
-                    refreshTexts = REFRESH_TEXTS,
-                ) {
-                    // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
-                    // 写进 items 里就是每本书挂一个
-                    val motionOn = animationsEnabled()
-                    // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
-                    val motion = AppTheme.motionScheme
-                    // 多选时收起卡片：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上。
-                    // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
-                    // 卡片收起（多选）时它回到网格里，照样能选
-                    val hero = continueReading?.takeIf { !selectionMode }
-                    val shelfItems = if (hero == null) books else books.filter { it.id != hero.book.id }
-                    when {
-                        // 当前分组下没有可见的书（未分组也算一个分组）。筛选条留在上面，空态只占内容区。
-                        // 隐藏区未展开时被藏起来的书也不算「有」，提示文案里同样一个字不提隐藏。
-                        books.isEmpty() -> EmptyState(
-                            icon = Icons.Default.AutoStories,
-                            title = "这个分组还没有书",
-                            hint = "长按书封「设置分组」可以把书移进来，或在上方切换分组",
-                        )
-                        layout == BookshelfLayout.GRID -> LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = Dimens.bookshelfGridMin),
-                            modifier = Modifier.fillMaxSize(),
-                            state = gridState,
-                            // 底部多留一个导航栏的高度：网格铺到屏幕最底边、书封滚到导航条下方，
-                            // 而最后一排仍能滚清导航条不被挡住
-                            contentPadding = PaddingValues(
-                                start = Dimens.gapM,
-                                end = Dimens.gapM,
-                                top = Dimens.gapM,
-                                bottom = Dimens.gapM + padding.calculateBottomPadding(),
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                            verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
-                        ) {
-                            if (hero != null) {
-                                item(
-                                    key = CONTINUE_READING_KEY,
-                                    span = { GridItemSpan(maxLineSpan) },
-                                    contentType = CONTINUE_READING_KEY,
+                when {
+                    // 当前分组下没有可见的书（未分组也算一个分组）。筛选条留在上面，空态只占内容区。
+                    // 隐藏区未展开时被藏起来的书也不算「有」，提示文案里同样一个字不提隐藏。
+                    books.isEmpty() -> EmptyState(
+                        icon = Icons.Outlined.AutoStories,
+                        title = "这个分组还没有书",
+                        hint = "长按书封「设置分组」可以把书移进来，或在上方切换分组",
+                        modifier = Modifier.padding(top = topInset, bottom = bottomInset),
+                    )
+                    layout == BookshelfLayout.GRID -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = Dimens.bookshelfGridMin),
+                        // HyperOS 的回弹 + 甩到头轻震（见 pageScroll）；自带的那份回弹关掉，免得叠两层
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pageScroll(),
+                        state = gridState,
+                        // 顶上垫顶栏高度、底部垫导航栏高度：书封滚到两头的玻璃下面，
+                        // 而第一排、最后一排仍能滚清、不被挡住
+                        contentPadding = PaddingValues(
+                            start = Dimens.gapM,
+                            end = Dimens.gapM,
+                            top = topInset + Dimens.gapM,
+                            bottom = Dimens.gapM + bottomInset,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                        overscrollEffect = null,
+                    ) {
+                        if (hero != null) {
+                            item(
+                                key = CONTINUE_READING_KEY,
+                                span = { GridItemSpan(maxLineSpan) },
+                                contentType = CONTINUE_READING_KEY,
+                            ) {
+                                Box(
+                                    Modifier.animateItem(
+                                        fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                        placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                        fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                    ),
                                 ) {
                                     ContinueReadingCard(
                                         entry = hero,
-                                        onClick = { bounds ->
-                                            viewModel.freezeShelfOrder()
-                                            onOpenBook(hero.book.id, originOf(bounds, windowSize))
-                                        },
-                                        onLongClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            actionTarget = hero.book
-                                        },
-                                        modifier = Modifier.animateItem(
-                                            fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                            placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                            fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                                        ),
+                                        onClick = { bounds -> click(hero.book, bounds) },
+                                        onLongClick = { longPress(hero.book) },
                                     )
+                                    bookMenu(hero.book)
                                 }
                             }
-                            items(shelfItems, key = { it.id }) { book ->
+                        }
+                        items(shelfItems, key = { it.id }) { book ->
+                            Box(
+                                Modifier.animateItem(
+                                    fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                    placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                    fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                ),
+                            ) {
                                 BookCard(
                                     book = book,
                                     selected = book.id in selected,
                                     selectionMode = selectionMode,
-                                    onClick = { bounds ->
-                                        if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else {
-                                            // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
-                                            viewModel.freezeShelfOrder()
-                                            onOpenBook(book.id, originOf(bounds, windowSize))
-                                        }
-                                    },
-                                    // 方案 A：平时长按 = 单本操作面板；已在多选里则长按继续勾选切换。
-                                    // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else actionTarget = book
-                                    },
-                                    // 进出隐藏区时整批书凭空出现/消失，从前是硬闪 —— 看不出
-                                    // 是多了几本书，还是整个书架换了内容。淡入淡出 + 其余书平滑挪位，
-                                    // 才看得出「这几本是插进来的」。
-                                    // 关了系统动画就传 null（这个 API 的「不动画」写法），而不是 tween(0) ——
-                                    // 后者仍会走一遍动画机器，只是时长为零。
-                                    modifier = Modifier.animateItem(
+                                    onClick = { bounds -> click(book, bounds) },
+                                    onLongClick = { longPress(book) },
+                                )
+                                bookMenu(book)
+                            }
+                        }
+                    }
+                    else -> LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pageScroll(),
+                        state = listState,
+                        // 书一行一行拼成一张圆角卡（groupedCardItem 自己让开左右、画卡片底）：
+                        // HyperOS 的列表是灰底上的白卡，不是通栏的行。行间不留缝，留了卡就断成一截一截
+                        contentPadding = PaddingValues(
+                            top = topInset + Dimens.gapS,
+                            bottom = Dimens.gapS + bottomInset,
+                        ),
+                        overscrollEffect = null,
+                    ) {
+                        if (hero != null) {
+                            item(key = CONTINUE_READING_KEY, contentType = CONTINUE_READING_KEY) {
+                                // 卡片与书的卡同宽（左右同一档外边距）；下面再空一档，别跟书的卡粘在一起
+                                Box(
+                                    Modifier
+                                        .animateItem(
+                                            fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                            placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                            fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                        )
+                                        .padding(horizontal = Dimens.listHorizontal)
+                                        .padding(bottom = Dimens.gapM),
+                                ) {
+                                    ContinueReadingCard(
+                                        entry = hero,
+                                        onClick = { bounds -> click(hero.book, bounds) },
+                                        onLongClick = { longPress(hero.book) },
+                                    )
+                                    bookMenu(hero.book)
+                                }
+                            }
+                        }
+                        itemsIndexed(shelfItems, key = { _, book -> book.id }) { index, book ->
+                            Box(
+                                Modifier
+                                    .animateItem(
                                         fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
                                         placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
                                         fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                                    ),
-                                )
-                            }
-                        }
-                        else -> LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            state = listState,
-                            // 左右内缩 + 行距：给列表行的圆角卡片留出背景露出，
-                            // 否则贴边铺满时一张张卡连成一片，页面底与卡片的层级也读不出来。
-                            contentPadding = ContentListDefaults.listContentPadding(
-                                bottom = padding.calculateBottomPadding(),
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
-                        ) {
-                            if (hero != null) {
-                                item(key = CONTINUE_READING_KEY, contentType = CONTINUE_READING_KEY) {
-                                    ContinueReadingCard(
-                                        entry = hero,
-                                        onClick = { bounds ->
-                                            viewModel.freezeShelfOrder()
-                                            onOpenBook(hero.book.id, originOf(bounds, windowSize))
-                                        },
-                                        onLongClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            actionTarget = hero.book
-                                        },
-                                        // 列表行左右有 listContentPadding，卡片与行同宽；下面再空一档，别跟第一行粘在一起
-                                        modifier = Modifier
-                                            .padding(bottom = Dimens.gapS)
-                                            .animateItem(
-                                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                                            ),
                                     )
-                                }
-                            }
-                            items(shelfItems, key = { it.id }) { book ->
+                                    .groupedCardItem(index, shelfItems.size),
+                            ) {
                                 BookShelfListRow(
                                     book = book,
                                     selected = book.id in selected,
                                     selectionMode = selectionMode,
-                                    onClick = { bounds ->
-                                        if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else {
-                                            // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
-                                            viewModel.freezeShelfOrder()
-                                            onOpenBook(book.id, originOf(bounds, windowSize))
-                                        }
-                                    },
-                                    onLongClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        if (selectionMode) viewModel.toggleSelect(book.id)
-                                        else actionTarget = book
-                                    },
-                                    modifier = Modifier.animateItem(
-                                        fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                        placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                        fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                                    ),
+                                    position = groupPosition(index, shelfItems.size),
+                                    onClick = { bounds -> click(book, bounds) },
+                                    onLongClick = { longPress(book) },
                                 )
+                                bookMenu(book)
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // 指着隐藏书的面板/弹窗，在隐藏区收起的那一帧就别画了（状态由上面的 LaunchedEffect 清，它晚一帧）
-    fun BookEntity.stillVisible() = showHidden || !hidden
-
-    actionTarget?.takeIf { it.stillVisible() }?.let { book ->
-        // 点了选项先把面板收下去再办事（dismissThen = AppSheetScope.dismiss：播完退场动画，
-        // 先把 actionTarget 置空、再办事）。从前直接把 actionTarget 置空：面板当场从组合树摘掉，
-        // 退场动画被掐断、一帧之内消失（同 OptionPickerSheet 里的那条）
-        // 面板底用默认的 background：与行的卡片色同色，选项是 HyperOS 面板里那种平铺的行（按下才显出圆角）——
-        // 与 OptionPickerSheet、应用图标面板同一个样子，不再是 M3 时代「灰底上一张张卡」
-        AppBottomSheet(onDismissRequest = { actionTarget = null }) {
-            fun dismissThen(action: () -> Unit) = dismiss(action)
-            Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
-                // 书名当面板标题：字号字重照 Miuix 面板标题（title4 / Medium、居中），但只给一行 ——
-                // Miuix 自带的标题不限行数，长书名会折成两三行把选项往下顶
-                Text(
-                    book.title,
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Dimens.screenPadding)
-                        .padding(bottom = Dimens.gapM),
-                    fontSize = MiuixTheme.textStyles.title4.fontSize,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                SettingRow(
-                    title = "书籍详情",
-                    subtitle = if (book.type == BookType.NET) "简介、目录、离线缓存" else "简介、目录",
-                    onClick = {
-                        val id = book.id
-                        dismissThen { onOpenDetail(id) }
-                    },
-                )
-                SettingRow(
-                    title = "设置分组",
-                    subtitle = book.groupName.ifBlank { "未分组" },
-                    onClick = {
-                        dismissThen {
-                            groupInput = book.groupName
-                            groupTarget = book
-                        }
-                    },
-                )
-                SettingRow(
-                    title = "多选",
-                    // 「隐藏」在多选里也是隐藏区专属（顶栏 ⋮ 那两项同样裹在 showHidden 里）。
-                    // 副标题不跟着分情况写的话，平时这行就把藏书功能写在了脸上，
-                    // 而进了多选又根本找不到它 —— 既泄了底，又是句空头承诺。
-                    subtitle = if (showHidden) "批量删除、分组或隐藏" else "批量删除或分组",
-                    onClick = {
-                        dismissThen { viewModel.startSelection(book.id) }
-                    },
-                )
-                // 「从书架隐藏」只在隐藏区打开时出现 —— 平时长按看不到，别人想不到能藏书。
-                if (showHidden) {
-                    SettingRow(
-                        title = if (book.hidden) "取消隐藏" else "从书架隐藏",
-                        subtitle = if (book.hidden) {
-                            "重新显示在书架上"
-                        } else {
-                            "书、进度、缓存都还在，只是列表里不显示"
-                        },
-                        onClick = {
-                            dismissThen { viewModel.setHidden(book.id, !book.hidden) }
-                        },
-                    )
-                }
-                SettingRow(
-                    title = "从书架删除",
-                    subtitle = "本地文件与缓存将一并删除",
-                    onClick = {
-                        dismissThen { deleteTarget = book }
-                    },
-                )
             }
         }
     }
@@ -897,12 +893,15 @@ fun BookshelfScreen(
 /**
  * 列表行：小封面 + 书名/作者/最新章，方便扫更新。
  * 走共享 [ContentListItem]；交互（点开、长按、多选、进书原点）与 [BookCard] 对齐。
+ * 行本身透明，底色与圆角由外面的 [groupedCardItem] 画（一行一行拼成一张卡）；
+ * [position] 只决定按压反馈切哪几个角，与卡的四角对齐。
  */
 @Composable
 private fun BookShelfListRow(
     book: BookEntity,
     selected: Boolean,
     selectionMode: Boolean,
+    position: SettingGroupPosition,
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -918,10 +917,12 @@ private fun BookShelfListRow(
     }
     val trailingContent: (@Composable () -> Unit)? = if (selectionMode) {
         {
-            Icon(
-                if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                contentDescription = null,
-                modifier = Modifier.size(Dimens.iconMd),
+            // Miuix 的圆形勾选框（HyperOS 多选的样子）。纯展示：选中语义由整行的 Checkbox 角色给，
+            // 它自己再报一个「复选框」读屏就成了两个焦点
+            Checkbox(
+                state = ToggleableState(selected),
+                onClick = null,
+                modifier = Modifier.clearAndSetSemantics {},
             )
         }
     } else {
@@ -946,6 +947,8 @@ private fun BookShelfListRow(
         Text(book.title, style = ContentListDefaults.titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 
+    val colors = ContentListDefaults.plainColors()
+    val shape = settingGroupItemShape(position)
     if (selectionMode) {
         ContentListItem(
             checked = selected,
@@ -957,6 +960,8 @@ private fun BookShelfListRow(
             overlineContent = overlineContent,
             supportingContent = supportingContent,
             contentPadding = ContentListDefaults.ComfortablePadding,
+            colors = colors,
+            shape = shape,
             content = headline,
         )
     } else {
@@ -968,6 +973,8 @@ private fun BookShelfListRow(
             overlineContent = overlineContent,
             supportingContent = supportingContent,
             contentPadding = ContentListDefaults.ComfortablePadding,
+            colors = colors,
+            shape = shape,
             content = headline,
         )
     }
@@ -1010,7 +1017,7 @@ private fun BookShelfListLeading(
         CoverProgressOverlay(book.readingProgress(), coverShape)
         if (book.hidden) {
             Icon(
-                Icons.Default.VisibilityOff,
+                MiuixIcons.Hide,
                 contentDescription = "已隐藏",
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -1069,7 +1076,7 @@ private fun BookCard(
                 }
             }
             .combinedClickable(
-                // 平时整张卡就是一个按钮（点开读、长按出面板）；多选时角色由上面的 Checkbox 给
+                // 平时整张卡就是一个按钮（点开读、长按出菜单）；多选时角色由上面的 Checkbox 给
                 role = if (selectionMode) null else Role.Button,
                 onClick = { onClick(cover.boundsInWindow()) },
                 onLongClick = onLongClick,
@@ -1119,7 +1126,7 @@ private fun BookCard(
             // 「显示隐藏的书」开着时，得看得出哪些是隐藏的 —— 否则分不清，会重复隐藏
             if (book.hidden) {
                 Icon(
-                    Icons.Default.VisibilityOff,
+                    MiuixIcons.Hide,
                     contentDescription = "已隐藏",
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -1141,31 +1148,18 @@ private fun BookCard(
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
             }
-            // 角标用成对的圆形图标（CheckCircle / 空心圆），与相册多选一致；
-            // 未选仍垫卡片色圆底（浅色白、深色亮灰）—— 花封面上看得见空心圈。
+            // 角标用 Miuix 的圆形勾选框，与 HyperOS 相册多选一致；未选是一枚灰色实心圆，
+            // 花封面上也看得见。纯展示：整张卡已经是一个 Checkbox 语义（见上面的 semantics），
+            // 它自己再报一个复选框，读屏就成了两个焦点
             if (selectionMode) {
-                Box(
-                    Modifier
+                Checkbox(
+                    state = ToggleableState(selected),
+                    onClick = null,
+                    modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(Dimens.gapXS)
-                        .size(Dimens.iconMd)
-                        .background(
-                            MiuixTheme.colorScheme.surfaceContainer,
-                            CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                        contentDescription = null,
-                        modifier = Modifier.size(Dimens.iconMd),
-                        tint = if (selected) {
-                            MiuixTheme.colorScheme.primary
-                        } else {
-                            MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        },
-                    )
-                }
+                        .clearAndSetSemantics {},
+                )
             }
         }
         Text(

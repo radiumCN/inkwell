@@ -64,7 +64,7 @@ fun AppIconSheet(
                     IconRow(
                         icon = icon,
                         selected = icon == selected,
-                        // 先收起再回调：调用方一回调就把面板摘掉，退场动画会被掐断（同 OptionPickerSheet）
+                        // 先收起再回调：调用方一回调就把面板摘掉，退场动画会被掐断（见 AppBottomSheet 的 dismiss）
                         onClick = { dismiss { onSelect(icon) } },
                     )
                 }

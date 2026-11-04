@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.replace
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,12 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,6 +37,7 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppFormField
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
@@ -45,21 +46,22 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.PrimaryButton
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
-import com.radium.inkwell.ui.components.settingsStackListColors
 import com.radium.inkwell.ui.components.sheetBottomInset
 import com.radium.inkwell.ui.components.topBarScroll
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Clear
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -77,7 +79,7 @@ fun ReplaceRuleScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -94,28 +96,31 @@ fun ReplaceRuleScreen(
         } else if (state.rules.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 EmptyState(
-                    icon = Icons.Default.CleaningServices,
+                    icon = MiuixIcons.Clear,
                     title = "还没有净化规则",
                     hint = "用来删掉正文里的广告、水印和防盗段落",
                 )
             }
         } else {
-            // 内容滚到手势条下面（见 exceptBottom）
+            // 只让开两侧：顶栏高度垫在列表开头（列表滚到毛玻璃顶栏下面），导航栏高度垫在末尾（见 AppScaffold）
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding.exceptBottom()),
+                Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
                 // 底部给悬浮的「新建」按钮让位（Miuix 悬浮按钮 60dp 高 + 边距）：不留的话，最后一条行尾的开关与删除
                 // 正好压在按钮下面，还滚不出来。按钮本身坐在导航栏上面，所以再加上导航栏的高度
-                contentPadding = ContentListDefaults.listContentPadding(
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
                     bottom = Dimens.touchTarget + Dimens.gapXXL + padding.calculateBottomPadding(),
                 ),
-                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                overscrollEffect = null,
             ) {
-                items(state.rules, key = { it.id }) { rule ->
+                // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝
+                itemsIndexed(state.rules, key = { _, it -> it.id }) { index, rule ->
                     RuleRow(
                         rule = rule,
                         onClick = { viewModel.edit(rule) },
                         onToggle = { viewModel.setEnabled(rule, it) },
                         onDelete = { pendingDelete = rule },
+                        modifier = Modifier.groupedCardItem(index, state.rules.size),
                     )
                 }
             }
@@ -200,10 +205,14 @@ private fun RuleRow(
     onClick: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     ContentListItem(
         onClick = onClick,
-        colors = settingsStackListColors(),
+        modifier = modifier,
+        // 底与圆角由外面的卡（groupedCardItem）画，行本身透明、直角
+        colors = ContentListDefaults.plainColors(),
+        shape = RectangleShape,
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 删除在前、开关在后：与书源/订阅列表的行尾一致。图标走摘要色 ——

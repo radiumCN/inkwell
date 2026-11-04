@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -28,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
@@ -37,16 +36,18 @@ import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Forward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 文章阅读。
@@ -74,26 +75,26 @@ fun RssArticleScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         snackbarHost = { AppSnackbarHost(snackbar) },
         topBar = {
-            AppTopBar("文章", topBarScroll, onBack = onBack, containerColor = pageColor) {
+            AppTopBar("文章", topBarScroll, onBack = onBack, containerColor = pageColor, actions = {
                 if (state.link.isNotBlank()) {
                     AppIconButton(onClick = ::openInBrowser) {
                         Icon(
-                            Icons.AutoMirrored.Filled.OpenInNew,
+                            MiuixIcons.Forward,
                             contentDescription = "浏览器打开原文",
                         )
                     }
                 }
-            }
+            })
         },
     ) { padding ->
         if (state.loading) {
             LoadingState(Modifier.padding(padding))
-            return@Scaffold
+            return@AppScaffold
         }
 
         // 懒加载：长文、多图的文章从前一次把全部段落和图片组合完才出第一屏。
@@ -102,13 +103,16 @@ fun RssArticleScreen(
         LazyColumn(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom()),
+                // 只让开两侧：顶栏高度垫在列表开头（正文滚到毛玻璃顶栏下面），导航栏高度垫在末尾（见 AppScaffold）
+                .padding(padding.horizontalOnly())
+                .pageScroll(),
             contentPadding = PaddingValues(
                 start = Dimens.screenPadding,
                 end = Dimens.screenPadding,
+                top = padding.calculateTopPadding(),
                 bottom = padding.calculateBottomPadding(),
             ),
+            overscrollEffect = null,
         ) {
             item(key = "title", contentType = "title") {
                 Column {

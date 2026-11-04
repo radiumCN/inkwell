@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.settings
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.SectionHeader
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +28,7 @@ import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.SpinnerSettingRow
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -37,7 +38,7 @@ import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.util.AppIconManager
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 
 @Composable
@@ -57,11 +58,10 @@ fun AppearanceSettingsScreen(
     val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
-    var showLayoutPicker by remember { mutableStateOf(false) }
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("外观", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -70,10 +70,11 @@ fun AppearanceSettingsScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
-                .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
+                .padding(top = padding.calculateTopPadding() + Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             // 按「改的是哪儿」分两组：整个 App 的样子 / 书架这一页。「发现」入口长在书架顶栏上，
             // 从前却单独一组挂在最后，跟同样管书架的「书架显示」隔开了
@@ -93,10 +94,24 @@ fun AppearanceSettingsScreen(
             }
             SectionHeader("书架")
             SettingGroup {
-                SettingRow(
+                SpinnerSettingRow(
                     title = "书架显示",
-                    value = bookshelfLayout.label,
-                    onClick = { showLayoutPicker = true },
+                    options = BookshelfLayout.entries.map {
+                        PickerOption(
+                            id = it.name,
+                            label = it.label,
+                            subtitle = when (it) {
+                                BookshelfLayout.GRID -> "封面网格，一屏多本书"
+                                BookshelfLayout.LIST -> "小封面 + 书名作者与最新章"
+                            },
+                        )
+                    },
+                    selectedId = bookshelfLayout.name,
+                    onSelect = { opt ->
+                        runCatching { BookshelfLayout.valueOf(opt.id) }.getOrNull()?.let { picked ->
+                            scope.launch { appPrefs.setBookshelfLayout(picked) }
+                        }
+                    },
                     position = SettingGroupPosition.First,
                 )
                 SwitchRow(
@@ -108,30 +123,6 @@ fun AppearanceSettingsScreen(
             }
             Spacer(Modifier.height(Dimens.gapXL))
         }
-    }
-
-    if (showLayoutPicker) {
-        OptionPickerSheet(
-            title = "书架显示",
-            options = BookshelfLayout.entries.map {
-                PickerOption(
-                    id = it.name,
-                    label = it.label,
-                    subtitle = when (it) {
-                        BookshelfLayout.GRID -> "封面网格，一屏多本书"
-                        BookshelfLayout.LIST -> "小封面 + 书名作者与最新章"
-                    },
-                )
-            },
-            selectedId = bookshelfLayout.name,
-            onSelect = { opt ->
-                showLayoutPicker = false
-                runCatching { BookshelfLayout.valueOf(opt.id) }.getOrNull()?.let { picked ->
-                    scope.launch { appPrefs.setBookshelfLayout(picked) }
-                }
-            },
-            onDismiss = { showLayoutPicker = false },
-        )
     }
 
     if (showIconPicker) {

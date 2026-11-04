@@ -88,12 +88,6 @@ object Dimens {
     val iconMd = 24.dp
     /** 48dp。空状态正中那个 */
     val iconXL = 48.dp
-    /**
-     * 设置行尾 › 的尺寸。照抄 Miuix `ArrowPreference` 那张图的固有尺寸 —— 是图标自己的比例而不是间距，
-     * 不走 4dp 栅格（同 [strokeThin] 那条理由）；改成 8 或 12 宽，› 就和 Miuix 原生行上的那个不是一个样子
-     */
-    val rowChevronWidth = 10.dp
-    val rowChevronHeight = 16.dp
     /** 整页加载态的转圈（[AppLoadingIndicator] 默认尺寸）。与 Miuix 圆形进度的 30dp 默认值相近、落在栅格上 */
     val loadingIndicator = 32.dp
 

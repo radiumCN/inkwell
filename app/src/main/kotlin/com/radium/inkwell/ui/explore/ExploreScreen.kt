@@ -1,21 +1,22 @@
 package com.radium.inkwell.ui.explore
 
-import com.radium.inkwell.ui.components.exceptBottom
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.BackButton
@@ -45,13 +46,12 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowUpDown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -93,7 +93,8 @@ fun ExploreScreen(
 
     // 与搜索/书架同一套灰底白卡（页面底 surface 上放卡片色的书行）
     val pageColor = settingsPageColor()
-    Scaffold(
+    val showCategories = state.sourcesLoaded && state.sources.isNotEmpty() && state.categories.size > 1
+    AppScaffold(
         containerColor = pageColor,
         topBar = {
             // 留窄栏：标题位是个可点的书源切换按钮，大标题那一行只收文字、放不下控件
@@ -102,126 +103,138 @@ fun ExploreScreen(
                     BackButton(onClick = onBack)
                 },
                 containerColor = pageColor,
+                // 分类 chips 钉在顶栏里：书列表从它下面滚过去、一起被毛玻璃盖住
+                bottomContent = {
+                    if (showCategories) {
+                        // 走共享 ChipRow（自带横向滚动），不再手搓 LazyRow + FilterChip
+                        ChipRow(
+                            options = state.categories,
+                            selectedIndex = state.categoryIndex,
+                            onSelect = { viewModel.selectCategory(it) },
+                            contentPadding = PaddingValues(
+                                horizontal = Dimens.listHorizontal,
+                                vertical = Dimens.gapXS,
+                            ),
+                        )
+                    }
+                },
             ) {
-                // 选书源统一走底部面板：从前是裸 DropdownMenu，弹个小浮层、选中态全靠猜。
+                // 选书源从标题处弹出列表（当前书源打勾）：从前是裸 DropdownMenu，选中态全靠猜。
                 // 字号字重照窄栏标题（title3 / Medium）、字色照标题的 onSurface —— 它就是这一页的标题，
-                // 只是能点；行尾的下拉箭头交代「点了能换」
-                AppTextButton(
-                    onClick = { sourceMenuOpen = true },
-                    contentColor = MiuixTheme.colorScheme.onSurface,
-                    contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                ) {
-                    Text(
-                        state.currentSource?.name ?: "发现",
-                        modifier = Modifier.weight(1f, fill = false),
-                        fontSize = MiuixTheme.textStyles.title3.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                // 只是能点；行尾的 ⇅ 交代「点了能换」
+                Box {
+                    AppTextButton(
+                        onClick = { sourceMenuOpen = true },
+                        contentColor = MiuixTheme.colorScheme.onSurface,
+                        contentPadding = PaddingValues(horizontal = Dimens.gapS),
+                    ) {
+                        Text(
+                            state.currentSource?.name ?: "发现",
+                            modifier = Modifier.weight(1f, fill = false),
+                            fontSize = MiuixTheme.textStyles.title3.fontSize,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            MiuixIcons.Basic.ArrowUpDown,
+                            contentDescription = "切换书源",
+                            modifier = Modifier.padding(start = Dimens.gapXS).size(Dimens.iconSm),
+                        )
+                    }
+                    AppDropdownMenu(
+                        expanded = sourceMenuOpen,
+                        onDismissRequest = { sourceMenuOpen = false },
+                        items = state.sources.mapIndexed { index, source ->
+                            AppMenuItem(
+                                text = source.name,
+                                selected = source.id == state.currentSource?.id,
+                                onClick = { viewModel.selectSource(index) },
+                            )
+                        },
                     )
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = "切换书源")
                 }
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
-        Column(Modifier.fillMaxSize().padding(padding.exceptBottom())) {
-            // 库还没读回来：先空着。不能落进下面的空态 —— 那会每次进页都闪一下「没有可用的发现来源」
-            if (!state.sourcesLoaded) return@Column
-            if (state.sources.isEmpty()) {
-                EmptyState(
-                    icon = Icons.Default.Explore,
-                    title = "没有可用的发现来源",
-                    hint = "导入带发现页规则后，可在此浏览分类列表",
-                    actionLabel = "去导入规则",
-                    onAction = onOpenSourceManage,
-                )
-                return@Column
-            }
+        // 库还没读回来：先空着。不能落进下面的空态 —— 那会每次进页都闪一下「没有可用的发现来源」
+        if (!state.sourcesLoaded) return@AppScaffold
+        if (state.sources.isEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.Explore,
+                title = "没有可用的发现来源",
+                hint = "导入带发现页规则后，可在此浏览分类列表",
+                actionLabel = "去导入规则",
+                onAction = onOpenSourceManage,
+                modifier = Modifier.padding(padding),
+            )
+            return@AppScaffold
+        }
 
-            // 分类 chips —— 走共享 ChipRow（自带横向滚动），不再手搓 LazyRow + FilterChip
-            if (state.categories.size > 1) {
-                ChipRow(
-                    options = state.categories,
-                    selectedIndex = state.categoryIndex,
-                    onSelect = { viewModel.selectCategory(it) },
-                    contentPadding = PaddingValues(
-                        horizontal = Dimens.listHorizontal,
-                        vertical = Dimens.gapXS,
-                    ),
-                )
-            }
-
-            when {
-                state.loading -> LoadingState()
-                state.error != null -> ErrorState(
-                    message = state.error.orEmpty(),
-                    onRetry = { viewModel.retry() },
-                )
-                state.books.isEmpty() -> EmptyState(
-                    icon = Icons.Default.Explore,
-                    title = "这个分类没有内容",
-                    actionLabel = "重试",
-                    onAction = { viewModel.retry() },
-                )
-                else -> LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
-                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
-                ) {
-                    items(state.books, key = { it.exploreKey }) { book ->
-                        val inShelf = bookKey(book.title, book.author) in state.shelfKeys
-                        BookListRow(
-                            title = book.title,
-                            subtitle = listOfNotNull(book.author, book.latestChapter)
-                                .joinToString(" · "),
-                            caption = book.intro,
-                            coverModel = book.coverUrl,
-                            trailingLabel = if (inShelf) "已加入" else "加入",
-                            trailingLoading = book.bookUrl in state.addingUrls,
-                            trailingEnabled = !inShelf,
-                            onTrailing = { viewModel.addToShelf(book) },
-                            onClick = { onOpenPreview(listOf(book)) },
-                        )
+        when {
+            state.loading -> LoadingState(Modifier.padding(padding))
+            state.error != null -> ErrorState(
+                message = state.error.orEmpty(),
+                onRetry = { viewModel.retry() },
+                modifier = Modifier.padding(padding),
+            )
+            state.books.isEmpty() -> EmptyState(
+                icon = Icons.Outlined.Explore,
+                title = "这个分类没有内容",
+                actionLabel = "重试",
+                onAction = { viewModel.retry() },
+                modifier = Modifier.padding(padding),
+            )
+            // 只让开两侧：顶栏（连同分类 chips）的高度垫在列表开头、导航栏垫在末尾，
+            // 列表滚到玻璃顶栏与手势条下面（见 AppScaffold）。书行拼成一张卡，行间不留缝
+            else -> LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = padding.calculateBottomPadding(),
+                ),
+                overscrollEffect = null,
+            ) {
+                val bookCount = state.books.size
+                itemsIndexed(state.books, key = { _, it -> it.exploreKey }) { index, book ->
+                    val inShelf = bookKey(book.title, book.author) in state.shelfKeys
+                    BookListRow(
+                        title = book.title,
+                        subtitle = listOfNotNull(book.author, book.latestChapter)
+                            .joinToString(" · "),
+                        caption = book.intro,
+                        coverModel = book.coverUrl,
+                        trailingLabel = if (inShelf) "已加入" else "加入",
+                        trailingLoading = book.bookUrl in state.addingUrls,
+                        trailingEnabled = !inShelf,
+                        onTrailing = { viewModel.addToShelf(book) },
+                        onClick = { onOpenPreview(listOf(book)) },
+                        modifier = Modifier.groupedCardItem(index, bookCount),
+                        colors = ContentListDefaults.plainColors(),
+                    )
+                }
+                if (state.loadingMore) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(Dimens.gapL),
+                            contentAlignment = Alignment.Center,
+                        ) { AppLoadingIndicator(size = Dimens.iconMd) }
                     }
-                    if (state.loadingMore) {
-                        item {
-                            Box(
-                                Modifier.fillMaxWidth().padding(Dimens.gapL),
-                                contentAlignment = Alignment.Center,
-                            ) { AppLoadingIndicator(size = Dimens.iconMd) }
-                        }
-                    }
-                    // 加载更多失败后不再「滑到底自动重来」（会无限重试），出口放在这里
-                    if (state.loadMoreFailed) {
-                        item {
-                            Box(
-                                Modifier.fillMaxWidth().padding(Dimens.gapS),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                AppTextButton("加载失败，点此重试", onClick = { viewModel.retryMore() })
-                            }
+                }
+                // 加载更多失败后不再「滑到底自动重来」（会无限重试），出口放在这里
+                if (state.loadMoreFailed) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(Dimens.gapS),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AppTextButton("加载失败，点此重试", onClick = { viewModel.retryMore() })
                         }
                     }
                 }
             }
         }
-    }
-
-    if (sourceMenuOpen) {
-        OptionPickerSheet(
-            title = "选择书源",
-            options = state.sources.map { PickerOption(id = it.id, label = it.name) },
-            selectedId = state.currentSource?.id,
-            onSelect = { opt ->
-                sourceMenuOpen = false
-                state.sources.indexOfFirst { it.id == opt.id }
-                    .takeIf { it >= 0 }
-                    ?.let { viewModel.selectSource(it) }
-            },
-            onDismiss = { sourceMenuOpen = false },
-        )
     }
 }

@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.legal
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,7 +16,7 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.settingsPageColor
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -32,7 +33,7 @@ fun DisclaimerScreen(onBack: () -> Unit) {
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("用户协议与免责声明", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -41,11 +42,15 @@ fun DisclaimerScreen(onBack: () -> Unit) {
             text = body,
             modifier = Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
-                .verticalScroll(rememberScrollState())
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(horizontal = Dimens.screenPadding)
-                .padding(top = Dimens.gapM, bottom = Dimens.gapXL + padding.calculateBottomPadding()),
+                .padding(
+                    top = padding.calculateTopPadding() + Dimens.gapM,
+                    bottom = Dimens.gapXL + padding.calculateBottomPadding(),
+                ),
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurface,
         )

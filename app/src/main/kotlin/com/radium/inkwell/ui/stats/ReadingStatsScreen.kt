@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.stats
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.SettingFootnote
 import androidx.compose.foundation.background
@@ -18,7 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -47,7 +48,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 import com.radium.inkwell.ui.theme.AppShapes
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -65,7 +66,7 @@ fun ReadingStatsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("阅读记录", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -74,7 +75,7 @@ fun ReadingStatsScreen(
         when {
             ui == null -> LoadingState(Modifier.padding(padding))
             ui.summary.isEmpty -> EmptyState(
-                icon = Icons.Default.AutoStories,
+                icon = Icons.Outlined.AutoStories,
                 title = "还没有阅读记录",
                 hint = "翻开一本书读几页，时长就会记在这里；配了 WebDAV 的话，各台设备的时长会合在一起",
                 modifier = Modifier.padding(padding),
@@ -90,10 +91,11 @@ private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
     Column(
         Modifier
             .fillMaxSize()
-            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-            .padding(padding.exceptBottom())
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = Dimens.gapXL + padding.calculateBottomPadding()),
+            // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+            .padding(padding.horizontalOnly())
+            .pageScroll()
+            .verticalScroll(rememberScrollState(), overscrollEffect = null)
+            .padding(top = padding.calculateTopPadding(), bottom = Dimens.gapXL + padding.calculateBottomPadding()),
     ) {
         TodayCard(s, Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS))
         Row(

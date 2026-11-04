@@ -12,8 +12,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import com.radium.inkwell.ui.components.AppFormField
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Clear
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Replace
@@ -48,6 +50,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 两者的底都取浮层色（[readerOverlayColor]）而不是卡片色：它们直接压在纸面上，
  * 而浅色纸的卡片色就是纸本身 —— 用卡片色等于纸上放一张看不见的纸。
  * 也不投影：同色纸上的阴影是一道脏灰线，层次只靠色阶（见 ReaderThemeScope）。
+ * 给了 [pageBackdrop] 时和阅读菜单一样是毛玻璃（[readerGlass]）：浮层色只叠八成，底下的正文隐约透出来。
  */
 @Composable
 fun SelectionToolbar(
@@ -57,7 +60,11 @@ fun SelectionToolbar(
     onReplace: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 录着翻页区的图层（见 ReaderScreen）；null 时退回实色底 */
+    pageBackdrop: LayerBackdrop? = null,
 ) {
+    val overlayColor = readerOverlayColor()
+    val fill = if (pageBackdrop != null) Color.Transparent else overlayColor
     var replacing by remember { mutableStateOf(false) }
     var replacement by remember { mutableStateOf("") }
 
@@ -65,8 +72,13 @@ fun SelectionToolbar(
         Surface(
             // 贴底的输入表单：键盘弹起时整块让上去。导航栏与键盘取并集（谁大让谁），
             // 不是两个 padding 叠加 —— 叠加会把导航栏那截再算一遍
-            modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
-            color = readerOverlayColor(),
+            modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                .readerGlass(pageBackdrop, AppShapes.large, overlayColor)
+                // 点在表单空白处别漏到纸面：纸面那层的「点空白取消选区」会把正在填的表单连同选区一起收掉
+                .blockTouchesBelow(),
+            color = fill,
             contentColor = MiuixTheme.colorScheme.onSurface,
             shape = AppShapes.large,
         ) {
@@ -123,7 +135,9 @@ fun SelectionToolbar(
                     .fillMaxWidth(),
             )
             FloatingToolbar(
-                color = readerOverlayColor(),
+                // 药丸是 50dp 圆角，比自身高度一半还大，等于两头全圆：模糊区用同一个胶囊形
+                modifier = Modifier.readerGlass(pageBackdrop, CircleShape, overlayColor),
+                color = fill,
                 // 外层 Column 已经留了边距；默认的 12/8dp 外边距再叠一层，药丸就离选中的那行字太远
                 outSidePadding = PaddingValues(0.dp),
                 shadowElevation = 0.dp,
@@ -137,7 +151,7 @@ fun SelectionToolbar(
                     }
                     // 最常用的动作：把这句话从本书里删掉
                     AppIconButton(onClick = onPurify) {
-                        Icon(Icons.Default.CleaningServices, contentDescription = "净化")
+                        Icon(MiuixIcons.Clear, contentDescription = "净化")
                     }
                     AppIconButton(onClick = { replacing = true }) {
                         Icon(MiuixIcons.Replace, contentDescription = "替换")

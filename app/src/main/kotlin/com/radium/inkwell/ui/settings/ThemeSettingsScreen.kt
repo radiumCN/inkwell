@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.settings
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SegmentedChoice
@@ -56,7 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -86,7 +87,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("主题外观", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -94,10 +95,11 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
-                .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
+                .padding(top = padding.calculateTopPadding() + Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             // 与别的设置页同一副骨架：分组标题 + 卡片。从前整页内缩 20dp、chip 和色板直接铺在灰底上
             SectionHeader("模式")

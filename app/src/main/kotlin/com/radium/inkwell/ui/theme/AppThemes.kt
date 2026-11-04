@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 enum class ThemeMode(val label: String) {
     SYSTEM("跟随系统"),
@@ -14,8 +16,8 @@ enum class ThemeMode(val label: String) {
 /** 全局主题配置（持久化于 AppPrefs） */
 data class ThemeConfig(
     val mode: ThemeMode = ThemeMode.SYSTEM,
-    val lightPreset: String = AppThemes.LIGHT_PAPER,
-    val darkPreset: String = AppThemes.DARK_WARM,
+    val lightPreset: String = AppThemes.HYPEROS,
+    val darkPreset: String = AppThemes.HYPEROS,
     /** 自定义主题的强调色与背景色（ARGB） */
     val customLightSeed: Long = 0xFF92400E,
     val customLightBg: Long = 0xFFFFFBEB,
@@ -33,6 +35,12 @@ data class ThemePreset(
 )
 
 object AppThemes {
+    /**
+     * HyperOS 原生配色（默认）：Miuix 自带的 `lightColorScheme()` / `darkColorScheme()` 原样用 ——
+     * 浅色是 #F7F7F7 灰底白卡、#3482FF 蓝，深色是纯黑底 #242424 卡。日/夜两个槽共用这个 id（同 [DYNAMIC]）。
+     * 不经 [schemeFrom]：那套推导是给「纸色 + 强调色」的品牌预设用的，拿来复刻系统配色只会差一点点、处处不对。
+     */
+    const val HYPEROS = "hyperos"
     const val LIGHT_PAPER = "paper"
     const val LIGHT_WHITE = "white"
     const val LIGHT_BAMBOO = "bamboo"
@@ -53,7 +61,13 @@ object AppThemes {
 
     val lightPresets: List<ThemePreset> by lazy {
         listOf(
-            // 默认。品牌色：墨褐 + 纸黄
+            ThemePreset(
+                HYPEROS, "HyperOS",
+                // 色板画的是卡片色（同其他浅色预设：预览底 = 卡片），HyperOS 浅色卡是纯白
+                Color(0xFFFFFFFF), Color(0xFF3482FF),
+                hyperOsScheme(dark = false),
+            ),
+            // 品牌色：墨褐 + 纸黄（HyperOS 预设之前的默认）
             ThemePreset(
                 LIGHT_PAPER, "暖纸",
                 Color(0xFFFFFBEB), Color(0xFF92400E),
@@ -86,6 +100,11 @@ object AppThemes {
 
     val darkPresets: List<ThemePreset> by lazy {
         listOf(
+            ThemePreset(
+                HYPEROS, "HyperOS",
+                Color(0xFF000000), Color(0xFF277AF7),
+                hyperOsScheme(dark = true),
+            ),
             ThemePreset(
                 DARK_WARM, "暖黑",
                 Color(0xFF17140F), Color(0xFFE8A33D),
@@ -274,6 +293,28 @@ object AppThemes {
             sliderKeyPoint = primary.copy(alpha = 0.3f),
             sliderKeyPointForeground = primary,
             sliderBackground = if (dark) onCard(0.15f) else onCard(0.08f),
+        )
+    }
+
+    /**
+     * HyperOS 预设的配色：Miuix 默认配色，只动四个槽。
+     * - `primaryContainer` / `onPrimaryContainer`：Miuix 组件不读，我们的页面按 M3 的含义用（淡强调底 + 深强调字：
+     *   设置概览卡、继续阅读卡），而 Miuix 默认值是一块饱和蓝配白字，铺满一张卡太抢眼。照 [schemeFrom] 的推法算。
+     * - `onBackgroundVariant`（分组小标题）、`onTertiaryContainer`（选中 chip、下拉菜单选中项的蓝字）：
+     *   Miuix 默认值只有约 2.9:1 / 3.4:1，低于正文 4.5:1 的底线（AppThemesTest 钉着）。各自往深处推到刚好够，
+     *   色相不变 —— 看上去仍是那个灰蓝小标题和那个蓝。
+     */
+    private fun hyperOsScheme(dark: Boolean): Colors {
+        val base = if (dark) darkColorScheme() else lightColorScheme()
+        // schemeFrom 的 background 在浅色是卡片色、在深色是页面底（见它的 KDoc）
+        val derived = schemeFrom(base.primary, if (dark) base.surface else base.surfaceContainer, dark)
+        // 小标题既在页面底上也在卡片上（面板里的分组）：两处都得够
+        val sectionTitle = readableOn(readableOn(base.onBackgroundVariant, base.surface), base.surfaceContainer)
+        return base.copy(
+            primaryContainer = derived.primaryContainer,
+            onPrimaryContainer = derived.onPrimaryContainer,
+            onBackgroundVariant = sectionTitle,
+            onTertiaryContainer = readableOn(base.onTertiaryContainer, base.tertiaryContainer),
         )
     }
 

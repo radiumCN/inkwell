@@ -1,10 +1,8 @@
 package com.radium.inkwell.ui.search
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,13 +15,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SearchOff
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
@@ -31,6 +23,14 @@ import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -61,8 +61,6 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.ErrorState
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.expandEnter
@@ -70,11 +68,12 @@ import com.radium.inkwell.ui.components.expandExit
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Recent
+import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -87,7 +86,6 @@ fun SearchScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
-    var showSortPicker by rememberSaveable { mutableStateOf(false) }
     var confirmClearHistory by rememberSaveable { mutableStateOf(false) }
 
     // 滚动位置活在 ViewModel：进详情再返回时 Composable 会重建，但 VM 还在返回栈上。
@@ -149,7 +147,19 @@ fun SearchScreen(
     // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，写进 items 里就是每行挂一个
     val motionOn = animationsEnabled()
     val motion = AppTheme.motionScheme
-    Scaffold(
+
+    // 历史在两种时候出来：进页还没搜过；搜过之后把输入框清空了 —— 清空就是「换个词」的意思，
+    // 这时候还摆着上一个词的结果（或「没找到」）没有用，从前得退出页面再进来才看得到历史。
+    // 正在搜 / 暂停着的时候不让位：结果还在长，或者等着用户点「继续搜索」。
+    val idle = !state.searching && !state.searchPaused
+    // 「清空了输入框」要单独成立，不能只靠有没有历史：清空后把历史删光，
+    // 否则会落回上一个词的旧结果，顶着一个空搜索框
+    val cleared = idle && state.searchId > 0 && viewModel.query.isBlank()
+    val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
+    val showEmpty = !showHistory && ((state.results.isEmpty() && idle) || cleared)
+    val showResults = !showHistory && !showEmpty
+
+    AppScaffold(
         containerColor = pageColor,
         topBar = {
             // 留窄栏：标题位放的是输入框。换成 AppTopBar 的大标题，输入框没处放 ——
@@ -162,6 +172,39 @@ fun SearchScreen(
                 actions = {
                     AppIconButton(onClick = { viewModel.search() }) {
                         Icon(MiuixIcons.Search, contentDescription = "搜索")
+                    }
+                },
+                // 进度条、暂停条、数量/排序条都钉在顶栏里：结果列表从它们下面滚过去、一起被毛玻璃盖住，
+                // 而不是在列表顶上永远挡着一截
+                bottomContent = {
+                    AnimatedVisibility(
+                        visible = state.searching || state.searchPaused,
+                        enter = expandEnter(),
+                        exit = expandExit(),
+                    ) {
+                        Column {
+                            DeterminateProgressBar(
+                                progress = if (state.sourceCount == 0) 0f else state.doneCount.toFloat() / state.sourceCount,
+                            )
+                            if (state.searchPaused) {
+                                SearchPauseBar(
+                                    // 提前结束要说清楚是「找到了」而不是「卡住了」，还剩多少源没搜
+                                    label = if (state.earlyStopped) "已找到这本书，还有 ${state.pausedRemaining} 个书源没搜"
+                                    else "搜索已暂停",
+                                    onResume = viewModel::resumeSearch,
+                                )
+                            }
+                        }
+                    }
+                    if (showResults) {
+                        // 列表上方一条：左侧数量、右侧当前排序。不塞进标题行 ——
+                        // 那一行已经是搜索框 + 搜索按钮，再加排序图标会挤成一团。
+                        SearchSortBar(
+                            count = state.results.size,
+                            sort = state.sort,
+                            searching = state.searching,
+                            onSelectSort = viewModel::setSort,
+                        )
                     }
                 },
             ) {
@@ -185,86 +228,63 @@ fun SearchScreen(
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
-        // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
-        Column(Modifier.fillMaxSize().padding(padding.exceptBottom()).consumeWindowInsets(padding)) {
-            AnimatedVisibility(
-                visible = state.searching || state.searchPaused,
-                enter = expandEnter(),
-                exit = expandExit(),
-            ) {
-                Column {
-                    DeterminateProgressBar(
-                        progress = if (state.sourceCount == 0) 0f else state.doneCount.toFloat() / state.sourceCount,
-                    )
-                    if (state.searchPaused) {
-                        SearchPauseBar(
-                            // 提前结束要说清楚是「找到了」而不是「卡住了」，还剩多少源没搜
-                            label = if (state.earlyStopped) "已找到这本书，还有 ${state.pausedRemaining} 个书源没搜"
-                            else "搜索已暂停",
-                            onResume = viewModel::resumeSearch,
-                        )
-                    }
-                }
-            }
-            // 历史在两种时候出来：进页还没搜过；搜过之后把输入框清空了 —— 清空就是「换个词」的意思，
-            // 这时候还摆着上一个词的结果（或「没找到」）没有用，从前得退出页面再进来才看得到历史。
-            // 正在搜 / 暂停着的时候不让位：结果还在长，或者等着用户点「继续搜索」。
-            val idle = !state.searching && !state.searchPaused
-            // 「清空了输入框」要单独成立，不能只靠有没有历史：清空后把历史删光，
-            // 否则会落回上一个词的旧结果，顶着一个空搜索框
-            val cleared = idle && state.searchId > 0 && viewModel.query.isBlank()
-            val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
+        Box(Modifier.fillMaxSize().consumeWindowInsets(padding)) {
+            // 列表只让开两侧：顶栏（连同钉在里面的进度/排序条）的高度垫在列表开头，内容滚到玻璃顶栏下面；
+            // 导航栏高度垫在末尾，滚到手势条下面（见 AppScaffold）
+            val listModifier = Modifier.padding(padding.horizontalOnly()).imePadding().pageScroll()
             if (showHistory) {
                 SearchHistoryList(
+                    modifier = listModifier,
+                    topInset = padding.calculateTopPadding(),
                     bottomInset = padding.calculateBottomPadding(),
                     history = state.history,
                     onSearch = viewModel::searchFromHistory,
                     onRemove = viewModel::removeHistory,
                     onClear = { confirmClearHistory = true },
                 )
-            } else if ((state.results.isEmpty() && idle) || cleared) {
+            } else if (showEmpty) {
                 if (state.searchId > 0 && !cleared && state.allFailed) {
                     // 每个源都超时或报错：多半是网络问题，不是书源里没这本。说「没找到」会让人换词白搜
                     ErrorState(
                         title = "书源都没有响应",
                         message = "搜索的书源全部超时或出错，请检查网络后重试",
                         onRetry = viewModel::retrySearch,
+                        modifier = Modifier.padding(padding),
                     )
                 } else if (state.searchId > 0 && !cleared) {
                     // 搜完了一本没有。从前这里落回进页时那句「按已启用的规则搜索」，
                     // 看起来像什么都没发生 —— 用户分不清是没搜、还是搜了没有。
                     EmptyState(
-                        icon = Icons.Default.SearchOff,
+                        icon = MiuixIcons.Search,
                         title = "没有找到相关的书",
                         hint = "换个关键词试试，或到书源管理里检查书源是否已启用、是否还能用",
+                        modifier = Modifier.padding(padding),
                     )
                 } else if (state.historyLoaded) {
                     // 历史还没读到时什么都不画：读到后要么是历史列表、要么才是这块空态，别先闪一下它
                     EmptyState(
-                        icon = Icons.Default.Search,
+                        icon = MiuixIcons.Search,
                         title = "按已启用的规则搜索",
                         hint = "输入书名或作者；未导入规则时无结果",
+                        modifier = Modifier.padding(padding),
                     )
                 }
             } else {
-                // 列表上方一条：左侧数量、右侧当前排序。不塞进顶栏 ——
-                // 顶栏已经是搜索框 + 搜索按钮，再加排序图标会挤成一团。
-                SearchSortBar(
-                    count = state.results.size,
-                    sort = state.sort,
-                    searching = state.searching,
-                    onOpenSort = { showSortPicker = true },
-                )
-                // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来
+                // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来。
+                // 结果拼成一张卡（HyperOS 的灰底白卡），行间不留缝 —— 留了卡就断开
+                val resultCount = state.results.size
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.imePadding(),
-                    contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
-                    verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                    modifier = listModifier,
+                    contentPadding = PaddingValues(
+                        top = padding.calculateTopPadding() + Dimens.gapS,
+                        bottom = padding.calculateBottomPadding(),
+                    ),
+                    overscrollEffect = null,
                 ) {
                     // key 必须与合并键是同一个（SearchHit.key）：拿代表条目的 sourceId|bookUrl 当 key 的话，
                     // 一个书源把同一地址列成两本书就撞 key 崩溃，见 searchKey
-                    items(state.results, key = { it.key }) { hit ->
+                    itemsIndexed(state.results, key = { _, hit -> hit.key }) { index, hit ->
                         // 边搜边重排（源数变了、相关度变了）时让行滑到新位置，而不是一帧之内互换 ——
                         // 手指底下的那行瞬间换成别的书，点开的就不是想点的那本
                         val result = hit.result
@@ -296,11 +316,14 @@ fun SearchScreen(
                                 onOpenPreview(viewModel.rankedResults(hit.results))
                             },
                             // 关了系统动画就传 null（这个 API 的「不动画」写法），同书架
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                            ),
+                            modifier = Modifier
+                                .animateItem(
+                                    fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                    placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                    fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                )
+                                .groupedCardItem(index, resultCount),
+                            colors = ContentListDefaults.plainColors(),
                         )
                     }
                     if (state.loadingMore) {
@@ -326,31 +349,6 @@ fun SearchScreen(
             },
         )
     }
-
-    if (showSortPicker) {
-        OptionPickerSheet(
-            title = "排序方式",
-            options = SearchSort.entries.map {
-                PickerOption(
-                    id = it.name,
-                    label = it.label,
-                    subtitle = when (it) {
-                        SearchSort.RELEVANCE -> "与关键词最相关的排前面"
-                        SearchSort.WORD_COUNT -> "字数多的排前面；无字数的沉底"
-                        SearchSort.TITLE_PINYIN -> "按书名拼音 A→Z"
-                        SearchSort.AUTHOR_PINYIN -> "按作者拼音 A→Z"
-                        SearchSort.UPDATE_TIME -> "能解析出日期的按新到旧；多数源写在分类里"
-                    },
-                )
-            },
-            selectedId = state.sort.name,
-            onSelect = { opt ->
-                showSortPicker = false
-                runCatching { SearchSort.valueOf(opt.id) }.getOrNull()?.let(viewModel::setSort)
-            },
-            onDismiss = { showSortPicker = false },
-        )
-    }
 }
 
 /**
@@ -358,10 +356,14 @@ fun SearchScreen(
  *
  * 用列表行而不是一堆 chip：书名常常很长（「我在末世有套房」后面再带个作者），chip 换行后
  * 参差不齐，单条删除的 ✕ 也没处放；一行一条，删哪条一目了然。
+ * 各条拼成一张卡（与结果列表同一种灰底白卡）。
  */
 @Composable
 private fun SearchHistoryList(
-    /** 垫在列表末尾的导航栏高度，见 exceptBottom */
+    modifier: Modifier,
+    /** 垫在列表开头的顶栏高度：列表从玻璃顶栏下面滚过去，见 AppScaffold */
+    topInset: Dp,
+    /** 垫在列表末尾的导航栏高度，见 AppScaffold */
     bottomInset: Dp,
     history: List<String>,
     onSearch: (String) -> Unit,
@@ -369,31 +371,37 @@ private fun SearchHistoryList(
     onClear: () -> Unit,
 ) {
     val motion = AppTheme.motionScheme
-    // 键盘弹着时历史多半在它底下，同结果列表一样让开
+    // 键盘弹着时历史多半在它底下，同结果列表一样让开（imePadding 在调用方的 modifier 里）
     LazyColumn(
-        modifier = Modifier.imePadding(),
-        contentPadding = ContentListDefaults.listContentPadding(bottom = Dimens.gapL + bottomInset),
-        verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+        modifier = modifier,
+        contentPadding = PaddingValues(top = topInset, bottom = Dimens.gapL + bottomInset),
+        overscrollEffect = null,
     ) {
         item(key = "header") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.padding(horizontal = Dimens.listHorizontal),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 SectionHeader("搜索历史", Modifier.weight(1f), horizontalInset = false)
                 AppTextButton("清空", onClick = onClear)
             }
         }
         // key 加前缀：裸用关键词的话，搜过「header」这个词就跟标题行的 key 撞上，LazyColumn 当场崩溃，
         // 而且历史还在、每次进页都崩
-        items(history, key = { "h:$it" }) { keyword ->
+        itemsIndexed(history, key = { _, it -> "h:$it" }) { index, keyword ->
             ContentListItem(
                 onClick = { onSearch(keyword) },
                 // 删一条时它淡出、下面的挪上来补位；否则那一行是硬消失，看不出删的是哪条
-                modifier = Modifier.animateItem(
-                    fadeInSpec = motion.defaultEffectsSpec(),
-                    placementSpec = motion.defaultSpatialSpec(),
-                    fadeOutSpec = motion.fastEffectsSpec(),
-                ),
+                modifier = Modifier
+                    .animateItem(
+                        fadeInSpec = motion.defaultEffectsSpec(),
+                        placementSpec = motion.defaultSpatialSpec(),
+                        fadeOutSpec = motion.fastEffectsSpec(),
+                    )
+                    .groupedCardItem(index, history.size),
+                colors = ContentListDefaults.plainColors(),
                 leadingContent = {
-                    Icon(Icons.Default.History, contentDescription = null, Modifier.size(Dimens.iconSm))
+                    Icon(MiuixIcons.Recent, contentDescription = null, Modifier.size(Dimens.iconSm))
                 },
                 trailingContent = {
                     AppIconButton(onClick = { onRemove(keyword) }) {
@@ -413,7 +421,7 @@ private fun SearchHistoryList(
 
 /**
  * 搜索结果工具条：左数量、右排序入口。整行高度贴 [Dimens.touchTarget]，
- * 点排序一侧打开底部面板（与书源管理同一套 OptionPicker）。
+ * 点排序一侧就在它下面弹出排序列表（当前方式打勾，每项下面一行说明怎么排）。
  *
  * 可点的是排序那一小块，它自己就得够 48dp 高：从前靠上下各 [Dimens.gapS] 撑，
  * 18dp 图标 / 一行 14sp 的字撑出来只有 36dp 左右，手指按偏一点就落空。
@@ -424,8 +432,9 @@ private fun SearchSortBar(
     count: Int,
     sort: SearchSort,
     searching: Boolean,
-    onOpenSort: () -> Unit,
+    onSelectSort: (SearchSort) -> Unit,
 ) {
+    var sortMenuOpen by rememberSaveable { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -439,27 +448,47 @@ private fun SearchSortBar(
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         Spacer(Modifier.weight(1f))
-        Row(
-            Modifier
-                .clickable(role = Role.Button, onClick = onOpenSort)
-                .heightIn(min = Dimens.touchTarget)
-                .padding(horizontal = Dimens.gapXS),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.Sort,
-                contentDescription = null,
-                Modifier.size(Dimens.iconSm),
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-            Text(
-                sort.label,
-                Modifier.padding(start = Dimens.gapXS),
-                style = MiuixTheme.textStyles.body2,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Box {
+            Row(
+                Modifier
+                    .clickable(role = Role.Button, onClick = { sortMenuOpen = true })
+                    .heightIn(min = Dimens.touchTarget)
+                    .padding(horizontal = Dimens.gapXS),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    MiuixIcons.Sort,
+                    contentDescription = null,
+                    Modifier.size(Dimens.iconSm),
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Text(
+                    sort.label,
+                    Modifier.padding(start = Dimens.gapXS),
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            AppDropdownMenu(
+                expanded = sortMenuOpen,
+                onDismissRequest = { sortMenuOpen = false },
+                items = SearchSort.entries.map {
+                    AppMenuItem(
+                        text = it.label,
+                        summary = when (it) {
+                            SearchSort.RELEVANCE -> "与关键词最相关的排前面"
+                            SearchSort.WORD_COUNT -> "字数多的排前面；无字数的沉底"
+                            SearchSort.TITLE_PINYIN -> "按书名拼音 A→Z"
+                            SearchSort.AUTHOR_PINYIN -> "按作者拼音 A→Z"
+                            SearchSort.UPDATE_TIME -> "能解析出日期的按新到旧；多数源写在分类里"
+                        },
+                        selected = it == sort,
+                        onClick = { onSelectSort(it) },
+                    )
+                },
             )
         }
     }

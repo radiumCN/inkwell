@@ -58,6 +58,38 @@ class AppThemesTest {
     }
 
     @Test
+    fun `HyperOS 预设的正文、小标题与选中色都够 4点5 比 1`() {
+        // Miuix 默认配色原样搬来的槽位里，有带透明度的摘要色（0x99000000 / 0x80FFFFFF）：
+        // 先叠到底色上再算，直接拿 luminance 会把 60% 黑当成纯黑
+        listOf(AppThemes.lightPresets, AppThemes.darkPresets).forEach { presets ->
+            val s = presets.first { it.id == AppThemes.HYPEROS }.scheme
+            for (bg in listOf(s.surface, s.surfaceContainer)) {
+                assertTrue(contrast(over(s.onSurfaceVariantSummary, bg), bg) >= 4.5f, "摘要字对比不足 bg=$bg")
+                assertTrue(contrast(s.onBackgroundVariant, bg) >= 4.5f, "分组小标题对比不足 bg=$bg")
+                assertTrue(contrast(s.onSurface, bg) >= 4.5f, "正文对比不足 bg=$bg")
+            }
+            assertTrue(contrast(s.onTertiaryContainer, s.tertiaryContainer) >= 4.5f, "淡强调底上的强调字对比不足")
+            assertTrue(contrast(s.onPrimary, s.primary) >= 3.0f, "按钮字对比不足")
+        }
+    }
+
+    /** 半透明前景叠到不透明底色上的实际颜色 */
+    private fun over(fg: Color, bg: Color): Color = Color(
+        red = fg.red * fg.alpha + bg.red * (1 - fg.alpha),
+        green = fg.green * fg.alpha + bg.green * (1 - fg.alpha),
+        blue = fg.blue * fg.alpha + bg.blue * (1 - fg.alpha),
+    )
+
+    @Test
+    fun `默认是 HyperOS 配色`() {
+        val (light, _) = AppThemes.resolve(ThemeConfig(mode = ThemeMode.LIGHT), systemDark = false)
+        assertEquals(Color(0xFFF7F7F7), light.surface)
+        assertEquals(Color(0xFF3482FF), light.primary)
+        val (dark, _) = AppThemes.resolve(ThemeConfig(mode = ThemeMode.DARK), systemDark = false)
+        assertEquals(Color.Black, dark.surface)
+    }
+
+    @Test
     fun `提示胶囊上的正文与操作键都读得清`() {
         // AppSnackbar：onSecondaryVariant 底、secondaryVariant 字，操作键是推过的强调色。
         // 浅色主题的强调色本身就是深色，原样放在近黑的胶囊上只有约 1.9:1
@@ -117,7 +149,7 @@ class AppThemesTest {
         assertEquals(Color(0xFF000000), scheme.surface)
 
         val (lightScheme, lightDark) =
-            AppThemes.resolve(config.copy(mode = ThemeMode.LIGHT), systemDark = true)
+            AppThemes.resolve(config.copy(mode = ThemeMode.LIGHT, lightPreset = AppThemes.LIGHT_PAPER), systemDark = true)
         assertEquals(false, lightDark)
         assertEquals(Color(0xFFFFFBEB), lightScheme.surfaceContainer)
     }

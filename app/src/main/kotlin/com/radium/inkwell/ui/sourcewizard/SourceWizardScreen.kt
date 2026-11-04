@@ -34,6 +34,7 @@ import com.radium.inkwell.core.source.detect.SiteAnalyzer
 import com.radium.inkwell.core.source.detect.TocCandidate
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.AppTopBar
@@ -49,11 +50,11 @@ import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.ToolbarTitle
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -103,7 +104,7 @@ private fun FormStep(state: SourceWizardUiState, viewModel: SourceWizardViewMode
     val topBarScroll = rememberAppTopBarScroll()
     // 每一步各记各的滚动位置：从核对页底下点进「高级」，不该落在高级页的半中间
     val scroll = key(state.step) { rememberScrollState() }
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = {
@@ -118,14 +119,18 @@ private fun FormStep(state: SourceWizardUiState, viewModel: SourceWizardViewMode
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
+                // 只让开两侧：顶栏高度垫在滚动内容开头（内容滚到毛玻璃顶栏下面），导航栏高度垫在末尾（见 AppScaffold）
+                .padding(padding.horizontalOnly())
                 // padding 里已含导航栏高度：先标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍
                 .consumeWindowInsets(padding)
                 // 网址、书名、书源名、规则各栏都是输入框：键盘弹起会盖住下面的按钮
                 .imePadding()
-                .verticalScroll(scroll)
-                .padding(top = Dimens.gapS, bottom = Dimens.gapXL + padding.calculateBottomPadding()),
+                .pageScroll()
+                .verticalScroll(scroll, overscrollEffect = null)
+                .padding(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = Dimens.gapXL + padding.calculateBottomPadding(),
+                ),
         ) {
             when (state.step) {
                 WizardStep.Input -> InputStep(state, viewModel)
@@ -152,7 +157,9 @@ private fun WebStep(state: SourceWizardUiState, viewModel: SourceWizardViewModel
         WizardStep.PickToc -> Triple("点一下目录里的一章", WebMode.PickLink, "点目录里任意一章的章节名。点了不会跳转，只是告诉向导目录在哪。")
         else -> Triple("点一下正文", WebMode.PickText, "点正文里的任意一段文字。点了不会跳转，只是告诉向导正文在哪。")
     }
-    Scaffold(
+    // 整页是 WebView：它不在 Compose 里画，录不进毛玻璃取样的图层，顶栏保持实色
+    AppScaffold(
+        blurBars = false,
         topBar = {
             AppToolbar(navigationIcon = { BackButton(onClick = goBack) }) {
                 ToolbarTitle(title)

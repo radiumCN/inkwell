@@ -32,12 +32,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,9 +42,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -96,7 +89,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -110,7 +102,15 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.ListView
+import top.yukonga.miuix.kmp.icon.extended.Pause
+import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.Replace
+import top.yukonga.miuix.kmp.icon.extended.Tune
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -133,6 +133,8 @@ fun ReaderMenu(
     onDismiss: () -> Unit,
     onSwipePage: (FlipDirection) -> Unit,
     onReaderSheetOpen: (Boolean) -> Unit,
+    /** 录着翻页区的图层（见 ReaderScreen）：菜单的几条栏对它取样做毛玻璃。null 时退回实色栏 */
+    pageBackdrop: LayerBackdrop? = null,
 ) {
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -153,11 +155,15 @@ fun ReaderMenu(
     // - 从前顶栏、底栏与纸同色，只隔一根发丝线，看着像页面上下多了两行字，而不是盖上来的一层。
     // - 也别回到投影 / 压暗：同色纸上 4~8dp 的投影就是一道脏灰线；压暗正文会把米色纸压成灰绿，
     //   在顶栏底边裂出一道生硬的分界（两条都实测过）。纸书里书签和纸页之间也没有阴影。
-    // 顶栏是比纸深（深色纸上是浅）一档的实色条，朝正文那一侧是大圆角；底部是两块同色的悬浮圆角条
+    // 顶栏是比纸深（深色纸上是浅）一档的条，朝正文那一侧是大圆角；底部是两块同色的悬浮圆角条
     // （进度、操作），四周露出纸色。圆角的边、露出来的那圈纸，就是「盖在纸上」的全部表达。
-    // 浮层底色与点「设置」弹出的面板同一个（见 readerOverlayColor）。
+    // 三条栏都是 HyperOS 的毛玻璃（readerGlass）：对正文取样模糊、再叠八成的浮层色 —— 底下的字隐约透出来，
+    // 色阶仍是那一档，上面这两条结论不变。浮层底色与点「设置」弹出的面板同一个（见 readerOverlayColor）。
     val scheme = MiuixTheme.colorScheme
     val barColor = readerOverlayColor()
+    // 毛玻璃时栏自己不铺底（底由 readerGlass 画），否则实色把模糊整个盖住
+    val barFill = if (pageBackdrop != null) Color.Transparent else barColor
+    val topBarShape = AppShapes.extraLarge.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize)
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
 
     // 菜单从前是硬出硬消（直接 if (visible) 组合/移除）。现在顶栏从上滑入、底栏从下滑入、
@@ -172,7 +178,7 @@ fun ReaderMenu(
         val slopPx = with(density) { FLIP_SLOP_DP.dp.toPx() }
         Box(Modifier.fillMaxSize()) {
             // 底层：整块纸面，**透明**。点一下关菜单；按当前翻页方向滑一下 = 关并翻一页。
-            // 顶栏和底部面板都是 Surface，落在它们身上的触摸被它们吃掉，不会漏到这一层。
+            // 顶栏和底部面板挂了 blockTouchesBelow，落在它们身上的触摸到此为止，不会漏到这一层。
             // 无涟漪：这是块半屏的空白。目录/设置/换源开着时不拦截，否则跟面板里的列表抢手势。
             // visible 已是 false 时也不挂 —— 退场动画还在播若仍吃手势，关完会短暂翻不了页。
             Box(
@@ -193,10 +199,13 @@ fun ReaderMenu(
                 // 顶栏从上滑入，底部从下滑入 —— 用 animateEnterExit 而不是再套一层
                 // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
                 Surface(
-                    color = barColor,
+                    color = barFill,
                     contentColor = scheme.onSurface,
-                    shape = AppShapes.extraLarge.copy(topStart = ZeroCornerSize, topEnd = ZeroCornerSize),
-                    modifier = Modifier.animateEnterExit(topBarEnter(), topBarExit()),
+                    shape = topBarShape,
+                    modifier = Modifier
+                        .animateEnterExit(topBarEnter(), topBarExit())
+                        .readerGlass(pageBackdrop, topBarShape, barColor)
+                        .blockTouchesBelow(),
                 ) {
                     Row(
                         Modifier
@@ -245,8 +254,11 @@ fun ReaderMenu(
                 ) {
                     Surface(
                         shape = AppShapes.extraLarge,
-                        color = barColor,
+                        color = barFill,
                         contentColor = scheme.onSurface,
+                        modifier = Modifier
+                            .readerGlass(pageBackdrop, AppShapes.extraLarge, barColor)
+                            .blockTouchesBelow(),
                     ) {
                         ChapterProgress(
                             pageUi = pageUi,
@@ -258,8 +270,11 @@ fun ReaderMenu(
                     }
                     Surface(
                         shape = AppShapes.extraLarge,
-                        color = barColor,
+                        color = barFill,
                         contentColor = scheme.onSurface,
+                        modifier = Modifier
+                            .readerGlass(pageBackdrop, AppShapes.extraLarge, barColor)
+                            .blockTouchesBelow(),
                     ) {
                         MenuActions(
                             session = session,
@@ -431,27 +446,27 @@ private fun MenuActions(
 ) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         BarAction(
-            icon = Icons.AutoMirrored.Filled.List,
+            icon = MiuixIcons.ListView,
             label = "目录",
             onClick = onShowToc,
             modifier = Modifier.weight(1f),
         )
         BarAction(
-            icon = Icons.Default.SwapHoriz,
+            icon = MiuixIcons.Replace,
             label = "换源",
             onClick = onSearchSources,
             enabled = session.isNetBook,
             modifier = Modifier.weight(1f),
         )
         BarAction(
-            icon = if (overlay.autoFlipping) Icons.Default.Pause else Icons.Default.PlayArrow,
+            icon = if (overlay.autoFlipping) MiuixIcons.Pause else MiuixIcons.Play,
             label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
             onClick = onToggleAutoFlip,
             enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
             modifier = Modifier.weight(1f),
         )
         BarAction(
-            icon = Icons.Default.Tune,
+            icon = MiuixIcons.Tune,
             label = "设置",
             onClick = onShowSettings,
             modifier = Modifier.weight(1f),
@@ -462,8 +477,8 @@ private fun MenuActions(
 /**
  * 操作条上的一个动作：图标在上、字在下。走 [AppTextButton]（按下有 Miuix 的压暗反馈，禁用时自动压到 38%）。
  *
- * 图标仍是 Material 的：四个里「换源」在 Miuix 图标集里没有对应的，混用两套线宽在同一排里一眼就看得出，
- * 宁可整排一致。
+ * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、自动翻页 Play/Pause、设置 Tune）：
+ * 同一排里混两套线宽一眼就看得出，所以要换就整排一起换。
  */
 @Composable
 private fun BarAction(
@@ -533,9 +548,13 @@ private fun TocList(
             val bottomInset = sheetBottomInset()
             LazyColumn(
                 state = listState,
-                modifier = Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
+                modifier = Modifier
+                    .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
+                    // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
+                    .pageScroll(),
                 contentPadding = ContentListDefaults.listContentPadding(bottom = bottomInset),
                 verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                overscrollEffect = null,
             ) {
                 items(filtered, key = { it.index }) { item ->
                     ChapterListItem(
@@ -685,7 +704,8 @@ private fun TypographyPanel(
                 .fillMaxWidth()
                 // 导航栏高度加进定高、也垫在滚动内容末尾：面板铺到屏幕底、设置项滚到手势条下面，看得见的高度不变
                 .height(contentHeight + sheetBottomInset())
-                .verticalScroll(scroll)
+                .pageScroll()
+                .verticalScroll(scroll, overscrollEffect = null)
                 .padding(horizontal = Dimens.screenPadding)
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXXL + sheetBottomInset()),
         ) { current ->
@@ -893,7 +913,7 @@ private fun BrightnessControl(
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(
-            Icons.Default.DarkMode, contentDescription = null,
+            Icons.Outlined.DarkMode, contentDescription = null,
             Modifier.size(Dimens.iconSm), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         AppSlider(
@@ -907,7 +927,7 @@ private fun BrightnessControl(
             modifier = Modifier.weight(1f).padding(horizontal = Dimens.gapS),
         )
         Icon(
-            Icons.Default.LightMode, contentDescription = null,
+            Icons.Outlined.LightMode, contentDescription = null,
             Modifier.size(Dimens.iconSm), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         AppFilterChip(
@@ -1335,7 +1355,7 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
             // 光看纸色选不出好不好读
             if (selected) {
                 Icon(
-                    Icons.Default.Check,
+                    MiuixIcons.Basic.Check,
                     contentDescription = null,
                     Modifier.size(Dimens.iconSm),
                     tint = Color(theme.textColor),

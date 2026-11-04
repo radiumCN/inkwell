@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.preview
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -15,6 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
@@ -43,9 +47,6 @@ import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.SecondaryButton
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -59,7 +60,6 @@ fun BookPreviewScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    var sourcePickerOpen by remember { mutableStateOf(false) }
 
     // 走共享的 CollectMessages：新提示直接替换正在显示的那条。从前这里自己 collect + showSnackbar，
     // showSnackbar 挂到上一条消失才返回 —— 连点「加入」「开始阅读」时提示一条条排队，几秒后才轮到
@@ -69,7 +69,7 @@ fun BookPreviewScreen(
     }
 
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         topBar = { AppTopBar("书籍详情", topBarScroll, onBack = onBack) },
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -80,36 +80,44 @@ fun BookPreviewScreen(
                 LoadingState(label = state.loadingLabel)
                 // 卡在某个源上时别只能干等：有别的书源就给出换源，不必等超时
                 if (state.sources.size > 1) {
-                    AppTextButton(
-                        onClick = { sourcePickerOpen = true },
+                    SwitchSourceButton(
+                        state = state,
+                        onSwitch = viewModel::switchSource,
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(Dimens.gapXL),
-                    ) {
-                        Text(
-                            "换个书源试试（共 ${state.sources.size} 个）",
-                            style = MiuixTheme.textStyles.body2,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
+                    )
                 }
             }
 
             // 从前这里手搓了一份错误屏（还漏掉了图标）；收敛到共享 ErrorState。
             // 一个源挂了不该让人卡死 —— 有别的书源就给出「换个书源」的出口。
-            state.error != null -> ErrorState(
-                message = state.error.orEmpty(),
-                modifier = Modifier.padding(padding),
-                onRetry = viewModel::load,
-                secondaryLabel = "换个书源试试（共 ${state.sources.size} 个）"
-                    .takeIf { state.sources.size > 1 },
-                onSecondary = if (state.sources.size > 1) ({ sourcePickerOpen = true }) else null,
-            )
+            // 换源入口与加载态同一个位置（页底居中）：书源列表要从按钮上弹出来，
+            // ErrorState 里的次按钮拿不到锚点
+            state.error != null -> Box(Modifier.fillMaxSize().padding(padding)) {
+                ErrorState(
+                    message = state.error.orEmpty(),
+                    onRetry = viewModel::load,
+                )
+                if (state.sources.size > 1) {
+                    SwitchSourceButton(
+                        state = state,
+                        onSwitch = viewModel::switchSource,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(Dimens.gapXL),
+                    )
+                }
+            }
 
-            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            // 只让开两侧：顶栏高度垫在列表开头、导航栏垫在末尾，内容滚到玻璃顶栏与手势条下面（见 AppScaffold）
             else -> LazyColumn(
-                Modifier.fillMaxSize().padding(padding.exceptBottom()),
-                contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
+                Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding(),
+                ),
+                overscrollEffect = null,
             ) {
                 // 加载中也画头部：搜索结果里的书名、封面、简介早就在 state 里了（见 BookPreviewViewModel），
                 // 从前只给一个转圈 —— 卡在慢源上最多要等三个源各 15 秒，人连点的是哪本都看不见。
@@ -117,7 +125,6 @@ fun BookPreviewScreen(
                 item {
                     Header(
                         state, viewModel,
-                        onOpenSourcePicker = { sourcePickerOpen = true },
                         loading = state.loading,
                     )
                 }
@@ -161,22 +168,45 @@ fun BookPreviewScreen(
         }
     }
 
-    // 换源：详情页从前一处是裸 DropdownMenu（选中态靠手拼 "✓ "），
-    // 另一处是加载失败时一排纵向 TextButton。两处收敛到同一个面板。
-    if (sourcePickerOpen) {
-        OptionPickerSheet(
-            title = "换源",
-            // 书源名称当主标题，网址退到副标题 —— 从前列表里只有一串域名
-            options = state.sources.map { PickerOption(id = it.id, label = it.name, subtitle = it.id) },
-            selectedId = state.sources.getOrNull(state.currentSource)?.id,
-            onSelect = { opt ->
-                sourcePickerOpen = false
-                state.sources.indexOfFirst { it.id == opt.id }
-                    .takeIf { it >= 0 }
-                    ?.let { viewModel.switchSource(it) }
-            },
-            onDismiss = { sourcePickerOpen = false },
-        )
+}
+
+/**
+ * 换源的书源列表，从触发它的按钮上弹出来（当前书源打勾）。书源名称当主标题，网址退到第二行 ——
+ * 从前列表里只有一串域名。详情页从前一处是裸 DropdownMenu（选中态靠手拼 "✓ "），
+ * 另一处是加载失败时一排纵向 TextButton，后来收敛成底部面板，现在是锚在按钮上的弹出列表。
+ */
+@Composable
+private fun SourceMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    state: BookPreviewUiState,
+    onSwitch: (Int) -> Unit,
+) {
+    AppDropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        items = state.sources.mapIndexed { index, source ->
+            AppMenuItem(
+                text = source.name,
+                summary = source.id,
+                selected = index == state.currentSource,
+                onClick = { onSwitch(index) },
+            )
+        },
+    )
+}
+
+/** 加载卡住 / 加载失败时页底那个「换个书源试试」，书源列表从它上面弹出来 */
+@Composable
+private fun SwitchSourceButton(
+    state: BookPreviewUiState,
+    onSwitch: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        AppTextButton("换个书源试试（共 ${state.sources.size} 个）", onClick = { open = true })
+        SourceMenu(expanded = open, onDismiss = { open = false }, state = state, onSwitch = onSwitch)
     }
 }
 
@@ -184,7 +214,6 @@ fun BookPreviewScreen(
 private fun Header(
     state: BookPreviewUiState,
     viewModel: BookPreviewViewModel,
-    onOpenSourcePicker: () -> Unit,
     /** 详情与目录还在取：书名等先按搜索结果画，按钮先置灰（没目录可读、可加） */
     loading: Boolean = false,
 ) {
@@ -226,11 +255,20 @@ private fun Header(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 if (state.sources.size > 1) {
-                    AppTextButton(onClick = onOpenSourcePicker, contentPadding = PaddingValues(0.dp)) {
-                        Text(
-                            "换源（${state.sources.size} 个书源）",
-                            style = MiuixTheme.textStyles.footnote1,
-                            fontWeight = FontWeight.Medium,
+                    var sourceMenuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        AppTextButton(onClick = { sourceMenuOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                            Text(
+                                "换源（${state.sources.size} 个书源）",
+                                style = MiuixTheme.textStyles.footnote1,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                        SourceMenu(
+                            expanded = sourceMenuOpen,
+                            onDismiss = { sourceMenuOpen = false },
+                            state = state,
+                            onSwitch = viewModel::switchSource,
                         )
                     }
                 }

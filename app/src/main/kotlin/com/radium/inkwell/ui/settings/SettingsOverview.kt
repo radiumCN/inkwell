@@ -8,13 +8,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.data.prefs.WebDavConfig
@@ -80,7 +85,7 @@ internal fun SettingsOverviewCard(
                     Text(it, style = MiuixTheme.textStyles.body2, color = content)
                 }
             }
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = content)
+            OverviewChevron(tint = content)
         }
 
         HorizontalDivider(
@@ -100,9 +105,9 @@ internal fun SettingsOverviewCard(
         ) {
             Icon(
                 when {
-                    !configured -> Icons.Default.CloudOff
-                    failed -> Icons.Default.ErrorOutline
-                    else -> Icons.Default.CloudDone
+                    !configured -> Icons.Outlined.CloudOff
+                    failed -> Icons.Outlined.ErrorOutline
+                    else -> Icons.Outlined.CloudDone
                 },
                 contentDescription = null,
                 tint = content,
@@ -131,10 +136,25 @@ internal fun SettingsOverviewCard(
                     loading = syncing,
                 )
             } else {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = content)
+                OverviewChevron(tint = content)
             }
         }
     }
+}
+
+/**
+ * 概览卡两行行尾的 ›：Miuix 设置行同一个细箭头（ArrowPreference 用的那张图），只是染成卡上的字色。
+ * 纯装饰（整行可点、行文字就是名字），RTL 下镜像。
+ */
+@Composable
+private fun OverviewChevron(tint: Color) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    Icon(
+        MiuixIcons.Basic.ArrowRight,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.graphicsLayer { scaleX = if (rtl) -1f else 1f },
+    )
 }
 
 private fun readingTitle(s: ReadingSummary?): String = when {

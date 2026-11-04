@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.reader
 
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
 import android.content.ClipData
 import android.view.WindowManager
@@ -100,6 +102,12 @@ private const val AUTO_CHANGED_HINT_MS = 8_000L
 
 /** 纸面上一次性提示的停留时长 */
 private const val READER_TOAST_MS = 1_800L
+
+/**
+ * 毛玻璃收起后，翻页区再录这么久才停：菜单 / 工具条的退场动画还在播，停早了栏会在半路变成全透明。
+ * 退场走 fast* 档的 spring，几百毫秒内就落定，这里留足余量。
+ */
+private const val PAGE_GLASS_LINGER_MS = 600L
 
 @Composable
 fun ReaderScreen(
@@ -269,6 +277,24 @@ fun ReaderScreen(
     ImmersiveEffect(activity, immersive = !overlay.menuVisible)
 
     val paper = remember(session.settings.theme.background) { Color(session.settings.theme.background) }
+    val pageBackdrop = rememberLayerBackdrop {
+        drawRect(paper)
+        drawContent()
+    }
+    // 录图层要把整页再画一遍：滚动模式下每一帧都是一整页字。所以只在有毛玻璃露着时录（菜单、选字工具条），
+    // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
+    // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明
+    val needsGlass = overlay.menuVisible || selection != null
+    var glassLingering by remember { mutableStateOf(false) }
+    LaunchedEffect(needsGlass) {
+        if (needsGlass) {
+            glassLingering = true
+        } else {
+            delay(PAGE_GLASS_LINGER_MS)
+            glassLingering = false
+        }
+    }
+    val recordPage = needsGlass || glassLingering
     Box(
         Modifier
             .fillMaxSize()
@@ -307,199 +333,205 @@ fun ReaderScreen(
             splashVisible = false
         }
 
-        when {
-            // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
-            // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
-            overlay.autoChanging -> Column(
-                Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                AppLoadingIndicator(color = Color(session.settings.theme.textColor))
-                Spacer(Modifier.height(Dimens.gapXL))
-                Text(
-                    "正在自动换源…",
-                    color = Color(session.settings.theme.textColor),
-                    style = MiuixTheme.textStyles.body1,
-                    textAlign = TextAlign.Center,
-                )
-                if (overlay.autoChangeTotal > 0) {
-                    Spacer(Modifier.height(Dimens.gapS))
-                    Text(
-                        "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个书源",
-                        color = Color(session.settings.theme.footerColor),
-                        style = MiuixTheme.textStyles.footnote1,
-                    )
-                }
-            }
-
-            // 包在 ReaderThemeScope 里：重试/换源按钮跟着**纸张主题**走，
-            // 不再是米色纸面上浮着两颗 App 主题色的按钮（阅读主题与 App 主题常不一致）。
-            pageUi.error != null -> ReaderThemeScope(session.settings.theme) {
-                Column(
+        // 翻页区（含页眉页脚）录进 pageBackdrop：阅读菜单与选字工具条对它取样做毛玻璃（readerGlass），只在 recordPage 时录。
+        // 页面全是 Compose 自己画的（PageCanvas、仿真页的位图也画在 Compose 画布上），图层录得下来；
+        // 菜单和各种浮层都在这一层**外面**，不会自己糊自己。录下来的那份不带纸色（纸色是外层 Box 画的），
+        // 透明处先垫一层纸，否则模糊时边缘会渗进黑色。
+        Box(Modifier.fillMaxSize().then(if (recordPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)) {
+            when {
+                // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
+                // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
+                overlay.autoChanging -> Column(
                     Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    AppLoadingIndicator(color = Color(session.settings.theme.textColor))
+                    Spacer(Modifier.height(Dimens.gapXL))
                     Text(
-                        pageUi.error!!,
+                        "正在自动换源…",
                         color = Color(session.settings.theme.textColor),
                         style = MiuixTheme.textStyles.body1,
                         textAlign = TextAlign.Center,
                     )
-                    Spacer(Modifier.height(Dimens.gapXL))
-                    // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
-                    // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
-                    Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                        SecondaryButton(text = "重试", onClick = { viewModel.retry() })
-                        if (session.isNetBook) {
-                            PrimaryButton(
-                                text = "换源",
-                                onClick = { viewModel.searchOtherSources() },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(Dimens.gapS))
-                    AppTextButton(
-                        text = "返回书架",
-                        onClick = requestExit,
-                        contentColor = Color(session.settings.theme.footerColor),
-                    )
-                }
-            }
-            // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
-            // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
-            // 主题走，不然浅色书封压在深色纸上会打架。
-            pageUi.loading || layout == null -> ReaderThemeScope(session.settings.theme) {
-                // 首屏之后的再加载（跳章、失败重试、换源重载）：splash 的一次性协程早已收场、
-                // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
-                // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
-                // 转圈同样先让开 READER_SPLASH_DELAY_MS：本地书、已缓存的章节几十毫秒就排好，
-                // 从前跨章时邻章没排完就会一闪转圈；等不到那么久的加载，纸面干干净净地过去。
-                if (firstContentShown) {
-                    var spinnerDue by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) {
-                        delay(Motion.READER_SPLASH_DELAY_MS)
-                        spinnerDue = true
-                    }
-                    if (spinnerDue) {
-                        AppLoadingIndicator(
-                            modifier = Modifier.align(Alignment.Center),
-                            color = Color(session.settings.theme.textColor),
+                    if (overlay.autoChangeTotal > 0) {
+                        Spacer(Modifier.height(Dimens.gapS))
+                        Text(
+                            "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个书源",
+                            color = Color(session.settings.theme.footerColor),
+                            style = MiuixTheme.textStyles.footnote1,
                         )
                     }
-                } else AnimatedVisibility(
-                    visible = splashVisible,
-                    modifier = Modifier.align(Alignment.Center),
-                    enter = scrimEnter(),
-                    exit = scrimExit(),
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 自然尺寸居中，**不铺满** —— 书封是 3:4 缩略图，撑到全屏必糊
-                        // （0.1.6-beta.3~6 那条失败路线就栽在这）。
-                        BookCover(
-                            title = session.bookTitle,
-                            coverModel = session.coverPath,
-                            modifier = Modifier.size(
-                                Dimens.readerSplashCoverWidth,
-                                Dimens.readerSplashCoverHeight,
-                            ),
-                            placeholderChars = 14,
+                }
+
+                // 包在 ReaderThemeScope 里：重试/换源按钮跟着**纸张主题**走，
+                // 不再是米色纸面上浮着两颗 App 主题色的按钮（阅读主题与 App 主题常不一致）。
+                pageUi.error != null -> ReaderThemeScope(session.settings.theme) {
+                    Column(
+                        Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            pageUi.error!!,
+                            color = Color(session.settings.theme.textColor),
+                            style = MiuixTheme.textStyles.body1,
+                            textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(Dimens.gapXL))
-                        // 封面只交代"在开哪本书"，还得有个东西说明"仍在工作中"，
-                        // 否则慢网络下一张静止的封面像卡死了
-                        AppLoadingIndicator(color = Color(session.settings.theme.textColor))
+                        // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
+                        // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
+                        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                            SecondaryButton(text = "重试", onClick = { viewModel.retry() })
+                            if (session.isNetBook) {
+                                PrimaryButton(
+                                    text = "换源",
+                                    onClick = { viewModel.searchOtherSources() },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(Dimens.gapS))
+                        AppTextButton(
+                            text = "返回书架",
+                            onClick = requestExit,
+                            contentColor = Color(session.settings.theme.footerColor),
+                        )
                     }
                 }
-            }
-            // 滚动：与仿真同一套分页。越过页高就 flip，标题跟当前页走。
-            session.settings.flipAnimation == FlipAnimation.SCROLL -> {
-                Box(Modifier.fillMaxSize()) {
-                    ScrollPageReader(
-                        current = pageUi.page,
-                        prev = pageUi.prevPage,
-                        next = pageUi.nextPage,
-                        layout = layout,
-                        theme = session.settings.theme,
-                        hasPrev = pageUi.hasPrev,
-                        hasNext = pageUi.hasNext,
-                        gesturesEnabled = !overlay.menuVisible &&
-                            !overlay.readerSheetOpen &&
-                            overlay.sourceCandidates == null,
-                        clickToFlip = session.settings.scrollClickToFlip,
-                        tapZones = session.settings.tapZones,
-                        onFlip = { viewModel.flip(it) },
-                        onCenterTap = { viewModel.toggleMenu() },
-                    )
-                    PageInfoBar(pageUi, session, layout)
-                }
-            }
-
-            else -> {
-                val page = pageUi.page
-                val pageLatest = rememberUpdatedState(page)
-                val layoutLatest = rememberUpdatedState(layout)
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        // 长按选字。放在**父节点**上而不是覆盖一层同级的 Box：
-                        // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
-                        // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
-                        // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
-                        .pointerInput(session.textSelectionEnabled) {
-                            if (!session.textSelectionEnabled) return@pointerInput
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { pos ->
-                                    val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
-                                    val sel = p.selectWordAt(pos.x, pos.y, layoutLatest.value)
-                                    if (sel != null && !sel.isEmpty) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        anchor = sel
-                                        selection = sel
-                                    }
-                                },
-                                onDrag = { change, _ ->
-                                    val a = anchor ?: return@detectDragGesturesAfterLongPress
-                                    val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
-                                    change.consume()
-                                    selection = p.extendSelection(
-                                        a, change.position.x, change.position.y, layoutLatest.value,
-                                    )
-                                },
+                // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
+                // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
+                // 主题走，不然浅色书封压在深色纸上会打架。
+                pageUi.loading || layout == null -> ReaderThemeScope(session.settings.theme) {
+                    // 首屏之后的再加载（跳章、失败重试、换源重载）：splash 的一次性协程早已收场、
+                    // splashVisible 恒为 false，这里必须回到无条件转圈 —— 否则慢源下是长达
+                    // CONTENT_TIMEOUT_MS 的纯白纸，用户只会当它卡死。splash 只属于「这本书正在打开」。
+                    // 转圈同样先让开 READER_SPLASH_DELAY_MS：本地书、已缓存的章节几十毫秒就排好，
+                    // 从前跨章时邻章没排完就会一闪转圈；等不到那么久的加载，纸面干干净净地过去。
+                    if (firstContentShown) {
+                        var spinnerDue by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            delay(Motion.READER_SPLASH_DELAY_MS)
+                            spinnerDue = true
+                        }
+                        if (spinnerDue) {
+                            AppLoadingIndicator(
+                                modifier = Modifier.align(Alignment.Center),
+                                color = Color(session.settings.theme.textColor),
                             )
                         }
-                        // 选中状态下点空白处取消。翻页手势此时已关掉，不会有人抢这个 tap
-                        .pointerInput(selection != null) {
-                            if (selection == null) return@pointerInput
-                            detectTapGestures { selection = null; anchor = null }
+                    } else AnimatedVisibility(
+                        visible = splashVisible,
+                        modifier = Modifier.align(Alignment.Center),
+                        enter = scrimEnter(),
+                        exit = scrimExit(),
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // 自然尺寸居中，**不铺满** —— 书封是 3:4 缩略图，撑到全屏必糊
+                            // （0.1.6-beta.3~6 那条失败路线就栽在这）。
+                            BookCover(
+                                title = session.bookTitle,
+                                coverModel = session.coverPath,
+                                modifier = Modifier.size(
+                                    Dimens.readerSplashCoverWidth,
+                                    Dimens.readerSplashCoverHeight,
+                                ),
+                                placeholderChars = 14,
+                            )
+                            Spacer(Modifier.height(Dimens.gapXL))
+                            // 封面只交代"在开哪本书"，还得有个东西说明"仍在工作中"，
+                            // 否则慢网络下一张静止的封面像卡死了
+                            AppLoadingIndicator(color = Color(session.settings.theme.textColor))
                         }
-                ) {
-                    PageFlipContainer(
-                        current = pageUi.page,
-                        prev = pageUi.prevPage,
-                        next = pageUi.nextPage,
-                        layout = layout,
-                        theme = session.settings.theme,
-                        animation = session.settings.flipAnimation,
-                        animationsEnabled = animationsEnabled(),
-                        hapticOnFlip = session.settings.flipHaptic,
-                        // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
-                        // 菜单、目录/设置 sheet、换源面板任一个开着都停手势。
-                        // sheet 关掉后 pointerInput 因 key 变化重建，避免 ModalBottomSheet
-                        // 把 down 留下、此后拖拽翻页全没反应。
-                        gesturesEnabled = !overlay.menuVisible &&
-                            !overlay.readerSheetOpen &&
-                            overlay.sourceCandidates == null &&
-                            selection == null,
-                        canFlip = { dir ->
-                            if (dir == FlipDirection.FORWARD) pageUi.hasNext else pageUi.hasPrev
-                        },
-                        onCommit = { viewModel.flip(it) },
-                        onCenterTap = { viewModel.toggleMenu() },
-                        controller = flipController,
-                        tapZones = session.settings.tapZones,
-                        selection = selection,
-                    )
-                    PageInfoBar(pageUi, session, layout)
+                    }
+                }
+                // 滚动：与仿真同一套分页。越过页高就 flip，标题跟当前页走。
+                session.settings.flipAnimation == FlipAnimation.SCROLL -> {
+                    Box(Modifier.fillMaxSize()) {
+                        ScrollPageReader(
+                            current = pageUi.page,
+                            prev = pageUi.prevPage,
+                            next = pageUi.nextPage,
+                            layout = layout,
+                            theme = session.settings.theme,
+                            hasPrev = pageUi.hasPrev,
+                            hasNext = pageUi.hasNext,
+                            gesturesEnabled = !overlay.menuVisible &&
+                                !overlay.readerSheetOpen &&
+                                overlay.sourceCandidates == null,
+                            clickToFlip = session.settings.scrollClickToFlip,
+                            tapZones = session.settings.tapZones,
+                            onFlip = { viewModel.flip(it) },
+                            onCenterTap = { viewModel.toggleMenu() },
+                        )
+                        PageInfoBar(pageUi, session, layout)
+                    }
+                }
+
+                else -> {
+                    val page = pageUi.page
+                    val pageLatest = rememberUpdatedState(page)
+                    val layoutLatest = rememberUpdatedState(layout)
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            // 长按选字。放在**父节点**上而不是覆盖一层同级的 Box：
+                            // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
+                            // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
+                            // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
+                            .pointerInput(session.textSelectionEnabled) {
+                                if (!session.textSelectionEnabled) return@pointerInput
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { pos ->
+                                        val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
+                                        val sel = p.selectWordAt(pos.x, pos.y, layoutLatest.value)
+                                        if (sel != null && !sel.isEmpty) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            anchor = sel
+                                            selection = sel
+                                        }
+                                    },
+                                    onDrag = { change, _ ->
+                                        val a = anchor ?: return@detectDragGesturesAfterLongPress
+                                        val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
+                                        change.consume()
+                                        selection = p.extendSelection(
+                                            a, change.position.x, change.position.y, layoutLatest.value,
+                                        )
+                                    },
+                                )
+                            }
+                            // 选中状态下点空白处取消。翻页手势此时已关掉，不会有人抢这个 tap
+                            .pointerInput(selection != null) {
+                                if (selection == null) return@pointerInput
+                                detectTapGestures { selection = null; anchor = null }
+                            }
+                    ) {
+                        PageFlipContainer(
+                            current = pageUi.page,
+                            prev = pageUi.prevPage,
+                            next = pageUi.nextPage,
+                            layout = layout,
+                            theme = session.settings.theme,
+                            animation = session.settings.flipAnimation,
+                            animationsEnabled = animationsEnabled(),
+                            hapticOnFlip = session.settings.flipHaptic,
+                            // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
+                            // 菜单、目录/设置 sheet、换源面板任一个开着都停手势。
+                            // sheet 关掉后 pointerInput 因 key 变化重建，避免 ModalBottomSheet
+                            // 把 down 留下、此后拖拽翻页全没反应。
+                            gesturesEnabled = !overlay.menuVisible &&
+                                !overlay.readerSheetOpen &&
+                                overlay.sourceCandidates == null &&
+                                selection == null,
+                            canFlip = { dir ->
+                                if (dir == FlipDirection.FORWARD) pageUi.hasNext else pageUi.hasPrev
+                            },
+                            onCommit = { viewModel.flip(it) },
+                            onCenterTap = { viewModel.toggleMenu() },
+                            controller = flipController,
+                            tapZones = session.settings.tapZones,
+                            selection = selection,
+                        )
+                        PageInfoBar(pageUi, session, layout)
+                    }
                 }
             }
         }
@@ -608,6 +640,7 @@ fun ReaderScreen(
                 },
                 onDismiss = { selection = null; anchor = null },
                 modifier = Modifier.align(Alignment.BottomCenter),
+                pageBackdrop = pageBackdrop,
             )
         }
 
@@ -677,6 +710,7 @@ fun ReaderScreen(
                 }
             },
             onReaderSheetOpen = { viewModel.setReaderSheetOpen(it) },
+            pageBackdrop = pageBackdrop,
         )
 
         }

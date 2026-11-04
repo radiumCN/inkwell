@@ -17,14 +17,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material.icons.filled.Source
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -50,6 +46,7 @@ import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSlider
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTextButton
@@ -64,27 +61,29 @@ import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.ToolbarTitle
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.settingsPageColor
-import com.radium.inkwell.ui.components.settingsStackListColors
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Sort
+import top.yukonga.miuix.kmp.icon.extended.Tasks
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -112,7 +111,6 @@ fun SourceManageScreen(
 
     var showCheckOptions by remember { mutableStateOf(false) }
     var showSortPicker by remember { mutableStateOf(false) }
-    var showGroupPicker by remember { mutableStateOf(false) }
     var showGroupAssign by remember { mutableStateOf(false) }
     var groupInput by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -148,7 +146,29 @@ fun SourceManageScreen(
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
     val pageColor = settingsPageColor()
-    Scaffold(
+    // 有书源时列表上面压着的那一截（搜索、筛选、导入 / 校验进度、失效汇总）。放进顶栏的 bottomContent，
+    // 而不是内容区顶上：列表才能从它下面滚过去、和顶栏一起被毛玻璃盖住。两条顶栏都带上它，进出多选高度不变
+    val showList = sourcesLoaded && sources.isNotEmpty()
+    val listHeader: @Composable () -> Unit = {
+        if (showList) {
+            SourceListHeader(
+                query = query,
+                onQueryChange = viewModel::setQuery,
+                filter = filter,
+                onFilterChange = viewModel::setFilter,
+                groups = groups,
+                groupFilter = groupFilter,
+                onGroupFilterChange = viewModel::setGroupFilter,
+                importing = importing,
+                checkProgress = checkProgress,
+                onCancelCheck = viewModel::cancelCheck,
+                failedCount = failedCount,
+                onDisableInvalid = viewModel::disableInvalid,
+                onDeleteInvalid = { confirmDeleteInvalid = true },
+            )
+        }
+    }
+    AppScaffold(
         // 两条都用窄栏（AppToolbar），不换 AppTopBar 的大标题折叠栏：这页有多选态，
         // 上下文操作栏与常规栏来回切，两者高度不同就会让进出多选像跳了一下
         containerColor = pageColor,
@@ -171,8 +191,9 @@ fun SourceManageScreen(
                         // 同普通状态：先挑选项（弹窗按「有选中就只校验选中的」写好了），校验进行中不给 ——
                         // 从前多选里直接开跑、跳过了选项；正在校验时再点则静默无效
                         if (checkProgress == null) {
+                            // 校验用 Tasks（打勾的方框），不用 SelectAll：旁边的「全选」已经是它，两个一样的图标挨着分不清
                             AppIconButton(onClick = { showCheckOptions = true }) {
-                                Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验")
+                                Icon(MiuixIcons.Tasks, contentDescription = "校验")
                             }
                         }
                         AppIconButton(onClick = { confirmBatchDelete = true }) {
@@ -210,6 +231,7 @@ fun SourceManageScreen(
                             )
                         }
                     },
+                    bottomContent = listHeader,
                 ) {
                     ToolbarTitle("已选 ${selected.size} 个")
                 }
@@ -219,11 +241,27 @@ fun SourceManageScreen(
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
                         AppIconButton(onClick = { showCheckOptions = true }) {
-                            Icon(Icons.AutoMirrored.Filled.PlaylistAddCheck, contentDescription = "校验书源")
+                            Icon(MiuixIcons.Tasks, contentDescription = "校验书源")
                         }
                     }
-                    AppIconButton(onClick = { showSortPicker = true }) {
-                        Icon(MiuixIcons.Sort, contentDescription = "排序")
+                    Box {
+                        AppIconButton(onClick = { showSortPicker = true }) {
+                            Icon(MiuixIcons.Sort, contentDescription = "排序")
+                        }
+                        AppDropdownMenu(
+                            expanded = showSortPicker,
+                            onDismissRequest = { showSortPicker = false },
+                            items = SourceSort.entries.map { option ->
+                                AppMenuItem(
+                                    option.label,
+                                    onClick = {
+                                        showSortPicker = false
+                                        viewModel.setSort(option)
+                                    },
+                                    selected = option == sort,
+                                )
+                            },
+                        )
                     }
                     Box {
                         AppIconButton(onClick = { showImportMenu = true }) {
@@ -252,6 +290,7 @@ fun SourceManageScreen(
                         )
                     }
                 },
+                bottomContent = listHeader,
             ) {
                 ToolbarTitle("书源管理")
             }
@@ -265,7 +304,7 @@ fun SourceManageScreen(
             LoadingState(Modifier.padding(padding), label = "正在导入书源…")
         } else if (sources.isEmpty()) {
             EmptyState(
-                icon = Icons.Default.Source,
+                icon = MiuixIcons.Import,
                 title = "还没有书源",
                 hint = "支持导入 Inkwell 与 Legado（阅读）格式的书源；" +
                     "没有现成书源的网站，可以点右上角「＋」按书的网址新建",
@@ -278,105 +317,37 @@ fun SourceManageScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            // 里面的列表各自 imePadding：padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
-            // 只让开顶栏与两侧，列表滚到手势条下面（见 exceptBottom）
-            Column(Modifier.fillMaxSize().padding(padding.exceptBottom()).consumeWindowInsets(padding)) {
-            // 几百个书源，没有搜索和筛选就只能一路滑
-            SearchField(
-                value = query,
-                onValueChange = viewModel::setQuery,
-                placeholder = "搜索书源名称或网址",
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
-            )
-            ChipRow(
-                options = SourceFilter.entries.map { it.label },
-                selectedIndex = SourceFilter.entries.indexOf(filter),
-                onSelect = { viewModel.setFilter(SourceFilter.entries[it]) },
-                contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
-                trailing = if (groups.isNotEmpty()) {
-                    {
-                        AppFilterChip(
-                            selected = groupFilter != null,
-                            onClick = { showGroupPicker = true },
-                            label = groupFilter ?: "分组",
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
-            // 导入进行中：几 MB 的合集要解析好几秒，没有这一行就像没点上
-            if (importing) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-                ) {
-                    AppLoadingIndicator(size = Dimens.buttonSpinner)
-                    Text("正在导入书源…", style = MiuixTheme.textStyles.footnote1)
-                }
-            }
-            // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
-            checkProgress?.let { p ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "正在校验 ${p.done}/${p.total}",
-                            style = MiuixTheme.textStyles.footnote1,
-                        )
-                        DeterminateProgressBar(
-                            progress = if (p.total == 0) 0f else p.done.toFloat() / p.total,
-                            modifier = Modifier.padding(top = Dimens.gapXS),
-                        )
-                    }
-                    AppTextButton("停止", onClick = viewModel::cancelCheck)
-                }
-            }
-            // 校验完最想干的事。禁用放在删除前面：删是不可逆的，而站点抽风、临时封 IP
-            // 都会造成一次性的"失效"，禁用了还能改天再校验一次
-            if (checkProgress == null && failedCount > 0) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "失效 $failedCount 个",
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    AppTextButton("只看失效", onClick = { viewModel.setFilter(SourceFilter.FAILED) })
-                    AppTextButton("禁用", onClick = viewModel::disableInvalid)
-                    AppTextButton(
-                        text = "删除",
-                        onClick = { confirmDeleteInvalid = true },
-                        contentColor = MiuixTheme.colorScheme.error,
-                    )
-                }
-            }
             // 搜不到 / 筛完是空的：从前就是一个空的列表，一片空白，也没有退出这个筛选的出口
             // （「失效」筛选下把失效源删完就是这样）。只在真的筛了的时候说 —— 没筛却是空的只可能是还没算完
             val narrowed = query.isNotBlank() || filter != SourceFilter.ALL || groupFilter != null
             if (visible.isEmpty() && narrowed) {
                 EmptyState(
-                    icon = Icons.Default.SearchOff,
+                    icon = MiuixIcons.Search,
                     title = "没有符合条件的书源",
                     hint = "换个关键词，或放宽筛选条件",
                     actionLabel = "清除筛选",
                     onAction = viewModel::clearFilters,
-                    modifier = Modifier.imePadding(),
+                    modifier = Modifier.padding(padding).consumeWindowInsets(padding).imePadding(),
                 )
             } else LazyColumn(
-                // 上面压着搜索框：edge-to-edge 下键盘弹起会盖住列表下半截，最后几条滚不出来
-                Modifier.fillMaxSize().imePadding(),
-                contentPadding = ContentListDefaults.listContentPadding(bottom = padding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.spacedBy(ContentListDefaults.ListSpacing),
+                // 只让开两侧：顶栏（连同压在下面的搜索、筛选）的高度垫在列表开头，列表滚到毛玻璃下面；
+                // 导航栏高度垫在末尾，滚到手势条下面（见 AppScaffold）。
+                // 顶栏里有搜索框：edge-to-edge 下键盘弹起会盖住列表下半截，最后几条滚不出来 ——
+                // padding 里已含导航栏高度，标成已消费，免得键盘上方多一道空隙
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding.horizontalOnly())
+                    .consumeWindowInsets(padding)
+                    .imePadding()
+                    .pageScroll(),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = padding.calculateBottomPadding(),
+                ),
+                overscrollEffect = null,
             ) {
-                items(visible, key = { it.id }) { source ->
+                // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝
+                itemsIndexed(visible, key = { _, it -> it.id }) { index, source ->
                     SourceListRow(
                         source = source,
                         exploreOnly = source.id in exploreOnlyIds,
@@ -390,9 +361,9 @@ fun SourceManageScreen(
                         onLongClick = { viewModel.toggleSelect(source.id) },
                         onDelete = { deleteTarget = source },
                         onToggleEnabled = { viewModel.setEnabled(source.id, it) },
+                        modifier = Modifier.groupedCardItem(index, visible.size),
                     )
                 }
-            }
             }
         }
     }
@@ -437,33 +408,6 @@ fun SourceManageScreen(
                     label = "单源超时",
                 )
             },
-        )
-    }
-
-    if (showSortPicker) {
-        OptionPickerSheet(
-            title = "排序",
-            options = SourceSort.entries.map { PickerOption(id = it.name, label = it.label) },
-            selectedId = sort.name,
-            onSelect = { opt ->
-                showSortPicker = false
-                runCatching { SourceSort.valueOf(opt.id) }.getOrNull()?.let(viewModel::setSort)
-            },
-            onDismiss = { showSortPicker = false },
-        )
-    }
-
-    if (showGroupPicker) {
-        OptionPickerSheet(
-            title = "按分组筛选",
-            options = listOf(PickerOption(id = "", label = "全部分组")) +
-                groups.map { PickerOption(id = it, label = it) },
-            selectedId = groupFilter.orEmpty(),
-            onSelect = { opt ->
-                showGroupPicker = false
-                viewModel.setGroupFilter(opt.id.takeIf { it.isNotEmpty() })
-            },
-            onDismiss = { showGroupPicker = false },
         )
     }
 
@@ -557,6 +501,133 @@ fun SourceManageScreen(
     }
 }
 
+/**
+ * 列表上面压着的那一截：搜索、筛选 chip、导入 / 校验进度、失效汇总。放在顶栏的 bottomContent 里（见调用处）。
+ */
+@Composable
+private fun SourceListHeader(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    filter: SourceFilter,
+    onFilterChange: (SourceFilter) -> Unit,
+    groups: List<String>,
+    groupFilter: String?,
+    onGroupFilterChange: (String?) -> Unit,
+    importing: Boolean,
+    checkProgress: CheckProgress?,
+    onCancelCheck: () -> Unit,
+    failedCount: Int,
+    onDisableInvalid: () -> Unit,
+    onDeleteInvalid: () -> Unit,
+) {
+    var showGroupPicker by remember { mutableStateOf(false) }
+    Column {
+        // 几百个书源，没有搜索和筛选就只能一路滑
+        SearchField(
+            value = query,
+            onValueChange = onQueryChange,
+            placeholder = "搜索书源名称或网址",
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        )
+        ChipRow(
+            options = SourceFilter.entries.map { it.label },
+            selectedIndex = SourceFilter.entries.indexOf(filter),
+            onSelect = { onFilterChange(SourceFilter.entries[it]) },
+            contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
+            trailing = if (groups.isNotEmpty()) {
+                {
+                    // 分组从这颗 chip 上弹出来选（当前分组打勾），不再另起一个底部面板
+                    Box {
+                        AppFilterChip(
+                            selected = groupFilter != null,
+                            onClick = { showGroupPicker = true },
+                            label = groupFilter ?: "分组",
+                        )
+                        AppDropdownMenu(
+                            expanded = showGroupPicker,
+                            onDismissRequest = { showGroupPicker = false },
+                            items = listOf(
+                                AppMenuItem(
+                                    "全部分组",
+                                    onClick = {
+                                        showGroupPicker = false
+                                        onGroupFilterChange(null)
+                                    },
+                                    selected = groupFilter == null,
+                                ),
+                            ) + groups.map { group ->
+                                AppMenuItem(
+                                    group,
+                                    onClick = {
+                                        showGroupPicker = false
+                                        onGroupFilterChange(group)
+                                    },
+                                    selected = group == groupFilter,
+                                )
+                            },
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+        )
+        // 导入进行中：几 MB 的合集要解析好几秒，没有这一行就像没点上
+        if (importing) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+            ) {
+                AppLoadingIndicator(size = Dimens.buttonSpinner)
+                Text("正在导入书源…", style = MiuixTheme.textStyles.footnote1)
+            }
+        }
+        // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
+        checkProgress?.let { p ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "正在校验 ${p.done}/${p.total}",
+                        style = MiuixTheme.textStyles.footnote1,
+                    )
+                    DeterminateProgressBar(
+                        progress = if (p.total == 0) 0f else p.done.toFloat() / p.total,
+                        modifier = Modifier.padding(top = Dimens.gapXS),
+                    )
+                }
+                AppTextButton("停止", onClick = onCancelCheck)
+            }
+        }
+        // 校验完最想干的事。禁用放在删除前面：删是不可逆的，而站点抽风、临时封 IP
+        // 都会造成一次性的"失效"，禁用了还能改天再校验一次
+        if (checkProgress == null && failedCount > 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "失效 $failedCount 个",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                AppTextButton("只看失效", onClick = { onFilterChange(SourceFilter.FAILED) })
+                AppTextButton("禁用", onClick = onDisableInvalid)
+                AppTextButton(
+                    text = "删除",
+                    onClick = onDeleteInvalid,
+                    contentColor = MiuixTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SourceListRow(
     source: BookSourceListItem,
@@ -567,6 +638,7 @@ private fun SourceListRow(
     onLongClick: () -> Unit,
     onDelete: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val leading: (@Composable () -> Unit)? = if (selectionMode) {
         {
@@ -621,7 +693,7 @@ private fun SourceListRow(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        if (ok) Icons.Default.Check else Icons.Default.Close,
+                        if (ok) MiuixIcons.Basic.Check else MiuixIcons.Close,
                         contentDescription = null,
                         Modifier.size(Dimens.iconSm),
                         tint = statusColor,
@@ -671,7 +743,10 @@ private fun SourceListRow(
             checked = selected,
             onCheckedChange = { onClick() },
             onLongClick = onLongClick,
-            colors = settingsStackListColors(),
+            modifier = modifier,
+            // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
+            colors = ContentListDefaults.colors(containerColor = Color.Transparent),
+            shape = RectangleShape,
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,
@@ -681,7 +756,10 @@ private fun SourceListRow(
         ContentListItem(
             onClick = onClick,
             onLongClick = onLongClick,
-            colors = settingsStackListColors(),
+            modifier = modifier,
+            // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
+            colors = ContentListDefaults.colors(containerColor = Color.Transparent),
+            shape = RectangleShape,
             leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,

@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.detail
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.unit.Dp
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,8 +54,6 @@ import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.data.repo.OfflineDownload
 import com.radium.inkwell.data.repo.OfflineRange
 import androidx.compose.foundation.background
@@ -60,7 +64,6 @@ import kotlinx.coroutines.launch
 import com.radium.inkwell.ui.components.animationsEnabled
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -77,7 +80,6 @@ fun BookDetailScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val download by viewModel.download.collectAsStateWithLifecycle()
-    var showOfflinePicker by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     // 点目录：进度写完才进阅读器（见 BookDetailViewModel.openChapter）
@@ -94,7 +96,7 @@ fun BookDetailScreen(
     val topBarScroll = rememberAppTopBarScroll()
     // 整页换上封面的强调色（只换 primary 一族，底色不动），见 CoverTintedTheme
     CoverTintedTheme(rememberCoverSeed(book?.coverPath)) {
-        Scaffold(
+        AppScaffold(
             modifier = Modifier.topBarScroll(topBarScroll),
             topBar = {
                 // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画。
@@ -127,7 +129,7 @@ fun BookDetailScreen(
             if (b == null) {
                 if (state.loaded) {
                     EmptyState(
-                        icon = Icons.Default.Warning,
+                        icon = Icons.Outlined.Warning,
                         title = "书籍不存在",
                         hint = "它可能已被删除",
                         actionLabel = "返回",
@@ -137,25 +139,29 @@ fun BookDetailScreen(
                 } else {
                     LoadingState(Modifier.padding(padding))
                 }
-                return@Scaffold
+                return@AppScaffold
             }
 
             // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
             val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
-            // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
+            // 只让开两侧：内容滚到玻璃顶栏与手势条下面（见 AppScaffold）。顶栏高度不进 contentPadding，
+            // 而是垫在头部**渐变里面**（Header 的 topInset）—— 顶栏底下取样到的就是渐变起点 primaryContainer，
+            // 与顶栏自己的底色一致，停在顶部时两者之间不留色缝
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding.exceptBottom()),
+                Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
                 state = listState,
                 contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
+                overscrollEffect = null,
             ) {
                 item {
                     Header(
                         book = b,
+                        topInset = padding.calculateTopPadding(),
                         chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
                         cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
                         download = download,
                         onRead = onRead,
-                        onOfflineCache = { showOfflinePicker = true },
+                        onStartDownload = viewModel::startDownload,
                         onCancelDownload = viewModel::cancelDownload,
                     )
                 }
@@ -243,29 +249,6 @@ fun BookDetailScreen(
             }
         }
     }
-
-    if (showOfflinePicker) {
-        OptionPickerSheet(
-            title = "离线缓存",
-            options = OfflineRange.entries.map { range ->
-                PickerOption(id = range.name, label = range.label, subtitle = offlineRangeHint(range))
-            },
-            selectedId = null,
-            onSelect = { opt ->
-                showOfflinePicker = false
-                viewModel.startDownload(OfflineRange.valueOf(opt.id))
-            },
-            onDismiss = { showOfflinePicker = false },
-            header = {
-                Text(
-                    "离开这一页也会接着缓存；已经缓存过的章直接跳过。需要网页渲染才抓得到的章，留到阅读时再加载",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
-                )
-            },
-        )
-    }
 }
 
 private fun offlineRangeHint(range: OfflineRange): String = when (range) {
@@ -277,15 +260,18 @@ private fun offlineRangeHint(range: OfflineRange): String = when (range) {
 /**
  * 头部：封面、书名、阅读与缓存按钮、简介。底下铺一道从 primaryContainer 到页面底色（surface）的竖向渐变 ——
  * 封面色（或 App 强调色）从顶栏流下来，在目录开始的地方化进纸面，详情页就不再是一张白纸上贴一张封面。
+ *
+ * [topInset]（顶栏高度）垫在渐变**里面**：渐变一直铺到玻璃顶栏底下，顶栏取样到的是同一个起点色。
  */
 @Composable
 private fun Header(
     book: BookEntity,
+    topInset: Dp,
     chapterCount: Int,
     cachedCount: Int,
     download: OfflineDownload?,
     onRead: () -> Unit,
-    onOfflineCache: () -> Unit,
+    onStartDownload: (OfflineRange) -> Unit,
     onCancelDownload: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -293,6 +279,7 @@ private fun Header(
         Modifier
             // 终点是页面底 surface（Miuix 的分层），与 Scaffold 画布同色，渐变化进去不留边
             .background(Brush.verticalGradient(listOf(scheme.primaryContainer, scheme.surface)))
+            .padding(top = topInset)
             .padding(Dimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
@@ -332,14 +319,29 @@ private fun Header(
         val readLabel = if (book.readAt > 0) "继续阅读" else "开始阅读"
         if (book.type == BookType.NET) {
             val running = download?.running == true
+            var offlineMenuOpen by remember { mutableStateOf(false) }
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                 PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.weight(1f))
-                SecondaryButton(
-                    text = if (running) "缓存中…" else "离线缓存",
-                    onClick = onOfflineCache,
-                    enabled = !running,
-                    modifier = Modifier.weight(1f),
-                )
+                // 缓存范围从按钮上弹出来选（每项下面一行说明从哪缓存到哪）
+                Box(Modifier.weight(1f)) {
+                    SecondaryButton(
+                        text = if (running) "缓存中…" else "离线缓存",
+                        onClick = { offlineMenuOpen = true },
+                        enabled = !running,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    AppDropdownMenu(
+                        expanded = offlineMenuOpen,
+                        onDismissRequest = { offlineMenuOpen = false },
+                        items = OfflineRange.entries.map { range ->
+                            AppMenuItem(
+                                text = range.label,
+                                summary = offlineRangeHint(range),
+                                onClick = { onStartDownload(range) },
+                            )
+                        },
+                    )
+                }
             }
             OfflineStatus(download, cachedCount, chapterCount, onCancelDownload)
         } else {
@@ -376,6 +378,13 @@ private fun OfflineStatus(
             }
             DeterminateProgressBar(
                 progress = if (download.total == 0) 0f else download.done.toFloat() / download.total,
+            )
+            // 从前写在选范围的面板顶上；范围改成按钮上弹出的列表后放不下长说明，挪到正在缓存时 ——
+            // 这时候用户才会想「能不能先走开」「重复的会不会再下一遍」
+            Text(
+                "离开这一页也会接着缓存；已经缓存过的章直接跳过。需要网页渲染才抓得到的章，留到阅读时再加载",
+                style = MiuixTheme.textStyles.footnote1,
+                color = muted,
             )
         }
         download != null -> Text(

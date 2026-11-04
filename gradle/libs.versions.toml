@@ -84,6 +84,8 @@ miuix-ui = { module = "top.yukonga.miuix.kmp:miuix-ui", version.ref = "miuix" }
 miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference", version.ref = "miuix" }
 # HyperOS 线条图标（返回、更多、搜索、删除…）。它没有的图标仍用 material-icons-extended
 miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miuix" }
+# 顶栏、阅读器菜单的毛玻璃（LayerBackdrop + textureBlur）。要 API 33（RuntimeShader），我们 minSdk 35，不用降级分支
+miuix-blur = { module = "top.yukonga.miuix.kmp:miuix-blur", version.ref = "miuix" }
 compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }

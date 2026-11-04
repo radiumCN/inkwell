@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -36,6 +34,8 @@ import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -51,7 +51,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 用 primaryContainer 铺底：它是书架上唯一一块带颜色的面，一眼就能落上去；文字统一 onPrimaryContainer，
  * 层级靠字号拉开 —— 这块底色上没有对应的「次要文字」令牌，硬套 onSurfaceVariantSummary 对比度不保证。
  *
- * 交互与网格里的书一致：点开进书（从这张封面展开）、长按出同一个操作面板。
+ * 交互与网格里的书一致：点开进书（从这张封面展开）、长按从卡片上弹出同一个操作菜单。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -96,7 +96,7 @@ internal fun ContinueReadingCard(
             // 与网格书卡同一套标记：隐藏区展开时看得出它是藏着的，追更后看得出有几章新的
             if (book.hidden) {
                 Icon(
-                    Icons.Default.VisibilityOff,
+                    MiuixIcons.Hide,
                     contentDescription = "已隐藏",
                     modifier = Modifier
                         .align(Alignment.TopStart)

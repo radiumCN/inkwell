@@ -1,20 +1,23 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.RssFeed
-import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.AutoDelete
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.automirrored.filled.AltRoute
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.RssFeed
+import com.radium.inkwell.ui.components.SpinnerSettingRow
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Background
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Info
+import top.yukonga.miuix.kmp.icon.extended.Link
+import top.yukonga.miuix.kmp.icon.extended.Merge
+import top.yukonga.miuix.kmp.icon.extended.Notes
+import top.yukonga.miuix.kmp.icon.extended.Timer
+import top.yukonga.miuix.kmp.icon.extended.Update
+import top.yukonga.miuix.kmp.icon.extended.UploadCloud
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.data.repo.describeSyncError
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
@@ -49,7 +52,6 @@ import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.MessageBus
-import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroup
@@ -62,7 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -107,8 +109,6 @@ fun SettingsScreen(
     val messages = remember { MessageBus() }
     CollectMessages(messages, snackbar)
     val updateCheck = rememberUpdateCheckState(messages)
-    var showSourcePicker by remember { mutableStateOf(false) }
-    var showChannelPicker by remember { mutableStateOf(false) }
 
     /**
      * 概览卡上的「立即同步」。跑在页面的协程作用域上：离开设置页就取消 —— 与 WebDAV 页的「立即同步」
@@ -133,7 +133,6 @@ fun SettingsScreen(
         }
     }
     var confirmClearCache by remember { mutableStateOf(false) }
-    var showPrunePicker by remember { mutableStateOf(false) }
     var cacheBytes by remember { mutableLongStateOf(-1L) }
     /** 正在删缓存：几千个文件要删一会儿，期间行上说一声、不许再点 */
     var clearingCache by remember { mutableStateOf(false) }
@@ -147,28 +146,30 @@ fun SettingsScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("设置", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 版本号从前钉在滚动区外面的页脚：列表在页脚上方就截断了，手势条底下垫的是一块空底色。
-        // 现在它是滚动内容的最后一行，整页能滚到手势条下面（见 exceptBottom）。内容不满一屏时仍压在底部：
+        // 现在它是滚动内容的最后一行，整页能滚到手势条下面（见 AppScaffold）。内容不满一屏时仍压在底部：
         // 滚动区最矮也是一整屏高（heightIn(min)），中间那个 weight 撑开 —— Column 在最大高度无界时，
         // 按最小高度分配 weight，所以滚动容器里也撑得开
+        // 顶栏的高度也垫在滚动内容开头（而不是整块往下推），内容才滚得到玻璃顶栏下面
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .padding(padding.exceptBottom()),
+                .padding(padding.horizontalOnly()),
         ) {
             val viewport = maxHeight
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                    .pageScroll()
+                    .verticalScroll(rememberScrollState(), overscrollEffect = null)
                     .heightIn(min = viewport)
-                    .padding(top = Dimens.gapS),
+                    .padding(top = padding.calculateTopPadding() + Dimens.gapS),
             ) {
                 SettingsOverviewCard(
                     reading = readingSummary,
@@ -183,19 +184,19 @@ fun SettingsScreen(
                 SettingGroup {
                     SettingRow(
                         title = "阅读与规则",
-                        icon = Icons.AutoMirrored.Filled.MenuBook,
+                        icon = MiuixIcons.Notes,
                         onClick = onOpenReading,
                         position = SettingGroupPosition.First,
                     )
                     SettingRow(
                         title = "外观",
-                        icon = Icons.Default.Palette,
+                        icon = MiuixIcons.Background,
                         onClick = onOpenAppearance,
                         position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "订阅源",
-                        icon = Icons.Default.RssFeed,
+                        icon = Icons.Outlined.RssFeed,
                         onClick = onOpenRss,
                         position = SettingGroupPosition.Last,
                     )
@@ -206,20 +207,25 @@ fun SettingsScreen(
                     // 同步状态与「立即同步」在顶上的概览卡里，这一行只是进 WebDAV 页的入口
                     SettingRow(
                         title = "WebDAV 备份同步",
-                        icon = Icons.Default.CloudSync,
+                        icon = MiuixIcons.UploadCloud,
                         onClick = onOpenWebDav,
                         position = SettingGroupPosition.First,
                     )
-                    SettingRow(
+                    SpinnerSettingRow(
                         title = "自动清理已读缓存",
-                        icon = Icons.Default.AutoDelete,
-                        value = cacheAutoPruneLabel(pruneDays),
-                        onClick = { showPrunePicker = true },
+                        icon = MiuixIcons.Timer,
+                        options = PRUNE_OPTIONS,
+                        selectedId = pruneDays.toString(),
+                        onSelect = { opt ->
+                            opt.id.toIntOrNull()
+                                ?.takeIf { it in AppPrefs.CACHE_AUTO_PRUNE_DAYS_OPTIONS }
+                                ?.let { days -> scope.launch { appPrefs.setCacheAutoPruneDays(days) } }
+                        },
                         position = SettingGroupPosition.Middle,
                     )
                     SettingRow(
                         title = "清除正文缓存",
-                        icon = Icons.Default.DeleteSweep,
+                        icon = MiuixIcons.Delete,
                         value = when {
                             clearingCache -> "正在清除…"
                             cacheBytes < 0 -> "正在统计…"
@@ -236,24 +242,22 @@ fun SettingsScreen(
                 SettingGroup {
                     SettingRow(
                         title = "检查更新",
-                        icon = Icons.Default.SystemUpdate,
+                        icon = MiuixIcons.Update,
                         value = if (updateCheck.checking) "正在检查…" else null,
                         onClick = updateCheck.check,
                         position = SettingGroupPosition.First,
                     )
-                    // 更新源 / 渠道从前单独占一个二级页（整页就这两行），现在直接摆在这里，点了弹选择面板
-                    SettingRow(
-                        title = "更新源",
-                        icon = Icons.Default.Public,
-                        value = updateCheck.source.label,
-                        onClick = { showSourcePicker = true },
+                    // 更新源 / 渠道从前单独占一个二级页（整页就这两行），现在直接摆在这里，点了从行上弹出选项
+                    UpdateSourceRow(
+                        current = updateCheck.source,
+                        onPick = { picked -> scope.launch { appPrefs.setUpdateSource(picked) } },
+                        icon = MiuixIcons.Link,
                         position = SettingGroupPosition.Middle,
                     )
-                    SettingRow(
-                        title = "更新渠道",
-                        icon = Icons.AutoMirrored.Filled.AltRoute,
-                        value = updateCheck.channel.label,
-                        onClick = { showChannelPicker = true },
+                    UpdateChannelRow(
+                        current = updateCheck.channel,
+                        onPick = { picked -> scope.launch { appPrefs.setUpdateChannel(picked) } },
+                        icon = MiuixIcons.Merge,
                         position = SettingGroupPosition.Last,
                     )
                 }
@@ -261,7 +265,7 @@ fun SettingsScreen(
                 SettingGroup {
                     SettingRow(
                         title = "关于",
-                        icon = Icons.Default.Info,
+                        icon = MiuixIcons.Info,
                         onClick = onOpenAbout,
                         position = SettingGroupPosition.Alone,
                     )
@@ -288,64 +292,6 @@ fun SettingsScreen(
 
     updateCheck.UpdateDialog()
 
-    if (showSourcePicker) {
-        UpdateSourcePicker(
-            current = updateCheck.source,
-            onPick = { picked ->
-                showSourcePicker = false
-                scope.launch { appPrefs.setUpdateSource(picked) }
-            },
-            onDismiss = { showSourcePicker = false },
-        )
-    }
-
-    if (showChannelPicker) {
-        UpdateChannelPicker(
-            current = updateCheck.channel,
-            onPick = { picked ->
-                showChannelPicker = false
-                scope.launch { appPrefs.setUpdateChannel(picked) }
-            },
-            onDismiss = { showChannelPicker = false },
-        )
-    }
-
-    if (showPrunePicker) {
-        OptionPickerSheet(
-            title = "自动清理已读缓存",
-            options = listOf(
-                PickerOption(
-                    id = "0",
-                    label = "关闭",
-                    subtitle = "已读章节正文一直保留，直到手动清除",
-                ),
-                PickerOption(
-                    id = "7",
-                    label = "7 天",
-                    subtitle = "进度之前且超过 7 天未回看的章节会删掉缓存",
-                ),
-                PickerOption(
-                    id = "14",
-                    label = "14 天",
-                    subtitle = "进度之前且超过 14 天未回看的章节会删掉缓存",
-                ),
-                PickerOption(
-                    id = "30",
-                    label = "30 天",
-                    subtitle = "进度之前且超过 30 天未回看的章节会删掉缓存",
-                ),
-            ),
-            selectedId = pruneDays.toString(),
-            onSelect = { opt ->
-                showPrunePicker = false
-                opt.id.toIntOrNull()
-                    ?.takeIf { it in AppPrefs.CACHE_AUTO_PRUNE_DAYS_OPTIONS }
-                    ?.let { days -> scope.launch { appPrefs.setCacheAutoPruneDays(days) } }
-            },
-            onDismiss = { showPrunePicker = false },
-        )
-    }
-
     if (confirmClearCache) {
         AppAlertDialog(
             onDismissRequest = { confirmClearCache = false },
@@ -370,7 +316,26 @@ fun SettingsScreen(
     }
 }
 
-private fun cacheAutoPruneLabel(days: Int): String = when (days) {
-    0 -> "关闭"
-    else -> "$days 天"
-}
+/** 自动清理已读缓存的几档（id 是天数，0 = 关闭）；与 [AppPrefs.CACHE_AUTO_PRUNE_DAYS_OPTIONS] 一致 */
+private val PRUNE_OPTIONS = listOf(
+    PickerOption(
+        id = "0",
+        label = "关闭",
+        subtitle = "已读章节正文一直保留，直到手动清除",
+    ),
+    PickerOption(
+        id = "7",
+        label = "7 天",
+        subtitle = "进度之前且超过 7 天未回看的章节会删掉缓存",
+    ),
+    PickerOption(
+        id = "14",
+        label = "14 天",
+        subtitle = "进度之前且超过 14 天未回看的章节会删掉缓存",
+    ),
+    PickerOption(
+        id = "30",
+        label = "30 天",
+        subtitle = "进度之前且超过 30 天未回看的章节会删掉缓存",
+    ),
+)

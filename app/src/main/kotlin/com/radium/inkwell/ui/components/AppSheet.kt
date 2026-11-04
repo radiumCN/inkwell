@@ -98,6 +98,8 @@ fun AppBottomSheet(
             pending = null
         },
     ) {
+        // 阅读设置面板不压暗（要看着正文调排版），同理也不糊
+        if (enableWindowDim) DialogWindowBlur(visible = show)
         Column(Modifier.fillMaxWidth()) {
             scope.content()
             if (padNavigationBar) {

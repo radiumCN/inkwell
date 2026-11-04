@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.feedback
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,8 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.outlined.CheckCircle
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,7 +45,7 @@ import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.openExternalLink
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -71,7 +73,7 @@ fun FeedbackScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("意见反馈", topBarScroll, onBack = leave, containerColor = pageColor) },
@@ -87,21 +89,22 @@ fun FeedbackScreen(
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize().padding(padding).padding(Dimens.screenPadding),
             )
-            return@Scaffold
+            return@AppScaffold
         }
 
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
                 // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
                 .consumeWindowInsets(padding)
                 // edge-to-edge 下窗口不再自动 resize，键盘会盖住提交按钮；让出 IME 高度
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(Dimens.screenPadding)
-                .padding(bottom = padding.calculateBottomPadding()),
+                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
@@ -135,7 +138,7 @@ fun FeedbackScreen(
                 horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
             ) {
                 Icon(
-                    Icons.Default.Info,
+                    MiuixIcons.Info,
                     contentDescription = null,
                     tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(Dimens.iconSm),
@@ -197,7 +200,7 @@ private fun SubmittedState(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            Icons.Default.CheckCircle,
+            Icons.Outlined.CheckCircle,
             contentDescription = null,
             tint = MiuixTheme.colorScheme.primary,
             modifier = Modifier.size(Dimens.iconXL),

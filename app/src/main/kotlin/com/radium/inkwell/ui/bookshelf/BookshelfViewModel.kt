@@ -430,7 +430,7 @@ class BookshelfViewModel(
         _selected.value = _selected.value.let { if (id in it) it - id else it + id }
     }
 
-    /** 从长按面板点「多选」：带着这本书进多选态 */
+    /** 从长按菜单点「多选」：带着这本书进多选态 */
     fun startSelection(id: String) {
         _selected.value = setOf(id)
     }
@@ -482,7 +482,7 @@ class BookshelfViewModel(
         }
     }
 
-    // ---- 单本操作（长按面板） ----
+    // ---- 单本操作（长按菜单） ----
 
     fun deleteBook(id: String) {
         viewModelScope.launch { bookRepo.deleteBook(id) }

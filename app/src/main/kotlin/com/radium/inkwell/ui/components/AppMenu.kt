@@ -15,11 +15,16 @@ data class AppMenuItem(
     val enabled: Boolean = true,
     /** 第二行小字（「从文件导入」下面注一句支持的格式之类）；大多数菜单项不需要 */
     val summary: String? = null,
+    /** 单选弹出列表里的当前项：淡强调底 + 行尾打勾（Miuix 下拉选择器的长相）。动作菜单不用 */
+    val selected: Boolean = false,
 )
 
 /**
- * 锚在某个按钮上的下拉菜单（顶栏 ⋮、导入方式）。Miuix [WindowDropdownPopup]：HyperOS 那种圆角浮层，
- * 从锚点处展开，点了某项自动收起。
+ * 锚在某个按钮 / 某一行上的弹出列表。Miuix [WindowDropdownPopup]：HyperOS 那种圆角浮层，
+ * 从锚点处展开，点了某项自动收起。两种用法：
+ * - **动作菜单**（顶栏 ⋮、导入方式、书架长按一本书）：各项只给 `onClick`；
+ * - **从几项里选一个**（排序方式、切换书源）：当前项标 [AppMenuItem.selected]，弹出来就看得到选的是谁。
+ *   设置页里「标题 + 当前值」那种选择行别用它，走 [SpinnerSettingRow]（锚点就是那一行）。
  *
  * 用法与 M3 `DropdownMenu` 相同 —— **和锚点放进同一个 `Box`**，弹层按这个 Box 的位置定位：
  * ```
@@ -29,8 +34,6 @@ data class AppMenuItem(
  * }
  * ```
  * 菜单项的 `onClick` 里不必再手动 `open = false`：点了就收（收起走 [onDismissRequest]）。写了也无妨。
- *
- * 「从 N 项里选一个」仍走 [OptionPickerSheet]，别拿下拉菜单做单选 —— 这里没有选中态。
  */
 @Composable
 fun AppDropdownMenu(
@@ -48,6 +51,7 @@ fun AppDropdownMenu(
                 enabled = item.enabled,
                 onClick = item.onClick,
                 summary = item.summary,
+                selected = item.selected,
             )
         },
     )

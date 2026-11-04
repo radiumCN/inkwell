@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.settings
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.SectionHeader
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
@@ -37,7 +38,7 @@ import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.update.UpdateChecker
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 
 /** 网页版 / 官网，与 README 里的 book.skylark.run 同一处 */
@@ -73,7 +74,7 @@ fun AboutSettingsScreen(
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("关于", topBarScroll, onBack = onBack, containerColor = pageColor) },
@@ -82,10 +83,11 @@ fun AboutSettingsScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
-                .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS, bottom = padding.calculateBottomPadding()),
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
+                .padding(top = padding.calculateTopPadding() + Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
             SectionHeader("支持")
             SettingGroup {

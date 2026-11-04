@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +23,7 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -44,14 +45,18 @@ internal fun WelcomeState(
     onSkip: () -> Unit,
     onOpenDisclaimer: () -> Unit,
     modifier: Modifier = Modifier,
-    /** 垫在滚动内容末尾的导航栏高度：外层只让开顶栏，内容滚到手势条下面（见 exceptBottom） */
+    /** 垫在滚动内容开头的顶栏高度：外层只让开两侧，内容能滚到玻璃顶栏下面（见 AppScaffold） */
+    topInset: Dp = 0.dp,
+    /** 垫在滚动内容末尾的导航栏高度：内容滚到手势条下面，最后一行仍能完整滚出来 */
     bottomInset: Dp = 0.dp,
 ) {
     Column(
         modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(top = Dimens.gapXXL, bottom = Dimens.gapXXL + bottomInset),
+            // HyperOS 的回弹 + 甩到头轻震；不满一屏也弹，所以自带的那份回弹关掉（见 pageScroll）
+            .pageScroll()
+            .verticalScroll(rememberScrollState(), overscrollEffect = null)
+            .padding(top = topInset + Dimens.gapXXL, bottom = Dimens.gapXXL + bottomInset),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
         Column(
@@ -59,7 +64,7 @@ internal fun WelcomeState(
             verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
         ) {
             Icon(
-                Icons.Default.AutoStories,
+                Icons.Outlined.AutoStories,
                 contentDescription = null,
                 modifier = Modifier.size(Dimens.iconXL),
                 tint = MiuixTheme.colorScheme.primary,

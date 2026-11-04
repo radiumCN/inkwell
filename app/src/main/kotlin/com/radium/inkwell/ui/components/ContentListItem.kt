@@ -201,7 +201,7 @@ fun ContentListItem(
     )
 }
 
-/** 单选行（OptionPicker、图标选择、当前章节）。读屏念「已选中」 */
+/** 单选行（图标选择、当前章节）。读屏念「已选中」 */
 @Composable
 fun ContentListItem(
     selected: Boolean,

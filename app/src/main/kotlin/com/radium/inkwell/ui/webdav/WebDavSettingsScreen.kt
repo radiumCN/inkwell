@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.webdav
 
-import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
@@ -62,7 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
 import com.radium.inkwell.ui.components.AppFormField
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Scaffold
+import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -83,24 +84,28 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
-    Scaffold(
+    AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 配置还没读回来：先空着，别先画一遍「自备 WebDAV」再跳回「官方同步」
-        if (!state.loaded) return@Scaffold
+        if (!state.loaded) return@AppScaffold
         Column(
             Modifier
                 .fillMaxSize()
-                // 内容滚到手势条下面，导航栏高度垫在末尾（见 exceptBottom）
-                .padding(padding.exceptBottom())
+                // 顶栏、导航栏的高度都垫在滚动内容首尾：内容能滚到玻璃顶栏和手势条下面（见 AppScaffold）
+                .padding(padding.horizontalOnly())
                 // padding 里已含导航栏高度：先把这份 inset 标成已消费，下面的 imePadding 才不会把导航栏那截再算一遍（键盘上方多一道空隙）
                 .consumeWindowInsets(padding)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(top = Dimens.gapS, bottom = Dimens.gapXL + padding.calculateBottomPadding()),
+                .pageScroll()
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
+                .padding(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = Dimens.gapXL + padding.calculateBottomPadding(),
+                ),
         ) {
             // 与别的设置页同一副骨架：分组标题 + 卡片，控件都装在卡里（见 SettingBlock）
             SectionHeader("同步方式")

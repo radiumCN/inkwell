@@ -366,8 +366,8 @@ class AppPrefs(private val context: Context) {
             mode = p[Keys.THEME_MODE]
                 ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                 ?: ThemeMode.SYSTEM,
-            lightPreset = p[Keys.THEME_LIGHT] ?: AppThemes.LIGHT_PAPER,
-            darkPreset = p[Keys.THEME_DARK] ?: AppThemes.DARK_WARM,
+            lightPreset = p[Keys.THEME_LIGHT] ?: AppThemes.HYPEROS,
+            darkPreset = p[Keys.THEME_DARK] ?: AppThemes.HYPEROS,
             customLightSeed = p[Keys.CUSTOM_LIGHT_SEED] ?: default.customLightSeed,
             customLightBg = p[Keys.CUSTOM_LIGHT_BG] ?: default.customLightBg,
             customDarkSeed = p[Keys.CUSTOM_DARK_SEED] ?: default.customDarkSeed,

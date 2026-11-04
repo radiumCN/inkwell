@@ -44,7 +44,8 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  * 一旦开始收起，两个按钮都不再响应：从前点了「不加入」、退场动画还没播完时再点「加入」，
  * 两条路先后都跑 —— 刚加进书架的书又被「不加入」那条删掉。
  *
- * 页面不要再手搓居中 Surface 冒充弹层。从 N 项里选一个仍走 [OptionPickerSheet]，不走对话框。
+ * 页面不要再手搓居中 Surface 冒充弹层。从几项里选一个走原位弹出的列表（[SpinnerSettingRow] /
+ * [AppDropdownMenu]），不走对话框。
  */
 @Composable
 fun AppAlertDialog(
@@ -76,6 +77,7 @@ fun AppAlertDialog(
         onDismissRequest = { if (!confirmLoading && dismissEnabled) show = false },
         onDismissFinished = { if (viaCancel) latestCancel() else latestRequest() },
     ) {
+        DialogWindowBlur(visible = show)
         Column(Modifier.fillMaxWidth()) {
             if (text != null || content != null) {
                 Column(
