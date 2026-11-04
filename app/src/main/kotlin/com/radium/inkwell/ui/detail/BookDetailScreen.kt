@@ -45,6 +45,7 @@ import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.BookIntro
 import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.ui.components.ChapterListItem
+import com.radium.inkwell.ui.components.CoverHeaderBackground
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
@@ -54,8 +55,6 @@ import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.data.repo.OfflineDownload
 import com.radium.inkwell.data.repo.OfflineRange
-import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -99,12 +98,11 @@ fun BookDetailScreen(
             modifier = Modifier.topBarScroll(topBarScroll),
             topBar = {
                 // 双栏布局里详情页是右侧面板，没有返回键 —— onBack 传 null 就不画。
-                // 顶栏与头部渐变的起点同色（primaryContainer），两者之间不留一道色缝
+                // 顶栏是页面底色的玻璃：停在顶部时它糊的就是头部最上面那截封面，栏底边再渐进地化进头部（见 barBlur）
                 AppTopBar(
                     "书籍详情",
                     topBarScroll,
                     onBack = onBack.takeIf { showBack },
-                    containerColor = MiuixTheme.colorScheme.primaryContainer,
                 ) {
                     if (book?.type == BookType.NET) {
                         AppIconButton(
@@ -144,8 +142,8 @@ fun BookDetailScreen(
             // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
             val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
             // 只让开两侧：内容滚到玻璃顶栏与手势条下面（见 AppScaffold）。顶栏高度不进 contentPadding，
-            // 而是垫在头部**渐变里面**（Header 的 topInset）—— 顶栏底下取样到的就是渐变起点 primaryContainer，
-            // 与顶栏自己的底色一致，停在顶部时两者之间不留色缝
+            // 而是垫在头部的**封面底里面**（Header 的 topInset）—— 封面一直铺到顶栏底下，顶栏糊的就是它，
+            // 停在顶部时栏和头部之间不是一道页面底色的空白
             LazyColumn(
                 Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
                 state = listState,
@@ -257,10 +255,10 @@ private fun offlineRangeHint(range: OfflineRange): String = when (range) {
 }
 
 /**
- * 头部：封面、书名、阅读与缓存按钮、简介。底下铺一道从 primaryContainer 到页面底色（surface）的竖向渐变 ——
- * 封面色（或 App 强调色）从顶栏流下来，在目录开始的地方化进纸面，详情页就不再是一张白纸上贴一张封面。
+ * 头部：封面、书名、阅读与缓存按钮、简介。底下铺这本书的封面，渐进模糊、再化进页面底色（[CoverHeaderBackground]）——
+ * 封面的颜色从顶栏底下流下来，在目录开始的地方化进页面，详情页就不再是一张白纸上贴一张封面。
  *
- * [topInset]（顶栏高度）垫在渐变**里面**：渐变一直铺到玻璃顶栏底下，顶栏取样到的是同一个起点色。
+ * [topInset]（顶栏高度）垫在封面底**里面**：封面一直铺到玻璃顶栏底下，顶栏糊的就是它。
  */
 @Composable
 private fun Header(
@@ -273,81 +271,82 @@ private fun Header(
     onStartDownload: (OfflineRange) -> Unit,
     onCancelDownload: () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    Column(
-        Modifier
-            // 终点是页面底 surface（Miuix 的分层），与 Scaffold 画布同色，渐变化进去不留边
-            .background(Brush.verticalGradient(listOf(scheme.primaryContainer, scheme.surface)))
-            .padding(top = topInset)
-            .padding(Dimens.screenPadding),
-        verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
-    ) {
-        Row {
-            BookCover(
-                title = book.title,
-                coverModel = book.coverPath,
-                modifier = Modifier.size(
-                    width = Dimens.coverDetailWidth,
-                    height = Dimens.coverDetailHeight,
-                ),
-                placeholderChars = 4,
-                // 书名就在右边，封面不再进读屏
-                contentDescription = null,
-            )
-            Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
-                Text(
-                    book.title,
-                    style = MiuixTheme.textStyles.title3,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+    Box {
+        // 底的终点是页面底 surface（Miuix 的分层），与 Scaffold 画布同色，化进去不留边
+        CoverHeaderBackground(book.title, book.coverPath, Modifier.matchParentSize())
+        Column(
+            Modifier
+                .padding(top = topInset)
+                .padding(Dimens.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
+        ) {
+            Row {
+                BookCover(
+                    title = book.title,
+                    coverModel = book.coverPath,
+                    modifier = Modifier.size(
+                        width = Dimens.coverDetailWidth,
+                        height = Dimens.coverDetailHeight,
+                    ),
+                    placeholderChars = 4,
+                    // 书名就在右边，封面不再进读屏
+                    contentDescription = null,
                 )
-                if (book.author.isNotBlank()) {
+                Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                     Text(
-                        book.author,
-                        style = MiuixTheme.textStyles.body2,
+                        book.title,
+                        style = MiuixTheme.textStyles.title3,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (book.author.isNotBlank()) {
+                        Text(
+                            book.author,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    Text(
+                        "共 $chapterCount 章",
+                        style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
-                Text(
-                    "共 $chapterCount 章",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
             }
-        }
-        val readLabel = if (book.readAt > 0) "继续阅读" else "开始阅读"
-        if (book.type == BookType.NET) {
-            val running = download?.running == true
-            var offlineMenuOpen by remember { mutableStateOf(false) }
-            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.weight(1f))
-                // 缓存范围从按钮上弹出来选（每项下面一行说明从哪缓存到哪）
-                Box(Modifier.weight(1f)) {
-                    SecondaryButton(
-                        text = if (running) "缓存中…" else "离线缓存",
-                        onClick = { offlineMenuOpen = true },
-                        enabled = !running,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    AppDropdownMenu(
-                        expanded = offlineMenuOpen,
-                        onDismissRequest = { offlineMenuOpen = false },
-                        items = OfflineRange.entries.map { range ->
-                            AppMenuItem(
-                                text = range.label,
-                                summary = offlineRangeHint(range),
-                                onClick = { onStartDownload(range) },
-                            )
-                        },
-                    )
+            val readLabel = if (book.readAt > 0) "继续阅读" else "开始阅读"
+            if (book.type == BookType.NET) {
+                val running = download?.running == true
+                var offlineMenuOpen by remember { mutableStateOf(false) }
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                    PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.weight(1f))
+                    // 缓存范围从按钮上弹出来选（每项下面一行说明从哪缓存到哪）
+                    Box(Modifier.weight(1f)) {
+                        SecondaryButton(
+                            text = if (running) "缓存中…" else "离线缓存",
+                            onClick = { offlineMenuOpen = true },
+                            enabled = !running,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        AppDropdownMenu(
+                            expanded = offlineMenuOpen,
+                            onDismissRequest = { offlineMenuOpen = false },
+                            items = OfflineRange.entries.map { range ->
+                                AppMenuItem(
+                                    text = range.label,
+                                    summary = offlineRangeHint(range),
+                                    onClick = { onStartDownload(range) },
+                                )
+                            },
+                        )
+                    }
                 }
+                OfflineStatus(download, cachedCount, chapterCount, onCancelDownload)
+            } else {
+                PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.fillMaxWidth())
             }
-            OfflineStatus(download, cachedCount, chapterCount, onCancelDownload)
-        } else {
-            PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.fillMaxWidth())
+            val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
+            if (intro.isNotBlank()) BookIntro(intro)
         }
-        val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
-        if (intro.isNotBlank()) BookIntro(intro)
     }
 }
 

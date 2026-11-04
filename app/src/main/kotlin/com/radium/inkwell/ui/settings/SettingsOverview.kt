@@ -19,17 +19,18 @@ import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.data.prefs.WebDavConfig
+import com.radium.inkwell.ui.components.CoverGlassCard
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.formatRelativeTime
+import com.radium.inkwell.ui.stats.LatestRead
 import com.radium.inkwell.ui.stats.ReadingSummary
 import com.radium.inkwell.ui.stats.formatDuration
 import androidx.compose.ui.text.font.FontWeight
-import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.icon.extended.UploadCloud
 import top.yukonga.miuix.kmp.icon.extended.Report
@@ -42,13 +43,15 @@ import top.yukonga.miuix.kmp.icon.extended.CloudFill
  * 「3 小时前同步」—— 看得到，却做不了什么：想同步还得先点进 WebDAV 页再点按钮。放到一张卡上，
  * 看和做在同一处。
  *
- * 用 primaryContainer 铺底（淡强调色，Miuix 组件不读这个槽，保留的是 M3 时代的含义），与书架「继续阅读」卡、
- * 阅读记录「今天」卡同一种：一页上唯一带颜色的面。四角是与 Miuix 卡片同档的连续曲率圆角。
- * 文字统一 onPrimaryContainer，层级靠字号拉开；同步失败靠图标标出来，原因仍用同一种文字色 ——
- * 这块底色上没有对应的「报错色」令牌，红字放在上面对比度没保证。
+ * 底是最近在读那本书的封面毛玻璃（[CoverGlassCard]），与书架「继续阅读」卡、阅读记录「今天」卡同一种：
+ * 一页上唯一带颜色的面。[latestRead] 由调用方查好，**不含隐藏的书** —— 设置页里一个字都不提隐藏区，
+ * 藏起来的那本的封面铺在这里，等于把它摆到了最显眼的位置。null 是还在查；查完一本都没读过时退回实色卡。
+ * 文字统一一种颜色（玻璃给的 LocalContentColor），层级靠字号拉开；同步失败靠图标标出来，原因仍用同一种文字色 ——
+ * 玻璃上没有对应的「报错色」令牌，红字放在上面对比度没保证。
  */
 @Composable
 internal fun SettingsOverviewCard(
+    latestRead: LatestRead?,
     reading: ReadingSummary?,
     sync: WebDavConfig?,
     syncing: Boolean,
@@ -57,85 +60,89 @@ internal fun SettingsOverviewCard(
     onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val content = MiuixTheme.colorScheme.onPrimaryContainer
-    Column(
-        modifier
+    // 玻璃卡同时裁切：两行的按压反馈也被圈在圆角里
+    CoverGlassCard(
+        coverTitle = latestRead?.book?.title,
+        coverModel = latestRead?.book?.coverPath,
+        modifier = modifier
             .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS)
-            .fillMaxWidth()
-            // 底色 + 裁切一起做：两行的按压反馈也被圈在圆角里
-            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge),
+            .fillMaxWidth(),
+        pending = latestRead == null,
     ) {
-        // ---- 阅读 ----
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button, onClick = onOpenStats)
-                .padding(Dimens.gapL),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                Text(
-                    readingTitle(reading),
-                    style = MiuixTheme.textStyles.headline2,
-                    fontWeight = FontWeight.Medium,
-                    color = content,
-                )
-                readingSubtitle(reading)?.let {
-                    Text(it, style = MiuixTheme.textStyles.body2, color = content)
-                }
-            }
-            OverviewChevron(tint = content)
-        }
-
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = Dimens.gapL),
-            color = content.copy(alpha = 0.12f),
-        )
-
-        // ---- 同步 ----
-        val configured = sync?.isConfigured == true
-        val failed = sync != null && sync.lastSyncErrorAt > sync.lastSyncAt
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Button, onClick = onOpenWebDav)
-                .padding(start = Dimens.gapL, end = Dimens.gapM, top = Dimens.gapM, bottom = Dimens.gapM),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                when {
-                    !configured -> MiuixIcons.UploadCloud
-                    failed -> MiuixIcons.Report
-                    else -> MiuixIcons.CloudFill
-                },
-                contentDescription = null,
-                tint = content,
-                modifier = Modifier.size(Dimens.iconMd),
-            )
-            Column(
+        val content = LocalContentColor.current
+        Column(Modifier.fillMaxWidth()) {
+            // ---- 阅读 ----
+            Row(
                 Modifier
-                    .weight(1f)
-                    .padding(horizontal = Dimens.gapM),
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClick = onOpenStats)
+                    .padding(Dimens.gapL),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(syncTitle(sync, syncing), style = MiuixTheme.textStyles.body1, color = content)
-                syncSubtitle(sync, syncing)?.let {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
                     Text(
-                        it,
-                        style = MiuixTheme.textStyles.footnote1,
+                        readingTitle(reading),
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.Medium,
                         color = content,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
+                    readingSubtitle(reading)?.let {
+                        Text(it, style = MiuixTheme.textStyles.body2, color = content)
+                    }
                 }
-            }
-            if (configured) {
-                PrimaryButton(
-                    text = if (failed && !syncing) "重试" else "立即同步",
-                    onClick = onSyncNow,
-                    loading = syncing,
-                )
-            } else {
                 OverviewChevron(tint = content)
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = Dimens.gapL),
+                color = content.copy(alpha = 0.12f),
+            )
+
+            // ---- 同步 ----
+            val configured = sync?.isConfigured == true
+            val failed = sync != null && sync.lastSyncErrorAt > sync.lastSyncAt
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClick = onOpenWebDav)
+                    .padding(start = Dimens.gapL, end = Dimens.gapM, top = Dimens.gapM, bottom = Dimens.gapM),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    when {
+                        !configured -> MiuixIcons.UploadCloud
+                        failed -> MiuixIcons.Report
+                        else -> MiuixIcons.CloudFill
+                    },
+                    contentDescription = null,
+                    tint = content,
+                    modifier = Modifier.size(Dimens.iconMd),
+                )
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(horizontal = Dimens.gapM),
+                ) {
+                    Text(syncTitle(sync, syncing), style = MiuixTheme.textStyles.body1, color = content)
+                    syncSubtitle(sync, syncing)?.let {
+                        Text(
+                            it,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = content,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (configured) {
+                    PrimaryButton(
+                        text = if (failed && !syncing) "重试" else "立即同步",
+                        onClick = onSyncNow,
+                        loading = syncing,
+                    )
+                } else {
+                    OverviewChevron(tint = content)
+                }
             }
         }
     }

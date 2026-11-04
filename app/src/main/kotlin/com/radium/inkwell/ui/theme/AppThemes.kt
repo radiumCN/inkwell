@@ -299,7 +299,7 @@ object AppThemes {
     /**
      * HyperOS 预设的配色：Miuix 默认配色，只动四个槽。
      * - `primaryContainer` / `onPrimaryContainer`：Miuix 组件不读，我们的页面按 M3 的含义用（淡强调底 + 深强调字：
-     *   设置概览卡、继续阅读卡），而 Miuix 默认值是一块饱和蓝配白字，铺满一张卡太抢眼。照 [schemeFrom] 的推法算。
+     *   封面玻璃卡还没书可铺时退回的实色卡），而 Miuix 默认值是一块饱和蓝配白字，铺满一张卡太抢眼。照 [schemeFrom] 的推法算。
      * - `onBackgroundVariant`（分组小标题）、`onTertiaryContainer`（选中 chip、下拉菜单选中项的蓝字）：
      *   Miuix 默认值只有约 2.9:1 / 3.4:1，低于正文 4.5:1 的底线（AppThemesTest 钉着）。各自往深处推到刚好够，
      *   色相不变 —— 看上去仍是那个灰蓝小标题和那个蓝。
@@ -325,11 +325,14 @@ object AppThemes {
     }
 
     /**
-     * [color] 放在 [on] 上不够 4.5:1 时，往远离底色的一端（浅底往黑、深底往白）一点点推。
-     * 淡强调底上的强调色字（下拉菜单选中项）、深色提示胶囊上的操作键（AppSnackbar）都要读得清。
+     * [color] 放在 [on] 上不够 4.5:1 时，往远离底色的一端（黑白里对比更高的那头）一点点推。
+     * 淡强调底上的强调色字（下拉菜单选中项）、提示胶囊上的操作键（AppSnackbar）都要读得清。
+     *
+     * 往哪头推按「黑、白谁在这块底上对比更高」定，不按亮度过不过 0.5：两者打平的地方在相对亮度 0.18 左右，
+     * 0.18~0.5 之间的中灰底（深色主题的浅色玻璃胶囊透出底下的黑）按 0.5 判会往白推，推到纯白也够不上 4.5:1。
      */
     fun readableOn(color: Color, on: Color): Color {
-        val target = if (on.luminance() > 0.5f) Color.Black else Color.White
+        val target = if (contrast(Color.Black, on) >= contrast(Color.White, on)) Color.Black else Color.White
         var t = 0f
         var c = color
         while (contrast(c, on) < 4.5f && t < 1f) {

@@ -1,0 +1,142 @@
+package com.radium.inkwell.ui.components
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import com.radium.inkwell.ui.theme.AppThemes
+import top.yukonga.miuix.kmp.theme.Colors
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * 封面毛玻璃上的字读不读得清。
+ *
+ * 渐进模糊清楚的那一头，字底下就是封面原图，所以按**最坏的封面**算：浅色主题的字是深色，最坏是一张纯黑封面；
+ * 深色主题反过来是纯白。只算薄底叠在封面上，不算 Colored Thick 混色 —— 那组混色在浅色下只会把黑往亮处提、
+ * 深色下只会把白往暗处压，都是帮字的，不算它是往保守里算。
+ */
+class CoverGlassTest {
+
+    private fun contrast(a: Color, b: Color): Float {
+        val l1 = maxOf(a.luminance(), b.luminance()) + 0.05f
+        val l2 = minOf(a.luminance(), b.luminance()) + 0.05f
+        return l1 / l2
+    }
+
+    /** 半透明前景叠到不透明底色上的实际颜色（sRGB 里混，和 Compose 画出来的一样） */
+    private fun over(fg: Color, bg: Color): Color = Color(
+        red = fg.red * fg.alpha + bg.red * (1 - fg.alpha),
+        green = fg.green * fg.alpha + bg.green * (1 - fg.alpha),
+        blue = fg.blue * fg.alpha + bg.blue * (1 - fg.alpha),
+    )
+
+    private fun worstCover(dark: Boolean) = if (dark) Color.White else Color.Black
+
+    /** 预设 + 几组极端的自定义配色（与 AppThemesTest 同一批） */
+    private val schemes = buildList {
+        AppThemes.lightPresets.forEach { add(it.scheme to false) }
+        AppThemes.darkPresets.forEach { add(it.scheme to true) }
+        listOf(
+            Triple(Color(0xFF92400E), Color(0xFFFFFBEB), false),
+            Triple(Color(0xFF2B3A55), Color(0xFFFFFFFF), false),
+            Triple(Color(0xFFE8A33D), Color(0xFF17140F), true),
+            Triple(Color(0xFF9E9E9E), Color(0xFF000000), true),
+            Triple(Color(0xFF00BCD4), Color(0xFFF0FDFF), false),
+        ).forEach { (seed, bg, dark) -> add(AppThemes.schemeFrom(seed, bg, dark) to dark) }
+    }
+
+    /** [text] 压在「[base] 色以 alpha 叠在最坏封面上」的底上，够不够 4.5:1 */
+    private fun readable(text: Color, base: Color, alpha: Float, dark: Boolean): Boolean {
+        val bg = over(base.copy(alpha = alpha), worstCover(dark))
+        return contrast(over(text, bg), bg) >= 4.5f
+    }
+
+    /** 这套配色里，薄底最少要多厚这几种字才都读得清（二分到千分之一） */
+    private fun minAlpha(base: Color, texts: List<Color>, dark: Boolean): Float {
+        var lo = 0f
+        var hi = 1f
+        repeat(10) {
+            val mid = (lo + hi) / 2
+            if (texts.all { readable(it, base, mid, dark) }) hi = mid else lo = mid
+        }
+        return hi
+    }
+
+    /** 浅色、深色各自最难的那套配色要多厚；常量必须不比它薄。失败信息里直接报出要改成多少 */
+    private fun assertVeil(name: String, light: Float, dark: Float, need: (Colors, Boolean) -> Float) {
+        for ((isDark, actual) in listOf(false to light, true to dark)) {
+            val worst = schemes.filter { it.second == isDark }.maxOf { (s, d) -> need(s, d) }
+            assertTrue(
+                actual >= worst,
+                "$name（${if (isDark) "深色" else "浅色"}）薄底 $actual 不够，最难的配色要 ${"%.3f".format(worst)}",
+            )
+        }
+    }
+
+    @Test
+    fun `玻璃卡上的字压在最坏的封面上也够 4点5 比 1`() {
+        assertVeil("玻璃卡正文", CARD_VEIL_LIGHT, CARD_VEIL_DARK) { s, dark ->
+            minAlpha(s.surfaceContainer, listOf(s.onSurface), dark)
+        }
+        // coverGlassVeil 用的就是这两个常量
+        schemes.forEach { (s, dark) ->
+            assertTrue(readable(s.onSurface, s.surfaceContainer, coverGlassVeil(s.surfaceContainer, dark).alpha, dark))
+        }
+    }
+
+    @Test
+    fun `详情页头部最淡的小字压在最坏的封面上也够 4点5 比 1`() {
+        // 书名 onSurface、作者与章数 onSurfaceVariantSummary、简介 onSurfaceSecondary
+        assertVeil("详情页头部", HEADER_VEIL_LIGHT, HEADER_VEIL_DARK) { s, dark ->
+            minAlpha(s.surface, listOf(s.onSurface, s.onSurfaceVariantSummary, s.onSurfaceSecondary), dark)
+        }
+        schemes.forEach { (s, dark) ->
+            val alpha = coverHeaderVeil(s.surface, dark).alpha
+            assertTrue(readable(s.onSurfaceVariantSummary, s.surface, alpha, dark))
+        }
+    }
+
+    @Test
+    fun `毛玻璃提示胶囊上的正文与操作键压在最坏的页面上也够 4点5 比 1`() {
+        // 胶囊色是 onSecondaryVariant（浅色主题近黑、深色主题近白），最坏的页面内容是和它反着的那一片纯色。
+        // 正文定了叠多厚；操作键的颜色是按这块最坏的底现推的（AppSnackbar），推完也得够
+        for (isDark in listOf(false, true)) {
+            val worst = schemes.filter { it.second == isDark }.maxOf { (s, _) ->
+                val container = s.onSecondaryVariant
+                val under = if (container.luminance() < 0.5f) Color.White else Color.Black
+                var lo = 0f
+                var hi = 1f
+                repeat(10) {
+                    val mid = (lo + hi) / 2
+                    if (contrast(s.secondaryVariant, over(container.copy(alpha = mid), under)) >= 4.5f) hi = mid else lo = mid
+                }
+                hi
+            }
+            assertTrue(
+                SNACKBAR_GLASS_ALPHA >= worst,
+                "提示胶囊正文（${if (isDark) "深色" else "浅色"}）叠色 $SNACKBAR_GLASS_ALPHA 不够，最难的配色要 ${"%.3f".format(worst)}",
+            )
+        }
+        schemes.forEach { (s, dark) ->
+            val floor = snackbarGlassFloor(s.onSecondaryVariant)
+            val action = AppThemes.readableOn(s.primary, floor)
+            assertTrue(contrast(s.secondaryVariant, floor) >= 4.5f, "提示胶囊正文对比不足 dark=$dark")
+            assertTrue(contrast(action, floor) >= 4.5f, "提示胶囊操作键推不到 4.5:1 dark=$dark action=$action")
+        }
+    }
+
+    @Test
+    fun `顶栏只在底边那一条里淡出`() {
+        val fade = 48f
+        // 收起的窄栏（状态栏 + 52dp，约 3 倍密度）：满强度一直到离底边 fade 处
+        val collapsed = barFadeGradient(heightPx = 288f, fadePx = fade)
+        assertEquals(1f - fade / 288f, collapsed.startFraction, 1e-4f)
+        assertEquals(1f, collapsed.endFraction)
+        // 展开的大标题栏更高，淡出带的绝对高度不变
+        val expanded = barFadeGradient(heightPx = 480f, fadePx = fade)
+        assertEquals(fade, (expanded.endFraction - expanded.startFraction) * 480f, 1e-2f)
+        // 还没量出来 / 矮过淡出带：整条都在淡，起止点也不能相等（ProgressiveBlur 不收）
+        assertEquals(0f, barFadeGradient(heightPx = 0f, fadePx = fade).startFraction)
+        assertEquals(0f, barFadeGradient(heightPx = 30f, fadePx = fade).startFraction)
+    }
+}

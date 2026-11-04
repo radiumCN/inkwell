@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.stats
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.dao.BookDao
+import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.repo.ReadingStatsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -13,6 +14,13 @@ import kotlinx.coroutines.flow.stateIn
 import java.time.LocalDate
 
 data class TopBook(val title: String, val author: String, val millis: Long)
+
+/**
+ * 「最近在读、没藏起来的那一本」（[BookDao.observeLatestRead]）查回来的结果：阅读记录「今天」卡与设置页概览卡
+ * 拿它的封面铺底。外面再包一层，是为了和「还没查回来」分开 —— 流的初始值 null 是还在查，[book] 为 null
+ * 才是查过了、一本都没有（见 CoverGlassCard 的 pending）。
+ */
+data class LatestRead(val book: BookEntity?)
 
 data class ReadingStatsUi(
     val today: LocalDate,
@@ -33,6 +41,11 @@ class ReadingStatsViewModel(
             ReadingStatsUi(today, summary, topBooks(summary))
         }
         .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** 「今天」卡铺底的封面：最近在读、没藏起来的那一本（隐藏的书不露面，理由同 [topBooks]）。null = 还在查 */
+    val latestRead: StateFlow<LatestRead?> = bookDao.observeLatestRead()
+        .map(::LatestRead)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**

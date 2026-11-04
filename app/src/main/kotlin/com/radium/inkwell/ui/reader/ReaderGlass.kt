@@ -8,6 +8,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.textureBlur
 
 /**
@@ -23,9 +24,18 @@ import top.yukonga.miuix.kmp.blur.textureBlur
  * 小字上。25dp 只够把那一行字糊成一块边界清楚的灰影，恰好垫在返回键和书名后面，装上后被看成「返回键外面套了个容器」。
  * 半径放大到一行字的好几倍，它就摊成看不出形状的一层薄雾；正文那几行在底栏下面也一样，摊成均匀的一层。
  * [backdrop] 为 null 时原样返回，调用方给实色底。
+ *
+ * [highlight] 是玻璃边缘那圈高光（Miuix 示例的 Small Container 档，[smallGlassHighlight]）：只给**浮起来的**玻璃
+ * （选字后的药丸、替换表单），[shape] 要和看得见的轮廓同一条线，高光才不会在角上被裁掉。贴边的通栏（菜单顶栏、底栏）不给 ——
+ * 一条通栏四周描一圈亮线，看上去像个框。
  */
 @Composable
-internal fun Modifier.readerGlass(backdrop: LayerBackdrop?, shape: Shape, tint: Color): Modifier {
+internal fun Modifier.readerGlass(
+    backdrop: LayerBackdrop?,
+    shape: Shape,
+    tint: Color,
+    highlight: Highlight? = null,
+): Modifier {
     if (backdrop == null) return this
     val colors = BlurDefaults.blurColors(
         blendColors = listOf(BlendColorEntry(color = tint.copy(alpha = READER_GLASS_TINT_ALPHA))),
@@ -35,6 +45,7 @@ internal fun Modifier.readerGlass(backdrop: LayerBackdrop?, shape: Shape, tint: 
         shape = shape,
         blurRadius = READER_GLASS_BLUR_RADIUS,
         colors = colors,
+        highlight = highlight,
     )
 }
 

@@ -26,17 +26,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.CoverGlassCard
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ReadingProgressMeter
 import com.radium.inkwell.ui.components.formatRelativeTime
-import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.radium.inkwell.ui.components.tiltOnPress
 
 /**
  * 书架顶上的「继续阅读」：最近在读的那本放大摆出来，点一下回到上次的位置。
@@ -48,8 +51,9 @@ import top.yukonga.miuix.kmp.squircle.squircleSurface
  * 卡片在时这本书不再在网格里重复一格（见 BookshelfScreen），所以网格封面上的那几样标记
  * —— 追更角标、隐藏标记 —— 卡片得自己画，不然这本书的「有 3 章更新」就没地方看了。
  *
- * 用 primaryContainer 铺底：它是书架上唯一一块带颜色的面，一眼就能落上去；文字统一 onPrimaryContainer，
- * 层级靠字号拉开 —— 这块底色上没有对应的「次要文字」令牌，硬套 onSurfaceVariantSummary 对比度不保证。
+ * 底是这本书自己的封面毛玻璃（[CoverGlassCard]）：书架上唯一一块带颜色的面，一眼就能落上去，颜色还是这本书的。
+ * 文字统一一种颜色（玻璃给的 LocalContentColor），层级靠字号拉开 —— 半透明的玻璃上没有对应的「次要文字」令牌，
+ * 硬套 onSurfaceVariantSummary 对比度不保证。
  *
  * 交互与网格里的书一致：点开进书（从这张封面展开）、长按从卡片上弹出同一个操作菜单。
  */
@@ -63,107 +67,117 @@ internal fun ContinueReadingCard(
 ) {
     val book = entry.book
     val cover = remember { CoverAnchor() }
-    val content = MiuixTheme.colorScheme.onPrimaryContainer
     val progress = book.readingProgress()
     val chapterLine = entry.chapterTitle?.takeIf { it.isNotBlank() }
         ?: "第 ${book.readChapterIndex + 1} 章"
-    Row(
-        modifier
-            .fillMaxWidth()
-            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge)
-            // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
-            .semantics(mergeDescendants = true) {}
-            .combinedClickable(
-                role = Role.Button,
-                onClick = { onClick(cover.boundsInWindow()) },
-                onLongClick = onLongClick,
-            )
-            .padding(Dimens.gapL),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+    // 按下时整张玻璃卡朝按住的那个角倾一下（见 tiltOnPress）：反馈挂在卡片外层，点击在里面那行，共用这一个源
+    val press = remember { MutableInteractionSource() }
+    CoverGlassCard(
+        coverTitle = book.title,
+        coverModel = book.coverPath,
+        modifier = modifier.fillMaxWidth().tiltOnPress(press),
+        tiltHighlight = true,
     ) {
-        Box(Modifier.size(Dimens.coverDetailWidth, Dimens.coverDetailHeight)) {
-            BookCover(
-                title = book.title,
-                coverModel = book.coverPath,
-                modifier = Modifier
-                    .matchParentSize()
-                    .onPlaced { cover.coordinates = it },
-                placeholderChars = 14,
-                // 书名就在旁边，封面不再进读屏
-                contentDescription = null,
-            )
-            // 与网格书卡同一套标记：隐藏区展开时看得出它是藏着的，追更后看得出有几章新的
-            if (book.hidden) {
-                Icon(
-                    MiuixIcons.Hide,
-                    contentDescription = "已隐藏",
+        val content = LocalContentColor.current
+        Row(
+            Modifier
+                .fillMaxWidth()
+                // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
+                .semantics(mergeDescendants = true) {}
+                .combinedClickable(
+                    interactionSource = press,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClick = { onClick(cover.boundsInWindow()) },
+                    onLongClick = onLongClick,
+                )
+                .padding(Dimens.gapL),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+        ) {
+            Box(Modifier.size(Dimens.coverDetailWidth, Dimens.coverDetailHeight)) {
+                BookCover(
+                    title = book.title,
+                    coverModel = book.coverPath,
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(Dimens.gapXS)
-                        .size(Dimens.iconSm),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        .matchParentSize()
+                        .onPlaced { cover.coordinates = it },
+                    placeholderChars = 14,
+                    // 书名就在旁边，封面不再进读屏
+                    contentDescription = null,
+                )
+                // 与网格书卡同一套标记：隐藏区展开时看得出它是藏着的，追更后看得出有几章新的
+                if (book.hidden) {
+                    Icon(
+                        MiuixIcons.Hide,
+                        contentDescription = "已隐藏",
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(Dimens.gapXS)
+                            .size(Dimens.iconSm),
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+                if (book.newChapterCount > 0) {
+                    Badge(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(Dimens.gapXS)
+                            // 卡片合并了语义，光秃秃的「3」读屏听不懂：给它一句完整的话
+                            .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
+                        containerColor = MiuixTheme.colorScheme.error,
+                        contentColor = MiuixTheme.colorScheme.onError,
+                    ) {
+                        Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
+                    }
+                }
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .height(Dimens.coverDetailHeight),
+            ) {
+                Text("继续阅读", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
+                Text(
+                    book.title,
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Medium,
+                    color = content,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = Dimens.gapXS),
+                )
+                Text(
+                    chapterLine,
+                    style = MiuixTheme.textStyles.body2,
+                    color = content,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Box(Modifier.weight(1f))
+                if (progress != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ReadingProgressMeter(
+                            progress = progress,
+                            color = content,
+                            trackColor = content.copy(alpha = 0.16f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            formatProgressPercent(progress),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = content,
+                            modifier = Modifier.padding(start = Dimens.gapS),
+                        )
+                    }
+                }
+                Text(
+                    "上次阅读 · ${formatRelativeTime(book.lastActiveAt())}",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = content,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = Dimens.gapXS),
                 )
             }
-            if (book.newChapterCount > 0) {
-                Badge(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(Dimens.gapXS)
-                        // 卡片合并了语义，光秃秃的「3」读屏听不懂：给它一句完整的话
-                        .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
-                    containerColor = MiuixTheme.colorScheme.error,
-                    contentColor = MiuixTheme.colorScheme.onError,
-                ) {
-                    Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
-                }
-            }
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .height(Dimens.coverDetailHeight),
-        ) {
-            Text("继续阅读", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
-            Text(
-                book.title,
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.Medium,
-                color = content,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = Dimens.gapXS),
-            )
-            Text(
-                chapterLine,
-                style = MiuixTheme.textStyles.body2,
-                color = content,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Box(Modifier.weight(1f))
-            if (progress != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ReadingProgressMeter(
-                        progress = progress,
-                        color = content,
-                        trackColor = content.copy(alpha = 0.16f),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        formatProgressPercent(progress),
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = content,
-                        modifier = Modifier.padding(start = Dimens.gapS),
-                    )
-                }
-            }
-            Text(
-                "上次阅读 · ${formatRelativeTime(book.lastActiveAt())}",
-                style = MiuixTheme.textStyles.footnote1,
-                color = content,
-                maxLines = 1,
-                modifier = Modifier.padding(top = Dimens.gapXS),
-            )
         }
     }
 }

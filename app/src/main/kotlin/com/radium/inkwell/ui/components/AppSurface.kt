@@ -6,11 +6,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.LocalContentColor
@@ -54,6 +61,22 @@ fun Modifier.squircleSurface(color: Color, corners: SquircleCorners): Modifier =
     } else {
         this.squircleSurface(color, corners.topStart, corners.topEnd, corners.bottomEnd, corners.bottomStart)
     }
+
+/**
+ * Miuix squircle 轮廓的 [Shape]：和 squircle 修饰符同一条曲线（`addSquircleRect`，Miuix 自己拿它对齐着色器那条边）。
+ *
+ * **只给要 Shape 参数的地方用**，目前是毛玻璃（[CoverGlassCard]）：玻璃的边缘高光沿 shape 画，给直角的话
+ * 高光在四个角被外面的 squircleClip 裁掉一截。裁切与底色仍用 squircle 修饰符 —— 那是着色器遮罩、边缘抗锯齿；
+ * 这里是路径，拿来 clip 整块内容不如修饰符。
+ */
+fun squircleShape(radius: Dp): Shape = SquircleShape(radius)
+
+private data class SquircleShape(val radius: Dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Generic(
+            Path().apply { addSquircleRect(size.width, size.height, with(density) { radius.toPx() }) },
+        )
+}
 
 /**
  * 带圆角的「面」：Miuix `Surface` 的 squircle 版。提示条、阅读页的小提示、主题预览这类不是卡片、

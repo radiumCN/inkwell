@@ -12,6 +12,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppThemes
@@ -24,6 +26,9 @@ import top.yukonga.miuix.kmp.basic.SnackbarData
 import top.yukonga.miuix.kmp.basic.SnackbarHost
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.BlurDefaults
+import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -74,6 +79,11 @@ fun CollectMessages(bus: MessageBus, snackbar: SnackbarHostState) {
  * - 圆角走 [AppShapes.extraLarge]；**不投影**，靠深浅对比浮起；
  * - 正文用 body2，操作键用强调色 —— 但要**推到胶囊上读得清**：浅色主题的强调色本就是深色（暖纸的墨褐），
  *   直接放在近黑的胶囊上只有约 1.9:1。M3 时代用 inversePrimary 解决，Miuix 没有这个槽，这里现场推一档。
+ *
+ * 在 [AppScaffold] 里时胶囊是**毛玻璃**：对页面内容取样模糊（与顶栏同一个图层），胶囊色只叠
+ * [SNACKBAR_GLASS_ALPHA]，再描一圈 Small 档的边缘高光 —— 浮在页面上的一颗玻璃，而不是贴上去的一块色。
+ * 叠多厚由 CoverGlassTest 按最坏的页面内容（深色胶囊下面一片纯白、浅色胶囊下面一片纯黑）算出来，
+ * 正文和操作键都还够 4.5:1。不在 AppScaffold 里（没有可取样的图层）时照旧实色。
  */
 @Composable
 fun AppSnackbar(
@@ -84,11 +94,29 @@ fun AppSnackbar(
     val scheme = MiuixTheme.colorScheme
     val scope = rememberCoroutineScope()
     val container = scheme.onSecondaryVariant
-    val action = remember(scheme.primary, container) { AppThemes.readableOn(scheme.primary, container) }
+    val backdrop = LocalBarBackdrop.current
+    // 玻璃胶囊的操作键按「最坏的页面透上来」那种底推：实色胶囊上刚好够 4.5:1 的颜色，胶囊一透就不够了
+    val actionOn = if (backdrop != null) snackbarGlassFloor(container) else container
+    val action = remember(scheme.primary, actionOn) { AppThemes.readableOn(scheme.primary, actionOn) }
+    val glass = if (backdrop != null) {
+        val shape = remember { squircleShape(AppShapes.radiusExtraLarge) }
+        val colors = BlurDefaults.blurColors(
+            blendColors = listOf(BlendColorEntry(color = container.copy(alpha = SNACKBAR_GLASS_ALPHA))),
+        )
+        Modifier.textureBlur(
+            backdrop = backdrop,
+            shape = shape,
+            blurRadius = SNACKBAR_GLASS_BLUR_RADIUS,
+            colors = colors,
+            highlight = smallGlassHighlight(dark = container.luminance() < 0.5f),
+        )
+    } else {
+        Modifier
+    }
     AppSurface(
         cornerRadius = AppShapes.radiusExtraLarge,
-        modifier = modifier,
-        color = container,
+        modifier = modifier.then(glass),
+        color = if (backdrop != null) Color.Transparent else container,
         contentColor = scheme.secondaryVariant,
     ) {
         Row(
@@ -120,6 +148,26 @@ fun AppSnackbar(
         }
     }
 }
+
+/** 毛玻璃胶囊上叠的胶囊色（见 [AppSnackbar]）。CoverGlassTest 算出最难的配色要多少，这里往上取整 */
+internal const val SNACKBAR_GLASS_ALPHA = 0.85f
+
+/**
+ * 玻璃胶囊最坏时的底色：胶囊色叠 [SNACKBAR_GLASS_ALPHA] 压在和它反着的一片纯色上（深色胶囊下面纯白、
+ * 浅色胶囊下面纯黑）。操作键的颜色按它推，正文的对比度也按它测
+ */
+internal fun snackbarGlassFloor(container: Color): Color {
+    val under = if (container.luminance() < 0.5f) Color.White else Color.Black
+    val a = SNACKBAR_GLASS_ALPHA
+    return Color(
+        red = container.red * a + under.red * (1 - a),
+        green = container.green * a + under.green * (1 - a),
+        blue = container.blue * a + under.blue * (1 - a),
+    )
+}
+
+/** dp。胶囊小、底下多半是一行行字，糊得狠些才摊成一层看不出字形的雾（同阅读菜单的道理） */
+private const val SNACKBAR_GLASS_BLUR_RADIUS = 60f
 
 /**
  * 替代裸 `SnackbarHost`：把 [AppSnackbar] 居中托起（Miuix [SnackbarHost]，[SnackbarHostState] 也是 Miuix 的那个）。
