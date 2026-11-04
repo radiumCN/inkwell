@@ -19,17 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import com.radium.inkwell.ui.components.formatRelativeTime
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,8 +58,18 @@ import com.radium.inkwell.util.LocalNetworkAccess
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import com.radium.inkwell.ui.components.AppFormField
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Hide
+import top.yukonga.miuix.kmp.icon.extended.Show
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -187,8 +187,8 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
         SettingBlock {
             Text(
                 "已连接官方同步" + state.officialEmail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurface,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
                 PrimaryButton(
@@ -251,16 +251,15 @@ private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
                 } else {
                     "暂未开放新账号，已有账号仍可用邮箱验证码登录。"
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            OutlinedTextField(
+            AppFormField(
                 value = state.email,
                 onValueChange = viewModel::setEmail,
-                label = { Text("邮箱") },
+                label = "邮箱",
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                modifier = Modifier.fillMaxWidth(),
             )
             CodeRow(state, viewModel)
             PrimaryButton(
@@ -280,28 +279,28 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
     SectionHeader("服务器")
     SettingGroup {
         SettingBlock {
-            OutlinedTextField(
+            // 例子放在框里当提示，「服务器地址」退到框上方做标题（AppFormField 有 placeholder 时的排法）：
+            // 一个现成的地址比一行「地址」好懂
+            AppFormField(
                 value = state.url,
                 onValueChange = viewModel::setUrl,
-                label = { Text("服务器地址") },
-                placeholder = { Text("https://dav.jianguoyun.com/dav/") },
+                label = "服务器地址",
+                placeholder = "https://dav.jianguoyun.com/dav/",
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth(),
             )
             if (state.url.isNotBlank() && !state.url.trim().startsWith("https://", ignoreCase = true)) {
                 Text(
                     "该地址不是 HTTPS，账号与密码将以明文在网络上传输。公网请务必改用 https://",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.error,
                 )
             }
-            OutlinedTextField(
+            AppFormField(
                 value = state.davUsername,
                 onValueChange = viewModel::setDavUsername,
-                label = { Text("账号") },
+                label = "账号",
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
             )
             SecretField(
                 value = state.davPassword,
@@ -342,7 +341,7 @@ private fun SyncFooter(state: WebDavUiState) {
     if (state.lastSyncErrorAt > state.lastSyncAt) {
         SettingFootnote(
             "上次同步失败（${formatRelativeTime(state.lastSyncErrorAt)}）：${state.lastSyncError}",
-            color = MaterialTheme.colorScheme.error,
+            color = MiuixTheme.colorScheme.error,
         )
     }
     if (state.lastSyncAt > 0) {
@@ -365,14 +364,16 @@ private fun OfficialPrivacyNote() {
 
 @Composable
 private fun CodeRow(state: WebDavUiState, viewModel: WebDavViewModel) {
+    // 按钮与输入框垂直居中：Miuix 的输入框没有 M3 描边框那截浮在上沿的 label，不必再给按钮垫顶
     Row(
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        OutlinedTextField(
+        AppFormField(
             value = state.code,
             onValueChange = viewModel::setCode,
-            label = { Text("验证码") },
+            label = "验证码",
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.weight(1f),
@@ -381,7 +382,6 @@ private fun CodeRow(state: WebDavUiState, viewModel: WebDavViewModel) {
             text = if (state.codeWait > 0) "${state.codeWait}s" else "发送验证码",
             onClick = viewModel::sendCode,
             enabled = !state.busy && state.codeWait == 0,
-            modifier = Modifier.padding(top = Dimens.gapS),
         )
     }
 }
@@ -393,21 +393,20 @@ private fun SecretField(
     label: String,
 ) {
     var visible by remember { mutableStateOf(false) }
-    OutlinedTextField(
+    AppFormField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = label,
         singleLine = true,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
             AppIconButton(onClick = { visible = !visible }) {
                 Icon(
-                    if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    if (visible) MiuixIcons.Hide else MiuixIcons.Show,
                     contentDescription = if (visible) "隐藏密码" else "显示密码",
                 )
             }
         },
-        modifier = Modifier.fillMaxWidth(),
     )
 }
 
@@ -441,8 +440,8 @@ private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
         if (copiedLabel != null) {
             Text(
                 "已复制$copiedLabel",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
             )
         }
     }
@@ -451,11 +450,16 @@ private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
 @Composable
 private fun CopyRow(label: String, value: String, copied: Boolean, onCopy: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(
+            label,
+            style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.primary,
+        )
         Text(
             value.ifBlank { "—" },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurface,
         )
         SecondaryButton(
             text = if (copied) "已复制" else "复制$label",

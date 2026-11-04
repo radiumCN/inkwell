@@ -1,93 +1,67 @@
 package com.radium.inkwell.ui.theme
 
-import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.animationsEnabled
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
 
-/**
- * M3 形状刻度（含 Expressive Dialog / Sheet / Snackbar 用的 extraLarge）。
- * `extraLarge` 用 28dp —— 与 Material 3 `AlertDialogDefaults` / 大面板规范一致；
- * 从前 24dp 会让对话框看起来比官方 Expressive 样例「方」一截。
- */
-private val InkwellShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
-)
-
-/**
- * 系统「移除动画」开启时顶替掉整套 [MotionScheme]：M3 组件内部动画（Sheet 的滑入、Switch 的
- * 拇指位移、Chip 的选中过渡……）全部拿到 0 时长的 spec，于是跟着一起静止。
- *
- * 从前这类框架内建动画是**逃出**无障碍约束的 —— `Motion.kt` 只管我们自己写的动画，组件内部
- * 没有公开定制口。M3 Expressive 把 `MotionScheme` 变成主题的一等参数，这个缺口才补上。
- *
- * 六个 spec 全给 `tween(0)`：spatial（位移/尺寸）与 effects（透明度/颜色）两类、快中慢三档，
- * 都是「立刻到位」。
- */
-private object InstantMotionScheme : MotionScheme {
-    override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
-    override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
-    override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = tween(0)
-    override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
-    override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
-    override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = tween(0)
-}
-
-/**
- * Inkwell 全局主题：按用户主题配置解析配色（模式 + 预设/自定义日夜主题）。
- * 页面颜色一律走 MaterialTheme 语义令牌。
- *
- * 用 [MaterialExpressiveTheme] 而非 `MaterialTheme`：它把 M3 Expressive 的组件默认值与
- * 动效方案打开（`LocalUsingExpressiveTheme`）。配色仍由 [AppThemes] 从「强调色 + 背景色」
- * 推导、圆角仍用 [InkwellShapes] —— Expressive 换的是组件形态与动效，不是我们的令牌体系。
- *
- * `motionScheme` **必须显式传**：它的默认值是 `null`，而 `null` 的含义是「沿用外层
- * `MaterialTheme` 的方案」，不是「填 expressive」—— 根节点没有外层，拿到的是
- * `MaterialTheme.Values` 的默认值 `MotionScheme.standard()`。省掉这个参数的结果是
- * 组件形态换成了 Expressive、动效还是 standard，编译和单测都看不出来。
- *
- * 注意：另一处主题入口 [com.radium.inkwell.ui.reader.ReaderThemeScope] 也必须是
- * Expressive 版，否则进阅读页会把这个开关重新关掉。
- *
- * 根上包一层 [Surface](color = background)：NavDisplay 的 shared-axis 旧页只让出 1/4，
- * 缝隙里没有别的 Compose 节点可画；若不铺底色，就会透到 Activity 的 windowBackground。
- * 以前那是纯白，深色主题下滑一下整条发白。
- */
 /**
  * 当前生效的配色（含「跟随壁纸」）。MainActivity 拿它设窗体底色与系统栏明暗、[InkwellTheme] 拿它铺整树 ——
  * 两处必须是同一个结果，否则选了壁纸配色后窗体底色还是预设的，转场缝隙里露出另一种颜色。
  *
  * 自定义主题的整套配色是现推导出来的（几十个槽位的颜色混合）：remember 住，别每次重组都推一遍。
  * 换壁纸时系统会重建 Activity，这里跟着重新取，不必自己监听。
+ *
+ * 壁纸配色交给 Miuix 的 [ThemeController]（Monet 模式、不给 keyColor）：它在 Android 13+ 读系统调色板的
+ * 种子色与风格（TONAL_SPOT / VIBRANT…）再生成，12 读系统 accent/neutral 资源，更老的系统给一套默认紫 ——
+ * 和 M3 `dynamicLightColorScheme` 是同一个来源，只是直接落成 Miuix 的槽位。
+ * 别在别处直接调 [AppThemes.resolve]：那样会漏掉壁纸配色。
  */
 @Composable
-fun rememberResolvedScheme(config: ThemeConfig, systemDark: Boolean): Pair<ColorScheme, Boolean> {
-    val context = LocalContext.current
-    return remember(config, systemDark, context) {
-        AppThemes.resolve(config, systemDark) { dark ->
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
+fun rememberResolvedScheme(config: ThemeConfig, systemDark: Boolean): Pair<Colors, Boolean> {
+    val dark = AppThemes.isDark(config.mode, systemDark)
+    val wantsWallpaper = (if (dark) config.darkPreset else config.lightPreset) == AppThemes.DYNAMIC
+    // 只有选了壁纸的那一侧才去读系统调色板：读一次要解析 Settings.Secure 里的 JSON，没必要每个主题都付
+    val wallpaper = if (wantsWallpaper) rememberWallpaperColors(dark) else null
+    return remember(config, systemDark, wallpaper) {
+        AppThemes.resolve(config, systemDark, wallpaper?.let { colors -> { colors } })
     }
 }
 
+@Composable
+private fun rememberWallpaperColors(dark: Boolean): Colors {
+    val controller = remember(dark) {
+        ThemeController(if (dark) ColorSchemeMode.MonetDark else ColorSchemeMode.MonetLight)
+    }
+    return controller.currentColors()
+}
+
+/**
+ * Inkwell 全局主题：按用户主题配置解析配色（模式 + 预设/自定义日夜主题），铺成 [MiuixTheme]。
+ * 页面颜色一律走 `MiuixTheme.colorScheme` 语义槽位，字体走 `MiuixTheme.textStyles`；
+ * Miuix 没有的圆角与动效见 [AppTheme]。
+ *
+ * 用的是 `MiuixTheme(colors = …)` 那个重载，不是 `MiuixTheme(controller = …)`：配色是我们自己从
+ * 「强调色 + 背景色」推导的（[AppThemes.schemeFrom]），controller 那一支只在壁纸配色时借来生成颜色。
+ * 两个重载装的东西不一样 —— colors 版**不提供** `LocalContentColor`，所以根上必须再铺一层 [Surface]
+ * 把内容色设成 onSurface，否则没写颜色的 Text / Icon 一律是黑的，深色主题下黑字压黑底。
+ *
+ * 这层 [Surface] 还有第二个用处：NavDisplay 的 shared-axis 旧页只让出 1/4，缝隙里没有别的 Compose 节点可画；
+ * 若不铺底色，就会透到 Activity 的 windowBackground。底色取 `surface` —— Miuix 的**页面底**是 surface，
+ * 不是 background（background 是弹窗与底部面板的底）。
+ *
+ * 注意：另两处局部主题（阅读器浮层的 [com.radium.inkwell.ui.reader.ReaderThemeScope]、书籍详情的封面取色
+ * `CoverTintedTheme`）同样是 `MiuixTheme(colors = …)`，从外层配色 copy 出来只改相关槽位；
+ * [LocalMotionScheme] 不会被它们盖掉，「移除动画」一路传进去。
+ */
 @Composable
 fun InkwellTheme(
     config: ThemeConfig = ThemeConfig(),
@@ -95,22 +69,17 @@ fun InkwellTheme(
 ) {
     val systemDark = isSystemInDarkTheme()
     val scheme = rememberResolvedScheme(config, systemDark).first
-    val animate = animationsEnabled()
-    // remember 住实例：主题走的是 staticCompositionLocalOf，换实例会让全树重组。
-    // 也别按 animate 拆成两个 MaterialExpressiveTheme 调用点 —— 那样用户在系统设置里切
-    // 「移除动画」时子树换槽位重建，滚动位置、展开态之类全丢。
-    val motion = remember(animate) {
-        if (animate) MotionScheme.expressive() else InstantMotionScheme
-    }
-    MaterialExpressiveTheme(
-        colorScheme = scheme,
-        motionScheme = motion,
-        shapes = InkwellShapes,
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = scheme.background,
-            content = content,
-        )
+    // 用户在系统设置里切「移除动画」时只换方案对象，不换调用点：按 animate 拆成两个 MiuixTheme 调用点
+    // 的话，子树换槽位重建，滚动位置、展开态之类全丢
+    val motion = if (animationsEnabled()) AppMotionScheme.Default else AppMotionScheme.Instant
+    MiuixTheme(colors = scheme) {
+        CompositionLocalProvider(LocalMotionScheme provides motion) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = scheme.surface,
+                contentColor = scheme.onSurface,
+                content = content,
+            )
+        }
     }
 }

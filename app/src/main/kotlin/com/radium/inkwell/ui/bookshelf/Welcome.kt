@@ -13,9 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +23,9 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 第一次打开、书架还是空的时候，代替「书架空空如也」出现的欢迎页。
@@ -62,17 +62,17 @@ internal fun WelcomeState(
                 Icons.Default.AutoStories,
                 contentDescription = null,
                 modifier = Modifier.size(Dimens.iconXL),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MiuixTheme.colorScheme.primary,
             )
             Text(
                 "欢迎使用墨水",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MiuixTheme.textStyles.title2,
                 modifier = Modifier.semantics { heading() },
             )
             Text(
                 "一个安静读书的地方。书架还是空的，从下面任选一条开始：",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
         SettingGroup {
@@ -103,11 +103,11 @@ internal fun WelcomeState(
         ) {
             Text(
                 "使用即表示同意",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             AppTextButton(onClick = onOpenDisclaimer) {
-                Text("用户协议与免责声明", style = MaterialTheme.typography.bodySmall)
+                Text("用户协议与免责声明", style = MiuixTheme.textStyles.footnote1)
             }
         }
     }

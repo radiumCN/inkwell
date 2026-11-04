@@ -13,9 +13,6 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,7 +41,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppTextButton
@@ -94,6 +90,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
 private const val AUTO_CHANGED_HINT_MS = 8_000L
@@ -319,6 +319,7 @@ fun ReaderScreen(
                 Text(
                     "正在自动换源…",
                     color = Color(session.settings.theme.textColor),
+                    style = MiuixTheme.textStyles.body1,
                     textAlign = TextAlign.Center,
                 )
                 if (overlay.autoChangeTotal > 0) {
@@ -326,7 +327,7 @@ fun ReaderScreen(
                     Text(
                         "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个书源",
                         color = Color(session.settings.theme.footerColor),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.footnote1,
                     )
                 }
             }
@@ -341,6 +342,7 @@ fun ReaderScreen(
                     Text(
                         pageUi.error!!,
                         color = Color(session.settings.theme.textColor),
+                        style = MiuixTheme.textStyles.body1,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(Dimens.gapXL))
@@ -357,13 +359,10 @@ fun ReaderScreen(
                     }
                     Spacer(Modifier.height(Dimens.gapS))
                     AppTextButton(
+                        text = "返回书架",
                         onClick = requestExit,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = Color(session.settings.theme.footerColor),
-                        ),
-                    ) {
-                        Text("返回书架")
-                    }
+                        contentColor = Color(session.settings.theme.footerColor),
+                    )
                 }
             }
             // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
@@ -527,9 +526,9 @@ fun ReaderScreen(
             ReaderThemeScope(session.settings.theme) {
                 Surface(
                     Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
-                    shape = MaterialTheme.shapes.medium,
-                    // 不加 tonalElevation：显式给了容器色，色调抬升只在底色是 surface 时才起作用
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = AppShapes.medium,
+                    // 纸面上的小提示条：比纸面深/亮一档（surfaceContainerHigh），不投影 —— 同色纸上的阴影是脏灰线
+                    color = MiuixTheme.colorScheme.surfaceContainerHigh,
                 ) {
                     Row(
                         Modifier.padding(
@@ -542,11 +541,11 @@ fun ReaderScreen(
                     ) {
                         Text(
                             "已自动换到「${lastAutoChanged.value}」",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurface,
                         )
-                        AppTextButton(onClick = { viewModel.undoAutoChange() }) { Text("撤销") }
-                        AppTextButton(onClick = { viewModel.dismissAutoChanged() }) { Text("知道了") }
+                        AppTextButton("撤销", onClick = { viewModel.undoAutoChange() })
+                        AppTextButton("知道了", onClick = { viewModel.dismissAutoChanged() })
                     }
                 }
             }
@@ -567,13 +566,14 @@ fun ReaderScreen(
             Text(
                 "已经是最后一页了",
                 color = Color(session.settings.theme.footerColor),
+                style = MiuixTheme.textStyles.body1,
             )
         }
 
         // 阅读页里所有浮层（菜单、目录、设置、换源、选字工具条）都跟着**阅读主题**走。
-        // 从前它们读的是 App 的 MaterialTheme —— 正文是米色纸张，弹出来的面板却是 M3 的
-        // 淡紫白，两套配色硬拼在一起。这里换掉这一片区域的 MaterialTheme，
-        // 里头的 TabRow / Chip / Slider / 分隔线全都自动协调，不必挨个传颜色（漏一个就露馅）。
+        // 从前它们读的是 App 主题 —— 正文是米色纸张，弹出来的面板却是另一套配色，两套硬拼在一起。
+        // 这里换掉这一片区域的 MiuixTheme，里头的页签 / Chip / 滑块 / 分隔线全都自动协调，
+        // 不必挨个传颜色（漏一个就露馅）。
         ReaderThemeScope(session.settings.theme) {
 
         overlay.sourceCandidates?.let { candidates ->
@@ -643,6 +643,7 @@ fun ReaderScreen(
                     Text(
                         toastText,
                         color = Color(session.settings.theme.footerColor),
+                        style = MiuixTheme.textStyles.body1,
                     )
                 }
             }
@@ -754,8 +755,8 @@ private fun buildLayoutSpec(
         // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
         // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。
         //
-        // 页眉页脚的字走排版令牌（bodySmall，见 pageInfoTextStyle），会跟着系统字号放大：放大到行高
-        // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 16sp，两条带仍是 26/18dp，排版不变。
+        // 页眉页脚的字走排版令牌（footnote1，见 pageInfoTextStyle），会跟着系统字号放大：放大到行高
+        // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 18sp，两条带仍是 26/18dp，排版不变。
         headerHeightPx = maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()),
         footerHeightPx = maxOf(18.dp.toPx(), infoLinePx),
         fontSizePx = fontSizePx,

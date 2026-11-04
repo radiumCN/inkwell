@@ -1,11 +1,9 @@
 package com.radium.inkwell.ui.theme
 
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import top.yukonga.miuix.kmp.theme.Colors
 
 enum class ThemeMode(val label: String) {
     SYSTEM("跟随系统"),
@@ -31,7 +29,7 @@ data class ThemePreset(
     /** 色板预览用 */
     val previewBg: Color,
     val previewAccent: Color,
-    val scheme: ColorScheme,
+    val scheme: Colors,
 )
 
 object AppThemes {
@@ -47,9 +45,9 @@ object AppThemes {
     const val DARK_PLUM = "plum"
     const val CUSTOM = "custom"
     /**
-     * 跟随壁纸（Material You 动态取色）。日/夜两个槽都能选它，配色由系统按壁纸给 —— 不经 [schemeFrom]，
-     * 系统那套本来就有全部 surfaceContainer* 槽位。它要 Context，所以由调用方经 [resolve] 的参数传进来，
-     * 这个对象仍是纯函数、能 JVM 单测。
+     * 跟随壁纸（Monet 动态取色）。日/夜两个槽都能选它，配色由系统按壁纸给 —— 不经 [schemeFrom]，
+     * 由 Miuix 的 `ThemeController`（Monet 模式）从系统调色板生成。它要 Context 与 Composable 环境，
+     * 所以由调用方经 [resolve] 的参数传进来，这个对象仍是纯函数、能 JVM 单测。
      */
     const val DYNAMIC = "dynamic"
 
@@ -117,6 +115,13 @@ object AppThemes {
         )
     }
 
+    /** 当前该用深色还是浅色（主题模式 × 系统深浅） */
+    fun isDark(mode: ThemeMode, systemDark: Boolean): Boolean = when (mode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+
     /**
      * 解析当前应生效的配色；返回 (scheme, 是否深色)。
      *
@@ -126,13 +131,9 @@ object AppThemes {
     fun resolve(
         config: ThemeConfig,
         systemDark: Boolean,
-        dynamicScheme: ((dark: Boolean) -> ColorScheme)? = null,
-    ): Pair<ColorScheme, Boolean> {
-        val dark = when (config.mode) {
-            ThemeMode.SYSTEM -> systemDark
-            ThemeMode.LIGHT -> false
-            ThemeMode.DARK -> true
-        }
+        dynamicScheme: ((dark: Boolean) -> Colors)? = null,
+    ): Pair<Colors, Boolean> {
+        val dark = isDark(config.mode, systemDark)
         val preset = if (dark) config.darkPreset else config.lightPreset
         if (preset == DYNAMIC && dynamicScheme != null) return dynamicScheme(dark) to dark
         val scheme = if (dark) {
@@ -154,100 +155,126 @@ object AppThemes {
     }
 
     /**
-     * 从「强调色 + 背景色」推导完整 Material3 配色。
-     * 手工推导（不引 material-color-utilities）：容器色 = 强调色向背景插值，
-     * 文本色按背景亮度取暖白/暖黑，保证正文对比度。
+     * 从「强调色 + 背景色」推导完整的 Miuix 配色（[Colors] 的五十来个槽位一个不漏）。
+     * 手工推导（不走 Monet）：中性色是「纸色 → 字色」之间的台阶，强调色只染 primary 一族，
+     * 文本色按背景亮度取暖黑/暖白，保证正文对比度。
+     *
+     * **分层照 HyperOS 来，不照 M3**：Miuix 的页面底是 `surface`、卡片是 `surfaceContainer`、
+     * 弹窗与底部面板是 `background`。浅色是「灰底白卡」—— 卡就是纸色本身，页面比纸压深一档；
+     * 深色是「黑底亮卡」—— 页面就是纸色，卡片往亮里抬。所以**预设的背景色**在浅色落在
+     * `surfaceContainer`、在深色落在 `surface`，不是哪一侧都叫 background。
+     * 从前 M3 时代设置页就是这么配的（settingsPageColor / settingsCardColor），现在全应用都是。
+     *
+     * 槽位的含义也和 M3 不同，别照 M3 的直觉读（见 Miuix `Colors` 的 KDoc）：
+     * - `secondary` 是**关着的开关轨道**、`secondaryVariant` 是**默认按钮底**、
+     *   `secondaryContainer` 是**输入框底** —— 都是中性灰，不是 M3 那个「次强调色」；
+     * - `onBackgroundVariant` 是分组小标题（SmallTitle）的字色；
+     * - `tertiaryContainer` 是下拉菜单选中项的淡强调底；
+     * - `primaryContainer` / `onPrimaryContainer` Miuix 组件不读，这里保留 M3 的含义（淡强调底 + 上面的字），
+     *   页面里「强调色小标签」之类照旧用它。
+     *
+     * 台阶一律用 [mixSrgb] 而不是 [lerp]：Compose 的 `lerp` 走 Oklab，近黑时同样 fraction 几乎抬不动 sRGB
+     * （纯黑 + 10% Oklab ≈ #030202），深色卡片会整片糊进页面 —— 日间看得到卡、夜间「消失」就是这个不对称。
+     * 文字色仍用 `lerp`：那几个比例是在 Oklab 里调出来、对比度测过的（AppThemesTest）。
      */
-    fun schemeFrom(seed: Color, background: Color, dark: Boolean): ColorScheme {
+    fun schemeFrom(seed: Color, background: Color, dark: Boolean): Colors {
         val onBg = if (background.luminance() > 0.5f) Color(0xFF1C1917) else Color(0xFFE7E1D7)
-        // surface / outline 仍可用 Oklab lerp：色相过渡更稳。容器层级不行 —— 见下方 mixSrgb。
-        val surface = lerp(background, onBg, 0.02f)
-        val surfaceVariant = lerp(background, onBg, if (dark) 0.08f else 0.06f)
-        val outline = lerp(onBg, background, 0.45f)
-        val outlineVariant = lerp(onBg, background, 0.75f)
+        /** 中性台阶：从纸色往字色走 t */
+        fun step(t: Float) = mixSrgb(background, onBg, t)
 
-        // surfaceContainer* 这一组从前**一个都没设**，于是全部落回 M3 基线值 —— 那是一套
-        // 淡紫。而底部弹层(surfaceContainerLow)、卡片、下拉菜单、隐藏区面板读的正是这几个槽位：
-        // 一个暖纸色的 App，弹出来的东西却是紫的。之前阅读页那次"割裂"是靠 ReaderThemeScope
-        // 局部盖掉的，根子一直在这儿。
-        //
-        // 容器必须用 [mixSrgb] 而不是 [lerp]：Compose 的 Color.lerp 走 Oklab，近黑时同样
-        // fraction 几乎抬不动 sRGB（纯黑 + 10% Oklab ≈ #030202），设置页 ListItem 卡片会
-        // 整片糊进 background —— 日间看得到容器、夜间「消失」，就是这个不对称，不是两套布局。
-        // 深色档位也抬得更开，OLED 上灰阶才分得清。
-        // surfaceContainer*：浅色越「高」越深、深色越「高」越亮（相对 background 抬阶）。
-        // Lowest = 贴纸面（浅色最白 / 深色最黑）。设置页浅色用 Lowest 做卡、Low 做画布；
-        // 深色反过来用 background 做画布、Low 做卡 —— 见 settingsPageColor / settingsCardColor。
-        // 浅色若把 Lowest 抬得比 Low 还深，就会「白底灰卡」；深色若页用 Low、卡用 Lowest，会「浅底深卡」。
-        val containerLowest = mixSrgb(background, onBg, 0.00f)
-        val containerLow = mixSrgb(background, onBg, if (dark) 0.10f else 0.04f)
-        val containerMid = mixSrgb(background, onBg, if (dark) 0.14f else 0.07f)
-        val containerHigh = mixSrgb(background, onBg, if (dark) 0.18f else 0.10f)
-        val containerHighest = mixSrgb(background, onBg, if (dark) 0.22f else 0.13f)
+        // ---- 三层底：页面 / 卡片 / 弹层 ----
+        val page = if (dark) background else step(0.04f)
+        val card = if (dark) step(0.10f) else background
+        /** 卡片上的台阶（输入框、按钮、开关轨道都长在卡上）：深色卡已经抬过一档，从卡出发再走 */
+        fun onCard(t: Float) = mixSrgb(card, onBg, t)
+
+        // ---- 文字 ----
+        // 摘要 / 说明小字。比例沿用 M3 时代的 onSurfaceVariant（对比度 ≥ 4.5:1，见测试）
+        val summary = lerp(onBg, background, 0.25f)
+        val textSecondary = lerp(onBg, background, 0.15f)
+        // 箭头、行尾图标这类「动作提示」：比摘要再淡一档，但仍看得出
+        val actions = lerp(onBg, background, 0.55f)
+        // 占位文字（输入框 placeholder、搜索框提示）
+        val placeholder = lerp(onBg, background, 0.42f)
+        val disabledText = lerp(onBg, background, 0.6f)
+
+        // ---- 强调色 ----
         // 深色模式下抬高强调色亮度，避免按钮发闷
         val primary = if (dark) lerp(seed, Color.White, 0.25f) else seed
         // 前景取黑/白中对比更高者（中灰强调色下亮度阈值会失效）
         val onPrimary = bestForeground(primary)
-        val container = lerp(primary, background, 0.80f)
-        val onContainer = lerp(primary, onBg, 0.65f)
-        val secondary = lerp(primary, onBg, 0.35f)
-        val tertiary = rotateHue(primary, 40f)
+        val softAccent = mixSrgb(card, primary, if (dark) 0.22f else 0.12f)
 
-        return if (dark) {
-            darkColorScheme(
-                primary = primary, onPrimary = onPrimary,
-                primaryContainer = container, onPrimaryContainer = onContainer,
-                secondary = secondary, onSecondary = onPrimary,
-                secondaryContainer = lerp(secondary, background, 0.75f),
-                onSecondaryContainer = lerp(secondary, onBg, 0.65f),
-                tertiary = tertiary, onTertiary = onPrimary,
-                background = background, onBackground = onBg,
-                surface = surface, onSurface = onBg,
-                surfaceVariant = surfaceVariant,
-                onSurfaceVariant = lerp(onBg, background, 0.25f),
-                surfaceContainerLowest = containerLowest,
-                surfaceContainerLow = containerLow,
-                surfaceContainer = containerMid,
-                surfaceContainerHigh = containerHigh,
-                surfaceContainerHighest = containerHighest,
-                surfaceTint = primary,
-                surfaceDim = lerp(background, onBg, 0.10f),
-                surfaceBright = lerp(background, onBg, 0.02f),
-                inverseSurface = onBg,
-                inverseOnSurface = background,
-                inversePrimary = lerp(primary, background, 0.55f),
-                scrim = Color.Black,
-                outline = outline, outlineVariant = outlineVariant,
-                error = Color(0xFFF87171), onError = Color(0xFF450A0A),
-            )
-        } else {
-            lightColorScheme(
-                primary = primary, onPrimary = onPrimary,
-                primaryContainer = container, onPrimaryContainer = onContainer,
-                secondary = secondary, onSecondary = onPrimary,
-                secondaryContainer = lerp(secondary, background, 0.75f),
-                onSecondaryContainer = lerp(secondary, onBg, 0.65f),
-                tertiary = tertiary, onTertiary = onPrimary,
-                background = background, onBackground = onBg,
-                surface = surface, onSurface = onBg,
-                surfaceVariant = surfaceVariant,
-                onSurfaceVariant = lerp(onBg, background, 0.25f),
-                surfaceContainerLowest = containerLowest,
-                surfaceContainerLow = containerLow,
-                surfaceContainer = containerMid,
-                surfaceContainerHigh = containerHigh,
-                surfaceContainerHighest = containerHighest,
-                surfaceTint = primary,
-                surfaceDim = lerp(background, onBg, 0.10f),
-                surfaceBright = lerp(background, onBg, 0.02f),
-                inverseSurface = onBg,
-                inverseOnSurface = background,
-                inversePrimary = lerp(primary, background, 0.55f),
-                scrim = Color.Black,
-                outline = outline, outlineVariant = outlineVariant,
-                error = Color(0xFFDC2626), onError = Color.White,
-            )
-        }
+        // ---- 中性控件 ----
+        val switchTrackOff = if (dark) onCard(0.22f) else onCard(0.10f)
+        val buttonBg = if (dark) onCard(0.14f) else onCard(0.06f)
+        val fieldBg = if (dark) onCard(0.14f) else onCard(0.06f)
+
+        val error = if (dark) Color(0xFFF87171) else Color(0xFFDC2626)
+        val onError = if (dark) Color(0xFF450A0A) else Color.White
+
+        val disabledPrimary = mixSrgb(page, primary, 0.38f)
+        val disabledPrimaryButton = mixSrgb(card, primary, 0.38f)
+        val disabledSecondary = mixSrgb(card, switchTrackOff, 0.5f)
+        val disabledSecondaryVariant = mixSrgb(card, buttonBg, 0.6f)
+
+        return Colors(
+            primary = primary,
+            onPrimary = onPrimary,
+            primaryVariant = primary,
+            onPrimaryVariant = lerp(primary, background, 0.55f),
+            error = error,
+            onError = onError,
+            errorContainer = mixSrgb(card, error, 0.12f),
+            onErrorContainer = lerp(error, onBg, 0.5f),
+            disabledPrimary = disabledPrimary,
+            disabledOnPrimary = mixSrgb(disabledPrimary, onPrimary, 0.38f),
+            disabledPrimaryButton = disabledPrimaryButton,
+            disabledOnPrimaryButton = mixSrgb(disabledPrimaryButton, onPrimary, 0.6f),
+            disabledPrimarySlider = mixSrgb(card, primary, 0.38f),
+            primaryContainer = lerp(primary, background, 0.80f),
+            onPrimaryContainer = lerp(primary, onBg, 0.65f),
+            secondary = switchTrackOff,
+            onSecondary = if (dark) onBg else Color.White,
+            secondaryVariant = buttonBg,
+            onSecondaryVariant = lerp(onBg, background, 0.08f),
+            disabledSecondary = disabledSecondary,
+            disabledOnSecondary = mixSrgb(disabledSecondary, onBg, 0.38f),
+            disabledSecondaryVariant = disabledSecondaryVariant,
+            disabledOnSecondaryVariant = mixSrgb(disabledSecondaryVariant, onBg, 0.38f),
+            secondaryContainer = fieldBg,
+            onSecondaryContainer = placeholder,
+            secondaryContainerVariant = if (dark) onCard(0.18f) else onCard(0.06f),
+            onSecondaryContainerVariant = placeholder,
+            tertiaryContainer = softAccent,
+            onTertiaryContainer = readableOn(primary, softAccent),
+            tertiaryContainerVariant = softAccent,
+            background = card,
+            onBackground = onBg,
+            onBackgroundVariant = summary,
+            surface = page,
+            onSurface = onBg,
+            surfaceVariant = card,
+            onSurfaceSecondary = textSecondary,
+            onSurfaceVariantSummary = summary,
+            onSurfaceVariantActions = actions,
+            disabledOnSurface = disabledText,
+            surfaceContainer = card,
+            onSurfaceContainer = onBg,
+            onSurfaceContainerVariant = summary,
+            // 页面上的搜索框底（Miuix SearchBar 读它）：比页面深/亮一档
+            surfaceContainerHigh = if (dark) step(0.14f) else step(0.10f),
+            onSurfaceContainerHigh = placeholder,
+            // 卡上最深的一档：分段按钮未选中段、阅读进度条的轨道
+            surfaceContainerHighest = if (dark) onCard(0.12f) else onCard(0.13f),
+            onSurfaceContainerHighest = onBg,
+            outline = if (dark) onCard(0.14f) else onCard(0.15f),
+            dividerLine = if (dark) onCard(0.10f) else onCard(0.10f),
+            windowDimming = Color.Black.copy(alpha = if (dark) 0.6f else 0.3f),
+            sliderKeyPoint = primary.copy(alpha = 0.3f),
+            sliderKeyPointForeground = primary,
+            sliderBackground = if (dark) onCard(0.15f) else onCard(0.08f),
+        )
     }
 
     /** 黑白前景中对比度更高者 */
@@ -257,10 +284,25 @@ object AppThemes {
     }
 
     /**
-     * sRGB 分量线性混合。容器抬阶专用。
+     * [color] 放在 [on] 上不够 4.5:1 时，往远离底色的一端（浅底往黑、深底往白）一点点推。
+     * 淡强调底上的强调色字（下拉菜单选中项）、深色提示胶囊上的操作键（AppSnackbar）都要读得清。
+     */
+    fun readableOn(color: Color, on: Color): Color {
+        val target = if (on.luminance() > 0.5f) Color.Black else Color.White
+        var t = 0f
+        var c = color
+        while (contrast(c, on) < 4.5f && t < 1f) {
+            t += 0.05f
+            c = mixSrgb(color, target, t)
+        }
+        return c
+    }
+
+    /**
+     * sRGB 分量线性混合。中性台阶专用。
      *
      * 不要换成 [lerp]：它在 Oklab 里插值，对「黑 → 暖白」这种两端，同样 fraction 落回
-     * sRGB 后亮度远远不够，纯黑主题上 surfaceContainerLow 会看起来还是黑的。
+     * sRGB 后亮度远远不够，纯黑主题上的卡片会看起来还是黑的。
      */
     private fun mixSrgb(from: Color, to: Color, fraction: Float): Color {
         val t = fraction.coerceIn(0f, 1f)
@@ -276,37 +318,5 @@ object AppThemes {
         val l1 = maxOf(a.luminance(), b.luminance()) + 0.05f
         val l2 = minOf(a.luminance(), b.luminance()) + 0.05f
         return l1 / l2
-    }
-
-    /** 纯 Kotlin 色相旋转（不依赖 android.graphics，可 JVM 单测） */
-    private fun rotateHue(color: Color, degrees: Float): Color {
-        val r = color.red
-        val g = color.green
-        val b = color.blue
-        val max = maxOf(r, g, b)
-        val min = minOf(r, g, b)
-        val delta = max - min
-        var h = when {
-            delta == 0f -> 0f
-            max == r -> 60f * (((g - b) / delta) % 6f)
-            max == g -> 60f * ((b - r) / delta + 2f)
-            else -> 60f * ((r - g) / delta + 4f)
-        }
-        val s = if (max == 0f) 0f else delta / max
-        val v = max
-
-        h = (h + degrees + 360f) % 360f
-        val c = v * s
-        val x = c * (1f - kotlin.math.abs((h / 60f) % 2f - 1f))
-        val m = v - c
-        val (r1, g1, b1) = when {
-            h < 60f -> Triple(c, x, 0f)
-            h < 120f -> Triple(x, c, 0f)
-            h < 180f -> Triple(0f, c, x)
-            h < 240f -> Triple(0f, x, c)
-            h < 300f -> Triple(x, 0f, c)
-            else -> Triple(c, 0f, x)
-        }
-        return Color(r1 + m, g1 + m, b1 + m, color.alpha)
     }
 }

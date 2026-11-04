@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -27,6 +25,8 @@ import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 阅读设置面板里「字体」「排版方案」两块要的数据与动作。打成一包往下传，
@@ -98,8 +98,8 @@ internal fun LayoutSchemeSection(
         if (schemes.isEmpty()) {
             Text(
                 "把现在的字号、字体、行距和边距存起来，换个场景一键切回。纸色不在方案里，仍按日夜各记一套",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(start = horizontalPadding, end = horizontalPadding, top = Dimens.gapS),
             )
         }

@@ -1,9 +1,6 @@
 package com.radium.inkwell.ui.detail
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +21,8 @@ import com.radium.inkwell.ui.theme.toHsv
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 从封面像素里挑一个强调色。整张图几乎没有颜色（黑白封面、灰底默认封面、纯文字封面）就给 null，
@@ -117,53 +116,51 @@ internal fun rememberCoverSeed(coverModel: Any?): Color? {
  * 底色、卡片、文字这些 surface 一族**原样沿用** App 主题 —— 换掉的话，从书架点进来整页底色一变，
  * 像进了另一个 App。
  *
- * 必须是 [MaterialExpressiveTheme] 且显式传 motionScheme（沿用外层的，含「移除动画」时的瞬时方案）：
- * 退回 MaterialTheme 会把这一片的 Expressive 形态关掉，省掉 motionScheme 会退成 standard（见 Theme.kt）。
+ * 局部换的是 [MiuixTheme]（colors 版）。动效方案不在 MiuixTheme 里，外层的照常透传，「移除动画」不受影响。
  *
  * 不论有没有封面色都包这一层：取色是异步的，若「没取到时不包、取到了再包」，取到的那一帧整页换一层
  * 组合 —— 目录滚动位置之类的状态全丢。颜色到了用 effects 令牌渐变过去，不是一帧之内跳色。
+ *
+ * remember 的 key 是外层的**槽位值**而不是 Colors 对象本身：MiuixTheme 只持有一个 Colors 实例、换主题时原地改值，
+ * 拿对象当 key 永远不失效 —— 切了日夜，这一页的强调色还停在上一套主题推出来的那个。
  */
 @Composable
 internal fun CoverTintedTheme(seed: Color?, content: @Composable () -> Unit) {
-    val base = MaterialTheme.colorScheme
-    val dark = base.background.luminance() < 0.5f
-    val target = remember(seed, base) {
-        seed?.let { tint(base, AppThemes.schemeFrom(seedForTheme(it, dark), base.background, dark)) } ?: base
+    val base = MiuixTheme.colorScheme
+    val card = base.surfaceContainer
+    val dark = base.surface.luminance() < 0.5f
+    val target = remember(seed, card, dark) {
+        seed?.let { AppThemes.schemeFrom(seedForTheme(it, dark), card, dark) }
     }
-    val spec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
-    val primary by animateColorAsState(target.primary, spec, label = "coverPrimary")
-    val onPrimary by animateColorAsState(target.onPrimary, spec, label = "coverOnPrimary")
-    val container by animateColorAsState(target.primaryContainer, spec, label = "coverContainer")
-    val onContainer by animateColorAsState(target.onPrimaryContainer, spec, label = "coverOnContainer")
-    val secondaryContainer by animateColorAsState(target.secondaryContainer, spec, label = "coverSecondary")
-    val onSecondaryContainer by animateColorAsState(target.onSecondaryContainer, spec, label = "coverOnSecondary")
-    MaterialExpressiveTheme(
-        colorScheme = target.copy(
+    val spec = AppTheme.motionScheme.defaultEffectsSpec<Color>()
+    val primary by animateColorAsState(target?.primary ?: base.primary, spec, label = "coverPrimary")
+    val onPrimary by animateColorAsState(target?.onPrimary ?: base.onPrimary, spec, label = "coverOnPrimary")
+    val container by animateColorAsState(target?.primaryContainer ?: base.primaryContainer, spec, label = "coverContainer")
+    val onContainer by animateColorAsState(target?.onPrimaryContainer ?: base.onPrimaryContainer, spec, label = "coverOnContainer")
+    val tertiary by animateColorAsState(target?.tertiaryContainer ?: base.tertiaryContainer, spec, label = "coverTertiary")
+    val onTertiary by animateColorAsState(target?.onTertiaryContainer ?: base.onTertiaryContainer, spec, label = "coverOnTertiary")
+    MiuixTheme(
+        colors = base.copy(
             primary = primary,
             onPrimary = onPrimary,
+            primaryVariant = primary,
             primaryContainer = container,
             onPrimaryContainer = onContainer,
-            secondaryContainer = secondaryContainer,
-            onSecondaryContainer = onSecondaryContainer,
+            tertiaryContainer = tertiary,
+            onTertiaryContainer = onTertiary,
+            tertiaryContainerVariant = tertiary,
+            disabledPrimary = target?.disabledPrimary ?: base.disabledPrimary,
+            disabledOnPrimary = target?.disabledOnPrimary ?: base.disabledOnPrimary,
+            disabledPrimaryButton = target?.disabledPrimaryButton ?: base.disabledPrimaryButton,
+            disabledOnPrimaryButton = target?.disabledOnPrimaryButton ?: base.disabledOnPrimaryButton,
+            disabledPrimarySlider = target?.disabledPrimarySlider ?: base.disabledPrimarySlider,
+            sliderKeyPoint = primary.copy(alpha = 0.3f),
+            sliderKeyPointForeground = primary,
         ),
-        motionScheme = MaterialTheme.motionScheme,
-        shapes = MaterialTheme.shapes,
-        typography = MaterialTheme.typography,
+        textStyles = MiuixTheme.textStyles,
         content = content,
     )
 }
-
-/** 只换 primary 一族，surface 一族照抄 [base] */
-private fun tint(base: ColorScheme, from: ColorScheme): ColorScheme = base.copy(
-    primary = from.primary,
-    onPrimary = from.onPrimary,
-    primaryContainer = from.primaryContainer,
-    onPrimaryContainer = from.onPrimaryContainer,
-    secondaryContainer = from.secondaryContainer,
-    onSecondaryContainer = from.onSecondaryContainer,
-    surfaceTint = from.surfaceTint,
-    inversePrimary = from.inversePrimary,
-)
 
 private const val HUE_BUCKETS = 12
 private const val MIN_VALUE = 0.15f

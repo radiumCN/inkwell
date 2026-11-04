@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.reader
 
-import com.radium.inkwell.ui.components.sheetContentInsets
 import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,14 +10,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Text
+import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.AppLoadingIndicator
@@ -27,6 +24,8 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SwitchRow
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 换源面板。
@@ -34,7 +33,6 @@ import com.radium.inkwell.ui.components.SwitchRow
  * 独立于阅读菜单存在 —— 从前它画在 ReaderMenu 里，而正文加载失败时整个翻页容器都不渲染，
  * 菜单根本呼不出来，于是「章节加载失败」这个最需要换源的场景反而换不了源，只能退出去。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChangeSourceSheet(
     overlay: ReaderOverlayUi,
@@ -45,13 +43,13 @@ fun ChangeSourceSheet(
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-        ModalBottomSheet(
+        // 面板底取浮层色（ReaderThemeScope 里的 background，AppBottomSheet 默认就读它），候选行是卡片色 ——
+        // 两者差一档，卡片才浮得起来；同色时候选行会糊进底色，看起来像没有卡片。
+        // 标题行带进度分数与「重新搜索」，自己排，不用面板自带的居中标题。
+        // 候选列表会滚到手势条下面：导航栏高度垫在各状态末尾，不让面板在外面垫
+        AppBottomSheet(
             onDismissRequest = onDismiss,
-            // Sheet 用 surface（纸色）；列表卡片读 surfaceContainerLow。
-            // 默认两者都走 Low 时候选行会糊进底色，看起来像没有 Expressive 卡片。
-            containerColor = MaterialTheme.colorScheme.surface,
-            // 候选列表滚到手势条下面，见 sheetContentInsets
-            contentWindowInsets = { sheetContentInsets() },
+            padNavigationBar = false,
         ) {
         // 底部留白与导航栏高度垫在各状态的末尾（从前垫在这一层上，列表在手势条上方就截断了）
         val bottomInset = Dimens.gapXL + sheetBottomInset()
@@ -63,13 +61,13 @@ fun ChangeSourceSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("换源", style = MaterialTheme.typography.titleMedium)
+                    Text("换源", style = MiuixTheme.textStyles.headline2, fontWeight = FontWeight.Medium)
                     // 告诉用户现在读的是哪个源 —— 换源列表里刻意不含当前源，不标出来就无从对比
                     currentSourceName.takeIf { it.isNotBlank() }?.let {
                         Text(
                             "当前：$it",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -79,22 +77,19 @@ fun ChangeSourceSheet(
                 if (overlay.searchingSources) {
                     Text(
                         "${overlay.sourcesDone}/${overlay.sourcesTotal}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.body2,
+                        fontWeight = FontWeight.Medium,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 } else if (!overlay.changingSource) {
                     // 会话内复用上次结果；书源有增删/站点恢复时用这个主动重搜
-                    AppTextButton(onClick = onRefresh) {
-                        Text("重新搜索")
-                    }
+                    AppTextButton("重新搜索", onClick = onRefresh)
                 }
             }
-            // 搜索进度拉成整行波浪条：右上角只留分数，比「搜索中 98/380」一坨小字好扫
+            // 搜索进度拉成整行进度条：右上角只留分数，比「搜索中 98/380」一坨小字好扫
             if (overlay.searchingSources && overlay.sourcesTotal > 0) {
                 DeterminateProgressBar(
-                    progress = {
-                        (overlay.sourcesDone.toFloat() / overlay.sourcesTotal).coerceIn(0f, 1f)
-                    },
+                    progress = (overlay.sourcesDone.toFloat() / overlay.sourcesTotal).coerceIn(0f, 1f),
                     modifier = Modifier.padding(
                         horizontal = Dimens.screenPadding,
                         vertical = Dimens.gapXS,
@@ -129,7 +124,7 @@ fun ChangeSourceSheet(
                     Modifier
                         .padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapL)
                         .padding(bottom = bottomInset),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MiuixTheme.textStyles.body2,
                 )
                 else -> LazyColumn(
                     Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
@@ -143,8 +138,8 @@ fun ChangeSourceSheet(
                             Text(
                                 "上次搜索未完成（已查 ${overlay.sourcesDone}/${overlay.sourcesTotal}），以下为当时结果。可点右上角「重新搜索」。",
                                 Modifier.padding(vertical = Dimens.gapS),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                     }
@@ -182,8 +177,7 @@ private fun ChangeSourceCandidateRow(
         overlineContent = {
             Text(
                 sourceLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = ContentListDefaults.overlineStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -192,7 +186,7 @@ private fun ChangeSourceCandidateRow(
             {
                 Text(
                     supporting,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = ContentListDefaults.supportingStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -203,7 +197,7 @@ private fun ChangeSourceCandidateRow(
         content = {
             Text(
                 candidate.title.ifBlank { "未命名" },
-                style = MaterialTheme.typography.bodyLarge,
+                style = ContentListDefaults.titleStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

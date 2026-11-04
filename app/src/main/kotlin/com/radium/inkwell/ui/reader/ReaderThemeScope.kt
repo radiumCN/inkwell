@@ -1,42 +1,41 @@
 package com.radium.inkwell.ui.reader
 
-import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.radium.inkwell.reader.api.ReaderTheme
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 让阅读页里的一切都跟着**阅读主题**走，而不是 App 主题。
  *
- * 割裂就是这么来的：正文是米色纸张，而底部弹出的设置面板、目录、换源全都是 M3 默认的
- * 淡紫白 —— 两套配色硬拼在一起。之前只把菜单的顶栏/底栏手动刷成了纸张色，可面板里的
- * TabRow、Chip、Slider、分隔线还是紫的，因为它们读的是 MaterialTheme。
+ * 割裂就是这么来的：正文是米色纸张，而底部弹出的设置面板、目录、换源全都是 App 主题的白卡灰底 ——
+ * 两套配色硬拼在一起。与其在每个控件上挨个传颜色（漏一个就露馅，而且以后新加的控件必然会漏），
+ * 不如**换掉这一片区域的 MiuixTheme**：从 ReaderTheme 派生一套 Colors，里头所有 Miuix 组件
+ * （开关、滑块、按钮、输入框、页签、下拉菜单）和我们的封装自动就协调了。
  *
- * 与其在每个控件上挨个传颜色（漏一个就露馅，而且以后新加的控件必然会漏），
- * 不如**换掉这一片区域的 MaterialTheme**：从 ReaderTheme 派生一套 colorScheme，
- * 里头所有 M3 组件自动就协调了。
+ * 三层底，各差一档（同色纸上的投影是脏灰线、压暗正文会裂出分界，所以层次只靠色阶）：
+ * - `surface` = 纸本身（页面底）；
+ * - `background` = 浮层：菜单顶栏/底栏、底部面板、弹窗（Miuix 的面板与弹窗默认就读 background）。
+ *   必须与纸面差一档 —— 第一版设置面板就是纸色，面板的上沿等于不存在，正文直接撞进面板；
+ * - `surfaceContainer` = 浮层里的分组卡。浅色是「灰底白卡」—— 卡就是纸色本身，像纸片放在托盘上；
+ *   深色是「暗底亮卡」，比面板再亮一档。
+ * 用法见 [readerOverlayColor] / [readerCardColor]。
  *
- * `surfaceContainer*` 必须逐级抬高，**不能**把 `surfaceContainerLow` 也钉成纸色：
- * [ContentListItem] 的卡片底色读的就是 Low；BottomSheet 默认容器也是 Low。
- * 两者同色时换源列表就「有 ListItem 却看不见卡片」—— 截图里开关行若隐若现、
- * 候选行整片糊进纸底，就是这么来的。Sheet 再显式用 [surface]，卡片用 Low，层次才分得开。
- *
- * 菜单与设置面板的层次靠色阶，而不是阴影和蒙层（同色纸上的投影是脏灰线，压暗正文会裂出分界）。
- * 三层各差一档，用法见 [readerOverlayColor] / [readerCardColor]；分段按钮未选中的那几段是
- * `surfaceContainerHighest`，选中的那段实心填 [primary]。Highest 从前与 High 同值，单独再抬了一档。
+ * Miuix 的槽位含义与 M3 不同（`secondary` 是关着的开关轨道、`secondaryContainer` 是输入框底……，
+ * 见 AppThemes.schemeFrom 的注释），这里逐个对上，漏一个，用到它的组件就在纸上露出 App 的配色。
  */
 @Composable
 fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
-    val base = MaterialTheme.colorScheme
-    val scheme = remember(theme, base) {
+    val base = MiuixTheme.colorScheme
+    val scheme = remember(theme, base.primary) {
         val bg = Color(theme.background)
         val fg = Color(theme.textColor)
+        val secondaryText = Color(theme.secondaryTextColor)
         val lightPaper = bg.luminance() > 0.5f
 
         // 强调色：沿用 App 的主色，但在这张纸上必须看得清 —— 它也当文字色用（文字按钮、链接），按正文的 4.5:1 要求。
@@ -53,86 +52,105 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
         val containerMid = step(if (lightPaper) 0.07f else 0.14f)
         val containerHigh = step(if (lightPaper) 0.10f else 0.18f)
         val containerHighest = step(if (lightPaper) 0.16f else 0.26f)
-        // 报错色按**纸**的深浅取 M3 基线的浅/深两套，不跟 App 走：App 浅色、纸是夜色时，
-        // App 的 error 是深红，压在深色纸上几乎看不见（自定义纸张的对比度警告就是这么糊掉的）
-        val errorBase = if (lightPaper) lightColorScheme() else darkColorScheme()
+        val overlay = if (lightPaper) containerHigh else containerLow
+        val card = if (lightPaper) bg else containerHigh
+        fun mix(from: Color, to: Color, t: Float) = Color(
+            red = from.red + (to.red - from.red) * t,
+            green = from.green + (to.green - from.green) * t,
+            blue = from.blue + (to.blue - from.blue) * t,
+        )
+        val softAccent = mix(card, accent, 0.20f)
+        // 报错色按**纸**的深浅取，不跟 App 走：App 浅色、纸是夜色时，App 的 error 是深红，
+        // 压在深色纸上几乎看不见（自定义纸张的对比度警告就是这么糊掉的）
+        val error = if (lightPaper) Color(0xFFDC2626) else Color(0xFFF87171)
+        val onError = if (lightPaper) Color.White else Color(0xFF450A0A)
+        val switchOff = mix(card, fg, 0.20f)
+        val disabledAccent = mix(card, accent, 0.38f)
 
-        // 从 App 当前的 scheme 派生，只改与"纸张"相关的那些槽位。
-        // 浮层里用得到的容器色、报错色都得在这里覆盖：漏一个，用到它的组件就在纸上露出 App 的配色
         base.copy(
             primary = accent,
             onPrimary = onAccent,
-            background = bg,
+            primaryVariant = accent,
+            onPrimaryVariant = mix(accent, bg, 0.55f),
+            error = error,
+            onError = onError,
+            errorContainer = mix(card, error, 0.12f),
+            onErrorContainer = mix(error, fg, 0.5f),
+            disabledPrimary = disabledAccent,
+            disabledOnPrimary = mix(disabledAccent, onAccent, 0.38f),
+            disabledPrimaryButton = disabledAccent,
+            disabledOnPrimaryButton = mix(disabledAccent, onAccent, 0.6f),
+            disabledPrimarySlider = disabledAccent,
+            // 0.24 是上限：强调色在深色纸上是提亮过的，叠得再浓，容器上的正文色就掉到 4.5:1 以下
+            primaryContainer = mix(card, accent, 0.24f),
+            onPrimaryContainer = fg,
+            secondary = switchOff,
+            onSecondary = if (lightPaper) Color.White else fg,
+            secondaryVariant = containerHighest,
+            onSecondaryVariant = fg,
+            disabledSecondary = mix(card, switchOff, 0.5f),
+            disabledOnSecondary = mix(card, fg, 0.38f),
+            disabledSecondaryVariant = mix(card, containerHighest, 0.6f),
+            disabledOnSecondaryVariant = mix(card, fg, 0.38f),
+            secondaryContainer = containerMid,
+            onSecondaryContainer = secondaryText,
+            secondaryContainerVariant = containerMid,
+            onSecondaryContainerVariant = secondaryText,
+            tertiaryContainer = softAccent,
+            onTertiaryContainer = readableOn(accent, softAccent),
+            tertiaryContainerVariant = softAccent,
+            background = overlay,
             onBackground = fg,
+            onBackgroundVariant = secondaryText,
             surface = bg,
             onSurface = fg,
             surfaceVariant = containerMid,
+            onSurfaceSecondary = mix(fg, bg, 0.15f),
             // 不再是 fg × 0.7 透明度：那在夜色/墨蓝/纯黑和宣纸/牛皮上只有 3.9~4.2:1，小字发虚。
             // secondaryTextColor 仍从「退三成」出发，只在不够 4.5:1 的主题上少退一点（见 ReaderThemeContrastTest）
-            onSurfaceVariant = Color(theme.secondaryTextColor),
-            surfaceContainerLowest = bg,
-            surfaceContainerLow = containerLow,
-            surfaceContainer = containerMid,
+            onSurfaceVariantSummary = secondaryText,
+            onSurfaceVariantActions = mix(fg, bg, 0.55f),
+            disabledOnSurface = mix(fg, bg, 0.6f),
+            surfaceContainer = card,
+            onSurfaceContainer = fg,
+            onSurfaceContainerVariant = secondaryText,
             surfaceContainerHigh = containerHigh,
+            onSurfaceContainerHigh = secondaryText,
+            // 分段按钮未选中的那几段、进度条轨道：与卡在两种纸上都差得开
             surfaceContainerHighest = containerHighest,
-            // 选中的 Chip 用正文色的淡底，而不是 M3 的紫
-            secondaryContainer = fg.copy(alpha = 0.14f),
-            onSecondaryContainer = fg,
-            // primary / tertiary 两组容器色从前没覆盖，读到的是 App 主题的颜色 —— 纸上冒出一块淡紫/淡蓝。
-            // 三组容器要分得开：primary 是强调色的淡底（比 secondary 浓一档），tertiary 退成纸面的实色台阶。
-            // 0.24 是上限：强调色在深色纸上是提亮过的，叠得再浓，容器上的正文色就掉到 4.5:1 以下
-            primaryContainer = accent.copy(alpha = 0.24f),
-            onPrimaryContainer = fg,
-            tertiaryContainer = containerHigh,
-            onTertiaryContainer = fg,
-            error = errorBase.error,
-            onError = errorBase.onError,
-            errorContainer = errorBase.errorContainer,
-            onErrorContainer = errorBase.onErrorContainer,
+            onSurfaceContainerHighest = fg,
             outline = fg.copy(alpha = 0.35f),
-            outlineVariant = fg.copy(alpha = 0.18f),
-            scrim = Color.Black.copy(alpha = 0.4f),
+            dividerLine = fg.copy(alpha = 0.18f),
+            windowDimming = Color.Black.copy(alpha = 0.4f),
+            sliderKeyPoint = accent.copy(alpha = 0.3f),
+            sliderKeyPointForeground = accent,
+            sliderBackground = fg.copy(alpha = 0.12f),
         )
     }
-    // 必须也是 Expressive 版：换成普通 MaterialTheme 会把 LocalUsingExpressiveTheme 关掉，
-    // 于是一进阅读页，浮层里的组件就悄悄退回非 Expressive 形态。
-    // 三个参数都显式透传（不传 = null = 沿用外层，行为上等价），是为了不依赖那条隐含语义 ——
-    // 尤其 motionScheme：根主题在「移除动画」下换的是 0 时长方案，这里跟丢了，
-    // 阅读页就成了全 App 唯一还在动的地方。
-    MaterialExpressiveTheme(
-        colorScheme = scheme,
-        motionScheme = MaterialTheme.motionScheme,
-        shapes = MaterialTheme.shapes,
-        typography = MaterialTheme.typography,
-        content = content,
-    )
+    // colors 版的 MiuixTheme 不提供 LocalContentColor（见 InkwellTheme），这里也补上：
+    // 浮层里没写颜色的 Text / Icon 跟纸上的字色走，而不是外层 App 主题的字色。
+    // 动效方案（AppTheme.motionScheme）不在 MiuixTheme 里，外层的照常透传进来，「移除动画」不会在阅读页失效
+    MiuixTheme(colors = scheme, textStyles = MiuixTheme.textStyles) {
+        CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
+    }
 }
 
 /**
- * 阅读页浮层的底：菜单顶栏、底部面板、设置面板。必须与纸面差一档 ——
+ * 阅读页浮层的底：菜单顶栏、底部面板、设置面板（[ReaderThemeScope] 里的 `background`）。必须与纸面差一档 ——
  * 第一版设置面板就是纸色，又去掉了蒙层，面板的上沿等于不存在：正文直接撞进面板、最后一行被拦腰截断，
  * 连面板的圆角都看不见（纸色上的纸色）。差了这一档，圆角上沿就是浮层的边。
- *
- * 浅纸往深走、深纸往浅走（深色里「浮起来」就是更亮），档位比卡片退一步，卡片才放得上去。
  */
 @Composable
 @ReadOnlyComposable
-internal fun readerOverlayColor(): Color {
-    val scheme = MaterialTheme.colorScheme
-    return if (scheme.background.luminance() > 0.5f) scheme.surfaceContainerHigh else scheme.surfaceContainerLow
-}
+internal fun readerOverlayColor(): Color = MiuixTheme.colorScheme.background
 
 /**
- * 设置面板里的分组卡。与 App 设置页同一个思路（见 settingsPageColor / settingsCardColor）：
- * 浅色是「灰底白卡」—— 卡就是纸色本身，像一张张纸片放在托盘上；深色是「暗底亮卡」，比面板再亮一档。
- * 卡里未选中的分段按钮是 Highest，在两种纸上都与卡差得开。
+ * 设置面板里的分组卡（[ReaderThemeScope] 里的 `surfaceContainer`）。与 App 设置页同一个思路：
+ * 浅色是「灰底白卡」、深色是「暗底亮卡」。卡里未选中的分段按钮是 `surfaceContainerHighest`，在两种纸上都与卡差得开。
  */
 @Composable
 @ReadOnlyComposable
-internal fun readerCardColor(): Color {
-    val scheme = MaterialTheme.colorScheme
-    return if (scheme.background.luminance() > 0.5f) scheme.surfaceContainerLowest else scheme.surfaceContainerHigh
-}
+internal fun readerCardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
 
 /**
  * [color] 放在 [paper] 上不够 4.5:1 时，往远离纸色的一端（浅纸往黑、深纸往白）一点点推，直到够为止。

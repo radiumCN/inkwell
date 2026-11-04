@@ -4,43 +4,33 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.LoadingIndicatorDefaults
-import androidx.compose.material3.ListItemColors
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -50,9 +40,17 @@ import coil3.decode.DataSource
 import coil3.request.ImageRequest
 import coil3.size.Precision
 import com.radium.inkwell.core.util.htmlToPlainText
+import com.radium.inkwell.ui.theme.AppShapes
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 空状态：图标 + 标题 + 提示 + 可选动作，全应用统一形态 */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EmptyState(
     icon: ImageVector,
@@ -68,34 +66,30 @@ fun EmptyState(
                 icon,
                 contentDescription = null,
                 Modifier.size(Dimens.iconXL),
-                tint = MaterialTheme.colorScheme.outlineVariant,
+                // 纯装饰的大图标：比文字淡得多，只做视觉锚点（dividerLine 那档）
+                tint = MiuixTheme.colorScheme.dividerLine,
             )
             Text(
                 title,
                 Modifier.padding(top = Dimens.gapL),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Center,
             )
             if (hint != null) {
                 Text(
                     hint,
                     Modifier.padding(top = Dimens.gapS),
-                    style = MaterialTheme.typography.bodySmall,
-                    // 正文性小字用 onSurfaceVariant，不用 outline —— 后者浅色下只有约 3.9:1，
-                    // 达不到 WCAG 的 4.5:1。空态提示恰恰是最需要被读清的那句话
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    // 正文性小字用摘要色，不用 outline / dividerLine —— 后者是给线和装饰的，对比度不够读。
+                    // 空态提示恰恰是最需要被读清的那句话
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     textAlign = TextAlign.Center,
                 )
             }
             if (actionLabel != null && onAction != null) {
-                TextButton(
-                    onClick = onAction,
-                    shapes = ButtonDefaults.shapes(),
-                    modifier = Modifier.padding(top = Dimens.gapS),
-                ) {
-                    Text(actionLabel)
-                }
+                AppTextButton(actionLabel, onClick = onAction, modifier = Modifier.padding(top = Dimens.gapS))
             }
         }
     }
@@ -103,10 +97,8 @@ fun EmptyState(
 
 /**
  * 加载态。与 [EmptyState]/[ErrorState] 三态对称，全应用统一形态。
- *
- * 内部走 [AppLoadingIndicator]（默认尺寸的 Expressive [LoadingIndicator]）。
+ * 内部走 [AppLoadingIndicator]（默认尺寸的 HyperOS 转圈）。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LoadingState(
     modifier: Modifier = Modifier,
@@ -119,8 +111,8 @@ fun LoadingState(
                 Text(
                     label,
                     Modifier.padding(top = Dimens.gapM),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -129,45 +121,44 @@ fun LoadingState(
 }
 
 /**
- * 不确定进度指示。默认尺寸用 Expressive [LoadingIndicator]；
- * 小于其容器下限（[LoadingIndicatorDefaults.ContainerWidth]）时回退
- * [CircularProgressIndicator] —— 形变多边形靠形状变化传达「在动」，强缩到 18~24dp
- * 会让 minConstraints > maxConstraints，直接 `IllegalArgumentException`。
+ * 不确定进度指示：Miuix [InfiniteProgressIndicator]（HyperOS 那种细环 + 绕圈的小点）。
+ *
+ * 尺寸从按钮里的 18dp 到整页的 32dp 都是同一个组件 —— M3 Expressive 时代大号是形变多边形、
+ * 小号得退回圆环（多边形强缩会炸约束），这里没有那道分叉了。线宽随尺寸：小于 24dp 用细线，否则粗一档，
+ * 否则 18dp 的转圈里那根 2dp 的环看着发粗。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppLoadingIndicator(
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
+    color: Color = MiuixTheme.colorScheme.primary,
     size: Dp? = null,
 ) {
-    val floor = LoadingIndicatorDefaults.ContainerWidth
-    if (size != null && size < floor) {
-        CircularProgressIndicator(
-            modifier = modifier.size(size),
-            strokeWidth = Dimens.strokeThick,
-            color = color,
-        )
-    } else {
-        LoadingIndicator(
-            modifier = if (size != null) modifier.size(size) else modifier,
-            color = color,
-        )
-    }
+    val actual = size ?: Dimens.loadingIndicator
+    InfiniteProgressIndicator(
+        modifier = modifier,
+        color = color,
+        size = actual,
+        strokeWidth = if (actual < Dimens.iconMd) {
+            ProgressIndicatorDefaults.DefaultInfiniteProgressIndicatorStrokeWidth
+        } else {
+            Dimens.strokeThick + Dimens.strokeThin
+        },
+    )
 }
 
 /**
- * 确定进度条。用 Expressive [LinearWavyProgressIndicator]，搜索/书源校验/更新下载三处共用。
- * OptIn 收在封装里，调用点不必各自标实验 API。
+ * 确定进度条（搜索 / 书源校验 / 更新下载 / 离线缓存）：Miuix [LinearProgressIndicator] 的 6dp 胶囊条。
+ *
+ * [progress] 收的是值，不是 M3 时代那种 lambda：Miuix 的条本来就要值，lambda 只是装作把读数推迟到绘制阶段，
+ * 其实还是在组合里读 —— 调用方以为进度跳动不触发重组，实际照样重组，不如签名照实写。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DeterminateProgressBar(
-    progress: () -> Float,
+    progress: Float,
     modifier: Modifier = Modifier,
 ) {
-    LinearWavyProgressIndicator(
-        progress = progress,
+    LinearProgressIndicator(
+        progress = progress.coerceIn(0f, 1f),
         modifier = modifier.fillMaxWidth(),
     )
 }
@@ -175,26 +166,29 @@ fun DeterminateProgressBar(
 /**
  * 读数式的进度条：书读到哪了。书架封面底边、「继续阅读」卡片里用。
  *
- * 不用 [DeterminateProgressBar]：那条波浪线一直在动，表达的是「有活正在跑」（搜索、校验、下载）；
- * 阅读进度是个静止的读数，书架上一排封面都在起伏只会让人以为它们在下载。
- * 也不画 M3 线性进度条尾巴上那个「终点」小圆点 —— 4dp 细线上它只是一粒噪点。
+ * 和 [DeterminateProgressBar] 分开：那条表达「有活正在跑」（搜索、校验、下载），这条是静止的读数 ——
+ * 书架上一排封面要的是细细一条线，不是一排 6dp 的任务进度条。
  *
- * [progress] 落在 0..1；读屏按进度条报百分比（LinearProgressIndicator 自带 progressBarRangeInfo）。
+ * [progress] 落在 0..1；读屏按进度条报百分比（这里手动挂 progressBarRangeInfo，Miuix 的条不带）。
  */
 @Composable
 fun ReadingProgressMeter(
     progress: Float,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    color: Color = MiuixTheme.colorScheme.primary,
+    trackColor: Color = MiuixTheme.colorScheme.surfaceContainerHighest,
 ) {
+    val value = progress.coerceIn(0f, 1f)
     LinearProgressIndicator(
-        progress = { progress.coerceIn(0f, 1f) },
-        modifier = modifier.fillMaxWidth().height(Dimens.progressMeter),
-        color = color,
-        trackColor = trackColor,
-        strokeCap = StrokeCap.Round,
-        drawStopIndicator = {},
+        progress = value,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(value, 0f..1f) },
+        colors = ProgressIndicatorDefaults.progressIndicatorColors(
+            foregroundColor = color,
+            backgroundColor = trackColor,
+        ),
+        height = Dimens.progressMeter,
     )
 }
 
@@ -222,56 +216,53 @@ fun BookCover(
     placeholderChars: Int = 4,
     contentDescription: String? = title,
 ) {
-    Surface(
-        modifier = if (contentDescription == null) modifier.clearAndSetSemantics {} else modifier,
-        shape = MaterialTheme.shapes.small,
-        // 不加 tonalElevation：底色不是 surface 时它本就不起作用，这层底色也总被默认封面整块盖住
-        color = MaterialTheme.colorScheme.surfaceVariant,
+    Box(
+        (if (contentDescription == null) modifier.clearAndSetSemantics {} else modifier)
+            .clip(AppShapes.small)
+            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
     ) {
-        Box(Modifier.fillMaxSize()) {
-            var loaded by remember(coverModel) { mutableStateOf(false) }
-            // 这次成功是不是内存缓存命中：命中就不淡入
-            var instant by remember(coverModel) { mutableStateOf(false) }
-            val fade = remember(coverModel) { Animatable(0f) }
-            val fadeSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-            LaunchedEffect(fade, loaded, instant) {
-                when {
-                    !loaded -> fade.snapTo(0f)
-                    instant -> fade.snapTo(1f)
-                    else -> fade.animateTo(1f, fadeSpec)
-                }
+        var loaded by remember(coverModel) { mutableStateOf(false) }
+        // 这次成功是不是内存缓存命中：命中就不淡入
+        var instant by remember(coverModel) { mutableStateOf(false) }
+        val fade = remember(coverModel) { Animatable(0f) }
+        val fadeSpec = AppTheme.motionScheme.defaultEffectsSpec<Float>()
+        LaunchedEffect(fade, loaded, instant) {
+            when {
+                !loaded -> fade.snapTo(0f)
+                instant -> fade.snapTo(1f)
+                else -> fade.animateTo(1f, fadeSpec)
             }
-            // 图完全不透明了才撤默认封面；derivedStateOf 让淡入的每一帧只走图层、不重组
-            val covered by remember(coverModel) {
-                derivedStateOf { loaded && (instant || fade.value >= 1f) }
+        }
+        // 图完全不透明了才撤默认封面；derivedStateOf 让淡入的每一帧只走图层、不重组
+        val covered by remember(coverModel) {
+            derivedStateOf { loaded && (instant || fade.value >= 1f) }
+        }
+        if (!covered) DefaultCover(title, placeholderChars)
+        if (coverModel != null) {
+            val context = LocalPlatformContext.current
+            val request = remember(coverModel, context) {
+                ImageRequest.Builder(context)
+                    .data(coverModel)
+                    // 不设 size：AsyncImage 按布局约束定解码尺寸 —— 列表封面 48×64dp，不会把 1000px 原图解进内存。
+                    // 从前为了拿约束在外面套了 BoxWithConstraints，每个列表项都多一次子组合，书架一滑就是一屏。
+                    // 各调用点的尺寸都是有界的（定宽高，或网格格子里 fillMaxSize）；无界时 Coil 会按原图解，新调用点别给无界约束。
+                    .precision(Precision.INEXACT)
+                    .build()
             }
-            if (!covered) DefaultCover(title, placeholderChars)
-            if (coverModel != null) {
-                val context = LocalPlatformContext.current
-                val request = remember(coverModel, context) {
-                    ImageRequest.Builder(context)
-                        .data(coverModel)
-                        // 不设 size：AsyncImage 按布局约束定解码尺寸 —— 列表封面 48×64dp，不会把 1000px 原图解进内存。
-                        // 从前为了拿约束在外面套了 BoxWithConstraints，每个列表项都多一次子组合，书架一滑就是一屏。
-                        // 各调用点的尺寸都是有界的（定宽高，或网格格子里 fillMaxSize）；无界时 Coil 会按原图解，新调用点别给无界约束。
-                        .precision(Precision.INEXACT)
-                        .build()
-                }
-                AsyncImage(
-                    model = request,
-                    contentDescription = contentDescription,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { alpha = if (instant) 1f else fade.value },
-                    onSuccess = { s ->
-                        instant = s.result.dataSource == DataSource.MEMORY_CACHE ||
-                            s.result.dataSource == DataSource.MEMORY
-                        loaded = true
-                    },
-                    onError = { loaded = false },
-                )
-            }
+            AsyncImage(
+                model = request,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = if (instant) 1f else fade.value },
+                onSuccess = { s ->
+                    instant = s.result.dataSource == DataSource.MEMORY_CACHE ||
+                        s.result.dataSource == DataSource.MEMORY
+                    loaded = true
+                },
+                onError = { loaded = false },
+            )
         }
     }
 }
@@ -300,7 +291,7 @@ private fun DefaultCover(title: String, maxChars: Int) {
                 .align(Alignment.Center)
                 // 左边多让一格给书脊，字才看着落在「封面」正中而不是压着书脊
                 .padding(start = Dimens.gapM, end = Dimens.gapXS),
-            style = MaterialTheme.typography.titleSmall,
+            style = MiuixTheme.textStyles.subtitle,
             color = Color.White.copy(alpha = 0.92f),
             textAlign = TextAlign.Center,
             maxLines = 3,
@@ -331,10 +322,8 @@ internal fun colorIndex(title: String): Int {
 /**
  * 书籍列表行：封面 + 标题/副标题/来源 + 尾部动作，搜索与发现共用；onClick 非空时整行可点。
  *
- * 默认白卡（[settingsStackListColors]）。调用页必须铺灰底 [settingsPageColor]，
- * 否则白卡坐在默认 `surface` 白画布上，圆角缝里会透出一块白板 —— 搜索页曾经就是这样。
+ * 默认白卡（[settingsStackListColors]），坐在页面底 `surface` 的灰上。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BookListRow(
     title: String,
@@ -348,11 +337,11 @@ fun BookListRow(
     trailingEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    colors: ListItemColors = settingsStackListColors(),
+    colors: ContentListColors = settingsStackListColors(),
 ) {
     val overline: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
         {
-            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(it, style = ContentListDefaults.overlineStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
     val plainCaption = remember(caption) {
@@ -364,57 +353,73 @@ fun BookListRow(
     }
     val supporting: (@Composable () -> Unit)? = plainCaption?.let {
         {
-            // outline 在浅色下只有约 3.9:1；书源名/最新章节是要读的信息，走令牌默认色
-            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // 书源名/最新章节是要读的信息：走槽位给的摘要色，不另取更淡的装饰色
+            Text(it, style = ContentListDefaults.supportingStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
-    ContentListItem(
-        onClick = onClick ?: {},
-        modifier = modifier,
-        enabled = onClick != null,
-        leadingContent = {
-            BookCover(
-                title = title,
-                coverModel = coverModel,
-                modifier = Modifier.size(
-                    width = Dimens.coverThumbWidth,
-                    height = Dimens.coverThumbHeight,
-                ),
-                placeholderChars = 2,
-                // 书名就是这一行的标题，读屏不必再念一遍封面
-                contentDescription = null,
-            )
-        },
-        trailingContent = {
-            // 转圈叠在按钮上，而不是替换它 —— 24dp 的转圈换掉 48dp 的按钮，整行高度会跳一下
-            Box(contentAlignment = Alignment.Center) {
-                TextButton(
-                    onClick = onTrailing,
-                    shapes = ButtonDefaults.shapes(),
-                    enabled = trailingEnabled && !trailingLoading,
-                ) {
-                    Text(
-                        trailingLabel,
-                        color = if (trailingLoading) Color.Transparent else LocalContentColor.current,
-                    )
-                }
-                if (trailingLoading) {
-                    AppLoadingIndicator(
-                        color = MaterialTheme.colorScheme.primary,
-                        size = Dimens.buttonSpinner,
-                    )
-                }
+    val cover: @Composable () -> Unit = {
+        BookCover(
+            title = title,
+            coverModel = coverModel,
+            modifier = Modifier.size(
+                width = Dimens.coverThumbWidth,
+                height = Dimens.coverThumbHeight,
+            ),
+            placeholderChars = 2,
+            // 书名就是这一行的标题，读屏不必再念一遍封面
+            contentDescription = null,
+        )
+    }
+    val trailing: @Composable () -> Unit = {
+        // 转圈叠在按钮上，而不是替换它 —— 24dp 的转圈换掉 48dp 的按钮，整行高度会跳一下
+        Box(contentAlignment = Alignment.Center) {
+            AppTextButton(
+                onClick = onTrailing,
+                enabled = trailingEnabled && !trailingLoading,
+            ) {
+                Text(
+                    trailingLabel,
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    color = if (trailingLoading) Color.Transparent else LocalContentColor.current,
+                )
             }
-        },
-        overlineContent = overline,
-        supportingContent = supporting,
-        // 48×64 书封：用 Comfortable，Compact 会贴边
-        contentPadding = ContentListDefaults.ComfortablePadding,
-        colors = colors,
-        content = {
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-        },
-    )
+            if (trailingLoading) {
+                AppLoadingIndicator(
+                    color = MiuixTheme.colorScheme.primary,
+                    size = Dimens.buttonSpinner,
+                )
+            }
+        }
+    }
+    val titleContent: @Composable () -> Unit = {
+        Text(title, style = ContentListDefaults.titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    if (onClick != null) {
+        ContentListItem(
+            onClick = onClick,
+            modifier = modifier,
+            leadingContent = cover,
+            trailingContent = trailing,
+            overlineContent = overline,
+            supportingContent = supporting,
+            // 48×64 书封：用 Comfortable，Compact 会贴边
+            contentPadding = ContentListDefaults.ComfortablePadding,
+            colors = colors,
+            content = titleContent,
+        )
+    } else {
+        ContentListItem(
+            modifier = modifier,
+            leadingContent = cover,
+            trailingContent = trailing,
+            overlineContent = overline,
+            supportingContent = supporting,
+            contentPadding = ContentListDefaults.ComfortablePadding,
+            colors = colors,
+            content = titleContent,
+        )
+    }
 }
 
 /**
@@ -427,18 +432,19 @@ fun BookIntro(intro: String, modifier: Modifier = Modifier) {
     // 收起状态下排版有没有被截：展开后就看不出来了，所以只在收起时更新
     var overflows by remember(intro) { mutableStateOf(false) }
     Column(modifier) {
-        Text("简介", style = MaterialTheme.typography.titleMedium)
+        Text("简介", style = MiuixTheme.textStyles.headline2, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(Dimens.gapXS))
         Text(
             intro,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceSecondary,
             maxLines = if (expanded) Int.MAX_VALUE else INTRO_COLLAPSED_LINES,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
         )
         if (expanded || overflows) {
             AppTextButton(onClick = { expanded = !expanded }) {
-                Text(if (expanded) "收起" else "展开")
+                Text(if (expanded) "收起" else "展开", style = MiuixTheme.textStyles.body2)
             }
         }
     }

@@ -1,31 +1,21 @@
 package com.radium.inkwell.ui.components
 
-import com.radium.inkwell.ui.components.sheetContentInsets
-import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 
 /**
  * 「从 N 项里选一个」的统一形态。
@@ -40,8 +30,12 @@ data class PickerOption(
     val subtitle: String? = null,
 )
 
-/** 底部选择面板。选中项左侧打勾 —— 不再靠 "✓ " 前缀拼字符串 */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 底部选择面板（[AppBottomSheet]，标题居中）。选中项左侧打勾、整行走选中色 —— 不再靠 "✓ " 前缀拼字符串。
+ *
+ * 选中后先把面板收下去（播完退场动画）再回调 [onSelect] / [onDismiss]：调用方若立刻把 `if (show)` 置 false，
+ * 面板会从组合树摘掉，退场动画直接被掐断。
+ */
 @Composable
 fun OptionPickerSheet(
     title: String,
@@ -51,13 +45,6 @@ fun OptionPickerSheet(
     onDismiss: () -> Unit,
     header: @Composable (() -> Unit)? = null,
 ) {
-    // 只要收起 / 全展开：选项不多，半展开没意义。选中后先 hide() 再回调 ——
-    // 调用方若立刻把 `if (show)` 置 false，面板会从组合树摘掉，退场动画直接被掐断。
-    val sheetState = rememberBottomSheetState(
-        initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-    )
-    val scope = rememberCoroutineScope()
     // 打开时直接定位到当前选中项：书源一多，每次都从头翻找刚才选的那个很折磨。
     // 往上留两行余量，让选中项不贴着列表顶边、一眼能看出它前后是谁。
     // 只取首次组合的初值 —— 面板开着时用户自己滚动不该被拽回去
@@ -66,22 +53,10 @@ fun OptionPickerSheet(
             .let { if (it < 0) 0 else (it - 2).coerceAtLeast(0) },
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        // Sheet 用 surface；选项行读 surfaceContainerLow。默认都走 Low 时卡片糊进底色。
-        containerColor = MaterialTheme.colorScheme.surface,
-        // 选项多时列表滚到手势条下面，见 sheetContentInsets
-        contentWindowInsets = { sheetContentInsets() },
-    ) {
+    // 列表会滚动：导航栏高度垫进列表末尾（见 sheetBottomInset），不让面板在外面垫
+    AppBottomSheet(onDismissRequest = onDismiss, title = title, padNavigationBar = false) {
         Column(Modifier.fillMaxWidth()) {
-            Text(
-                title,
-                Modifier.padding(horizontal = Dimens.screenPadding, vertical = Dimens.gapS),
-                style = MaterialTheme.typography.titleMedium,
-            )
             header?.invoke()
-            // 底部留白与导航栏高度都垫在列表末尾（从前垫在外层 Column 上，列表在手势条上方就截断了）
             val bottomInset = Dimens.gapXL + sheetBottomInset()
             LazyColumn(
                 Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset),
@@ -93,13 +68,7 @@ fun OptionPickerSheet(
                     OptionRow(
                         option = opt,
                         selected = opt.id == selectedId,
-                        onClick = {
-                            scope.launch {
-                                sheetState.hide()
-                                onSelect(opt)
-                                onDismiss()
-                            }
-                        },
+                        onClick = { dismiss { onSelect(opt) } },
                     )
                 }
             }
@@ -116,7 +85,7 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
             // 勾选位始终占宽，选中与否不会让文字左右跳动
             if (selected) {
                 Icon(
-                    Icons.Default.Check,
+                    MiuixIcons.Basic.Check,
                     contentDescription = null,
                     Modifier.size(Dimens.iconSm),
                 )
@@ -126,13 +95,13 @@ private fun OptionRow(option: PickerOption, selected: Boolean, onClick: () -> Un
         },
         supportingContent = option.subtitle?.takeIf { it.isNotBlank() }?.let {
             {
-                Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(it, style = ContentListDefaults.supportingStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
         content = {
             Text(
                 option.label,
-                style = MaterialTheme.typography.bodyLarge,
+                style = ContentListDefaults.titleStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

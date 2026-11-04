@@ -14,15 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -65,8 +58,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.radium.inkwell.ui.components.animationsEnabled
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookDetailScreen(
     onRead: () -> Unit,
@@ -103,7 +103,7 @@ fun BookDetailScreen(
                     "书籍详情",
                     topBarScroll,
                     onBack = onBack.takeIf { showBack },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    containerColor = MiuixTheme.colorScheme.primaryContainer,
                 ) {
                     if (book?.type == BookType.NET) {
                         AppIconButton(
@@ -115,7 +115,7 @@ fun BookDetailScreen(
                             if (refreshing) {
                                 AppLoadingIndicator(size = Dimens.buttonSpinner)
                             } else {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新目录")
+                                Icon(MiuixIcons.Refresh, contentDescription = "刷新目录")
                             }
                         }
                     }
@@ -168,19 +168,18 @@ fun BookDetailScreen(
                             // 章节表还没读到时先用书行上记的章数，别闪一下「共 0 章」
                             "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
                             Modifier.weight(1f).padding(vertical = Dimens.gapS),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MiuixTheme.textStyles.headline2,
+                            fontWeight = FontWeight.Medium,
                         )
                         // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
                         // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
                         if (currentPos >= 0) {
-                            AppTextButton(onClick = {
+                            AppTextButton("定位当前章", onClick = {
                                 val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
                                 scope.launch {
                                     if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
                                 }
-                            }) {
-                                Text("定位当前章")
-                            }
+                            })
                         }
                     }
                     HorizontalDivider()
@@ -200,8 +199,8 @@ fun BookDetailScreen(
                                 Spacer(Modifier.height(Dimens.gapM))
                                 Text(
                                     "正在获取目录…",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
                             }
                         }
@@ -216,16 +215,15 @@ fun BookDetailScreen(
                             ) {
                                 Text(
                                     if (b.type == BookType.NET) "目录还没加载" else "这本书没有章节",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
                                 if (b.type == BookType.NET) {
                                     AppTextButton(
+                                        text = "重新获取",
                                         onClick = { viewModel.refresh() },
                                         enabled = !refreshing,
-                                    ) {
-                                        Text("重新获取")
-                                    }
+                                    )
                                 }
                             }
                         }
@@ -261,8 +259,8 @@ fun BookDetailScreen(
             header = {
                 Text(
                     "离开这一页也会接着缓存；已经缓存过的章直接跳过。需要网页渲染才抓得到的章，留到阅读时再加载",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
                 )
             },
@@ -277,7 +275,7 @@ private fun offlineRangeHint(range: OfflineRange): String = when (range) {
 }
 
 /**
- * 头部：封面、书名、阅读与缓存按钮、简介。底下铺一道从 primaryContainer 到页面底色的竖向渐变 ——
+ * 头部：封面、书名、阅读与缓存按钮、简介。底下铺一道从 primaryContainer 到页面底色（surface）的竖向渐变 ——
  * 封面色（或 App 强调色）从顶栏流下来，在目录开始的地方化进纸面，详情页就不再是一张白纸上贴一张封面。
  */
 @Composable
@@ -290,10 +288,11 @@ private fun Header(
     onOfflineCache: () -> Unit,
     onCancelDownload: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Column(
         Modifier
-            .background(Brush.verticalGradient(listOf(scheme.primaryContainer, scheme.background)))
+            // 终点是页面底 surface（Miuix 的分层），与 Scaffold 画布同色，渐变化进去不留边
+            .background(Brush.verticalGradient(listOf(scheme.primaryContainer, scheme.surface)))
             .padding(Dimens.screenPadding),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
     ) {
@@ -312,21 +311,21 @@ private fun Header(
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                 Text(
                     book.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MiuixTheme.textStyles.title3,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (book.author.isNotBlank()) {
                     Text(
                         book.author,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
                 Text(
                     "共 $chapterCount 章",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
         }
@@ -362,21 +361,21 @@ private fun OfflineStatus(
     chapterCount: Int,
     onCancel: () -> Unit,
 ) {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val muted = MiuixTheme.colorScheme.onSurfaceVariantSummary
     when {
         download?.running == true -> Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "正在缓存 ${download.done} / ${download.total} 章" +
                         if (download.failed > 0) "，${download.failed} 章没抓到" else "",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MiuixTheme.textStyles.footnote1,
                     color = muted,
                     modifier = Modifier.weight(1f),
                 )
-                AppTextButton(onClick = onCancel) { Text("停止") }
+                AppTextButton("停止", onClick = onCancel)
             }
             DeterminateProgressBar(
-                progress = { if (download.total == 0) 0f else download.done.toFloat() / download.total },
+                progress = if (download.total == 0) 0f else download.done.toFloat() / download.total,
             )
         }
         download != null -> Text(
@@ -386,12 +385,12 @@ private fun OfflineStatus(
                 download.failed > 0 -> "缓存完成，${download.failed} 章没抓到（阅读时会再试）"
                 else -> "缓存完成，已缓存 $cachedCount / $chapterCount 章"
             },
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             color = muted,
         )
         cachedCount > 0 -> Text(
             "已缓存 $cachedCount / $chapterCount 章",
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             color = muted,
         )
     }

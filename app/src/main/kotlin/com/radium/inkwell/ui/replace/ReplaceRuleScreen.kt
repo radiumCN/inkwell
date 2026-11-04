@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.replace
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,61 +9,61 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.rememberModalBottomSheetState
-import com.radium.inkwell.ui.components.AppAlertDialog
-import com.radium.inkwell.ui.components.AppIconButton
-import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import com.radium.inkwell.ui.components.PrimaryButton
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
-import kotlinx.coroutines.launch
+import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppBottomSheet
+import com.radium.inkwell.ui.components.AppFormField
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
-@OptIn(ExperimentalMaterial3Api::class)
+import com.radium.inkwell.ui.components.sheetBottomInset
+import com.radium.inkwell.ui.components.topBarScroll
+import top.yukonga.miuix.kmp.basic.FloatingActionButton
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun ReplaceRuleScreen(
     onBack: () -> Unit,
@@ -84,7 +83,8 @@ fun ReplaceRuleScreen(
         topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
         floatingActionButton = {
             FloatingActionButton(onClick = viewModel::newRule) {
-                Icon(Icons.Default.Add, contentDescription = "新建规则")
+                // Miuix 的悬浮按钮不替内容设前景色，图标色自己给
+                Icon(MiuixIcons.Add, contentDescription = "新建规则", tint = MiuixTheme.colorScheme.onPrimary)
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -103,7 +103,7 @@ fun ReplaceRuleScreen(
             // 内容滚到手势条下面（见 exceptBottom）
             LazyColumn(
                 Modifier.fillMaxSize().padding(padding.exceptBottom()),
-                // 底部给悬浮的「新建」按钮让位（56dp 高 + 16dp 边距）：不留的话，最后一条行尾的开关与删除
+                // 底部给悬浮的「新建」按钮让位（Miuix 悬浮按钮 60dp 高 + 边距）：不留的话，最后一条行尾的开关与删除
                 // 正好压在按钮下面，还滚不出来。按钮本身坐在导航栏上面，所以再加上导航栏的高度
                 contentPadding = ContentListDefaults.listContentPadding(
                     bottom = Dimens.touchTarget + Dimens.gapXXL + padding.calculateBottomPadding(),
@@ -123,24 +123,35 @@ fun ReplaceRuleScreen(
     }
 
     state.editing?.let { draft ->
-        // 有没保存的改动时，下滑、点遮罩、按返回都先问一句 —— 从前一碰就关，填了半天的正则说没就没。
-        // 拦在 confirmValueChange 上：它说不，面板就不会收起，onDismissRequest 也不会来。
+        // 有没保存的改动时，下滑、按返回都不能一碰就关 —— 从前一碰就关，填了半天的正则说没就没。
+        // Miuix 面板是先把面板动画移出屏幕、再回调关闭请求，回调里说不就晚了，所以分三路拦：
+        // - 有改动时 allowDismiss = false：下滑、点遮罩一律弹回原位，不关；
+        // - 返回键另挂一个 NavigationBackHandler 在面板内容里：比面板自己的那个后注册，优先拿到返回事件，
+        //   有改动时弹「放弃编辑？」；
+        // - 标题行左边的 ×（HyperOS 编辑面板的「取消」位）：有改动先问，没改动直接收。
         // 「放弃」之后自己收起面板，那一下要放行（discarding），否则又被这里拦回去。
-        val scope = rememberCoroutineScope()
         var askDiscard by remember { mutableStateOf(false) }
         var discarding by remember { mutableStateOf(false) }
-        val dirty by rememberUpdatedState(state.editorDirty)
-        val sheetState = rememberModalBottomSheetState(
-            confirmValueChange = { target ->
-                if (target == SheetValue.Hidden && dirty && !discarding) {
-                    askDiscard = true
-                    false
-                } else {
-                    true
+        val guarded = state.editorDirty && !discarding
+        AppBottomSheet(
+            // 动画播完才让 ViewModel 清掉草稿：先清的话面板当场从组合树摘掉，退场动画被掐断
+            onDismissRequest = viewModel::dismissEditor,
+            title = if (draft.id.isEmpty()) "新建净化规则" else "编辑净化规则",
+            startAction = {
+                AppIconButton(onClick = { if (guarded) askDiscard = true else dismiss() }) {
+                    Icon(MiuixIcons.Close, contentDescription = "关闭")
                 }
             },
-        )
-        ModalBottomSheet(onDismissRequest = viewModel::dismissEditor, sheetState = sheetState) {
+            allowDismiss = !guarded,
+            // 表单会滚动：导航栏高度垫在表单末尾（见 Editor）
+            padNavigationBar = false,
+        ) {
+            val backState = rememberNavigationEventState(currentInfo = NavigationEventInfo.None)
+            NavigationBackHandler(
+                state = backState,
+                isBackEnabled = guarded,
+                onBackCompleted = { askDiscard = true },
+            )
             Editor(
                 draft = draft,
                 sampleText = state.sampleText,
@@ -151,22 +162,21 @@ fun ReplaceRuleScreen(
                 onSampleChange = viewModel::updateSample,
                 onSave = viewModel::save,
             )
-        }
-        if (askDiscard) {
-            AppAlertDialog(
-                onDismissRequest = { askDiscard = false },
-                title = "放弃编辑？",
-                text = "这条规则的改动还没保存，关掉就没了。",
-                confirmText = "放弃",
-                dismissText = "继续编辑",
-                onConfirm = {
-                    askDiscard = false
-                    discarding = true
-                    scope.launch { sheetState.hide() }.invokeOnCompletion {
-                        if (!sheetState.isVisible) viewModel.dismissEditor()
-                    }
-                },
-            )
+            // 放在面板内容里，「放弃」才拿得到 dismiss()
+            if (askDiscard) {
+                AppAlertDialog(
+                    onDismissRequest = { askDiscard = false },
+                    title = "放弃编辑？",
+                    text = "这条规则的改动还没保存，关掉就没了。",
+                    confirmText = "放弃",
+                    dismissText = "继续编辑",
+                    onConfirm = {
+                        askDiscard = false
+                        discarding = true
+                        dismiss()
+                    },
+                )
+            }
         }
     }
 
@@ -196,13 +206,13 @@ private fun RuleRow(
         colors = settingsStackListColors(),
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 删除在前、开关在后：与书源/订阅列表的行尾一致。图标走 onSurfaceVariant ——
-                // outline 只给边框/分隔线，拿它画可点的图标在浅色下对比度不够（约 3.9:1）
+                // 删除在前、开关在后：与书源/订阅列表的行尾一致。图标走摘要色 ——
+                // outline / dividerLine 只给边框/分隔线，拿它画可点的图标在浅色下对比度不够
                 AppIconButton(onClick = onDelete) {
                     Icon(
-                        Icons.Default.Delete,
+                        MiuixIcons.Delete,
                         contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
                 Switch(
@@ -224,6 +234,7 @@ private fun RuleRow(
                     // 否则用户会纳闷"这条规则怎么在别的书里不管用"
                     if (rule.bookId.isNotEmpty()) append("  ·  本书专属")
                 },
+                style = ContentListDefaults.supportingStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -231,7 +242,7 @@ private fun RuleRow(
         content = {
             Text(
                 rule.name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = ContentListDefaults.titleStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -256,35 +267,32 @@ private fun Editor(
             .heightIn(max = Dimens.sheetEditorMaxHeight)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Dimens.screenPadding)
-            .padding(bottom = Dimens.gapXXL),
+            // Miuix 面板铺到屏幕底、不替内容让导航栏：导航栏高度垫在滚动内容末尾（见 sheetBottomInset）
+            .padding(bottom = Dimens.gapXXL + sheetBottomInset()),
         verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
-        Text(
-            if (draft.id.isEmpty()) "新建净化规则" else "编辑净化规则",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        OutlinedTextField(
+        // 标题在面板自带的标题行里（居中，左边是 ×），这里不再排一行
+        AppFormField(
             value = draft.name,
             onValueChange = { onChange(draft.copy(name = it)) },
-            label = { Text("名称") },
-            placeholder = { Text("留空则用规则内容代替") },
+            label = "名称",
+            placeholder = "留空则用规则内容代替",
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
         )
-        OutlinedTextField(
+        AppFormField(
             value = draft.pattern,
             onValueChange = { onChange(draft.copy(pattern = it)) },
-            label = { Text("替换什么") },
+            label = "替换什么",
+            singleLine = false,
             isError = patternError != null,
-            supportingText = patternError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } },
-            modifier = Modifier.fillMaxWidth(),
+            supportingText = patternError,
         )
-        OutlinedTextField(
+        AppFormField(
             value = draft.replacement,
             onValueChange = { onChange(draft.copy(replacement = it)) },
-            label = { Text("替换成什么") },
-            placeholder = { Text("留空即删除") },
-            modifier = Modifier.fillMaxWidth(),
+            label = "替换成什么",
+            placeholder = "留空即删除",
+            singleLine = false,
         )
         // 整行就是一个开关（读屏一个焦点，念「使用正则表达式，开关」），行内 Switch 只做展示；
         // Switch 只展示时不再自带 48dp 触控区，行自己撑够
@@ -300,11 +308,11 @@ private fun Editor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("使用正则表达式", style = MaterialTheme.typography.bodyMedium)
+                Text("使用正则表达式", style = MiuixTheme.textStyles.body2)
                 Text(
                     if (draft.isRegex) "按正则匹配" else "按纯文本原样匹配",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
             Switch(
@@ -312,41 +320,41 @@ private fun Editor(
                 onCheckedChange = null,
             )
         }
-        OutlinedTextField(
+        AppFormField(
             value = draft.scope,
             onValueChange = { onChange(draft.copy(scope = it)) },
-            label = { Text("作用范围") },
-            placeholder = { Text("留空 = 所有书源；否则填书源名或域名，逗号分隔") },
+            label = "作用范围",
+            placeholder = "留空 = 所有书源；否则填书源名或域名，逗号分隔",
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
         )
 
         HorizontalDivider()
 
         // 净化是有损的：一条贪婪的正则能把整章正文删空，而在阅读页只表现为
         // 「正文规则未匹配到内容」，事后根本查不出是净化干的。所以保存前先让用户看见结果。
-        Text("试一下", style = MaterialTheme.typography.titleSmall)
-        OutlinedTextField(
+        Text("试一下", style = MiuixTheme.textStyles.subtitle)
+        AppFormField(
             value = sampleText,
             onValueChange = onSampleChange,
-            label = { Text("粘一段正文进来") },
+            label = "粘一段正文进来",
+            singleLine = false,
             minLines = 2,
             maxLines = 4,
-            modifier = Modifier.fillMaxWidth(),
         )
         // sampleResult 为 null = 规则还没写、或正则有误（错误已标在「替换什么」下面）：不显示结果，
         // 更不能当成「被删光了」标红
         if (sampleText.isNotEmpty() && sampleResult != null) {
             Text(
                 "替换后",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             Text(
                 sampleResult.ifEmpty { "（整段被删光了 —— 这条规则大概太贪婪）" },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (sampleResult.isEmpty()) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurface,
+                style = MiuixTheme.textStyles.footnote1,
+                color = if (sampleResult.isEmpty()) MiuixTheme.colorScheme.error
+                else MiuixTheme.colorScheme.onSurface,
             )
         }
 

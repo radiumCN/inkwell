@@ -21,24 +21,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.radium.inkwell.ui.components.AppToolbar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -55,6 +47,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
@@ -75,7 +68,16 @@ import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
 import com.radium.inkwell.ui.components.settingsPageColor
-@OptIn(ExperimentalMaterial3Api::class)
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Search
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
@@ -134,8 +136,7 @@ fun SearchScreen(
         if (nearEnd) viewModel.loadMore()
     }
 
-    // 与书架/设置同一套画布：浅色灰底白卡。默认 Scaffold 是 surface 白底，
-    // 结果行圆角缝里会透出一块白板，像每条结果后面垫了一层白背景。
+    // 与书架/设置同一套画布：灰底白卡（Miuix 的页面底 surface 上放卡片色的结果行）
     val pageColor = settingsPageColor()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -147,43 +148,39 @@ fun SearchScreen(
     }
     // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，写进 items 里就是每行挂一个
     val motionOn = animationsEnabled()
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     Scaffold(
         containerColor = pageColor,
         topBar = {
-            // 留经典窄栏：标题位放的是输入框。换成 AppTopBar 的两段式，输入框会被摊到
-            // 大标题那一行的位置上，它自己的高度与字号跟大标题的排版打架
-            TopAppBar(
-                title = {
-                    SearchField(
-                        // 读 VM 里同步更新的那份，不读 StateFlow（理由见 SearchViewModel.query）
-                        value = viewModel.query,
-                        onValueChange = viewModel::setQuery,
-                        placeholder = "书名 / 作者",
-                        onSearch = {
-                            // 回车搜了就收键盘：IME 的 Search 动作默认不收，键盘一直挡着大半屏结果
-                            keyboard?.hide()
-                            focusManager.clearFocus()
-                            viewModel.search()
-                        },
-                        modifier = Modifier
-                            .padding(end = Dimens.gapS)
-                            .focusRequester(searchFocus),
-                    )
-                },
+            // 留窄栏：标题位放的是输入框。换成 AppTopBar 的大标题，输入框没处放 ——
+            // 大标题那一行只收文字，Miuix 的顶栏标题也只收字符串
+            AppToolbar(
                 navigationIcon = {
                     BackButton(onClick = onBack)
                 },
+                containerColor = pageColor,
                 actions = {
                     AppIconButton(onClick = { viewModel.search() }) {
-                        Icon(Icons.Default.Search, contentDescription = "搜索")
+                        Icon(MiuixIcons.Search, contentDescription = "搜索")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = pageColor,
-                    scrolledContainerColor = pageColor,
-                ),
-            )
+            ) {
+                SearchField(
+                    // 读 VM 里同步更新的那份，不读 StateFlow（理由见 SearchViewModel.query）
+                    value = viewModel.query,
+                    onValueChange = viewModel::setQuery,
+                    placeholder = "书名 / 作者",
+                    onSearch = {
+                        // 回车搜了就收键盘：IME 的 Search 动作默认不收，键盘一直挡着大半屏结果
+                        keyboard?.hide()
+                        focusManager.clearFocus()
+                        viewModel.search()
+                    },
+                    modifier = Modifier
+                        .padding(end = Dimens.gapS)
+                        .focusRequester(searchFocus),
+                )
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
@@ -197,10 +194,7 @@ fun SearchScreen(
             ) {
                 Column {
                     DeterminateProgressBar(
-                        progress = {
-                            if (state.sourceCount == 0) 0f
-                            else state.doneCount.toFloat() / state.sourceCount
-                        },
+                        progress = if (state.sourceCount == 0) 0f else state.doneCount.toFloat() / state.sourceCount,
                     )
                     if (state.searchPaused) {
                         SearchPauseBar(
@@ -374,7 +368,7 @@ private fun SearchHistoryList(
     onRemove: (String) -> Unit,
     onClear: () -> Unit,
 ) {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     // 键盘弹着时历史多半在它底下，同结果列表一样让开
     LazyColumn(
         modifier = Modifier.imePadding(),
@@ -384,7 +378,7 @@ private fun SearchHistoryList(
         item(key = "header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionHeader("搜索历史", Modifier.weight(1f), horizontalInset = false)
-                AppTextButton(onClick = onClear) { Text("清空") }
+                AppTextButton("清空", onClick = onClear)
             }
         }
         // key 加前缀：裸用关键词的话，搜过「header」这个词就跟标题行的 key 撞上，LazyColumn 当场崩溃，
@@ -404,14 +398,14 @@ private fun SearchHistoryList(
                 trailingContent = {
                     AppIconButton(onClick = { onRemove(keyword) }) {
                         Icon(
-                            Icons.Default.Close,
+                            MiuixIcons.Close,
                             contentDescription = "删除「$keyword」",
                             Modifier.size(Dimens.iconSm),
                         )
                     }
                 },
             ) {
-                Text(keyword, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(keyword, style = ContentListDefaults.titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -422,7 +416,7 @@ private fun SearchHistoryList(
  * 点排序一侧打开底部面板（与书源管理同一套 OptionPicker）。
  *
  * 可点的是排序那一小块，它自己就得够 48dp 高：从前靠上下各 [Dimens.gapS] 撑，
- * 18dp 图标 / 一行 labelLarge 撑出来只有 36dp 左右，手指按偏一点就落空。
+ * 18dp 图标 / 一行 14sp 的字撑出来只有 36dp 左右，手指按偏一点就落空。
  * 外层不再另加上下留白 —— 加了就是 56dp，比两侧内容都高出一截。
  */
 @Composable
@@ -440,8 +434,9 @@ private fun SearchSortBar(
     ) {
         Text(
             if (count == 0 && searching) "搜索中…" else "共 $count 本",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         Spacer(Modifier.weight(1f))
         Row(
@@ -455,13 +450,14 @@ private fun SearchSortBar(
                 Icons.AutoMirrored.Filled.Sort,
                 contentDescription = null,
                 Modifier.size(Dimens.iconSm),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             Text(
                 sort.label,
                 Modifier.padding(start = Dimens.gapXS),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -485,9 +481,10 @@ private fun SearchPauseBar(label: String, onResume: () -> Unit) {
         Text(
             label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
-        AppTextButton(onClick = onResume) { Text("继续搜索") }
+        AppTextButton("继续搜索", onClick = onResume)
     }
 }

@@ -27,37 +27,20 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Badge
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
+import com.radium.inkwell.ui.components.AppBottomSheet
+import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.ToolbarTitle
+import com.radium.inkwell.ui.components.settingGroupItemShape
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -66,8 +49,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,8 +57,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
@@ -112,8 +91,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -128,6 +107,27 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.expandEnter
 import com.radium.inkwell.ui.components.expandExit
+import com.radium.inkwell.ui.theme.AppShapes
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.Badge
+import top.yukonga.miuix.kmp.basic.PullToRefresh
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Search
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
+import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -156,7 +156,6 @@ private fun originOf(bounds: Rect?, window: IntSize): TransformOrigin {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BookshelfScreen(
     onOpenBook: (String, TransformOrigin) -> Unit,
@@ -337,87 +336,76 @@ fun BookshelfScreen(
         )
     }
 
-    // 与设置页同一套画布：浅色灰底、深色黑底（见 settingsPageColor），进出设置不再闪白。
+    // 与设置页同一套画布：页面底 surface（见 settingsPageColor），进出设置不再闪色。
+    // 顶栏与画布同色、不随滚动变色，否则滚动时顶出一道色缝
     val pageColor = settingsPageColor()
-    // 纯 MD3：实心 tonal 顶栏（container / scrolled 同色，避免滚动时顶出色缝）。
-    // 不做磨砂玻璃、也不做底边 scrim 渐变 —— MD3 没有这些组件。
-    val topBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = pageColor,
-        scrolledContainerColor = pageColor,
-    )
     Scaffold(
-        // 这两条顶栏刻意留经典窄栏，不换 AppTopBar 的两段式 Flexible：一是进出多选会在两种
-        // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，两段式会把它
-        // 摊到大标题的位置上。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
+        // 这两条顶栏刻意留窄栏（AppToolbar），不换 AppTopBar 的折叠大标题：一是进出多选会在两种
+        // 栏之间切，高度不同就会跳；二是标题位是长按入口、副标题还要播追更进度，大标题那一行
+        // 放不下这两样。下面还压着隐藏区与下拉刷新，再叠一层折叠手势也容易互相抢。
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
                 var overflowOpen by remember { mutableStateOf(false) }
-                TopAppBar(
-                    title = {
-                        Text(
-                            "已选 ${selected.size} 本",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
+                AppToolbar(
                     navigationIcon = {
                         AppIconButton(onClick = viewModel::clearSelection) {
-                            Icon(Icons.Default.Close, contentDescription = "退出多选")
+                            Icon(MiuixIcons.Close, contentDescription = "退出多选")
                         }
                     },
+                    containerColor = pageColor,
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
-                            Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                            Icon(MiuixIcons.SelectAll, contentDescription = "全选")
                         }
                         AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
-                                Icons.Default.Delete,
+                                MiuixIcons.Delete,
                                 contentDescription = "删除",
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = MiuixTheme.colorScheme.error,
                             )
                         }
                         Box {
                             AppIconButton(onClick = { overflowOpen = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                                Icon(MiuixIcons.More, contentDescription = "更多")
                             }
-                            DropdownMenu(
+                            AppDropdownMenu(
                                 expanded = overflowOpen,
                                 onDismissRequest = { overflowOpen = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("设置分组") },
-                                    onClick = {
-                                        overflowOpen = false
-                                        groupInput = ""
-                                        showGroupAssign = true
-                                    },
-                                )
-                                // 隐藏相关只在隐藏区露面 —— 平时菜单里出现「隐藏」等于把功能写在脸上
-                                if (showHidden) {
-                                    DropdownMenuItem(
-                                        text = { Text("从书架隐藏") },
-                                        onClick = {
+                                items = buildList {
+                                    add(
+                                        AppMenuItem("设置分组", onClick = {
                                             overflowOpen = false
-                                            viewModel.setHiddenSelected(true)
-                                        },
+                                            groupInput = ""
+                                            showGroupAssign = true
+                                        }),
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("取消隐藏") },
-                                        onClick = {
-                                            overflowOpen = false
-                                            viewModel.setHiddenSelected(false)
-                                        },
-                                    )
-                                }
-                            }
+                                    // 隐藏相关只在隐藏区露面 —— 平时菜单里出现「隐藏」等于把功能写在脸上
+                                    if (showHidden) {
+                                        add(
+                                            AppMenuItem("从书架隐藏", onClick = {
+                                                overflowOpen = false
+                                                viewModel.setHiddenSelected(true)
+                                            }),
+                                        )
+                                        add(
+                                            AppMenuItem("取消隐藏", onClick = {
+                                                overflowOpen = false
+                                                viewModel.setHiddenSelected(false)
+                                            }),
+                                        )
+                                    }
+                                },
+                            )
                         }
                     },
-                    colors = topBarColors,
-                )
+                ) {
+                    ToolbarTitle("已选 ${selected.size} 本")
+                }
             } else {
-                TopAppBar(
+                AppToolbar(
+                    containerColor = pageColor,
                     title = {
                         // 长按标题 = 隐藏书籍的入口。它本身不可见、不可猜 ——
                         // 一个写在菜单里的「显示隐藏的书」，等于告诉所有人这里藏了东西。
@@ -431,12 +419,12 @@ fun BookshelfScreen(
                                 onLongClick = { if (showHidden) viewModel.collapseHiddenAll() else revealHidden() },
                             ),
                         ) {
-                            Text("书架", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            ToolbarTitle("书架")
                             if (refreshProgress.running) {
                                 Text(
                                     "更新中 ${refreshProgress.done}/${refreshProgress.total}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MiuixTheme.textStyles.footnote2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     maxLines = 1,
                                 )
                             }
@@ -445,7 +433,7 @@ fun BookshelfScreen(
                     actions = {
                         // 网格/列表改在「设置 → 外观 → 书架显示」—— 顶栏留给搜索/发现/导入，少一个占位
                         AppIconButton(onClick = onOpenSearch) {
-                            Icon(Icons.Default.Search, contentDescription = "搜索")
+                            Icon(MiuixIcons.Search, contentDescription = "搜索")
                         }
                         // 发现入口可在设置里关掉 —— 不看发现页的人，那个图标只是碍事
                         if (exploreEnabled) {
@@ -464,7 +452,7 @@ fun BookshelfScreen(
                                     size = Dimens.buttonSpinner,
                                 )
                             } else {
-                                Icon(Icons.Default.Add, contentDescription = "导入本地书")
+                                Icon(MiuixIcons.Add, contentDescription = "导入本地书")
                             }
                         }
                         // 这里**没有**「显示隐藏的书」。
@@ -481,10 +469,9 @@ fun BookshelfScreen(
                         // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
                         // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
                         AppIconButton(onClick = onOpenSettings) {
-                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                            Icon(MiuixIcons.Settings, contentDescription = "设置")
                         }
                     },
-                    colors = topBarColors,
                 )
             }
         },
@@ -574,26 +561,20 @@ fun BookshelfScreen(
                         ),
                     )
                 }
-                val pullRefreshState = rememberPullToRefreshState()
-                PullToRefreshBox(
+                // Miuix 的下拉刷新（HyperOS 那种把内容往下拽、顶上冒出圆圈与一行状态字）。
+                // 状态字默认是英文，这里换成中文 —— 书架下拉干的是「追更」，字也照这个说
+                PullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = { viewModel.refreshAll() },
                     modifier = Modifier.fillMaxSize(),
-                    state = pullRefreshState,
-                    indicator = {
-                        // Expressive 形变指示，替代默认圆形 PullToRefreshDefaults.Indicator
-                        PullToRefreshDefaults.LoadingIndicator(
-                            state = pullRefreshState,
-                            isRefreshing = refreshing,
-                            modifier = Modifier.align(Alignment.TopCenter),
-                        )
-                    },
+                    pullToRefreshState = rememberPullToRefreshState(),
+                    refreshTexts = REFRESH_TEXTS,
                 ) {
                     // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，
                     // 写进 items 里就是每本书挂一个
                     val motionOn = animationsEnabled()
                     // 动效走主题令牌（全局唯一来源）：位移用 spatial、淡入淡出用 effects
-                    val motion = MaterialTheme.motionScheme
+                    val motion = AppTheme.motionScheme
                     // 多选时收起卡片：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上。
                     // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
                     // 卡片收起（多选）时它回到网格里，照样能选
@@ -682,8 +663,8 @@ fun BookshelfScreen(
                         else -> LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             state = listState,
-                            // 左右内缩 + 行距：给 Expressive ListItem 的圆角容器留出背景露出，
-                            // 否则贴边铺满时形状变化几乎看不见，主题的 surface 层级也读不出来。
+                            // 左右内缩 + 行距：给列表行的圆角卡片留出背景露出，
+                            // 否则贴边铺满时一张张卡连成一片，页面底与卡片的层级也读不出来。
                             contentPadding = ContentListDefaults.listContentPadding(
                                 bottom = padding.calculateBottomPadding(),
                             ),
@@ -748,29 +729,25 @@ fun BookshelfScreen(
     fun BookEntity.stillVisible() = showHidden || !hidden
 
     actionTarget?.takeIf { it.stillVisible() }?.let { book ->
-        // 点了选项先把面板收下去再办事。从前直接把 actionTarget 置空：面板当场从组合树摘掉，
+        // 点了选项先把面板收下去再办事（dismissThen = AppSheetScope.dismiss：播完退场动画，
+        // 先把 actionTarget 置空、再办事）。从前直接把 actionTarget 置空：面板当场从组合树摘掉，
         // 退场动画被掐断、一帧之内消失（同 OptionPickerSheet 里的那条）
-        val sheetState = rememberModalBottomSheetState()
-        val sheetScope = rememberCoroutineScope()
-        fun dismissThen(action: () -> Unit) {
-            sheetScope.launch {
-                sheetState.hide()
-                actionTarget = null
-                action()
-            }
-        }
-        ModalBottomSheet(
-            onDismissRequest = { actionTarget = null },
-            sheetState = sheetState,
-            // Sheet 用 surface；SettingRow 卡片读 surfaceContainerLow。
-            // 默认两者都走 Low 时选项会糊进底色，看起来像没有卡片（见 ChangeSourceSheet）。
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
+        // 面板底用默认的 background：与行的卡片色同色，选项是 HyperOS 面板里那种平铺的行（按下才显出圆角）——
+        // 与 OptionPickerSheet、应用图标面板同一个样子，不再是 M3 时代「灰底上一张张卡」
+        AppBottomSheet(onDismissRequest = { actionTarget = null }) {
+            fun dismissThen(action: () -> Unit) = dismiss(action)
             Column(Modifier.fillMaxWidth().padding(bottom = Dimens.gapXL)) {
+                // 书名当面板标题：字号字重照 Miuix 面板标题（title4 / Medium、居中），但只给一行 ——
+                // Miuix 自带的标题不限行数，长书名会折成两三行把选项往下顶
                 Text(
                     book.title,
-                    Modifier.padding(horizontal = Dimens.rowHorizontal, vertical = Dimens.gapS),
-                    style = MaterialTheme.typography.titleMedium,
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dimens.screenPadding)
+                        .padding(bottom = Dimens.gapM),
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -952,7 +929,7 @@ private fun BookShelfListRow(
     }
     val overlineContent: (@Composable () -> Unit)? = if (book.author.isNotBlank()) {
         {
-            Text(book.author, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(book.author, style = ContentListDefaults.overlineStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     } else {
         null
@@ -960,13 +937,13 @@ private fun BookShelfListRow(
     val latest = book.latestChapterTitle
     val supportingContent: (@Composable () -> Unit)? = if (!latest.isNullOrBlank()) {
         {
-            Text(latest, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(latest, style = ContentListDefaults.supportingStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     } else {
         null
     }
     val headline: @Composable () -> Unit = {
-        Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(book.title, style = ContentListDefaults.titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 
     if (selectionMode) {
@@ -1003,7 +980,7 @@ private fun BookShelfListLeading(
     selectionMode: Boolean,
     anchor: CoverAnchor,
 ) {
-    val coverShape = MaterialTheme.shapes.small
+    val coverShape = AppShapes.small
     Box(
         Modifier
             .width(Dimens.coverThumbWidth)
@@ -1018,7 +995,7 @@ private fun BookShelfListLeading(
                     if (selectionMode && selected) {
                         Modifier.border(
                             width = Dimens.gapXS,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MiuixTheme.colorScheme.primary,
                             shape = coverShape,
                         )
                     } else {
@@ -1039,7 +1016,7 @@ private fun BookShelfListLeading(
                     .align(Alignment.TopStart)
                     .padding(Dimens.gapXS)
                     .size(Dimens.iconSm),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
         if (book.newChapterCount > 0 && !selectionMode) {
@@ -1047,8 +1024,8 @@ private fun BookShelfListLeading(
                 modifier = Modifier.align(Alignment.TopEnd)
                 // 角标合并进卡片的语义后，读屏只念一个光秃秃的「3」：给它一句完整的话
                 .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
-                containerColor = MaterialTheme.colorScheme.error,
-                contentColor = MaterialTheme.colorScheme.onError,
+                containerColor = MiuixTheme.colorScheme.error,
+                contentColor = MiuixTheme.colorScheme.onError,
             ) {
                 Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
             }
@@ -1074,7 +1051,7 @@ private fun BookCard(
     // 用封面（而不是整张卡片）的位置：展开动画应该从书封长出来，标题那一行不算
     val cover = remember { CoverAnchor() }
     // 与 BookCover 的 shape 对齐 —— 选中描边若用 medium，封面却是 small，就会看出「框套框」
-    val coverShape = MaterialTheme.shapes.small
+    val coverShape = AppShapes.small
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -1100,8 +1077,8 @@ private fun BookCard(
     ) {
         // 多选态外圈留出与描边等宽的 padding：未选不画边、已选才描 primary，
         // 占位却始终在 —— 勾选不会把封面挤小一圈。
-        // （以前给每本都画 outline，整架书像进了铁笼，也不合 MD3 媒体多选：
-        //  未选只靠角标，已选靠 tonal 遮罩 + 描边。）
+        // （以前给每本都画 outline，整架书像进了铁笼，也不合系统相册那种媒体多选：
+        //  未选只靠角标，已选靠半透明遮罩 + 描边。）
         Box(
             Modifier
                 .fillMaxWidth()
@@ -1117,7 +1094,7 @@ private fun BookCard(
                         if (selectionMode && selected) {
                             Modifier.border(
                                 width = Dimens.gapXS,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MiuixTheme.colorScheme.primary,
                                 shape = coverShape,
                             )
                         } else Modifier
@@ -1130,13 +1107,13 @@ private fun BookCard(
             )
             // 多选时让位给描边与勾选：选中态才是那时要看的
             if (!selectionMode) CoverProgressOverlay(book.readingProgress(), coverShape)
-            // MD3 tonal：已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
+            // 已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
             if (selectionMode && selected) {
                 Box(
                     Modifier
                         .fillMaxSize()
                         .clip(coverShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
+                        .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.20f)),
                 )
             }
             // 「显示隐藏的书」开着时，得看得出哪些是隐藏的 —— 否则分不清，会重复隐藏
@@ -1148,7 +1125,7 @@ private fun BookCard(
                         .align(Alignment.TopStart)
                         .padding(Dimens.gapXS)
                         .size(Dimens.iconSm),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
             // 追更红点：自从你上次打开之后，新增了几章。
@@ -1158,14 +1135,14 @@ private fun BookCard(
                     modifier = Modifier.align(Alignment.TopEnd).padding(Dimens.gapXS)
                     // 角标合并进卡片的语义后，读屏只念一个光秃秃的「3」：给它一句完整的话
                     .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
+                    containerColor = MiuixTheme.colorScheme.error,
+                    contentColor = MiuixTheme.colorScheme.onError,
                 ) {
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
             }
             // 角标用成对的圆形图标（CheckCircle / 空心圆），与相册多选一致；
-            // 未选仍垫 surface 圆底 —— 花封面上看得见空心圈。
+            // 未选仍垫卡片色圆底（浅色白、深色亮灰）—— 花封面上看得见空心圈。
             if (selectionMode) {
                 Box(
                     Modifier
@@ -1173,7 +1150,7 @@ private fun BookCard(
                         .padding(Dimens.gapXS)
                         .size(Dimens.iconMd)
                         .background(
-                            MaterialTheme.colorScheme.surface,
+                            MiuixTheme.colorScheme.surfaceContainer,
                             CircleShape,
                         ),
                     contentAlignment = Alignment.Center,
@@ -1183,9 +1160,9 @@ private fun BookCard(
                         contentDescription = null,
                         modifier = Modifier.size(Dimens.iconMd),
                         tint = if (selected) {
-                            MaterialTheme.colorScheme.primary
+                            MiuixTheme.colorScheme.primary
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            MiuixTheme.colorScheme.onSurfaceVariantSummary
                         },
                     )
                 }
@@ -1193,7 +1170,7 @@ private fun BookCard(
         }
         Text(
             book.title,
-            style = MaterialTheme.typography.bodySmall,
+            style = MiuixTheme.textStyles.footnote1,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = Dimens.gapXS),
@@ -1203,9 +1180,9 @@ private fun BookCard(
         if (!book.latestChapterTitle.isNullOrBlank()) {
             Text(
                 book.latestChapterTitle,
-                // 正文性小字不低于 bodySmall（12sp）；labelSmall 只有 11sp
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 正文性小字不低于 footnote1（13sp）；footnote2 只有 11sp
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1234,28 +1211,27 @@ private fun HiddenStatusBar(
 ) {
     // 开关显示的是偏好本身；能不能拨：能验证就能开关，不能验证则只许关
     val toggleEnabled = biometricAvailable || requireAuth
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
     Surface(
         modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal)
             // 与 SettingGroup 上下同一档留白
             .padding(vertical = Dimens.gapS),
-        shape = MaterialTheme.shapes.large,
+        shape = AppShapes.large,
         color = settingsCardColor(),
     ) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 开关区吃掉剩余宽度；形用 Middle（直角），外层 Surface 裁出大圆角，
+            // 开关区吃掉剩余宽度；按压反馈的形用 Middle（直角），外层 Surface 裁出大圆角，
             // 避免 Alone 四角圆贴到 ✕ 左侧看起来像两块卡。
             ContentListItem(
                 checked = requireAuth,
                 onCheckedChange = onToggleAuth,
                 modifier = Modifier.weight(1f),
                 enabled = toggleEnabled,
+                role = Role.Switch,
                 trailingContent = {
                     Switch(
                         checked = requireAuth,
@@ -1263,9 +1239,8 @@ private fun HiddenStatusBar(
                         onCheckedChange = null,
                     )
                 },
-                colors = ContentListDefaults.groupedColors(pressed = pressed),
-                shapes = ContentListDefaults.groupedShapes(SettingGroupPosition.Middle),
-                interactionSource = interactionSource,
+                colors = ContentListDefaults.plainColors(),
+                shape = settingGroupItemShape(SettingGroupPosition.Middle),
                 content = {
                     Text(
                         when {
@@ -1273,11 +1248,11 @@ private fun HiddenStatusBar(
                             requireAuth -> "未设锁屏，验证暂不生效"
                             else -> "无法上锁"
                         },
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = ContentListDefaults.titleStyle,
                         color = if (biometricAvailable) {
-                            MaterialTheme.colorScheme.onSurface
+                            MiuixTheme.colorScheme.onSurface
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            MiuixTheme.colorScheme.onSurfaceVariantSummary
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1285,7 +1260,7 @@ private fun HiddenStatusBar(
                 },
             )
             AppIconButton(onClick = onCollapse) {
-                Icon(Icons.Default.Close, contentDescription = "收起隐藏区")
+                Icon(MiuixIcons.Close, contentDescription = "收起隐藏区")
             }
         }
     }
@@ -1293,3 +1268,6 @@ private fun HiddenStatusBar(
 
 /** 换分组后等新列表最多多久再回顶（见 BookshelfScreen 里的 groupSwitchFrom） */
 private const val GROUP_SWITCH_WAIT_MS = 500L
+
+/** 下拉刷新的四段状态字：下拉中 / 过了阈值 / 刷新中 / 完成（顺序是 Miuix PullToRefresh 规定的） */
+private val REFRESH_TEXTS = listOf("下拉检查更新", "松开检查更新", "正在检查更新…", "检查完成")

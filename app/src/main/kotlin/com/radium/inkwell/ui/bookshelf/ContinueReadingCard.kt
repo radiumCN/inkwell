@@ -14,10 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Badge
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -30,11 +26,17 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ReadingProgressMeter
 import com.radium.inkwell.ui.components.formatRelativeTime
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Badge
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 书架顶上的「继续阅读」：最近在读的那本放大摆出来，点一下回到上次的位置。
@@ -47,7 +49,7 @@ import com.radium.inkwell.ui.components.formatRelativeTime
  * —— 追更角标、隐藏标记 —— 卡片得自己画，不然这本书的「有 3 章更新」就没地方看了。
  *
  * 用 primaryContainer 铺底：它是书架上唯一一块带颜色的面，一眼就能落上去；文字统一 onPrimaryContainer，
- * 层级靠字号拉开 —— 这块底色上没有对应的「次要文字」令牌，硬套 onSurfaceVariant 对比度不保证。
+ * 层级靠字号拉开 —— 这块底色上没有对应的「次要文字」令牌，硬套 onSurfaceVariantSummary 对比度不保证。
  *
  * 交互与网格里的书一致：点开进书（从这张封面展开）、长按出同一个操作面板。
  */
@@ -61,15 +63,15 @@ internal fun ContinueReadingCard(
 ) {
     val book = entry.book
     val cover = remember { CoverAnchor() }
-    val content = MaterialTheme.colorScheme.onPrimaryContainer
+    val content = MiuixTheme.colorScheme.onPrimaryContainer
     val progress = book.readingProgress()
     val chapterLine = entry.chapterTitle?.takeIf { it.isNotBlank() }
         ?: "第 ${book.readChapterIndex + 1} 章"
     Row(
         modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clip(AppShapes.large)
+            .background(MiuixTheme.colorScheme.primaryContainer)
             // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
             .semantics(mergeDescendants = true) {}
             .combinedClickable(
@@ -100,7 +102,7 @@ internal fun ContinueReadingCard(
                         .align(Alignment.TopStart)
                         .padding(Dimens.gapXS)
                         .size(Dimens.iconSm),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
             if (book.newChapterCount > 0) {
@@ -110,8 +112,8 @@ internal fun ContinueReadingCard(
                         .padding(Dimens.gapXS)
                         // 卡片合并了语义，光秃秃的「3」读屏听不懂：给它一句完整的话
                         .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
+                    containerColor = MiuixTheme.colorScheme.error,
+                    contentColor = MiuixTheme.colorScheme.onError,
                 ) {
                     Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
                 }
@@ -122,10 +124,11 @@ internal fun ContinueReadingCard(
                 .weight(1f)
                 .height(Dimens.coverDetailHeight),
         ) {
-            Text("继续阅读", style = MaterialTheme.typography.labelLarge, color = content)
+            Text("继续阅读", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
             Text(
                 book.title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.Medium,
                 color = content,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -133,7 +136,7 @@ internal fun ContinueReadingCard(
             )
             Text(
                 chapterLine,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MiuixTheme.textStyles.body2,
                 color = content,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -149,7 +152,7 @@ internal fun ContinueReadingCard(
                     )
                     Text(
                         formatProgressPercent(progress),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MiuixTheme.textStyles.footnote1,
                         color = content,
                         modifier = Modifier.padding(start = Dimens.gapS),
                     )
@@ -157,7 +160,7 @@ internal fun ContinueReadingCard(
             }
             Text(
                 "上次阅读 · ${formatRelativeTime(book.lastActiveAt())}",
-                style = MaterialTheme.typography.bodySmall,
+                style = MiuixTheme.textStyles.footnote1,
                 color = content,
                 maxLines = 1,
                 modifier = Modifier.padding(top = Dimens.gapXS),

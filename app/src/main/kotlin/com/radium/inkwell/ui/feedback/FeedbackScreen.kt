@@ -16,12 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.repo.FeedbackRepository
@@ -47,8 +42,12 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.openExternalLink
 import com.radium.inkwell.ui.components.settingsPageColor
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedbackScreen(
     onBack: () -> Unit,
@@ -117,8 +116,8 @@ fun FeedbackScreen(
                 // 提示放框外：写进 placeholder 的话一落笔就消失，第一行当标题这件事就看不见了
                 Text(
                     "第一行会成为标题，尽量写得具体些：什么操作触发的、是必现还是偶发",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
 
@@ -138,15 +137,15 @@ fun FeedbackScreen(
                 Icon(
                     Icons.Default.Info,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(Dimens.iconSm),
                 )
                 Text(
                     "反馈会作为一条 issue 公开发布在开源仓库，任何人都能看到。" +
                         "填了联系方式就等于公开它 —— 不想公开可以留空，" +
                         "我们仍会看到你的反馈，只是没法直接回复你。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
 
@@ -160,8 +159,8 @@ fun FeedbackScreen(
 
             Text(
                 "提交时会附带应用版本、机型与系统版本，便于定位问题。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
     }
@@ -200,14 +199,14 @@ private fun SubmittedState(
         Icon(
             Icons.Default.CheckCircle,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MiuixTheme.colorScheme.primary,
             modifier = Modifier.size(Dimens.iconXL),
         )
-        Text("反馈已提交", style = MaterialTheme.typography.titleMedium)
+        Text("反馈已提交", style = MiuixTheme.textStyles.headline2, fontWeight = FontWeight.Medium)
         Text(
             "感谢反馈。你可以在下面的页面里跟进处理进展，也可以补充信息。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
         )
         PrimaryButton(text = "查看进展", onClick = onView, modifier = Modifier.fillMaxWidth())

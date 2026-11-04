@@ -16,20 +16,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import com.radium.inkwell.ui.components.AppToolbar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -41,7 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,7 +48,12 @@ import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.settingsPageColor
-@OptIn(ExperimentalMaterial3Api::class)
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun ExploreScreen(
     onBack: () -> Unit,
@@ -95,32 +91,37 @@ fun ExploreScreen(
         scrolledFor = key
     }
 
-    // 与搜索/书架同一套浅色灰底白卡，避免默认 surface 白底从书行圆角缝里透出来
+    // 与搜索/书架同一套灰底白卡（页面底 surface 上放卡片色的书行）
     val pageColor = settingsPageColor()
     Scaffold(
         containerColor = pageColor,
         topBar = {
-            // 留经典窄栏：标题位是个可点的书源切换按钮，两段式会把这个控件摊到大标题的位置上
-            TopAppBar(
-                title = {
-                    // 选书源统一走底部面板：从前是裸 DropdownMenu，弹个小浮层、选中态全靠猜
-                    AppTextButton(onClick = { sourceMenuOpen = true }) {
-                        Text(
-                            state.currentSource?.name ?: "发现",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "切换书源")
-                    }
-                },
+            // 留窄栏：标题位是个可点的书源切换按钮，大标题那一行只收文字、放不下控件
+            AppToolbar(
                 navigationIcon = {
                     BackButton(onClick = onBack)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = pageColor,
-                    scrolledContainerColor = pageColor,
-                ),
-            )
+                containerColor = pageColor,
+            ) {
+                // 选书源统一走底部面板：从前是裸 DropdownMenu，弹个小浮层、选中态全靠猜。
+                // 字号字重照窄栏标题（title3 / Medium）、字色照标题的 onSurface —— 它就是这一页的标题，
+                // 只是能点；行尾的下拉箭头交代「点了能换」
+                AppTextButton(
+                    onClick = { sourceMenuOpen = true },
+                    contentColor = MiuixTheme.colorScheme.onSurface,
+                    contentPadding = PaddingValues(horizontal = Dimens.gapS),
+                ) {
+                    Text(
+                        state.currentSource?.name ?: "发现",
+                        modifier = Modifier.weight(1f, fill = false),
+                        fontSize = MiuixTheme.textStyles.title3.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = "切换书源")
+                }
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
@@ -200,9 +201,7 @@ fun ExploreScreen(
                                 Modifier.fillMaxWidth().padding(Dimens.gapS),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                AppTextButton(onClick = { viewModel.retryMore() }) {
-                                    Text("加载失败，点此重试")
-                                }
+                                AppTextButton("加载失败，点此重试", onClick = { viewModel.retryMore() })
                             }
                         }
                     }

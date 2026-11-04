@@ -10,10 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,6 +37,8 @@ import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.update.UpdateChecker
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 
 /** 网页版 / 官网，与 README 里的 book.skylark.run 同一处 */
 private const val SITE_URL = "https://book.skylark.run"
@@ -51,7 +49,6 @@ private const val DEV_TAPS_HINT_FROM = 3
 /** 两下之间超过这个间隔就从头数：隔了半天又点一下，不该接着上次的数 */
 private const val DEV_TAP_WINDOW_MS = 1500L
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutSettingsScreen(
     onBack: () -> Unit,

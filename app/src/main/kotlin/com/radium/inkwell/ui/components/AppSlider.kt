@@ -1,46 +1,25 @@
 package com.radium.inkwell.ui.components
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.SliderState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 全应用统一的滑块。
+ * 全应用统一的滑块：Miuix [Slider]（HyperOS 亮度条那种胶囊粗轨，拖动时带触感反馈）。
  *
- * M3 Expressive 默认是 **16dp 粗轨 + 4×44 竖条拇指**（`SliderDefaults.Track` /
- * `Thumb`），那一套官方布局天然垂直居中。阅读底栏要细轨圆点，官方没有对应 token：
- * `Track` 内部会再 `.height(TrackHeight)`，外传高度盖不掉。
+ * 封一层是为了两件 Miuix 默认值不管的事：
+ * - **读屏名字**（[label]）：不给的话读屏只念一个百分比，不知道这条在调什么；旁边印着的标签 Text
+ *   在滑块节点之外，念不到它身上。
+ * - **阅读器浮层换色**（[activeColor] / [inactiveColor]）：那里的底是纸色，不是主题的卡片色，
+ *   主题 primary 在深色纸上会糊掉。其余地方一律不传，走主题。
  *
- * 这里仍挂官方 [Slider]（拖动、无障碍、步进），只换形。拇指/轨的**布局槽**都做成
- * [Dimens.sliderSlot]（= M3 `TrackHeight`），细线与圆点在槽内居中画 —— 槽高若跟
- * Slider 的 `requiredSizeIn(minHeight = TrackHeight)` 不一致，圆点会系统性偏上/偏下。
- *
- * @param activeColor 覆盖 thumb 与已完成轨道色。**只给阅读器浮层用** —— 那里的底色是纸色，
- *   不是 `colorScheme.surface`，用主题 primary 会在深色纸上糊掉。其余地方一律传 null 走主题。
- * @param showStopIndicators 保留参数以兼容旧调用；细轨形态下不再画首尾停点。
+ * @param height 轨道高度。默认 Miuix 的 28dp；夹在两行字之间的（阅读底栏进度）传 [Dimens.sliderCompact]
  */
 @Composable
 fun AppSlider(
@@ -54,95 +33,27 @@ fun AppSlider(
     onValueChangeFinished: (() -> Unit)? = null,
     activeColor: Color? = null,
     inactiveColor: Color? = null,
-    @Suppress("UNUSED_PARAMETER")
-    showStopIndicators: Boolean = false,
-    /**
-     * 读屏念的名字（「亮度」「纸色色相」……）。不给的话读屏只念一个百分比，不知道这条在调什么；
-     * 旁边印着的标签 Text 在滑块节点之外，念不到它身上。
-     */
     label: String? = null,
+    height: Dp = SliderDefaults.MinHeight,
 ) {
+    val scheme = MiuixTheme.colorScheme
     val colors = if (activeColor == null && inactiveColor == null) {
-        SliderDefaults.colors()
+        SliderDefaults.sliderColors()
     } else {
-        val active = activeColor ?: MaterialTheme.colorScheme.primary
-        val inactive = inactiveColor ?: MaterialTheme.colorScheme.surfaceContainerHighest
-        SliderDefaults.colors(
-            thumbColor = active,
-            activeTrackColor = active,
-            inactiveTrackColor = inactive,
+        SliderDefaults.sliderColors(
+            foregroundColor = activeColor ?: scheme.primary,
+            backgroundColor = inactiveColor ?: scheme.sliderBackground,
         )
     }
-    val interactionSource = remember { MutableInteractionSource() }
-    // material3 1.5.0-alpha28 起，带 thumb/track 槽的无状态重载降成 HIDDEN，只剩有状态版能换形。
-    // 照官方无状态重载的内部写法桥接：按 steps/valueRange 记住 state，每次重组把外部 value 写回去，
-    // 对外签名不变，调用点不用动。
-    val state = remember(steps, valueRange) { SliderState(value, steps, valueRange) }
-    state.value = value
-
     Slider(
-        state = state,
+        value = value,
         onValueChange = onValueChange,
         modifier = if (label != null) modifier.semantics { contentDescription = label } else modifier,
         enabled = enabled,
+        valueRange = valueRange,
+        steps = steps,
         onValueChangeFinished = onValueChangeFinished,
+        height = height,
         colors = colors,
-        interactionSource = interactionSource,
-        thumb = {
-            val color = if (enabled) colors.thumbColor else colors.disabledThumbColor
-            // 槽高 = TrackHeight；圆点在槽内居中，与轨线共用同一条中线
-            Box(
-                Modifier
-                    .width(Dimens.sliderThumb)
-                    .height(Dimens.sliderSlot)
-                    .hoverable(interactionSource)
-                    .pointerHoverIcon(PointerIcon.Hand),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(Modifier.size(Dimens.sliderThumb).background(color, CircleShape))
-            }
-        },
-        track = { sliderState ->
-            CompactTrack(
-                state = sliderState,
-                activeColor = if (enabled) colors.activeTrackColor else colors.disabledActiveTrackColor,
-                inactiveColor = if (enabled) {
-                    colors.inactiveTrackColor
-                } else {
-                    colors.disabledInactiveTrackColor
-                },
-            )
-        },
     )
-}
-
-@Composable
-private fun CompactTrack(
-    state: SliderState,
-    activeColor: Color,
-    inactiveColor: Color,
-) {
-    val fraction = state.coercedValueAsFraction
-    // 与拇指同槽高；细线按像素中线画，不靠嵌套 Alignment（避免与 Slider 槽位再错一层）
-    Canvas(Modifier.fillMaxWidth().height(Dimens.sliderSlot)) {
-        val trackHeight = Dimens.sliderTrack.toPx()
-        val top = (size.height - trackHeight) / 2f
-        val radius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
-        val trackSize = Size(size.width, trackHeight)
-        drawRoundRect(
-            color = inactiveColor,
-            topLeft = Offset(0f, top),
-            size = trackSize,
-            cornerRadius = radius,
-        )
-        val activeWidth = size.width * fraction
-        if (activeWidth > 0f) {
-            drawRoundRect(
-                color = activeColor,
-                topLeft = Offset(0f, top),
-                size = Size(activeWidth, trackHeight),
-                cornerRadius = radius,
-            )
-        }
-    }
 }

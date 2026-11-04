@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.rss
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -11,25 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RssFeed
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import com.radium.inkwell.ui.components.AppAlertDialog
-import com.radium.inkwell.ui.components.AppIconButton
-import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.CompactTextField
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,16 +23,35 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.RssSourceEntity
+import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
-import com.radium.inkwell.ui.components.EmptyState
-import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
-@OptIn(ExperimentalMaterial3Api::class)
+import com.radium.inkwell.ui.components.topBarScroll
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun RssSourceScreen(
     onBack: () -> Unit,
@@ -92,31 +92,30 @@ fun RssSourceScreen(
                         }
                     } else {
                         AppIconButton(onClick = { showImportMenu = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "添加订阅源")
+                            Icon(MiuixIcons.Add, contentDescription = "添加订阅源")
                         }
                     }
-                    DropdownMenu(
+                    AppDropdownMenu(
                         expanded = showImportMenu,
                         onDismissRequest = { showImportMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("粘贴地址或订阅源") },
-                            onClick = { showImportMenu = false; importText = ""; showUrlImport = true },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("从剪贴板导入") },
-                            onClick = { showImportMenu = false; viewModel.importFromClipboard() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("从文件导入") },
-                            onClick = {
+                        items = listOf(
+                            AppMenuItem("粘贴地址或订阅源", onClick = {
+                                showImportMenu = false
+                                importText = ""
+                                showUrlImport = true
+                            }),
+                            AppMenuItem("从剪贴板导入", onClick = {
+                                showImportMenu = false
+                                viewModel.importFromClipboard()
+                            }),
+                            AppMenuItem("从文件导入", onClick = {
                                 showImportMenu = false
                                 fileLauncher.launch(
                                     arrayOf("application/json", "text/plain", "application/octet-stream")
                                 )
-                            },
-                        )
-                    }
+                            }),
+                        ),
+                    )
                 }
             }
         },
@@ -149,13 +148,13 @@ fun RssSourceScreen(
                         colors = settingsStackListColors(),
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 删除图标走 onSurfaceVariant：outline 只给边框/分隔线用，
-                                // 拿它画可点的图标在浅色下对比度不够（约 3.9:1）
+                                // 删除图标走摘要色：outline / dividerLine 只给边框/分隔线用，
+                                // 拿它画可点的图标在浅色下对比度不够
                                 AppIconButton(onClick = { deleteTarget = source }) {
                                     Icon(
-                                        Icons.Default.Delete,
+                                        MiuixIcons.Delete,
                                         contentDescription = "删除",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     )
                                 }
                                 Switch(
@@ -171,6 +170,7 @@ fun RssSourceScreen(
                         supportingContent = {
                             Text(
                                 source.id,
+                                style = ContentListDefaults.supportingStyle,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -178,7 +178,7 @@ fun RssSourceScreen(
                         content = {
                             Text(
                                 source.name,
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = ContentListDefaults.titleStyle,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -212,8 +212,8 @@ fun RssSourceScreen(
                 )
                 Text(
                     "直接粘一个 RSS/Atom 地址即可 —— 不必先去找一份 Legado 格式的订阅源。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             },
         )

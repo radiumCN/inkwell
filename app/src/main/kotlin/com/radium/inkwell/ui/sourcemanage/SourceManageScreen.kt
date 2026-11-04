@@ -1,17 +1,18 @@
 package com.radium.inkwell.ui.sourcemanage
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,30 +20,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Source
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppTextButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material.icons.filled.Source
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,40 +32,61 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.ui.platform.LocalContext
-import com.radium.inkwell.data.db.entity.CheckStatus
-import com.radium.inkwell.ui.components.ChipRow
-import com.radium.inkwell.ui.components.DeterminateProgressBar
-import com.radium.inkwell.ui.components.OptionPickerSheet
-import com.radium.inkwell.ui.components.PickerOption
-import com.radium.inkwell.ui.components.SearchField
-import com.radium.inkwell.ui.components.AppFilterChip
-import com.radium.inkwell.ui.components.AppAlertDialog
-import com.radium.inkwell.ui.components.AppIconButton
-import com.radium.inkwell.ui.components.AppSlider
-import com.radium.inkwell.ui.components.CompactTextField
-import com.radium.inkwell.ui.components.BackButton
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import com.radium.inkwell.ui.components.ContentListDefaults
-import com.radium.inkwell.ui.components.ContentListItem
-import com.radium.inkwell.ui.components.Dimens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
-import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppFilterChip
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
-import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.AppMenuItem
+import com.radium.inkwell.ui.components.AppSlider
+import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.CompactTextField
+import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.ContentListItem
+import com.radium.inkwell.ui.components.DeterminateProgressBar
+import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.OptionPickerSheet
+import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SearchField
+import com.radium.inkwell.ui.components.ToolbarTitle
+import com.radium.inkwell.ui.components.exceptBottom
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
-@OptIn(ExperimentalMaterial3Api::class)
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Checkbox
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
+import top.yukonga.miuix.kmp.icon.extended.Sort
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun SourceManageScreen(
     onBack: () -> Unit,
@@ -145,36 +148,25 @@ fun SourceManageScreen(
     ) { uri -> uri?.let { viewModel.importFromFile(it) } }
 
     val pageColor = settingsPageColor()
-    val topBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = pageColor,
-        scrolledContainerColor = pageColor,
-    )
     Scaffold(
-        // 两条都留经典窄栏，不换 AppTopBar 的两段式 Flexible：这页有多选态，
+        // 两条都用窄栏（AppToolbar），不换 AppTopBar 的大标题折叠栏：这页有多选态，
         // 上下文操作栏与常规栏来回切，两者高度不同就会让进出多选像跳了一下
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
                 // 批量操作栏：文字按钮塞不下五个（标题会被挤成竖排单字）。
-                // 按 Material 的 overflow 规则 —— 高频动作留成图标，低频的收进溢出菜单。
+                // 高频动作留成图标，低频的收进溢出菜单。
                 var overflowOpen by remember { mutableStateOf(false) }
-                TopAppBar(
-                    title = {
-                        Text(
-                            "已选 ${selected.size} 个",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
+                AppToolbar(
                     navigationIcon = {
                         AppIconButton(onClick = viewModel::clearSelection) {
-                            Icon(Icons.Default.Close, contentDescription = "退出多选")
+                            Icon(MiuixIcons.Close, contentDescription = "退出多选")
                         }
                     },
-                    colors = topBarColors,
+                    containerColor = pageColor,
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
-                            Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                            Icon(MiuixIcons.SelectAll, contentDescription = "全选")
                         }
                         // 同普通状态：先挑选项（弹窗按「有选中就只校验选中的」写好了），校验进行中不给 ——
                         // 从前多选里直接开跑、跳过了选项；正在校验时再点则静默无效
@@ -185,63 +177,45 @@ fun SourceManageScreen(
                         }
                         AppIconButton(onClick = { confirmBatchDelete = true }) {
                             Icon(
-                                Icons.Default.Delete,
+                                MiuixIcons.Delete,
                                 contentDescription = "删除",
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = MiuixTheme.colorScheme.error,
                             )
                         }
                         Box {
-                        AppIconButton(onClick = { overflowOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "更多")
-                        }
-                        DropdownMenu(
-                            expanded = overflowOpen,
-                            onDismissRequest = { overflowOpen = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("启用") },
-                                onClick = {
-                                    overflowOpen = false
-                                    viewModel.setEnabledSelected(true)
-                                },
+                            AppIconButton(onClick = { overflowOpen = true }) {
+                                Icon(MiuixIcons.More, contentDescription = "更多")
+                            }
+                            AppDropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = { overflowOpen = false },
+                                items = listOf(
+                                    AppMenuItem("启用", onClick = {
+                                        overflowOpen = false
+                                        viewModel.setEnabledSelected(true)
+                                    }),
+                                    AppMenuItem("禁用", onClick = {
+                                        overflowOpen = false
+                                        viewModel.setEnabledSelected(false)
+                                    }),
+                                    AppMenuItem("置顶", onClick = { overflowOpen = false; viewModel.moveToTop() }),
+                                    AppMenuItem("置底", onClick = { overflowOpen = false; viewModel.moveToBottom() }),
+                                    AppMenuItem("设置分组", onClick = {
+                                        overflowOpen = false
+                                        groupInput = ""
+                                        showGroupAssign = true
+                                    }),
+                                    AppMenuItem("导出选中", onClick = { overflowOpen = false; viewModel.exportSelected() }),
+                                ),
                             )
-                            DropdownMenuItem(
-                                text = { Text("禁用") },
-                                onClick = {
-                                    overflowOpen = false
-                                    viewModel.setEnabledSelected(false)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("置顶") },
-                                onClick = { overflowOpen = false; viewModel.moveToTop() },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("置底") },
-                                onClick = { overflowOpen = false; viewModel.moveToBottom() },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("设置分组") },
-                                onClick = {
-                                    overflowOpen = false
-                                    groupInput = ""
-                                    showGroupAssign = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("导出选中") },
-                                onClick = { overflowOpen = false; viewModel.exportSelected() },
-                            )
-                        }
                         }
                     },
-                )
-            } else TopAppBar(
-                title = { Text("书源管理") },
-                navigationIcon = {
-                    BackButton(onClick = onBack)
-                },
-                colors = topBarColors,
+                ) {
+                    ToolbarTitle("已选 ${selected.size} 个")
+                }
+            } else AppToolbar(
+                navigationIcon = { BackButton(onClick = onBack) },
+                containerColor = pageColor,
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
                         AppIconButton(onClick = { showCheckOptions = true }) {
@@ -249,44 +223,38 @@ fun SourceManageScreen(
                         }
                     }
                     AppIconButton(onClick = { showSortPicker = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序")
+                        Icon(MiuixIcons.Sort, contentDescription = "排序")
                     }
                     Box {
-                    AppIconButton(onClick = { showImportMenu = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "添加书源")
-                    }
-                    DropdownMenu(
-                        expanded = showImportMenu,
-                        onDismissRequest = { showImportMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("从文件导入") },
-                            onClick = {
-                                showImportMenu = false
-                                fileImportLauncher.launch(
-                                    arrayOf("application/json", "text/plain", "application/octet-stream")
-                                )
-                            },
+                        AppIconButton(onClick = { showImportMenu = true }) {
+                            Icon(MiuixIcons.Add, contentDescription = "添加书源")
+                        }
+                        AppDropdownMenu(
+                            expanded = showImportMenu,
+                            onDismissRequest = { showImportMenu = false },
+                            items = listOf(
+                                AppMenuItem("从文件导入", onClick = {
+                                    showImportMenu = false
+                                    fileImportLauncher.launch(
+                                        arrayOf("application/json", "text/plain", "application/octet-stream")
+                                    )
+                                }),
+                                AppMenuItem("从网络链接导入", onClick = {
+                                    showImportMenu = false
+                                    showUrlImport = true
+                                }),
+                                // 和两种导入分开说清：导入要的是现成的书源文件，这个只要一本书的网址
+                                AppMenuItem("按书的网址新建", onClick = {
+                                    showImportMenu = false
+                                    onCreate()
+                                }),
+                            ),
                         )
-                        DropdownMenuItem(
-                            text = { Text("从网络链接导入") },
-                            onClick = {
-                                showImportMenu = false
-                                showUrlImport = true
-                            },
-                        )
-                        // 和两种导入分开说清：导入要的是现成的书源文件，这个只要一本书的网址
-                        DropdownMenuItem(
-                            text = { Text("按书的网址新建") },
-                            onClick = {
-                                showImportMenu = false
-                                onCreate()
-                            },
-                        )
-                    }
                     }
                 },
-            )
+            ) {
+                ToolbarTitle("书源管理")
+            }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
@@ -346,7 +314,7 @@ fun SourceManageScreen(
                     horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
                 ) {
                     AppLoadingIndicator(size = Dimens.buttonSpinner)
-                    Text("正在导入书源…", style = MaterialTheme.typography.labelMedium)
+                    Text("正在导入书源…", style = MiuixTheme.textStyles.footnote1)
                 }
             }
             // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
@@ -358,14 +326,14 @@ fun SourceManageScreen(
                     Column(Modifier.weight(1f)) {
                         Text(
                             "正在校验 ${p.done}/${p.total}",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MiuixTheme.textStyles.footnote1,
                         )
                         DeterminateProgressBar(
-                            progress = { if (p.total == 0) 0f else p.done.toFloat() / p.total },
+                            progress = if (p.total == 0) 0f else p.done.toFloat() / p.total,
                             modifier = Modifier.padding(top = Dimens.gapXS),
                         )
                     }
-                    AppTextButton(onClick = viewModel::cancelCheck) { Text("停止") }
+                    AppTextButton("停止", onClick = viewModel::cancelCheck)
                 }
             }
             // 校验完最想干的事。禁用放在删除前面：删是不可逆的，而站点抽风、临时封 IP
@@ -377,20 +345,17 @@ fun SourceManageScreen(
                 ) {
                     Text(
                         "失效 $failedCount 个",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.error,
                         modifier = Modifier.weight(1f),
                     )
-                    AppTextButton(onClick = { viewModel.setFilter(SourceFilter.FAILED) }) { Text("只看失效") }
-                    AppTextButton(onClick = viewModel::disableInvalid) { Text("禁用") }
+                    AppTextButton("只看失效", onClick = { viewModel.setFilter(SourceFilter.FAILED) })
+                    AppTextButton("禁用", onClick = viewModel::disableInvalid)
                     AppTextButton(
+                        text = "删除",
                         onClick = { confirmDeleteInvalid = true },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
-                    ) {
-                        Text("删除")
-                    }
+                        contentColor = MiuixTheme.colorScheme.error,
+                    )
                 }
             }
             // 搜不到 / 筛完是空的：从前就是一个空的列表，一片空白，也没有退出这个筛选的出口
@@ -454,15 +419,15 @@ fun SourceManageScreen(
                 )
                 Text(
                     "要一个几乎每个站都搜得出结果的常见词",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 CheckItemRow("校验详情页", draft.checkDetail) { draft = draft.copy(checkDetail = it) }
                 CheckItemRow("校验目录", draft.checkToc) { draft = draft.copy(checkToc = it) }
                 CheckItemRow("校验正文", draft.checkContent) { draft = draft.copy(checkContent = it) }
                 Text(
                     "单源超时 ${draft.timeoutMs / 1000} 秒",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MiuixTheme.textStyles.footnote1,
                 )
                 AppSlider(
                     value = (draft.timeoutMs / 1000).toFloat(),
@@ -605,9 +570,10 @@ private fun SourceListRow(
 ) {
     val leading: (@Composable () -> Unit)? = if (selectionMode) {
         {
+            // 纯展示：整行是一个复选语义目标（ContentListItem 的 checked 重载），框自己不可点，读屏不会多一个焦点
             Checkbox(
-                checked = selected,
-                onCheckedChange = null,
+                state = ToggleableState(selected),
+                onClick = null,
             )
         }
     } else {
@@ -616,12 +582,12 @@ private fun SourceListRow(
     val trailing: (@Composable () -> Unit)? = if (!selectionMode) {
         {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 图标走 onSurfaceVariant：outline 只给边框/分隔线，拿它画可点的图标在浅色下对比度不够
+                // 图标走摘要色：outline / dividerLine 只给边框/分隔线，拿它画可点的图标在浅色下对比度不够
                 AppIconButton(onClick = onDelete) {
                     Icon(
-                        Icons.Default.Delete,
+                        MiuixIcons.Delete,
                         contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
                 Switch(
@@ -639,15 +605,16 @@ private fun SourceListRow(
         Column {
             Text(
                 source.id,
+                style = ContentListDefaults.supportingStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (source.checkStatus != CheckStatus.UNCHECKED) {
                 val ok = source.checkStatus == CheckStatus.OK
                 val statusColor = if (ok) {
-                    MaterialTheme.colorScheme.primary
+                    MiuixTheme.colorScheme.primary
                 } else {
-                    MaterialTheme.colorScheme.error
+                    MiuixTheme.colorScheme.error
                 }
                 Row(
                     Modifier.padding(top = Dimens.gapXS),
@@ -662,7 +629,7 @@ private fun SourceListRow(
                     Text(
                         source.checkMessage,
                         Modifier.padding(start = Dimens.gapXS),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MiuixTheme.textStyles.footnote1,
                         color = statusColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -675,22 +642,24 @@ private fun SourceListRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 source.name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = ContentListDefaults.titleStyle,
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),
             )
             if (exploreOnly) {
+                // 淡强调底 + 强调色字（tertiaryContainer 一对），与选中的 chip 同一种「标签」语汇
                 Text(
                     "仅发现",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    style = MiuixTheme.textStyles.footnote2,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier
                         .padding(start = Dimens.gapS)
                         .background(
-                            MaterialTheme.colorScheme.secondaryContainer,
-                            MaterialTheme.shapes.extraSmall,
+                            MiuixTheme.colorScheme.tertiaryContainer,
+                            AppShapes.extraSmall,
                         )
-                        // 只留左右：上下贴着 labelSmall 的行高，正好是 M3 大号 Badge 的 16dp
+                        // 只留左右：上下贴着 footnote2 的行高，标签和标题行一样矮
                         .padding(horizontal = Dimens.gapS),
                 )
             }
@@ -735,7 +704,8 @@ private fun CheckItemRow(label: String, checked: Boolean, onChange: (Boolean) ->
             .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(label, Modifier.weight(1f), style = MiuixTheme.textStyles.body2)
         Switch(checked = checked, onCheckedChange = null)
     }
 }
+

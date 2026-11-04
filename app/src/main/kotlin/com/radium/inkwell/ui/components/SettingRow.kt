@@ -1,41 +1,48 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Icon
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.ZeroCornerSize
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 分组小标题。从前 ReaderMenu 与 ThemeSettings 各定义了一份一模一样的 —— 现在它俩的
- * 私有 SectionLabel 都改成薄薄地转调这里，全 App 的分组标题一套字号/颜色。
+ * 分组小标题：Miuix [SmallTitle]（subtitle 字号、`onBackgroundVariant` 灰）。全 App 的分组标题一套字号/颜色。
+ *
+ * 左边对齐**卡片里的文字**（卡片外边距 + 行内边距），不是对齐卡片边 —— HyperOS 设置页就是这么排的：
+ * 小标题、行标题在同一条竖线上。
  */
 @Composable
 fun SectionHeader(
@@ -44,18 +51,21 @@ fun SectionHeader(
     /** 调用方的内容 Column 已整体内缩时设 false，避免左右留白叠加两次 */
     horizontalInset: Boolean = true,
 ) {
-    // 与 ContentListItem / SettingGroup 的 listHorizontal 对齐
-    val h = if (horizontalInset) Dimens.listHorizontal else 0.dp
-    Text(
-        text,
-        modifier.padding(start = h, end = h, top = Dimens.sectionHeaderTop, bottom = Dimens.gapS),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+    val start = if (horizontalInset) Dimens.listHorizontal * 2 else Dimens.listHorizontal
+    SmallTitle(
+        text = text,
+        modifier = modifier,
+        insideMargin = PaddingValues(
+            start = start,
+            end = start,
+            top = Dimens.sectionHeaderTop,
+            bottom = Dimens.gapS,
+        ),
     )
 }
 
 /**
- * 组内行位置：决定按压遮罩的圆角，与系统设置一致。
+ * 组内行位置：决定按压反馈的圆角，与组卡的四角对齐。
  *
  * - [Alone] 单行组：四角圆（如「关于」）
  * - [First] 组首：上圆下直（如「WebDAV 备份同步」）
@@ -70,13 +80,11 @@ enum class SettingGroupPosition {
 }
 
 /**
- * 组内行的切角：从 [SettingGroup] 用的 [MaterialTheme.shapes.large] 直接派生，只把不该圆的那一侧压成直角。
- * 从前另存了一份 16dp 半径、手拼 RoundedCornerShape —— 哪天主题改了 large，组卡跟着变、组内行的
- * 按压遮罩却还是旧圆角，两层角对不上。
+ * 组内行的切角：从 [SettingGroup] 用的 [AppShapes.large] 直接派生，只把不该圆的那一侧压成直角。
+ * 哪天组卡的圆角改了，组内行的按压反馈跟着变，两层角对得上。
  */
-@Composable
 internal fun settingGroupItemShape(position: SettingGroupPosition): Shape {
-    val group = MaterialTheme.shapes.large
+    val group = AppShapes.large
     return when (position) {
         SettingGroupPosition.Alone -> group
         SettingGroupPosition.First -> group.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
@@ -86,86 +94,60 @@ internal fun settingGroupItemShape(position: SettingGroupPosition): Shape {
 }
 
 /**
- * 设置页画布色（Scaffold / 顶栏）。
+ * 设置页画布色（Scaffold / 顶栏）：Miuix 的页面底 `surface`。浅色是比卡片深一档的灰底，深色是最深的底。
  *
- * 浅色：灰底（[ColorScheme.surfaceContainerLow]）；深色：最深底（[ColorScheme.background]）。
- * 深色不能再用 Low —— Low 比 Lowest 亮，会变成「浅底深卡」凹陷感，和系统设置反着。
+ * 保留这个函数而不是让各页直接写 `surface`：设置类页面、书籍列表页都要「灰底白卡」这一对，
+ * 哪天分层再改，只改这里和 [settingsCardColor]。
  */
 @Composable
-fun settingsPageColor(): Color {
-    val scheme = MaterialTheme.colorScheme
-    return if (scheme.background.luminance() > 0.5f) {
-        scheme.surfaceContainerLow
-    } else {
-        scheme.background
-    }
-}
+fun settingsPageColor(): Color = MiuixTheme.colorScheme.surface
 
-/**
- * 设置分组卡底色。
- *
- * 浅色：近白（[ColorScheme.surfaceContainerLowest]）；深色：抬一阶的灰
- * （[ColorScheme.surfaceContainerLow]），压在黑画布上才像「浮起来」的卡。
- */
+/** 设置分组卡底色：Miuix 的卡片色 `surfaceContainer`（浅色白卡、深色亮一档的灰卡） */
 @Composable
-fun settingsCardColor(): Color {
-    val scheme = MaterialTheme.colorScheme
-    return if (scheme.background.luminance() > 0.5f) {
-        scheme.surfaceContainerLowest
-    } else {
-        scheme.surfaceContainerLow
-    }
-}
+fun settingsCardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
 
 /**
- * 设置栈灰底上的内容列表行色。
- *
- * 默认 [ContentListDefaults.colors] 用 Low，和 [settingsPageColor] 同色会糊成一片；
- * 这里改用 [settingsCardColor]（白卡 / 深色浅卡），与 [SettingGroup] 同阶。
+ * 设置栈灰底上的内容列表行色。现在就是 [ContentListDefaults.colors] 的默认值（卡片色），
+ * 留着名字是让书籍列表这类「灰底上一张张白卡」的页面读起来和设置页是一回事。
  */
 @Composable
 fun settingsStackListColors() =
     ContentListDefaults.colors(containerColor = settingsCardColor())
 
 /**
- * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张大圆角 Surface。
+ * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张 Miuix [Card]
+ * （16dp 连续曲率圆角、卡片色）。
  *
- * 圆角只画在这一层，组内行按位置切角，避免「框套框」与按压遮罩四角形状不对。
+ * 圆角只画在这一层，组内行透明、按位置切按压反馈的角，避免「框套框」。
  * 组间距靠上下各 [Dimens.gapS]，组与组之间合起来正好一档 [Dimens.gapL]（「分组之间」）。
- * 从前是上下各 `gapM / 2`（6dp）—— 为了凑一整格 gapM 拿令牌做除法，落到了 4dp 栅格外面。
- *
- * 色：见 [settingsPageColor] / [settingsCardColor] —— 浅色灰底白卡、深色黑底浅卡。
- * 角：用 [MaterialTheme.shapes.large]（16dp），对齐系统设置分组卡。
  */
 @Composable
 fun SettingGroup(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // 从前有个 applyHorizontalInset 开关，给「整页已经内缩 20dp」的页面关掉卡片自带的 16dp。
-    // 设置类页面统一成一副骨架之后（见 SettingBlock），没有页面再整页内缩，开关也就撤了 ——
-    // 留着只会让下一个页面又长出第二套边距
-    Surface(
+    Card(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal)
             .padding(vertical = Dimens.gapS),
-        shape = MaterialTheme.shapes.large,
-        color = settingsCardColor(),
-        content = { Column(content = content) },
+        cornerRadius = AppShapes.radiusLarge,
+        colors = CardDefaults.defaultColors(color = settingsCardColor()),
+        content = content,
     )
 }
+
 /**
- * 设置项。走 [ContentListItem]，与内容列表同一套 Expressive 容器色 / 圆角。
+ * 设置项。走 [ContentListItem]，与 Miuix `ArrowPreference` 同一个长相：标题 17sp Medium，
+ * 可点的行尾带一个灰色 ›（HyperOS「点进去还有一页」的标记）。
  *
- * 设置页默认只留一行标题，把卡片压矮；当前选中值 / 描述性信息（版本号、许可证等）
- * 走 [value]（右侧同行）。说明性长文案不要塞 [subtitle] —— 需要解释时留给点开后的面板。
- * `trailing` 优先于 `value`（开关等自定义尾部仍走它）。
+ * 设置页默认只留一行标题，把行压矮；当前选中值 / 描述性信息（版本号、许可证等）
+ * 走 [value]（右侧同行，摘要色）。说明性长文案不要塞 [subtitle] —— 需要解释时留给点开后的面板。
+ * `trailing` 优先于 `value`（开关等自定义尾部仍走它），给了 `trailing` 就不画 ›。
  *
- * @param position 非 null 表示在 [SettingGroup] 内，并标明组内位置（按压遮罩圆角）。
+ * @param position 非 null 表示在 [SettingGroup] 内，并标明组内位置（按压反馈的圆角）。
  *   底栏 / 选择面板等「一条一卡」场景保持 null。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingRow(
     title: String,
@@ -175,7 +157,7 @@ fun SettingRow(
     trailing: @Composable (() -> Unit)? = null,
     position: SettingGroupPosition? = null,
     /**
-     * 行首图标，放在浅色圆底里（[SettingIcon]）。只给设置主页那种「一列入口」用：十几行纯文字长得一模一样，
+     * 行首图标，放在淡强调色的圆角方底里（[SettingIcon]）。只给设置主页那种「一列入口」用：十几行纯文字长得一模一样，
      * 找一项只能挨行读，图标是扫一眼就能落上去的锚点。二级页保持纯文字 —— 每页就几行，图标只会添乱。
      */
     icon: ImageVector? = null,
@@ -183,35 +165,35 @@ fun SettingRow(
     val grouped = position != null
     val leading: (@Composable () -> Unit)? = icon?.let { { SettingIcon(it) } }
     val supporting: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
-        {
-            Text(it, style = MaterialTheme.typography.bodySmall)
+        { Text(it, style = ContentListDefaults.supportingStyle) }
+    }
+    val valueText = value?.takeIf { it.isNotBlank() }
+    val trailingContent: (@Composable () -> Unit)? = when {
+        trailing != null -> trailing
+        valueText != null || onClick != null -> {
+            {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (valueText != null) {
+                        Text(
+                            valueText,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (onClick != null) RowChevron(Modifier.padding(start = Dimens.gapS))
+                }
+            }
         }
+        else -> null
     }
-    val trailingContent = trailing ?: value?.takeIf { it.isNotBlank() }?.let {
-        {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-    // 分组行静息透明：Expressive 形变按压看不见，要靠按下态铺一层 state layer。
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val colors = if (grouped) {
-        ContentListDefaults.groupedColors(pressed = pressed)
-    } else {
-        ContentListDefaults.colors()
-    }
-    val shapes = if (position != null) {
-        ContentListDefaults.groupedShapes(position)
-    } else {
-        ListItemDefaults.shapes()
-    }
+    val colors = if (grouped) ContentListDefaults.plainColors() else ContentListDefaults.colors()
+    val shape = if (position != null) settingGroupItemShape(position) else ContentListDefaults.Shape
     val rowModifier = if (grouped) Modifier else ContentListDefaults.rowChrome()
+    val titleContent: @Composable () -> Unit = {
+        Text(title, style = ContentListDefaults.titleStyle)
+    }
 
     if (onClick != null) {
         ContentListItem(
@@ -221,29 +203,19 @@ fun SettingRow(
             trailingContent = trailingContent,
             supportingContent = supporting,
             colors = colors,
-            shapes = shapes,
-            interactionSource = if (grouped) interactionSource else null,
-            content = {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-            },
+            shape = shape,
+            content = titleContent,
         )
     } else {
-        // 纯展示行（版本、许可证…）：用无点击重载，避免 enabled=false 把右侧 value 洗淡。
-        // verticalAlignment 必须显式给：官方默认是「行内可用高度过约 56dp 就改顶对齐」，带 subtitle 的行
-        // 被两行最小高度撑过了线，标题副标题全贴在上半截、下面空一大块（阅读记录「今年读得最多」）。
-        // 可点那一支走 ContentListItem，早就钉了居中，所以从前只有纯展示行歪
-        ListItem(
-            modifier = rowModifier.fillMaxWidth(),
+        // 纯展示行（版本、许可证…）：用不可点的重载 —— 别用 enabled=false，那会把右侧 value 洗淡
+        ContentListItem(
+            modifier = rowModifier,
             leadingContent = leading,
             trailingContent = trailingContent,
             supportingContent = supporting,
-            verticalAlignment = Alignment.CenterVertically,
-            shapes = shapes,
             colors = colors,
-            contentPadding = ContentListDefaults.CompactPadding,
-            content = {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-            },
+            shape = shape,
+            content = titleContent,
         )
     }
 }
@@ -253,8 +225,7 @@ fun SettingRow(
  * 左右内缩与行内文字对齐（[Dimens.listHorizontal]），块内各项按 [Dimens.gapM] 拉开。
  *
  * 设置类页面只有一种骨架：灰底 + [SectionHeader] + [SettingGroup]，**所有控件都装在卡里**。
- * 从前 WebDAV、主题外观两页是另一套 —— 整页内缩 20dp、输入框和色板直接铺在灰底上、只有个别开关塞进卡里，
- * 卡片还比别的页每边窄 4dp，从别的页切进来左右边缘跳一下。卡里放的不是行时就用这个块。
+ * 卡里放的不是行时就用这个块。
  */
 @Composable
 fun SettingBlock(
@@ -272,52 +243,70 @@ fun SettingBlock(
 
 /**
  * 分组卡下面的说明小字（「会同步什么」「时长怎么算」）。左边与 [SectionHeader] 对齐 ——
- * 标题、卡、脚注是一组东西，起点不该三处各不相同。
+ * 标题、卡里的字、脚注是一组东西，起点在同一条竖线上。
  */
 @Composable
 fun SettingFootnote(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    color: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
 ) {
     Text(
         text,
-        style = MaterialTheme.typography.bodySmall,
+        style = MiuixTheme.textStyles.footnote1,
         color = color,
-        modifier = modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        modifier = modifier.padding(horizontal = Dimens.listHorizontal * 2, vertical = Dimens.gapXS),
     )
 }
 
 /**
- * 设置行的行首图标：secondaryContainer 的圆底 + onSecondaryContainer 的图标。
- * 用容器色而不是 primary：一页十来个图标全是强调色，强调就不成其为强调了。纯装饰，不进读屏（行标题就是名字）。
+ * 设置行的行首图标：淡强调底（`tertiaryContainer`）的圆角方块 + 强调色图标 —— HyperOS 设置页的彩色小方块，
+ * 只是不一行一个颜色：一页十来个图标全是饱和色，强调就不成其为强调了。纯装饰，不进读屏（行标题就是名字）。
  */
 @Composable
 private fun SettingIcon(icon: ImageVector) {
     Box(
         Modifier
             .size(Dimens.settingIcon)
-            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+            .squircleBackground(MiuixTheme.colorScheme.tertiaryContainer, AppShapes.radiusMedium),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
             contentDescription = null,
             modifier = Modifier.size(Dimens.iconMd),
-            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            tint = MiuixTheme.colorScheme.onTertiaryContainer,
         )
     }
 }
 
 /**
- * 开关项：整行可点，点行等于拨开关。
+ * 行尾的 ›：Miuix `ArrowPreference` 用的同一个图（10×16dp、`onSurfaceVariantActions` 色），RTL 下镜像。
+ * 纯装饰，不进读屏。
+ */
+@Composable
+internal fun RowChevron(modifier: Modifier = Modifier) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    Image(
+        imageVector = MiuixIcons.Basic.ArrowRight,
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantActions),
+        modifier = modifier
+            .width(Dimens.rowChevronWidth)
+            .height(Dimens.rowChevronHeight)
+            .graphicsLayer { scaleX = if (rtl) -1f else 1f },
+    )
+}
+
+/**
+ * 开关项：整行可点，点行等于拨开关（Miuix `SwitchPreference` 的长相）。
  *
- * 用 checked 重载让整行成为一个开关语义目标，并把行内 Switch 的
- * onCheckedChange 置空（纯展示）—— 否则读屏会出现「行」和「开关」两个焦点，
- * 且行焦点念不出开/关状态。
+ * 不直接用 `SwitchPreference`：它的行和行内 Switch **各自**可点，读屏会出现「行」和「开关」两个焦点，
+ * 且行焦点念不出开/关状态。这里整行是一个 [Role.Switch] 语义目标，行内 [Switch] 的
+ * onCheckedChange 置空（纯展示）。
  *
- * 独立成卡时形状与底色走 [ContentListDefaults.toggleShapes] / [toggleColors]；
- * 进 [SettingGroup] 时传 [position]，按压遮罩圆角跟组内位置走。
+ * 开/关**不**换行的底色 —— 状态只由开关表达。独立成卡时底是卡片色；进 [SettingGroup] 时传 [position]，
+ * 底透明、按压反馈的圆角跟组内位置走。
  */
 @Composable
 fun SwitchRow(
@@ -330,34 +319,26 @@ fun SwitchRow(
 ) {
     val grouped = position != null
     val supporting: (@Composable () -> Unit)? = subtitle?.takeIf { it.isNotBlank() }?.let {
-        {
-            Text(it, style = MaterialTheme.typography.bodySmall)
-        }
+        { Text(it, style = ContentListDefaults.supportingStyle) }
     }
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
     ContentListItem(
         checked = checked,
         onCheckedChange = onCheckedChange,
         modifier = if (grouped) Modifier else ContentListDefaults.rowChrome(),
         enabled = enabled,
+        role = Role.Switch,
         trailingContent = {
             Switch(checked = checked, enabled = enabled, onCheckedChange = null)
         },
         supportingContent = supporting,
         colors = if (grouped) {
-            ContentListDefaults.groupedColors(pressed = pressed)
+            ContentListDefaults.plainColors()
         } else {
-            ContentListDefaults.toggleColors()
+            ContentListDefaults.plainColors(containerColor = settingsCardColor())
         },
-        shapes = if (position != null) {
-            ContentListDefaults.groupedShapes(position)
-        } else {
-            ContentListDefaults.toggleShapes()
-        },
-        interactionSource = if (grouped) interactionSource else null,
+        shape = if (position != null) settingGroupItemShape(position) else ContentListDefaults.Shape,
         content = {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(title, style = ContentListDefaults.titleStyle)
         },
     )
 }

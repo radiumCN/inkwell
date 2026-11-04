@@ -35,23 +35,73 @@ class AppThemesTest {
                 contrast(scheme.onPrimary, scheme.primary) >= 3.0f,
                 "onPrimary/primary 对比不足: seed=$seed bg=$bg dark=$dark",
             )
+            // 摘要小字（设置行副标题、空态提示）与分组小标题既坐在页面底上，也坐在卡片上：两处都得够 4.5:1
+            for ((name, text) in listOf(
+                "onSurfaceVariantSummary" to scheme.onSurfaceVariantSummary,
+                "onBackgroundVariant" to scheme.onBackgroundVariant,
+            )) {
+                assertTrue(
+                    contrast(text, scheme.surface) >= 4.5f,
+                    "$name/surface 对比不足: seed=$seed bg=$bg dark=$dark",
+                )
+                assertTrue(
+                    contrast(text, scheme.surfaceContainer) >= 4.5f,
+                    "$name/surfaceContainer 对比不足: seed=$seed bg=$bg dark=$dark",
+                )
+            }
+            // 下拉菜单选中项、选中 chip：淡强调底上的强调色字
+            assertTrue(
+                contrast(scheme.onTertiaryContainer, scheme.tertiaryContainer) >= 4.5f,
+                "onTertiaryContainer/tertiaryContainer 对比不足: seed=$seed bg=$bg dark=$dark",
+            )
+        }
+    }
+
+    @Test
+    fun `提示胶囊上的正文与操作键都读得清`() {
+        // AppSnackbar：onSecondaryVariant 底、secondaryVariant 字，操作键是推过的强调色。
+        // 浅色主题的强调色本身就是深色，原样放在近黑的胶囊上只有约 1.9:1
+        (AppThemes.lightPresets + AppThemes.darkPresets).forEach { preset ->
+            val s = preset.scheme
+            val container = s.onSecondaryVariant
+            assertTrue(
+                contrast(s.secondaryVariant, container) >= 4.5f,
+                "提示正文对比不足: ${preset.id}",
+            )
+            val action = AppThemes.readableOn(s.primary, container)
+            assertTrue(
+                contrast(action, container) >= 4.5f,
+                "提示操作键对比不足: ${preset.id} action=$action container=$container",
+            )
+        }
+    }
+
+    @Test
+    fun `浅色灰底白卡、深色黑底亮卡`() {
+        // Miuix 的分层：页面底 surface、卡片 surfaceContainer。浅色卡就是预设的纸色、页面压深一档；
+        // 深色页面就是预设的底色、卡片往亮里抬 —— 两边都得是「卡比页面更像纸」
+        AppThemes.lightPresets.forEach { preset ->
+            val s = preset.scheme
+            assertEquals(preset.previewBg, s.surfaceContainer, "浅色卡片应是纸色本身: ${preset.id}")
+            assertTrue(s.surface.luminance() < s.surfaceContainer.luminance(), "浅色页面应比卡片深: ${preset.id}")
+        }
+        AppThemes.darkPresets.forEach { preset ->
+            val s = preset.scheme
+            assertEquals(preset.previewBg, s.surface, "深色页面应是底色本身: ${preset.id}")
+            assertTrue(s.surfaceContainer.luminance() > s.surface.luminance(), "深色卡片应比页面亮: ${preset.id}")
         }
     }
 
     @Test
     fun `dark list cards stay distinct from page background`() {
-        // 设置页等 ContentListItem 读 surfaceContainerLow；纯黑预设上若只提亮 3%，
-        // 卡片会糊进 background，夜间「看不见容器」、日间却正常 —— 就是这个不对称。
+        // 卡片（surfaceContainer）坐在页面底（surface）上；纯黑预设上若只提亮 3%，
+        // 卡片会糊进页面，夜间「看不见容器」、日间却正常 —— 就是这个不对称（所以台阶走 sRGB 混合而非 Oklab）。
         AppThemes.darkPresets.forEach { preset ->
             val scheme = preset.scheme
             assertTrue(
-                contrast(scheme.surfaceContainerLow, scheme.background) >= 1.12f,
-                "surfaceContainerLow 相对 background 太近: preset=${preset.id} " +
-                    "low=${scheme.surfaceContainerLow} bg=${scheme.background}",
-            )
-            assertTrue(
-                scheme.surfaceContainerLow.luminance() > scheme.background.luminance(),
-                "深色下 containerLow 应比 background 更亮: preset=${preset.id}",
+                contrast(scheme.surfaceContainer, scheme.surface) >= 1.12f,
+                "surfaceContainer 相对 surface 太近: preset=${preset.id} " +
+                    "card=${scheme.surfaceContainer} page=${scheme.surface}",
             )
         }
     }
@@ -64,12 +114,12 @@ class AppThemesTest {
         )
         val (scheme, dark) = AppThemes.resolve(config, systemDark = false)
         assertTrue(dark)
-        assertEquals(Color(0xFF000000), scheme.background)
+        assertEquals(Color(0xFF000000), scheme.surface)
 
         val (lightScheme, lightDark) =
             AppThemes.resolve(config.copy(mode = ThemeMode.LIGHT), systemDark = true)
         assertEquals(false, lightDark)
-        assertEquals(Color(0xFFFFFBEB), lightScheme.background)
+        assertEquals(Color(0xFFFFFBEB), lightScheme.surfaceContainer)
     }
 
     @Test
@@ -82,7 +132,7 @@ class AppThemesTest {
         )
         val (scheme, _) = AppThemes.resolve(config, systemDark = false)
         assertEquals(Color(0xFF006064), scheme.primary)
-        assertEquals(Color(0xFFF5FDFD), scheme.background)
+        assertEquals(Color(0xFFF5FDFD), scheme.surfaceContainer)
     }
 
     @Test

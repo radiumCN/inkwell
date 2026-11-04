@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
@@ -36,12 +34,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.ui.components.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 页眉章节名 + 页脚信息层。
@@ -152,15 +153,19 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
 }
 
 /**
- * 页眉/页脚小字的样式：排版角色 bodySmall（12sp），正文性小字的下限。
+ * 页眉/页脚小字的样式：排版角色 footnote1（13sp），正文性小字的下限。
  *
- * 从前裸写 11.sp，低于规范的 12sp 下限，也不跟排版令牌走。分页给页眉页脚预留的那两条带
+ * 从前裸写 11.sp，低于规范的下限，也不跟排版令牌走。分页给页眉页脚预留的那两条带
  * （ReaderScreen 的 buildLayoutSpec）按这里的行高兜底 —— 两边必须读同一个，否则调大系统字号后
  * 页脚的字就压进正文里了。
+ *
+ * 行高必须是 **sp**：Miuix 的 footnote1 不带行高（Unspecified），buildLayoutSpec 读到非 sp 就只按 dp 兜底，
+ * 系统字号放大后两条带不再跟着撑开。这里补一个 18sp —— 正好等于默认的页脚带高 18dp
+ * （页眉带 18 + gapS = 26dp 也与默认值相等），默认字号下排版一个像素都不变。
  */
 @Composable
 @ReadOnlyComposable
-internal fun pageInfoTextStyle(): TextStyle = MaterialTheme.typography.bodySmall
+internal fun pageInfoTextStyle(): TextStyle = MiuixTheme.textStyles.footnote1.copy(lineHeight = 18.sp)
 
 /** 小电池图标：描边外框 + 正极触点 + 按电量填充 */
 @Composable

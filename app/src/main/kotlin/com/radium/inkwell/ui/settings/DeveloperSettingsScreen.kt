@@ -10,9 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,9 +33,10 @@ import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 
 /** 开发者选项：关于页连点版本号进来。目前只管运行日志 */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeveloperSettingsScreen(
     onBack: () -> Unit,

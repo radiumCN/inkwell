@@ -19,11 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -33,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.AppTopBar
@@ -50,13 +46,17 @@ import com.radium.inkwell.ui.components.topBarScroll
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 阅读记录：今天读了多久、连续几天、本周/今年/累计，近几个月的每日热力图，今年读得最多的书。
  *
  * 只给看，不打分、不设目标、不发提醒 —— 这是一本账，不是一个要你每天打卡的任务。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadingStatsScreen(
     onBack: () -> Unit,
@@ -144,19 +144,19 @@ private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
  */
 @Composable
 private fun TodayCard(s: ReadingSummary, modifier: Modifier) {
-    val content = MaterialTheme.colorScheme.onPrimaryContainer
+    val content = MiuixTheme.colorScheme.onPrimaryContainer
     Column(
         modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clip(AppShapes.large)
+            .background(MiuixTheme.colorScheme.primaryContainer)
             .semantics(mergeDescendants = true) {}
             .padding(Dimens.gapXL),
     ) {
-        Text("今天读了", style = MaterialTheme.typography.labelLarge, color = content)
+        Text("今天读了", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
         Text(
             formatDuration(s.todayMillis),
-            style = MaterialTheme.typography.displaySmall,
+            style = MiuixTheme.textStyles.title1,
             color = content,
             modifier = Modifier.padding(vertical = Dimens.gapXS),
         )
@@ -165,7 +165,7 @@ private fun TodayCard(s: ReadingSummary, modifier: Modifier) {
                 append(if (s.streakDays > 0) "连续读了 ${s.streakDays} 天" else "今天还没开始")
                 append(" · 共 ${s.activeDays} 天在读")
             },
-            style = MaterialTheme.typography.bodyMedium,
+            style = MiuixTheme.textStyles.body2,
             color = content,
         )
     }
@@ -176,13 +176,14 @@ private fun StatTile(label: String, value: String, modifier: Modifier) {
     Surface(
         modifier = modifier.semantics(mergeDescendants = true) {},
         color = settingsCardColor(),
-        shape = MaterialTheme.shapes.large,
+        shape = AppShapes.large,
     ) {
         Column(Modifier.padding(horizontal = Dimens.gapM, vertical = Dimens.gapM)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             Text(
                 value,
-                style = MaterialTheme.typography.titleMedium,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.Medium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = Dimens.gapXS),
@@ -199,7 +200,7 @@ private fun StatTile(label: String, value: String, modifier: Modifier) {
  */
 @Composable
 private fun ReadingHeatmap(daily: Map<Long, Long>, today: LocalDate, modifier: Modifier) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val levels = listOf(
         scheme.surfaceContainerHighest,
         scheme.primary.copy(alpha = 0.30f),
@@ -207,7 +208,7 @@ private fun ReadingHeatmap(daily: Map<Long, Long>, today: LocalDate, modifier: M
         scheme.primary.copy(alpha = 0.75f),
         scheme.primary,
     )
-    val cellShape = MaterialTheme.shapes.extraSmall
+    val cellShape = AppShapes.extraSmall
     Column(modifier) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val gap = Dimens.gapXS
@@ -250,11 +251,11 @@ private fun ReadingHeatmap(daily: Map<Long, Long>, today: LocalDate, modifier: M
                 ) {
                     Text(
                         "${firstMonday.monthValue} 月 ${firstMonday.dayOfMonth} 日起",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = scheme.onSurfaceVariantSummary,
                         modifier = Modifier.weight(1f),
                     )
-                    Text("少", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                    Text("少", style = MiuixTheme.textStyles.footnote1, color = scheme.onSurfaceVariantSummary)
                     levels.forEach { c ->
                         Spacer(Modifier.width(Dimens.gapXS))
                         Box(
@@ -265,7 +266,7 @@ private fun ReadingHeatmap(daily: Map<Long, Long>, today: LocalDate, modifier: M
                         )
                     }
                     Spacer(Modifier.width(Dimens.gapXS))
-                    Text("多", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                    Text("多", style = MiuixTheme.textStyles.footnote1, color = scheme.onSurfaceVariantSummary)
                 }
             }
         }

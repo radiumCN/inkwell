@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.rss
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,12 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RssFeed
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -26,19 +20,25 @@ import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.core.util.htmlToPlainText
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppTopBar
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.ErrorState
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.settingsStackListColors
-@OptIn(ExperimentalMaterial3Api::class)
+import com.radium.inkwell.ui.components.topBarScroll
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+
 @Composable
 fun RssArticlesScreen(
     sourceId: String,
@@ -56,7 +56,7 @@ fun RssArticlesScreen(
         topBar = {
             AppTopBar(state.sourceName, topBarScroll, onBack = onBack, containerColor = pageColor) {
                 AppIconButton(onClick = viewModel::refresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                    Icon(MiuixIcons.Refresh, contentDescription = "刷新")
                 }
             }
         },
@@ -135,10 +135,10 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
             {
                 Column {
                     if (desc != null) {
-                        Text(desc, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(desc, style = ContentListDefaults.supportingStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     if (date != null) {
-                        Text(date, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(date, style = ContentListDefaults.overlineStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -146,7 +146,7 @@ private fun ArticleRow(article: RssArticle, onClick: () -> Unit) {
             null
         },
         content = {
-            Text(article.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(article.title, style = ContentListDefaults.titleStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
     )
 }

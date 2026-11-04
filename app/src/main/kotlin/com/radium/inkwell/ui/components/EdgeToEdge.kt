@@ -2,16 +2,10 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
-import androidx.compose.foundation.layout.exclude
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.union
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -47,21 +41,13 @@ fun PaddingValues.exceptBottom(): PaddingValues {
 }
 
 /**
- * 会滚动的底部弹层（目录、阅读设置、选项面板、换源）的 `contentWindowInsets`：与页面同一个道理，让列表滚到手势条下面。
+ * 会滚动的底部弹层（目录、阅读设置、选项面板、换源）垫在**滚动内容末尾**的导航栏高度：与页面同一个道理，
+ * 让列表滚到手势条下面，最后一行又仍能完整滚出来。
  *
- * M3 的默认值是 safeDrawing 的上下两边：底部那份是导航栏高度，弹层的底色一直铺到屏幕底，内容却在手势条上方截断 ——
- * 下面空一条弹层底色，跟页面上的毛病一模一样。这里只留两样：
- * - 顶部：弹层拉满时让开状态栏；
- * - 键盘里**超出导航栏**的那部分：目录里有搜索框，键盘弹起还得把列表顶上去。
- * 导航栏本身的高度由内容自己垫在末尾（[sheetBottomInset]），合起来键盘弹起时正好让出一个键盘高。
- *
- * 不滚动的弹层（书架长按面板、应用图标、净化规则编辑）用 M3 默认值：就几行，没有东西要滚到手势条下面。
+ * Miuix 的面板一直铺到屏幕底、不替内容让导航栏；[AppBottomSheet] 默认在内容末尾垫一份，
+ * 会滚动的面板关掉那份（`padNavigationBar = false`），改把这个值放进列表的 `contentPadding` 末尾 ——
+ * 垫在列表外面的话，列表在手势条上方就截断了，下面空一条面板底色。
+ * 键盘由 Miuix 面板自己 `imePadding()` 让开，这里不用管。
  */
-@Composable
-fun sheetContentInsets(): WindowInsets =
-    WindowInsets.safeDrawing.only(WindowInsetsSides.Top)
-        .union(WindowInsets.ime.exclude(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
-
-/** 用了 [sheetContentInsets] 的弹层，垫在滚动内容末尾的导航栏高度 */
 @Composable
 fun sheetBottomInset(): Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()

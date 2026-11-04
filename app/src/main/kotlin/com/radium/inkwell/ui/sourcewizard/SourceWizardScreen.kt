@@ -12,17 +12,13 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
@@ -39,6 +35,7 @@ import com.radium.inkwell.core.source.detect.TocCandidate
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.ChipRow
@@ -51,10 +48,14 @@ import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
+import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.exceptBottom
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 新建书源：输入一本书的网址 → 核对认出来的目录与正文（可选：在网页里搜一次、点一下纠错、逐项改规则）
@@ -136,10 +137,9 @@ private fun FormStep(state: SourceWizardUiState, viewModel: SourceWizardViewMode
 }
 
 /**
- * 网页步骤。顶栏用经典窄栏而不是 [AppTopBar]：WebView 不接嵌套滚动，两段式顶栏收不起来，
+ * 网页步骤。顶栏用窄栏（[AppToolbar]）而不是 [AppTopBar]：WebView 不接嵌套滚动，大标题顶栏收不起来，
  * 就是白送一条永久变高的顶栏，还要从本来就不大的网页里再切走一截。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WebStep(state: SourceWizardUiState, viewModel: SourceWizardViewModel, goBack: () -> Unit) {
     val start = viewModel.webStartUrl(state) ?: return
@@ -154,10 +154,9 @@ private fun WebStep(state: SourceWizardUiState, viewModel: SourceWizardViewModel
     }
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { BackButton(onClick = goBack) },
-            )
+            AppToolbar(navigationIcon = { BackButton(onClick = goBack) }) {
+                ToolbarTitle(title)
+            }
         },
     ) { padding ->
         // 不滚动的整页：整块让开系统栏；搜索框在网页里，键盘弹起时把网页和底下的按钮一起顶上去
@@ -173,7 +172,7 @@ private fun WebStep(state: SourceWizardUiState, viewModel: SourceWizardViewModel
                 WizardWebView(
                     url = start,
                     mode = mode,
-                    highlight = MaterialTheme.colorScheme.primary,
+                    highlight = MiuixTheme.colorScheme.primary,
                     onPageUrl = viewModel::onWebPage,
                     onFormSubmit = viewModel::onFormSubmitted,
                     onPick = viewModel::onPicked,
@@ -186,9 +185,9 @@ private fun WebStep(state: SourceWizardUiState, viewModel: SourceWizardViewModel
                     .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapM),
                 verticalArrangement = Arrangement.spacedBy(Dimens.gapS),
             ) {
-                Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(hint, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 val error = if (state.step == WizardStep.SearchCapture) state.searchError else state.pickError
-                error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+                error?.let { Text(it, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.error) }
                 if (state.pickLoading) BusyLine("正在按你点的地方重新认…")
                 if (state.step == WizardStep.SearchCapture) {
                     PrimaryButton(
@@ -223,7 +222,7 @@ private fun InputStep(state: SourceWizardUiState, viewModel: SourceWizardViewMod
             state.progress?.let { BusyLine(it) }
         }
     }
-    state.inputError?.let { SettingFootnote(it, color = MaterialTheme.colorScheme.error) }
+    state.inputError?.let { SettingFootnote(it, color = MiuixTheme.colorScheme.error) }
     SettingFootnote(
         "在浏览器里打开这本书的目录页（列出全部章节的那一页）或详情页，复制地址粘贴到这里；" +
             "正在读的某一章的地址也行。应用会认出目录和正文在页面上的位置，生成一个书源。",
@@ -270,7 +269,7 @@ private fun ReviewStep(state: SourceWizardUiState, viewModel: SourceWizardViewMo
                     onSelect = viewModel::selectToc,
                 )
             }
-            Text("共 ${toc.chapters.size} 章", style = MaterialTheme.typography.titleSmall)
+            Text("共 ${toc.chapters.size} 章", style = MiuixTheme.textStyles.subtitle)
             ChapterPeek(toc.chapters)
         }
         SettingRow("认得不对？去网页上点一下", onClick = viewModel::openPickToc, position = SettingGroupPosition.Last)
@@ -321,7 +320,7 @@ private fun ReviewStep(state: SourceWizardUiState, viewModel: SourceWizardViewMo
             if (state.saving) BusyLine("正在按规则试抓目录和正文…")
         }
     }
-    state.saveError?.let { SettingFootnote(it, color = MaterialTheme.colorScheme.error) }
+    state.saveError?.let { SettingFootnote(it, color = MiuixTheme.colorScheme.error) }
     val group = BookSourceRepository.CREATED_GROUP
     SettingFootnote(
         if (state.search != null) {
@@ -339,7 +338,7 @@ private fun ColumnScope.ContentSummary(state: SourceWizardUiState, viewModel: So
     val error = state.chapterError
     when {
         state.chapterLoading -> BusyLine("正在识别正文…")
-        error != null -> Text(error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        error != null -> Text(error, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.error)
         chapter != null -> {
             val candidates = chapter.contentCandidates
             if (candidates.size > 1) {
@@ -350,11 +349,11 @@ private fun ColumnScope.ContentSummary(state: SourceWizardUiState, viewModel: So
                 )
             }
             candidates.getOrNull(state.contentIndex)?.let { content ->
-                Text("约 ${content.textLength} 字", style = MaterialTheme.typography.titleSmall)
+                Text("约 ${content.textLength} 字", style = MiuixTheme.textStyles.subtitle)
                 Text(
                     content.preview + "…",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     maxLines = PREVIEW_LINES,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -372,12 +371,12 @@ private fun SearchSection(state: SourceWizardUiState, viewModel: SourceWizardVie
             state.searchLoading -> SettingBlock { BusyLine("正在按你搜的那一次试搜…") }
             search != null -> {
                 SettingBlock {
-                    Text("搜「${search.keyword}」搜到 ${search.results.size} 本", style = MaterialTheme.typography.titleSmall)
+                    Text("搜「${search.keyword}」搜到 ${search.results.size} 本", style = MiuixTheme.textStyles.subtitle)
                     search.results.take(PEEK_HEAD).forEach { r ->
                         Text(
                             listOfNotNull(r.title, r.author).joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -389,7 +388,7 @@ private fun SearchSection(state: SourceWizardUiState, viewModel: SourceWizardVie
             else -> SettingRow("在网页里搜一次", onClick = viewModel::openSearchCapture, position = SettingGroupPosition.Alone)
         }
     }
-    state.searchError?.let { SettingFootnote(it, color = MaterialTheme.colorScheme.error) }
+    state.searchError?.let { SettingFootnote(it, color = MiuixTheme.colorScheme.error) }
     if (search == null && !state.searchLoading) {
         SettingFootnote("可选。在网站上搜一次，以后就能在应用里搜这个网站，换源时也能找到它。")
     }
@@ -411,17 +410,17 @@ private fun AdvancedStep(state: SourceWizardUiState, viewModel: SourceWizardView
             )
             if (state.dryRunning) BusyLine("正在按这套规则抓详情、目录、正文…")
             run?.let {
-                Text(dryRunSummary(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(dryRunSummary(it), style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
     }
     for ((stage, title, fields) in ADVANCED_SECTIONS) {
         SectionHeader(title)
-        run?.failures?.get(stage)?.let { SettingFootnote("这一段没走通：$it", color = MaterialTheme.colorScheme.error) }
+        run?.failures?.get(stage)?.let { SettingFootnote("这一段没走通：$it", color = MiuixTheme.colorScheme.error) }
         SettingGroup {
             fields.forEach { field ->
                 SettingBlock {
-                    Text(FIELD_LABELS.getValue(field), style = MaterialTheme.typography.labelLarge)
+                    Text(FIELD_LABELS.getValue(field), style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium)
                     CompactTextField(
                         value = state.editing[field].orEmpty(),
                         onValueChange = { viewModel.setField(field, it) },
@@ -430,8 +429,8 @@ private fun AdvancedStep(state: SourceWizardUiState, viewModel: SourceWizardView
                     sampleLine(run, field, state.editing[field].orEmpty())?.let { (text, isError) ->
                         Text(
                             text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = if (isError) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             maxLines = SAMPLE_LINES,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -456,7 +455,7 @@ private fun AdvancedStep(state: SourceWizardUiState, viewModel: SourceWizardView
 private fun BusyLine(text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
         AppLoadingIndicator(size = Dimens.buttonSpinner)
-        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
 }
 
@@ -472,8 +471,8 @@ private fun ChapterPeek(chapters: List<DetectedChapter>) {
         lines.forEach { line ->
             Text(
                 line,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

@@ -24,18 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ripple
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -62,8 +50,21 @@ import com.radium.inkwell.ui.theme.toArgbLong
 import com.radium.inkwell.ui.theme.toHsv
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeSettingsScreen(onBack: () -> Unit) {
     val prefs = koinInject<AppPrefs>()
@@ -75,10 +76,13 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         scope.launch { prefs.setThemeConfig(new) }
     }
 
-    // 「跟随壁纸」色块按系统此刻给的那套画：底色 + 强调色，跟别的预设同一种预览
-    val context = LocalContext.current
-    val wallpaperLight = remember(context) { dynamicLightColorScheme(context) }
-    val wallpaperDark = remember(context) { dynamicDarkColorScheme(context) }
+    // 「跟随壁纸」色块按系统此刻给的那套画：底色 + 强调色，跟别的预设同一种预览。
+    // 与 rememberResolvedScheme 同一个来源（Miuix ThemeController 的 Monet 模式、不给 keyColor），
+    // 色块和选中后整个 App 换上的颜色才是同一套
+    val wallpaperLightController = remember { ThemeController(ColorSchemeMode.MonetLight) }
+    val wallpaperDarkController = remember { ThemeController(ColorSchemeMode.MonetDark) }
+    val wallpaperLight = wallpaperLightController.currentColors()
+    val wallpaperDark = wallpaperDarkController.currentColors()
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
@@ -234,49 +238,52 @@ private fun ThemeSwatch(
     onClick: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(Dimens.swatch)
-                .background(bg, CircleShape)
-                .border(
-                    width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
-                    color = if (selected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outlineVariant,
-                    shape = CircleShape,
-                )
-                // 整块色板作为单选目标带上名字与选中态：否则读屏聚焦未选中的色块什么都念不出，
-                // 十个色块无从区分（名字 Text 在可点区之外）
-                // 水波纹是圆的：默认的有界水波纹是方的，圆色板按下去冒出一个方块。不用 clip 圈住 ——
-                // 那会把右下角的选中对勾一起裁掉
-                .selectable(
-                    selected = selected,
-                    interactionSource = null,
-                    indication = ripple(bounded = false, radius = Dimens.swatch / 2),
-                    role = Role.RadioButton,
-                    onClick = onClick,
-                )
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(Dimens.iconSm).background(accent, CircleShape))
+        // 外层只定尺寸、托住右下角的选中对勾；可点的圆在里层 —— 按压反馈（Miuix 的压暗）要裁成圆的，
+        // 圆色板按下去冒出一个方块很难看；裁切若放在外层，会把伸出圆外的对勾一起裁掉
+        Box(Modifier.size(Dimens.swatch)) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(bg)
+                    .border(
+                        width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
+                        color = if (selected) MiuixTheme.colorScheme.primary
+                        else MiuixTheme.colorScheme.dividerLine,
+                        shape = CircleShape,
+                    )
+                    // 整块色板作为单选目标带上名字与选中态：否则读屏聚焦未选中的色块什么都念不出，
+                    // 十个色块无从区分（名字 Text 在可点区之外）
+                    .selectable(
+                        selected = selected,
+                        interactionSource = null,
+                        indication = LocalIndication.current,
+                        role = Role.RadioButton,
+                        onClick = onClick,
+                    )
+                    .semantics { contentDescription = label },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(Dimens.iconSm).background(accent, CircleShape))
+            }
             if (selected) {
                 Icon(
-                    Icons.Default.Check,
+                    MiuixIcons.Basic.Check,
                     contentDescription = null,
                     Modifier
                         .align(Alignment.BottomEnd)
                         .size(Dimens.iconSm)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .background(MiuixTheme.colorScheme.primary, CircleShape)
                         .padding(Dimens.gapXS),
-                    tint = MaterialTheme.colorScheme.onPrimary,
+                    tint = MiuixTheme.colorScheme.onPrimary,
                 )
             }
         }
         Text(
             label,
             Modifier.padding(top = Dimens.gapXS),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
     }
 }
@@ -317,20 +324,21 @@ private fun CustomThemeEditor(
         Modifier
             .fillMaxWidth()
             .padding(start = Dimens.listHorizontal, end = Dimens.listHorizontal, top = Dimens.gapM),
-        shape = MaterialTheme.shapes.medium,
-        // 编辑器外壳走当前主题的容器槽，别用半透明 surfaceVariant —— 深色/自定义下会发灰发脏
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = AppShapes.medium,
+        // 编辑器是卡里再凹一层的托盘：取页面底 surface（浅色比卡深一档、深色比卡暗一档），
+        // 别用半透明色 —— 深色/自定义下会发灰发脏
+        color = MiuixTheme.colorScheme.surface,
     ) {
         Column(Modifier.padding(Dimens.gapL)) {
-            // 实时预览：背景 + 抬高容器 + 强调按钮，把 surfaceContainer* 层级也画出来。
-            // 从前只预览 background/primary，换主题后列表/弹层用的容器色对不上预览。
+            // 实时预览照 Miuix 的分层画三样：页面底（surface）上的标题与强调按钮、一张卡片（surfaceContainer）、
+            // 一行选中项（tertiaryContainer）。只预览底色与强调色的话，换主题后卡片、选中行的颜色对不上预览
             Surface(
                 Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                color = previewScheme.background,
-                border = androidx.compose.foundation.BorderStroke(
+                shape = AppShapes.medium,
+                color = previewScheme.surface,
+                border = BorderStroke(
                     Dimens.strokeThin,
-                    MaterialTheme.colorScheme.outlineVariant,
+                    MiuixTheme.colorScheme.dividerLine,
                 ),
             ) {
                 Column(Modifier.padding(Dimens.gapM)) {
@@ -338,17 +346,18 @@ private fun CustomThemeEditor(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 "预览标题",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = previewScheme.onBackground,
+                                style = MiuixTheme.textStyles.headline2,
+                                fontWeight = FontWeight.Medium,
+                                color = previewScheme.onSurface,
                             )
                             Text(
                                 "正文文字效果",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = previewScheme.onSurfaceVariant,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = previewScheme.onSurfaceVariantSummary,
                             )
                         }
                         Surface(
-                            shape = MaterialTheme.shapes.small,
+                            shape = AppShapes.small,
                             color = previewScheme.primary,
                         ) {
                             Text(
@@ -357,7 +366,7 @@ private fun CustomThemeEditor(
                                     horizontal = Dimens.gapM,
                                     vertical = Dimens.gapXS,
                                 ),
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MiuixTheme.textStyles.footnote1,
                                 color = previewScheme.onPrimary,
                             )
                         }
@@ -366,8 +375,8 @@ private fun CustomThemeEditor(
                         Modifier
                             .fillMaxWidth()
                             .padding(top = Dimens.gapS),
-                        shape = MaterialTheme.shapes.medium,
-                        color = previewScheme.surfaceContainerLow,
+                        shape = AppShapes.medium,
+                        color = previewScheme.surfaceContainer,
                     ) {
                         Row(
                             Modifier.padding(
@@ -380,21 +389,21 @@ private fun CustomThemeEditor(
                                 Modifier
                                     .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight)
                                     .background(
-                                        previewScheme.secondaryContainer,
-                                        MaterialTheme.shapes.small,
+                                        previewScheme.tertiaryContainer,
+                                        AppShapes.small,
                                     ),
                             )
                             Column(Modifier.padding(start = Dimens.gapM).weight(1f)) {
                                 Text(
                                     "列表行标题",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = previewScheme.onSurface,
+                                    style = MiuixTheme.textStyles.body1,
+                                    color = previewScheme.onSurfaceContainer,
                                     maxLines = 1,
                                 )
                                 Text(
                                     "容器色与正文对比",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = previewScheme.onSurfaceVariant,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = previewScheme.onSurfaceVariantSummary,
                                     maxLines = 1,
                                 )
                             }
@@ -404,8 +413,8 @@ private fun CustomThemeEditor(
                         Modifier
                             .fillMaxWidth()
                             .padding(top = Dimens.gapXS),
-                        shape = MaterialTheme.shapes.medium,
-                        color = previewScheme.secondaryContainer,
+                        shape = AppShapes.medium,
+                        color = previewScheme.tertiaryContainer,
                     ) {
                         Text(
                             "选中的列表行",
@@ -413,8 +422,8 @@ private fun CustomThemeEditor(
                                 horizontal = Dimens.gapM,
                                 vertical = Dimens.listVertical,
                             ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = previewScheme.onSecondaryContainer,
+                            style = MiuixTheme.textStyles.body2,
+                            color = previewScheme.onTertiaryContainer,
                         )
                     }
                 }
@@ -451,8 +460,8 @@ private fun LabeledSlider(
         Text(
             label,
             Modifier.width(Dimens.sliderLabelWidth),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MiuixTheme.textStyles.footnote2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         // 全项目最后一处裸 Slider。它和阅读菜单里的滑块本该长得一样
         AppSlider(

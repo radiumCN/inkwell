@@ -14,17 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
-import androidx.compose.material3.Text
 import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,9 +31,9 @@ import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.core.util.htmlToPlainText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.ui.components.Dimens
@@ -52,7 +45,11 @@ import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.OptionPickerSheet
 import com.radium.inkwell.ui.components.PickerOption
-@OptIn(ExperimentalMaterial3Api::class)
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 @Composable
 fun BookPreviewScreen(
     results: List<SearchResult>,
@@ -89,7 +86,11 @@ fun BookPreviewScreen(
                             .align(Alignment.BottomCenter)
                             .padding(Dimens.gapXL),
                     ) {
-                        Text("换个书源试试（共 ${state.sources.size} 个）")
+                        Text(
+                            "换个书源试试（共 ${state.sources.size} 个）",
+                            style = MiuixTheme.textStyles.body2,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -132,8 +133,8 @@ fun BookPreviewScreen(
                             Spacer(Modifier.height(Dimens.gapM))
                             Text(
                                 state.loadingLabel,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                     }
@@ -143,7 +144,8 @@ fun BookPreviewScreen(
                     Text(
                         "目录 · 共 ${state.chapters.size} 章",
                         Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
                 items(state.chapters, key = { it.index }) { chapter ->
@@ -206,26 +208,30 @@ private fun Header(
             Column(Modifier.padding(start = Dimens.gapL).align(Alignment.CenterVertically)) {
                 Text(
                     state.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MiuixTheme.textStyles.title3,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (state.author.isNotBlank()) {
                     Text(
                         state.author,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
                 Text(
                     if (loading) "来源 ${state.sourceName}" else "共 ${state.chapters.size} 章 · 来源 ${state.sourceName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MiuixTheme.textStyles.footnote1,
+                    // 正文性小字走摘要色；outline / dividerLine 是给线用的，读不清
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
                 if (state.sources.size > 1) {
                     AppTextButton(onClick = onOpenSourcePicker, contentPadding = PaddingValues(0.dp)) {
-                        Text("换源（${state.sources.size} 个书源）", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "换源（${state.sources.size} 个书源）",
+                            style = MiuixTheme.textStyles.footnote1,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }

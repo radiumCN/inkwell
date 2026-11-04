@@ -9,19 +9,16 @@ kotlin = "2.4.21"
 ksp = "2.3.12"
 coroutines = "1.11.0"
 serialization = "1.12.0"
-# 用的是 **compose-bom-alpha**，不是稳定的 compose-bom —— 为了 M3 Expressive。
-# M3 Expressive（MaterialExpressiveTheme、MotionScheme、ButtonGroup/FloatingToolbar…）在
-# 1.4.0-beta01 被整批摘出稳定线（"All public APIs tagged with ExperimentalMaterial3ExpressiveApi
-# ... have been removed, please switch to 1.5.0-alpha"），只活在 material3 1.5.0-alpha 通道。
-# 稳定 1.4.0 里那些类还在，但全是 internal —— 编译期就拦死，不是"加个 OptIn 就能用"。
-# 稳定 BOM 只收稳定版，永远给不到 alpha，所以启用 Expressive 就必须离开稳定 BOM。
-#
-# 为什么换整个 BOM，而不是只把 material3 单钉成 alpha：单钉也拦不住 —— material3 1.5.0-alpha
-# 要求 foundation/ui/animation 跟它走（2026.10.01 是 1.13.0-beta02 + material3 1.5.0-beta02），
-# 会把稳定 BOM 的 1.12.x 直接顶掉，栈照样进预发布，只是变成「toml 写稳定号、实际跑 alpha」。
-# 换 alpha BOM 反而更稳：它把整栈钉在同一快照。升 BOM 前先读 material3 1.5.0 的
-# breaking change，别盲升。
+# 用的是 **compose-bom-alpha**，不是稳定的 compose-bom。
+# 当初是为了 M3 Expressive（那批 API 只活在 material3 1.5.0-alpha 通道，稳定 BOM 给不到）。
+# UI 换成 Miuix、material3 已从依赖里删掉之后，这条理由没了 —— 但退回稳定 BOM 会把整栈从 1.13 beta
+# 降到 1.12，是另一件要单独验证的事，没有跟着换库一起做。在那之前照旧：alpha BOM 把整栈钉在同一快照，
+# 升 BOM 前先读 release notes 的 breaking change，别盲升。
 composeBom = "2026.10.01"
+# UI 组件库：Miuix（HyperOS 设计语言，Compose Multiplatform）。只依赖 foundation，不依赖 material3 组件。
+# 0.x 实验线，作者明说 API 可能不打招呼就改 —— 升级前先读 release notes 的 breaking change，
+# 跟 BOM 一样别盲升。它对着 Compose 1.12 构建，在我们的 alpha BOM（1.13 beta）上会被抬版本运行。
+miuix = "0.9.4"
 activityCompose = "1.13.0"
 # Navigation 3（与 Nav2 navigation-compose 不兼容，整图迁移）
 navigation3 = "1.2.0"
@@ -81,7 +78,12 @@ compose-ui-text = { module = "androidx.compose.ui:ui-text" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-foundation = { module = "androidx.compose.foundation:foundation" }
-compose-material3 = { module = "androidx.compose.material3:material3" }
+miuix-ui = { module = "top.yukonga.miuix.kmp:miuix-ui", version.ref = "miuix" }
+# AppDropdownMenu 用的 WindowDropdownPopup 在这个模块里（miuix-ui 只有底层的 WindowListPopup）。
+# 名字像「设置项」的库，别当成没用到删掉 —— 删了下拉菜单就编不过
+miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference", version.ref = "miuix" }
+# HyperOS 线条图标（返回、更多、搜索、删除…）。它没有的图标仍用 material-icons-extended
+miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miuix" }
 compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }

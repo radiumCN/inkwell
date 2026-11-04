@@ -57,7 +57,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             val (scheme, dark) = rememberResolvedScheme(themeConfig, systemDark)
             val view = LocalView.current
             SideEffect {
-                window.setBackgroundDrawable(ColorDrawable(scheme.background.toArgb()))
+                // 页面底是 surface（Miuix 的分层：background 是弹窗/面板的底），与 InkwellTheme 根上铺的同一色
+                window.setBackgroundDrawable(ColorDrawable(scheme.surface.toArgb()))
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = !dark
                     isAppearanceLightNavigationBars = !dark

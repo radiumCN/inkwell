@@ -9,17 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,7 +19,13 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.util.AppIcon
-import kotlinx.coroutines.launch
+import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.components.AppBottomSheet
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 选桌面图标。
@@ -37,46 +33,28 @@ import kotlinx.coroutines.launch
  * 预览必须是**圆形裁切**的：桌面上大多数启动器就是这么裁的，方形预览会让人以为选中之后
  * 得到的是一张方图，结果装上一看边角全没了。这里的圆等于所见即所得。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppIconSheet(
     selected: AppIcon,
     onSelect: (AppIcon) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // 只要「收起 / 全展开」两态，不要中间的半展开 —— 图标一共几个，没有分段浏览的必要。
-    // 从前的写法是 rememberModalBottomSheetState(skipPartiallyExpanded = true)，
-    // material3 1.5.0-alpha 把它弃用了：改成显式列出允许的状态集合。
-    val sheetState = rememberBottomSheetState(
-        initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
-    )
-    val scope = rememberCoroutineScope()
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        // Sheet 用 surface；选项行读 surfaceContainerLow。默认都走 Low 时卡片糊进底色。
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
+    // 标题走 Miuix 面板自带的居中标题行；图标一共几个，面板按内容高度展开，不用分段
+    AppBottomSheet(onDismissRequest = onDismiss, title = "应用图标") {
         Column(Modifier.padding(bottom = Dimens.gapXL)) {
             Text(
-                "应用图标",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(
-                    start = Dimens.screenPadding,
-                    end = Dimens.screenPadding,
-                    bottom = Dimens.gapXS,
-                ),
-            )
-            Text(
                 "换完之后桌面上的图标可能要等几秒才刷新；个别启动器得重启桌面才认。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(
-                    start = Dimens.screenPadding,
-                    end = Dimens.screenPadding,
-                    bottom = Dimens.gapM,
-                ),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                // 跟着上面居中的面板标题走，不然一行标题居中、一行说明靠左，读起来像两块
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = Dimens.screenPadding,
+                        end = Dimens.screenPadding,
+                        bottom = Dimens.gapM,
+                    ),
             )
 
             Column(
@@ -87,12 +65,7 @@ fun AppIconSheet(
                         icon = icon,
                         selected = icon == selected,
                         // 先收起再回调：调用方一回调就把面板摘掉，退场动画会被掐断（同 OptionPickerSheet）
-                        onClick = {
-                            scope.launch {
-                                sheetState.hide()
-                                onSelect(icon)
-                            }
-                        },
+                        onClick = { dismiss { onSelect(icon) } },
                     )
                 }
             }
@@ -102,7 +75,7 @@ fun AppIconSheet(
 
 @Composable
 private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = MiuixTheme.colorScheme.primary
     ContentListItem(
         selected = selected,
         onClick = onClick,
@@ -119,7 +92,7 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
                         } else {
                             Modifier.border(
                                 Dimens.strokeThin,
-                                MaterialTheme.colorScheme.outlineVariant,
+                                MiuixTheme.colorScheme.dividerLine,
                                 CircleShape,
                             )
                         },
@@ -139,7 +112,7 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
         trailingContent = if (selected) {
             {
                 Icon(
-                    Icons.Default.Check,
+                    MiuixIcons.Basic.Check,
                     contentDescription = "已选中",
                     Modifier.size(Dimens.iconMd),
                 )
@@ -148,11 +121,11 @@ private fun IconRow(icon: AppIcon, selected: Boolean, onClick: () -> Unit) {
             null
         },
         supportingContent = {
-            Text(icon.description, style = MaterialTheme.typography.bodySmall)
+            Text(icon.description, style = ContentListDefaults.supportingStyle)
         },
         contentPadding = ContentListDefaults.ComfortablePadding,
         content = {
-            Text(icon.label, style = MaterialTheme.typography.bodyLarge)
+            Text(icon.label, style = ContentListDefaults.titleStyle)
         },
     )
 }

@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
@@ -29,8 +26,8 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import top.yukonga.miuix.kmp.basic.Scaffold
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadingSettingsScreen(
     onBack: () -> Unit,

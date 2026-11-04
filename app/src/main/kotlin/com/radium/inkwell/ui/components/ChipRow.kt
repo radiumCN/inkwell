@@ -1,21 +1,38 @@
 package com.radium.inkwell.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Text
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 一排单选 chip。
@@ -24,6 +41,8 @@ import androidx.compose.ui.unit.dp
  * Row：选项一多（自动翻页有 7 档）就塞不下，Row 把剩余宽度硬分给最后一个 chip，
  * 它的文字被压成竖排单字 ——「45s」变成了三行。这种事只要有一处忘了加滚动就会再犯，
  * 所以把它焊死在组件里。
+ *
+ * 整排是一个 selectableGroup、每颗是单选按钮语义：读屏念「45 秒，已选中，3/7」。
  *
  * @param trailing 跟在选项后面的额外 chip（如书源页「分组」打开选择面板），仍在同一条横滚里
  */
@@ -41,15 +60,24 @@ fun ChipRow(
         modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(contentPadding),
+            .padding(contentPadding)
+            .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.chipSpacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         options.forEachIndexed { i, label ->
-            AppFilterChip(
+            val interactionSource = remember { MutableInteractionSource() }
+            ChipPill(
                 selected = i == selectedIndex,
-                onClick = { onSelect(i) },
                 label = label,
+                interactionSource = interactionSource,
+                modifier = Modifier.selectable(
+                    selected = i == selectedIndex,
+                    onClick = { onSelect(i) },
+                    role = Role.RadioButton,
+                    interactionSource = interactionSource,
+                    indication = null,
+                ),
             )
         }
         trailing?.invoke(this)
@@ -57,14 +85,9 @@ fun ChipRow(
 }
 
 /**
- * 单个筛选 chip。[ChipRow] 装不下的场合用它（阅读菜单的「系统亮度」、书源页的「分组」——
- * 它们是横滚条尾巴上的独立开关，不属于那组单选项）。
- *
- * 存在的理由只有一个：Expressive 的**按压形变**在带 `shapes` 的重载上（按下时圆角收一档，
- * 选中态另有一档更方的圆角）。裸写 `FilterChip` 落到旧重载，形状是死的 —— 同一条 chip 条上
- * 混着两种重载时，尾巴那个按下去不动，看着像失灵。
+ * 单个独立 chip（开关语义）。[ChipRow] 装不下的场合用它：阅读菜单的「系统亮度」、书源页的「分组」——
+ * 它们是横滚条尾巴上的独立开关，不属于那组单选项。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppFilterChip(
     selected: Boolean,
@@ -72,11 +95,70 @@ fun AppFilterChip(
     label: String,
     modifier: Modifier = Modifier,
 ) {
-    FilterChip(
+    val interactionSource = remember { MutableInteractionSource() }
+    ChipPill(
         selected = selected,
-        onClick = onClick,
-        label = { Text(label, maxLines = 1) },
-        shapes = FilterChipDefaults.shapes(),
-        modifier = modifier,
+        label = label,
+        interactionSource = interactionSource,
+        modifier = modifier.toggleable(
+            value = selected,
+            onValueChange = { onClick() },
+            role = Role.Checkbox,
+            interactionSource = interactionSource,
+            indication = null,
+        ),
     )
 }
+
+/**
+ * chip 的样子：HyperOS 筛选条那种胶囊。选中是淡强调底 + 强调色字（`tertiaryContainer` 一对，
+ * Miuix 下拉菜单的选中项也是这一对），未选中是默认按钮那档浅灰。
+ *
+ * 可点区（[modifier] 上的 selectable/toggleable）挂在 48dp 高的外框上，按压反馈却画在 32dp 的胶囊里 ——
+ * 两者共用一个 [interactionSource]：外框只管「点到了没有」、不画反馈（`indication = null`），
+ * 胶囊按同一个交互源画 Miuix 的压暗。否则压暗会是一块 48dp 高的方块，比胶囊大一圈。
+ */
+@Composable
+private fun ChipPill(
+    selected: Boolean,
+    label: String,
+    interactionSource: MutableInteractionSource,
+    modifier: Modifier,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val spec = AppTheme.motionScheme.defaultEffectsSpec<Color>()
+    val container by animateColorAsState(
+        if (selected) scheme.tertiaryContainer else scheme.secondaryVariant,
+        spec,
+        label = "chipContainer",
+    )
+    val content by animateColorAsState(
+        if (selected) scheme.onTertiaryContainer else scheme.onSecondaryVariant,
+        spec,
+        label = "chipContent",
+    )
+    Box(
+        modifier.defaultMinSize(minHeight = Dimens.touchTarget),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .height(Dimens.chipHeight)
+                .clip(PillShape)
+                .background(container)
+                .indication(interactionSource, LocalIndication.current)
+                .padding(horizontal = Dimens.gapM),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MiuixTheme.textStyles.body2,
+                color = content,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private val PillShape = RoundedCornerShape(percent = 50)

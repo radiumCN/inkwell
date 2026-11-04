@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,14 +12,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.data.prefs.WebDavConfig
@@ -29,6 +23,13 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.formatRelativeTime
 import com.radium.inkwell.ui.stats.ReadingSummary
 import com.radium.inkwell.ui.stats.formatDuration
+import androidx.compose.ui.text.font.FontWeight
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 设置主页顶上的概览：今天读了多久、同步得怎么样，外加一个「立即同步」。
@@ -37,7 +38,8 @@ import com.radium.inkwell.ui.stats.formatDuration
  * 「3 小时前同步」—— 看得到，却做不了什么：想同步还得先点进 WebDAV 页再点按钮。放到一张卡上，
  * 看和做在同一处。
  *
- * 用 primaryContainer 铺底，与书架「继续阅读」卡、阅读记录「今天」卡同一种：一页上唯一带颜色的面。
+ * 用 primaryContainer 铺底（淡强调色，Miuix 组件不读这个槽，保留的是 M3 时代的含义），与书架「继续阅读」卡、
+ * 阅读记录「今天」卡同一种：一页上唯一带颜色的面。四角是与 Miuix 卡片同档的连续曲率圆角。
  * 文字统一 onPrimaryContainer，层级靠字号拉开；同步失败靠图标标出来，原因仍用同一种文字色 ——
  * 这块底色上没有对应的「报错色」令牌，红字放在上面对比度没保证。
  */
@@ -51,13 +53,13 @@ internal fun SettingsOverviewCard(
     onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val content = MaterialTheme.colorScheme.onPrimaryContainer
+    val content = MiuixTheme.colorScheme.onPrimaryContainer
     Column(
         modifier
             .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS)
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.primaryContainer),
+            // 底色 + 裁切一起做：两行的按压反馈也被圈在圆角里
+            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge),
     ) {
         // ---- 阅读 ----
         Row(
@@ -68,9 +70,14 @@ internal fun SettingsOverviewCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                Text(readingTitle(reading), style = MaterialTheme.typography.titleMedium, color = content)
+                Text(
+                    readingTitle(reading),
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Medium,
+                    color = content,
+                )
                 readingSubtitle(reading)?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, color = content)
+                    Text(it, style = MiuixTheme.textStyles.body2, color = content)
                 }
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = content)
@@ -106,11 +113,11 @@ internal fun SettingsOverviewCard(
                     .weight(1f)
                     .padding(horizontal = Dimens.gapM),
             ) {
-                Text(syncTitle(sync, syncing), style = MaterialTheme.typography.bodyLarge, color = content)
+                Text(syncTitle(sync, syncing), style = MiuixTheme.textStyles.body1, color = content)
                 syncSubtitle(sync, syncing)?.let {
                     Text(
                         it,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MiuixTheme.textStyles.footnote1,
                         color = content,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

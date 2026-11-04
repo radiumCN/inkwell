@@ -11,13 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 错误态。与 [EmptyState] 对称。
@@ -43,21 +44,22 @@ fun ErrorState(
                 Icons.Default.ErrorOutline,
                 contentDescription = null,
                 Modifier.size(Dimens.iconXL),
-                tint = MaterialTheme.colorScheme.outlineVariant,
+                tint = MiuixTheme.colorScheme.dividerLine,
             )
             Text(
                 title,
                 Modifier.padding(top = Dimens.gapL),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.headline2,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Center,
             )
             Text(
                 message,
                 Modifier.padding(top = Dimens.gapS),
-                style = MaterialTheme.typography.bodySmall,
-                // 正文性文字用 onSurfaceVariant（对比度达标）而非 outline（浅色下仅约 3.9:1）
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MiuixTheme.textStyles.footnote1,
+                // 正文性文字用摘要色（对比度达标），不用 outline / dividerLine（那是给线的）
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 textAlign = TextAlign.Center,
             )
 
@@ -74,7 +76,7 @@ fun ErrorState(
             }
             if (tertiaryLabel != null && onTertiary != null) {
                 Spacer(Modifier.height(Dimens.gapS))
-                AppTextButton(onClick = onTertiary) { Text(tertiaryLabel) }
+                AppTextButton(tertiaryLabel, onClick = onTertiary)
             }
         }
     }

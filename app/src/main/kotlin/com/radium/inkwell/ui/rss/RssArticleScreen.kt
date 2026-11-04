@@ -1,34 +1,28 @@
 package com.radium.inkwell.ui.rss
 
-import com.radium.inkwell.ui.components.exceptBottom
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.isSpecified
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -37,23 +31,29 @@ import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
-import com.radium.inkwell.ui.components.MessageBus
-import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
-import com.radium.inkwell.ui.components.openExternalLink
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
-import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.MessageBus
+import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.exceptBottom
+import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.topBarScroll
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 文章阅读。
  *
  * 不走小说的分页阅读器：文章是短的、带图的、结构化的，硬塞进翻页排版里只会难看。
  * 直接滚动着看就好。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RssArticleScreen(
     args: RssArticleArgs,
@@ -115,15 +115,15 @@ fun RssArticleScreen(
                     Text(
                         state.title,
                         Modifier.padding(top = Dimens.gapS),
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MiuixTheme.textStyles.title2,
                     )
                     state.pubDate?.let {
                         Text(
                             it,
                             Modifier.padding(top = Dimens.gapXS),
-                            style = MaterialTheme.typography.labelMedium,
-                            // 正文性小字走 onSurfaceVariant；outline 浅色下约 3.9:1，读不清
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.footnote1,
+                            // 正文性小字走摘要色；outline / dividerLine 是给线的，浅色下读不清
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                     Spacer(Modifier.height(Dimens.gapL))
@@ -140,12 +140,13 @@ fun RssArticleScreen(
                     is ContentElement.Heading -> Text(
                         el.text,
                         Modifier.padding(vertical = Dimens.gapS),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.Medium,
                     )
                     is ContentElement.Paragraph -> Text(
                         el.text,
                         Modifier.padding(vertical = Dimens.gapS),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MiuixTheme.textStyles.body1,
                     )
                     is ContentElement.Image -> ArticleImage(el, imageRatios)
                     ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
@@ -160,8 +161,8 @@ fun RssArticleScreen(
                     if (error != null) {
                         Text(
                             "正文没能取到：$error",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.error,
                         )
                         Spacer(Modifier.height(Dimens.gapM))
                         SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
@@ -169,8 +170,8 @@ fun RssArticleScreen(
                         // 解析不出正文不是错误：很多源本来就只给标题+链接
                         Text(
                             "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
 
@@ -216,9 +217,9 @@ private fun ArticleImage(el: ContentElement.Image, ratios: MutableMap<String, Fl
             .padding(vertical = Dimens.gapS)
             .fillMaxWidth()
             .aspectRatio(ratio ?: PLACEHOLDER_RATIO)
-            .clip(MaterialTheme.shapes.small)
+            .clip(AppShapes.small)
             .then(
-                if (ratio == null) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                if (ratio == null) Modifier.background(MiuixTheme.colorScheme.surfaceContainerHigh)
                 else Modifier
             ),
     )

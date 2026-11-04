@@ -2,40 +2,42 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonColors
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonColors
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
+import com.radium.inkwell.ui.theme.AppShapes
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 带加载态的按钮。
+ * 主按钮：Miuix 实心强调色按钮（`buttonColorsPrimary`），带加载态。
  *
- * 加载指示用 Expressive [AppLoadingIndicator]（钉 [Dimens.buttonSpinner]），叠在文字上
- * 而不是替换文字 —— 按钮宽度也就不会跟着内容一起跳。
+ * 加载指示用 [AppLoadingIndicator]（钉 [Dimens.buttonSpinner]），叠在文字上而不是替换文字 ——
+ * 按钮宽度也就不会跟着内容一起跳。
  *
- * 显式传 `shapes = ButtonDefaults.shapes()`：这是 Expressive 的**按压形变**重载（按下时圆角
- * 收成 `shapes.small`，松手弹回）。不传就落到不带 `shapes` 的旧重载 —— 编译通过、颜色形状也对，
- * 只是按下去那一下没有形变，跟 `ButtonGroup` 里的按钮不是一套手感。形变时长走主题的
- * `MotionScheme`，系统关动画时随 `InstantMotionScheme` 一起静止。
+ * 按压反馈是 Miuix 主题提供的 `LocalIndication`（HyperOS 那种按下压暗），不用自己传。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PrimaryButton(
     text: String,
@@ -46,15 +48,21 @@ fun PrimaryButton(
 ) {
     Button(
         onClick = onClick,
-        shapes = ButtonDefaults.shapes(),
         enabled = enabled && !loading,
-        modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
+        minHeight = Dimens.buttonMinHeight,
+        colors = ButtonDefaults.buttonColorsPrimary(),
+        modifier = modifier,
     ) {
         ButtonContent(text, loading)
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/**
+ * 次按钮：Miuix 默认的浅灰实心按钮（`buttonColors`，底是 `secondaryVariant`）。
+ *
+ * HyperOS 没有描边按钮 —— 对话框里「取消 | 确定」就是一灰一彩两块实心。M3 时代这里是 OutlinedButton，
+ * 换过来之后一排按钮里不会再夹一圈描边。
+ */
 @Composable
 fun SecondaryButton(
     text: String,
@@ -63,21 +71,21 @@ fun SecondaryButton(
     enabled: Boolean = true,
     loading: Boolean = false,
 ) {
-    OutlinedButton(
+    Button(
         onClick = onClick,
-        shapes = ButtonDefaults.shapes(),
         enabled = enabled && !loading,
-        modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
+        minHeight = Dimens.buttonMinHeight,
+        colors = ButtonDefaults.buttonColors(),
+        modifier = modifier,
     ) {
         ButtonContent(text, loading)
     }
 }
 
 /**
- * 次一级的实心按钮（M3 FilledTonalButton）：容器是主题的 secondaryContainer。阅读设置的字号加减用它 ——
- * 和同一张卡里分段按钮的未选中段是同一类「浅底实心」，不再是一圈描边夹在一排实心按钮中间。
+ * 卡片里的小号实心按钮（阅读设置的字号加减）。底色是 `surfaceContainerHighest` ——
+ * 和同一张卡里 [SegmentedChoice] 的未选中段同一档，不是卡片上再浮一块默认按钮灰。
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TonalButton(
     text: String,
@@ -85,82 +93,137 @@ fun TonalButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    FilledTonalButton(
+    val scheme = MiuixTheme.colorScheme
+    Button(
         onClick = onClick,
-        shapes = ButtonDefaults.shapes(),
         enabled = enabled,
-        modifier = modifier.defaultMinSize(minHeight = Dimens.buttonMinHeight),
+        minHeight = Dimens.buttonMinHeight,
+        colors = ButtonDefaults.buttonColors(
+            color = scheme.surfaceContainerHighest,
+            contentColor = scheme.onSurfaceContainerHighest,
+        ),
+        modifier = modifier,
     ) {
         ButtonContent(text, loading = false)
     }
 }
 
 /**
- * 图标按钮。和 [PrimaryButton] 同理，为的是**按压形变**那个 `shapes` 重载。
+ * 图标按钮。包一层的理由有两个：
  *
- * 封成组件而不是各页自己传 `shapes`：顶栏里的图标按钮有五十来处，靠自觉传参数必然漏，
- * 漏掉的那几个按下去不形变，同一条顶栏上手感就分了两派。
+ * - **触控下限**：Miuix `IconButton` 默认 40×40dp，低于 48dp（[Dimens.touchTarget]）。这里把最小尺寸抬上去，
+ *   按压的圆底也跟着大一圈 —— 可点区与看得见的反馈是同一块，不会出现「点在圆外也触发」。
+ * - **禁用态**：Miuix 的图标按钮禁用时只是不响应，图标颜色不变，看不出它点不了。这里把内容色压到 38%。
  *
- * 形参照着 M3 [IconButton] 抄，迁移只是改个名字；[colors] 留出来是给阅读器浮层那类
- * 需要换内容色的地方。
+ * @param contentColor 图标色。默认沿用外层（顶栏上是 onSurface）；阅读器浮层、删除这类要换色的地方传
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: IconButtonColors = IconButtonDefaults.iconButtonColors(),
+    contentColor: Color = Color.Unspecified,
+    backgroundColor: Color = Color.Unspecified,
     content: @Composable () -> Unit,
 ) {
+    val base = if (contentColor.isSpecified()) contentColor else LocalContentColor.current
     IconButton(
         onClick = onClick,
-        shapes = IconButtonDefaults.shapes(),
         modifier = modifier,
         enabled = enabled,
-        colors = colors,
-        content = content,
-    )
+        backgroundColor = backgroundColor,
+        minWidth = Dimens.touchTarget,
+        minHeight = Dimens.touchTarget,
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides if (enabled) base else base.copy(alpha = base.alpha * DISABLED_ALPHA),
+            content = content,
+        )
+    }
 }
 
 /**
  * 顶栏返回键。
  *
- * 二十来个页面从前一字不差地重复「IconButton + AutoMirrored ArrowBack + contentDescription 返回」，
+ * 二十来个页面从前一字不差地重复「IconButton + ArrowBack + contentDescription 返回」，
  * 抄漏一处就少一个读屏名字。收成一个组件后，无障碍名称和 RTL 镜像只有一个地方能写错。
+ * 图标用 Miuix 的 [MiuixIcons.Back]（HyperOS 那条细线箭头），它不会自动镜像，RTL 下这里自己翻。
  */
 @Composable
 fun BackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     AppIconButton(onClick = onClick, modifier = modifier) {
-        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        Icon(
+            MiuixIcons.Back,
+            contentDescription = "返回",
+            modifier = if (rtl) Modifier.graphicsLayer { scaleX = -1f } else Modifier,
+        )
     }
 }
 
 /**
- * 行内文字按钮（展开/收起、撤销、停止校验）。
+ * 行内文字按钮（展开/收起、撤销、停止校验、书籍行尾的「加入」）：强调色文字、无底色，按下时压一层 Miuix 反馈。
  *
- * 和 [AppIconButton] 同理：显式走带 `shapes` 的 Expressive 重载，页面别再裸写 [TextButton]。
- * 不要拿它冒充 [PrimaryButton] / [SecondaryButton] —— 那是实心/描边主操作。
+ * Miuix 的 `TextButton` 只收一个字符串、而且是**有底色**的按钮，不是这种文字链；这里用可点 [Surface] 自己排。
+ * 不要拿它冒充 [PrimaryButton] / [SecondaryButton] —— 那是实心主操作。
+ *
+ * 可点高度保底 [Dimens.touchTarget]（文字本身只有一行高），左右留 [Dimens.gapM]。
+ * 读屏角色要自己补：Miuix 可点 Surface 的 clickable 不带 role（它的 Button / IconButton 才带），
+ * 不补的话读屏念不出「按钮」，听着不像能点的东西。
+ *
+ * @param contentColor 文字色。默认强调色；危险操作（停止、删除）传 `error`
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
-    colors: ButtonColors = ButtonDefaults.textButtonColors(),
+    contentPadding: PaddingValues = PaddingValues(horizontal = Dimens.gapM),
+    contentColor: Color = MiuixTheme.colorScheme.primary,
     content: @Composable RowScope.() -> Unit,
 ) {
-    TextButton(
+    Surface(
         onClick = onClick,
-        shapes = ButtonDefaults.shapes(),
+        modifier = modifier
+            .defaultMinSize(minHeight = Dimens.touchTarget)
+            .semantics { role = Role.Button },
+        enabled = enabled,
+        shape = AppShapes.medium,
+        color = Color.Transparent,
+        contentColor = if (enabled) contentColor else contentColor.copy(alpha = contentColor.alpha * DISABLED_ALPHA),
+    ) {
+        Box(
+            Modifier.defaultMinSize(minHeight = Dimens.touchTarget).padding(contentPadding),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, content = content)
+        }
+    }
+}
+
+/**
+ * [AppTextButton] 的纯文字版：字是 body2 + Medium，颜色跟按钮的内容色走。绝大多数文字按钮就是这样一行字 ——
+ * 从前十几处各自手写同一行 `Text(…, body2, Medium)`，书源管理页还另起了个私有帮手，改一处字重就得改十几处。
+ * 字号要不一样的（欢迎页那行小字链接、简介的「展开」）仍用带 content 的那个。
+ */
+@Composable
+fun AppTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(horizontal = Dimens.gapM),
+    contentColor: Color = MiuixTheme.colorScheme.primary,
+) {
+    AppTextButton(
+        onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         contentPadding = contentPadding,
-        colors = colors,
-        content = content,
-    )
+        contentColor = contentColor,
+    ) {
+        Text(text, style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium)
+    }
 }
 
 /**
@@ -171,7 +234,12 @@ fun AppTextButton(
 private fun ButtonContent(text: String, loading: Boolean) {
     Box(contentAlignment = Alignment.Center) {
         // 文字始终占位，撑住按钮的宽度；加载时让位给转圈
-        Text(text, color = if (loading) androidx.compose.ui.graphics.Color.Transparent else LocalContentColor.current)
+        Text(
+            text,
+            style = MiuixTheme.textStyles.button,
+            color = if (loading) Color.Transparent else LocalContentColor.current,
+            maxLines = 1,
+        )
         if (loading) {
             AppLoadingIndicator(
                 color = LocalContentColor.current,
@@ -180,3 +248,8 @@ private fun ButtonContent(text: String, loading: Boolean) {
         }
     }
 }
+
+/** 禁用态内容的不透明度（与 Material / HyperOS 一致的 38%） */
+private const val DISABLED_ALPHA = 0.38f
+
+private fun Color.isSpecified(): Boolean = this != Color.Unspecified

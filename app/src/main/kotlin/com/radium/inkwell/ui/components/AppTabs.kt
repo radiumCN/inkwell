@@ -8,24 +8,23 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.TabRowDefaults
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 全应用统一的分段 Tab。
+ * 全应用统一的分段 Tab：Miuix [TabRow]（HyperOS 的胶囊页签 —— 选中那一格浮起一块卡片色的圆角底）。
  *
- * 用 [PrimaryTabRow] 而不是 `SecondaryTabRow`：Primary 的指示条是贴着文字宽度的短粗圆角块，
- * 这是 Expressive 下「选中态在动」的那一种；Secondary 那根通栏细线在浅纸背景上几乎看不出切换。
- * 指示条的位移由主题的 `MotionScheme` 驱动（系统关动画时随 `InstantMotionScheme` 一起静止）。
- *
- * 封成组件是为了**后来者也自动对齐** —— 直接手写 `TabRow` 的话，形态与切换动效又会各page一套。
+ * 封成组件是为了**后来者也自动对齐** —— 直接手写的话，形态与切换动效又会各页一套。
  * 只有这一个 Tab 入口，配套的切换过渡见 [AppTabContent]。
+ *
+ * Miuix 的页签按内容定宽（单格 76~98dp）、放不下时横滚，不是 M3 那种通栏均分；
+ * 选中格的底色是 `surfaceContainer`，所以 [containerColor]（未选中的底）必须和它差一档 ——
+ * 放在页面上默认 `surface` 就对；放进卡片 / 阅读设置面板时传面板自己的底色。
  */
 @Composable
 fun AppTabRow(
@@ -33,21 +32,16 @@ fun AppTabRow(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * 默认是主题的 surface。放在不是 surface 的面板上（阅读设置面板）传 Transparent：
-     * 不然面板顶上横着一条别的颜色的带子
-     */
-    containerColor: Color = TabRowDefaults.primaryContainerColor,
+    /** 页签条的底色（未选中格透出来的颜色）。默认页面底 surface */
+    containerColor: Color = MiuixTheme.colorScheme.surface,
 ) {
-    PrimaryTabRow(selectedTabIndex = selectedIndex, modifier = modifier, containerColor = containerColor) {
-        titles.forEachIndexed { i, title ->
-            Tab(
-                selected = selectedIndex == i,
-                onClick = { onSelect(i) },
-                text = { Text(title) },
-            )
-        }
-    }
+    TabRow(
+        tabs = titles,
+        selectedTabIndex = selectedIndex,
+        onTabSelected = onSelect,
+        modifier = modifier,
+        colors = TabRowDefaults.tabRowColors(backgroundColor = containerColor),
+    )
 }
 
 /**
@@ -59,7 +53,7 @@ fun AppTabRow(
  *   拉高该由用户自己拖，不该是切 Tab 的副作用。所以调用方要给内容区**定高**或定上限，
  *   别让高度跟着当前页内容变。
  *
- * 动效全部读主题令牌：位移用 spatial、淡入淡出用 effects，与顶栏/底栏/导航转场同一套节奏。
+ * 动效全部读 [AppTheme.motionScheme]：位移用 spatial、淡入淡出用 effects，与顶栏/底栏/导航转场同一套节奏。
  */
 @Composable
 fun <T> AppTabContent(
@@ -68,7 +62,7 @@ fun <T> AppTabContent(
     label: String = "AppTabContent",
     content: @Composable (T) -> Unit,
 ) {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     AnimatedContent(
         targetState = targetState,
         modifier = modifier,

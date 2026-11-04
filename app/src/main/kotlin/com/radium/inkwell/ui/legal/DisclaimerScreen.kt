@@ -6,12 +6,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -21,6 +15,9 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.settingsPageColor
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 用户协议与免责声明（只读）。
@@ -28,7 +25,6 @@ import com.radium.inkwell.ui.components.settingsPageColor
  * 正文来自 `assets/legal/disclaimer.txt`，与仓库根目录 [DISCLAIMER.md] 保持同文；
  * 改条文时两处一起改，避免应用内与 GitHub 文档各说各话。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DisclaimerScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -50,8 +46,8 @@ fun DisclaimerScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Dimens.screenPadding)
                 .padding(top = Dimens.gapM, bottom = Dimens.gapXL + padding.calculateBottomPadding()),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurface,
         )
     }
 }

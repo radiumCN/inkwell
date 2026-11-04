@@ -17,7 +17,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -25,17 +24,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.radium.inkwell.ui.theme.AppMotionScheme
+import com.radium.inkwell.ui.theme.AppTheme
 
 /**
- * 动效层。组件内建与浮层帮手都以 [MaterialTheme.motionScheme] 为唯一来源；
+ * 动效层。我们自己写的组件动画与浮层帮手都以 [AppTheme.motionScheme] 为唯一来源；
  * **整页转场**（前进 / 返回 / 侧滑）与**阅读器开合**是刻意的例外，走下方 [Motion] 里命名的时长与曲线。
+ * Miuix 组件内部的动画（开关拇指、弹窗滑入、按压缩放）是它自己的 spring，不读这里。
  *
- * `InkwellTheme` 把 `motionScheme` 钉成 `MotionScheme.expressive()`，系统开「移除动画」时
- * 整套换成 `InstantMotionScheme`（六个 spec 全 `tween(0)`）。顶栏/底栏/蒙层/展开读令牌，
+ * `InkwellTheme` 默认提供 [AppMotionScheme.Default]，系统开「移除动画」时整套换成
+ * [AppMotionScheme.Instant]（六个 spec 全 `tween(0)`）。顶栏/底栏/蒙层/展开读令牌，
  * 不再逐个判 [animationsEnabled]；不读令牌的整页转场与阅读器开合自己判。
  *
- * spatial / effects 的分工是 M3 的约定，别混：
- * - **spatial**（带回弹的 spring）管**位置与尺寸**：滑入、展开、缩放
+ * spatial / effects 的分工（沿用 M3 的约定），别混：
+ * - **spatial**（spring）管**位置与尺寸**：滑入、展开、缩放
  * - **effects**（不回弹）管**纯视觉属性**：alpha、颜色
  *
  * 用 effects 做位移会发木；用 spatial 做淡入会让透明度过冲，看着像闪了一下。
@@ -50,7 +52,7 @@ object Motion {
 
     /**
      * 「移除动画」时用的 0 时长 spec。阅读器开合不读主题令牌时靠它兜底，
-     * 与 [InstantMotionScheme] 行为一致。
+     * 与 [AppMotionScheme.Instant] 行为一致。
      */
     fun <T> instantSpec(): FiniteAnimationSpec<T> = tween(0)
 
@@ -64,7 +66,7 @@ object Motion {
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
      *
-     * 这条**刻意不走** `MotionScheme`：时长要和 [READER_SPLASH_DELAY_MS] 对齐（封面恰好在展开
+     * 这条**刻意不走** [AppMotionScheme]：时长要和 [READER_SPLASH_DELAY_MS] 对齐（封面恰好在展开
      * 收尾时才可能出现，不跟展开抢戏），而 spring 给不出确定时长。曲线用 M3「强调减速」：起步更快、
      * 收尾更缓，落定那一下像被接住。200ms 比常规页转场更短 —— 进书首帧排版本就抢手
      * （见 InkwellNavDisplay 的转场注释 / ReaderViewModel.PREFETCH_LEAD_IN_MS），转场只做点到为止的
@@ -119,9 +121,9 @@ object Motion {
     const val READER_SPLASH_MIN_MS = 200L
 
     /**
-     * 整页前进 / 返回转场：**不回弹**的 spring（dampingRatio = 1），不走 [MaterialTheme.motionScheme]。
+     * 整页前进 / 返回转场：**不回弹**的 spring（dampingRatio = 1），不走 [AppTheme.motionScheme]。
      *
-     * 刚度沿用 Expressive 位移令牌（默认 700 / 快速 1400），只去掉回弹。Expressive 的 spring 带回弹，
+     * 刚度沿用位移令牌（默认 700 / 快速 1400），只去掉回弹。带回弹的 spring（M3 Expressive 时代实测），
      * 放在小组件上是手感，放在整页上就成了「顿一下」：逐帧实测，进设置时新页冲过终点 18px
      * 再用约 230ms 爬回 0，被盖的书架目标 -305 却冲到 -334 再抖回来。
      *
@@ -151,7 +153,7 @@ object Motion {
 /**
  * 系统 [Settings.Global.ANIMATOR_DURATION_SCALE]（开发者选项「动画程序时长缩放」）。
  *
- * - `0`：「移除动画」—— 主题换 [InstantMotionScheme]；不读令牌的页面进退由 [animationsEnabled] 自己归零
+ * - `0`：「移除动画」—— 主题换 [AppMotionScheme.Instant]；不读令牌的页面进退由 [animationsEnabled] 自己归零
  * - `0.5` / `1` / `2`…：阅读器与页面进退的动画由框架 `MotionDurationScale` 自动乘倍率
  *
  * 用 ContentObserver 实时听，别 `remember {}` 读一次 —— 用户改完设置应立刻生效。
@@ -182,7 +184,7 @@ fun rememberAnimatorDurationScale(): Float {
 /**
  * 系统开了「移除动画」就别动（[rememberAnimatorDurationScale] != 0）。
  *
- * 大部分地方**不需要**直接问它 —— 主题已经把 [MaterialTheme.motionScheme] 换成 0 时长的一套，
+ * 大部分地方**不需要**直接问它 —— 主题已经把 [AppTheme.motionScheme] 换成 0 时长的一套，
  * 走令牌的动画自动静止。留着它是给两类逃在主题之外的场合：翻页容器那套自绘动画（reader 模块，
  * 拿不到 Compose 主题），以及「关了动画就干脆别做这件事」而不只是缩到 0 时长的判断
  * （如 LazyGrid 的 `animateItem` 直接传 null，省掉每帧的插值开销）。
@@ -193,35 +195,35 @@ fun animationsEnabled(): Boolean = rememberAnimatorDurationScale() != 0f
 /** 顶栏：从上方滑入 + 淡入 */
 @Composable
 fun topBarEnter(): EnterTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return slideInVertically(motion.defaultSpatialSpec()) { -it } + fadeIn(motion.defaultEffectsSpec())
 }
 
 @Composable
 fun topBarExit(): ExitTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return slideOutVertically(motion.fastSpatialSpec()) { -it } + fadeOut(motion.fastEffectsSpec())
 }
 
 /** 底栏：从下方滑入 + 淡入 */
 @Composable
 fun bottomBarEnter(): EnterTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return slideInVertically(motion.defaultSpatialSpec()) { it } + fadeIn(motion.defaultEffectsSpec())
 }
 
 @Composable
 fun bottomBarExit(): ExitTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return slideOutVertically(motion.fastSpatialSpec()) { it } + fadeOut(motion.fastEffectsSpec())
 }
 
 /** 蒙层等纯淡入淡出的东西：只动 alpha，走 effects（spatial 的回弹会让透明度过冲） */
 @Composable
-fun scrimEnter(): EnterTransition = fadeIn(MaterialTheme.motionScheme.defaultEffectsSpec())
+fun scrimEnter(): EnterTransition = fadeIn(AppTheme.motionScheme.defaultEffectsSpec())
 
 @Composable
-fun scrimExit(): ExitTransition = fadeOut(MaterialTheme.motionScheme.fastEffectsSpec())
+fun scrimExit(): ExitTransition = fadeOut(AppTheme.motionScheme.fastEffectsSpec())
 
 /**
  * 会撑高/收起、把周围内容顶开的一块面板（书架隐藏区、搜索进度条之类）。
@@ -229,12 +231,12 @@ fun scrimExit(): ExitTransition = fadeOut(MaterialTheme.motionScheme.fastEffects
  */
 @Composable
 fun expandEnter(): EnterTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return expandVertically(motion.defaultSpatialSpec()) + fadeIn(motion.defaultEffectsSpec())
 }
 
 @Composable
 fun expandExit(): ExitTransition {
-    val motion = MaterialTheme.motionScheme
+    val motion = AppTheme.motionScheme
     return shrinkVertically(motion.fastSpatialSpec()) + fadeOut(motion.fastEffectsSpec())
 }

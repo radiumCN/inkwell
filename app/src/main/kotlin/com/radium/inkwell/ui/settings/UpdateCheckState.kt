@@ -1,7 +1,5 @@
 package com.radium.inkwell.ui.settings
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -26,6 +24,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 设置主页「检查更新」用的状态与弹窗，避免把整套下载逻辑塞进二级页。 */
 internal class UpdateCheckState(
@@ -152,18 +152,18 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
                 },
                 content = {
                     if (downloading) {
-                        DeterminateProgressBar(progress = { downloadProgress })
+                        DeterminateProgressBar(progress = downloadProgress)
                         Text(
                             "正在下载并校验… ${(downloadProgress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                     downloadError?.let {
                         Text(
                             it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.error,
                         )
                     }
                 },

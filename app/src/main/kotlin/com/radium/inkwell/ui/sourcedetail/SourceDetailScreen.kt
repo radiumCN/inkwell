@@ -14,16 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -33,16 +27,23 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingBlock
+import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.material.icons.filled.Warning
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.settingsPageColor
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
 /**
  * 书源详情：只读展示规则原文 + 一键全链路测试。书源不在应用内编辑，改规则请重新导入。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SourceDetailScreen(
     sourceId: String,
@@ -94,48 +95,52 @@ fun SourceDetailScreen(
                 // 顶上有测试关键词输入框：edge-to-edge 下键盘弹起会盖住下面的测试报告与规则
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(Dimens.screenPadding)
                 .padding(bottom = padding.calculateBottomPadding()),
         ) {
-            // 一键冒烟：源好不好，跑一遍搜索→详情→目录→正文最直观
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-            ) {
-                CompactTextField(
-                    value = state.testKeyword,
-                    onValueChange = viewModel::setTestKeyword,
-                    placeholder = if (state.searchable) "测试关键词" else "书的网址",
-                    modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
-                )
-                SecondaryButton(
-                    text = "全链路测试",
-                    onClick = viewModel::testSearchChain,
-                    enabled = !state.testing,
-                    loading = state.testing,
-                    modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
-                )
-            }
-            if (state.testReport.isNotBlank()) {
-                Text(
-                    state.testReport,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.padding(top = Dimens.gapM),
-                )
+            // 控件装进卡里（设置类页面的骨架）：输入框的底是卡上的那一档，直接铺在灰底上几乎看不出框
+            SectionHeader("全链路测试")
+            SettingGroup {
+                SettingBlock {
+                    // 一键冒烟：源好不好，跑一遍搜索→详情→目录→正文最直观
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                    ) {
+                        CompactTextField(
+                            value = state.testKeyword,
+                            onValueChange = viewModel::setTestKeyword,
+                            placeholder = if (state.searchable) "测试关键词" else "书的网址",
+                            modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
+                        )
+                        SecondaryButton(
+                            text = "全链路测试",
+                            onClick = viewModel::testSearchChain,
+                            enabled = !state.testing,
+                            loading = state.testing,
+                            modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
+                        )
+                    }
+                    if (state.testReport.isNotBlank()) {
+                        Text(
+                            state.testReport,
+                            style = MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace),
+                        )
+                    }
+                }
             }
 
-            Text(
-                "规则（只读，要改请重新导入或重新新建）",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = Dimens.gapL, bottom = Dimens.gapS),
-            )
-            // 只读展示：可选中复制，横向滚动避免长规则折行
-            SelectionContainer {
-                Text(
-                    state.jsonText,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                )
+            SectionHeader("规则（只读，要改请重新导入或重新新建）")
+            SettingGroup {
+                SettingBlock {
+                    // 只读展示：可选中复制，横向滚动避免长规则折行
+                    SelectionContainer {
+                        Text(
+                            state.jsonText,
+                            style = MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        )
+                    }
+                }
             }
         }
     }
