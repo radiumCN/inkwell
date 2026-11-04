@@ -126,7 +126,11 @@ class SourceChecker(
      */
     private suspend fun checkOne(id: String, opts: CheckOptions): SourceCheck {
         val rule = sourceRepo.getRule(id) ?: return SourceCheck(false, "书源规则损坏")
-        if (rule.search == null) return SourceCheck(true, "仅发现页（不校验搜索）")
+        if (rule.search == null) {
+            // 「新建书源」生成的源连发现页也没有：说「仅发现页」就是错的，用户会去发现页里找它
+            val what = if (rule.explore.isEmpty()) "无搜索规则，按网址加书" else "仅发现页"
+            return SourceCheck(true, "$what（不校验搜索）")
+        }
         val startedAt = System.currentTimeMillis()
         return runCatching {
             withTimeout(opts.timeoutMs) {

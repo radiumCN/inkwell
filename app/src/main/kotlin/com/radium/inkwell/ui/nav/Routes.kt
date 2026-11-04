@@ -104,9 +104,13 @@ data object ReplaceRuleRoute : NavKey
 @Serializable
 data object SourceManageRoute : NavKey
 
-/** 书源详情（只读）；书源不在应用内编辑，只能导入 */
+/** 书源详情（只读）；书源不在应用内编辑，只能导入或用「新建书源」识别生成 */
 @Serializable
 data class SourceDetailRoute(val sourceId: String) : NavKey
+
+/** 新建书源：给一本书的网址，认出目录与正文，存成书源（见 SourceWizardViewModel） */
+@Serializable
+data object SourceWizardRoute : NavKey
 
 @Serializable
 data object SettingsRoute : NavKey
@@ -151,7 +155,8 @@ data object DeveloperSettingsRoute : NavKey
  * 设置 (1)
  * ├─ 阅读记录 (2)
  * ├─ 外观 (2) ── 主题 (3)
- * ├─ 阅读 (2) ─┬ 书源管理 (3) ── 书源详情 (4)
+ * ├─ 阅读 (2) ─┬ 书源管理 (3) ─┬ 书源详情 (4)
+ * │            │               └ 新建书源 (4)
  * │            └ 替换规则 (3)
  * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4)
  * ├─ WebDAV (2)
@@ -185,6 +190,7 @@ internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     -> 3
 
     is SourceDetailRoute,
+    is SourceWizardRoute,
     is RssArticleRoute,
     -> 4
 

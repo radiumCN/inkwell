@@ -95,6 +95,16 @@ class PageDetectorsTest {
     }
 
     @Test
+    fun `sample chapter skips notices at the top`() {
+        fun c(t: String) = DetectedChapter(t, "https://www.example.com/$t")
+        val toc = TocCandidate("@css:a", listOf(c("作品相关"), c("第0章 上架感言"), c("第1章 出山"), c("第2章 下山")), false, 1.0)
+        assertEquals("第1章 出山", toc.sampleChapter.title)
+        // 一个都不像：用第一章，别返回空
+        val odd = TocCandidate("@css:a", listOf(c("春"), c("夏"), c("秋")), false, 1.0)
+        assertEquals("春", odd.sampleChapter.title)
+    }
+
+    @Test
     fun `page without a chapter list yields nothing`() {
         val d = doc("<html><body><div class='nav'><a href='/'>首页</a><a href='/a'>关于</a></div><p>没有目录</p></body></html>")
         assertTrue(TocDetector.detect(d).isEmpty())

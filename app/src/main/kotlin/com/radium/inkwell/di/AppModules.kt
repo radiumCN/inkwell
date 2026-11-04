@@ -109,6 +109,8 @@ val appModule = module {
         )
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
+    // 新建书源的页面识别：与引擎共用抓取客户端（同一套 UA、Cookie、私网防护）和 WebView 渲染回退
+    single { com.radium.inkwell.core.source.detect.SiteAnalyzer(http = get(), renderer = get()) }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
     // 更新用的通用 HTTP 客户端（检查 + 下载安装包 + 反馈上报）
     single {
@@ -158,6 +160,7 @@ val appModule = module {
     single { com.radium.inkwell.data.repo.OfflineDownloader(get(), get(), get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
     viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
+    viewModel { com.radium.inkwell.ui.sourcewizard.SourceWizardViewModel(get(), get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }

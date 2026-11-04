@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.lang.ref.SoftReference
 import java.util.concurrent.ConcurrentHashMap
 
@@ -31,6 +32,14 @@ class BookSourceRepository(
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = true
+    }
+
+    companion object {
+        /** 「新建书源」生成的书源统一放进这个分组，和导入的书源分开管理 */
+        const val CREATED_GROUP = "自建"
+
+        /** 同站已有书源时，新建的那个 id 后面加这个（见 [addCreated]） */
+        private const val CREATED_SUFFIX = "#自建"
     }
 
     /** 列表用投影，不含规则 JSON —— 见 [BookSourceListItem] */
@@ -182,6 +191,36 @@ class BookSourceRepository(
     }
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled, System.currentTimeMillis())
+
+    /**
+     * 「新建书源」生成的书源入库，返回实际入库的那一份（id 可能加了后缀）。
+     *
+     * id 就是站点地址，撞上已有书源时**不能**覆盖：用户导入的同站书源会被换成自动识别的规则，
+     * 搜索规则一起没了。按 Legado「同站多源」的约定加 `#自建` 后缀 —— [BookSourceRule.baseUrl]
+     * 会剥掉 `#` 之后的部分，请求地址不受影响。墓碑（已删除的旧行）不算占用，直接复用。
+     */
+    suspend fun addCreated(rule: BookSourceRule): BookSourceRule {
+        val site = rule.bookSourceUrl.substringBefore('#')
+        var candidate = rule
+        var n = 1
+        while (loadEntity(candidate.id)?.takeIf { !it.deleted } != null) {
+            candidate = rule.copy(bookSourceUrl = site + CREATED_SUFFIX + (if (n == 1) "" else "$n"))
+            n++
+        }
+        upsertRules(listOf(candidate))
+        return candidate
+    }
+
+    /**
+     * 与 [url] 同一主机的书源（未删除）。「新建书源」先看这个站是不是已经有源了：有就直接用它打开这本书，
+     * 别再生成一份重复的。只认**同主机**：`www.` 与 `m.` 往往是两套页面，PC 站的规则套不上手机站。
+     */
+    suspend fun findByHost(url: String): List<BookSourceRule> = withContext(Dispatchers.Default) {
+        val host = url.toHttpUrlOrNull()?.host ?: return@withContext emptyList()
+        dao.getAllIds()
+            .filter { id -> id.substringBefore('#').toHttpUrlOrNull()?.host == host }
+            .mapNotNull { getRule(it) }
+    }
 
     suspend fun delete(id: String) {
         dao.softDeleteById(id, System.currentTimeMillis())

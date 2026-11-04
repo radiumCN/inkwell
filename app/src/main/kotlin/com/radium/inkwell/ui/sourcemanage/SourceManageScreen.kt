@@ -88,6 +88,8 @@ import com.radium.inkwell.ui.components.settingsStackListColors
 fun SourceManageScreen(
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
+    /** 新建书源（按网址识别），见 SourceWizardScreen */
+    onCreate: () -> Unit,
     viewModel: SourceManageViewModel,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
@@ -251,7 +253,7 @@ fun SourceManageScreen(
                     }
                     Box {
                     AppIconButton(onClick = { showImportMenu = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "导入书源")
+                        Icon(Icons.Default.Add, contentDescription = "添加书源")
                     }
                     DropdownMenu(
                         expanded = showImportMenu,
@@ -273,6 +275,14 @@ fun SourceManageScreen(
                                 showUrlImport = true
                             },
                         )
+                        // 和两种导入分开说清：导入要的是现成的书源文件，这个只要一本书的网址
+                        DropdownMenuItem(
+                            text = { Text("按书的网址新建") },
+                            onClick = {
+                                showImportMenu = false
+                                onCreate()
+                            },
+                        )
                     }
                     }
                 },
@@ -289,7 +299,8 @@ fun SourceManageScreen(
             EmptyState(
                 icon = Icons.Default.Source,
                 title = "还没有书源",
-                hint = "支持导入 Inkwell 与 Legado（阅读）格式的书源",
+                hint = "支持导入 Inkwell 与 Legado（阅读）格式的书源；" +
+                    "没有现成书源的网站，可以点右上角「＋」按书的网址新建",
                 actionLabel = "从文件导入",
                 onAction = {
                     fileImportLauncher.launch(

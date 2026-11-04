@@ -259,6 +259,22 @@ fun InkwellNavDisplay() {
                 SourceManageScreen(
                     onBack = { nav.back() },
                     onOpen = { nav.go(SourceDetailRoute(it)) },
+                    onCreate = { nav.go(SourceWizardRoute) },
+                    viewModel = vm,
+                )
+            }
+            entry<SourceWizardRoute>(
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
+            ) {
+                val vm = koinViewModel<com.radium.inkwell.ui.sourcewizard.SourceWizardViewModel>()
+                com.radium.inkwell.ui.sourcewizard.SourceWizardScreen(
+                    onBack = { nav.back() },
+                    // 向导页换成预览页：书源已经存好了，从预览返回该落在书源管理（新书源就在列表里），
+                    // 而不是回到一个已经存过的向导 —— 再点一次「保存」就是第二份重复书源
+                    onOpenBook = { result ->
+                        nav.back()
+                        nav.go(BookPreviewRoute.of(listOf(result)))
+                    },
                     viewModel = vm,
                 )
             }

@@ -121,5 +121,5 @@ object ContentDetector {
 
     /** 一段「无块级后代的 div」最长多少字还算一段；再长就是整章塞在一个元素里，自己当正文块 */
     private const val MAX_INLINE_PARAGRAPH = 1000
-    private const val PREVIEW_CHARS = 80
+    private const val PREVIEW_CHARS = 160
 }

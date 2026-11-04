@@ -20,7 +20,19 @@ data class TocCandidate(
     val chapters: List<DetectedChapter>,
     val reversed: Boolean,
     val score: Double,
-)
+) {
+    /**
+     * 拿来识别正文的那一章：开头一段里第一个正经章节，都不像就用第一章。
+     * 第一章常是「作品相关」「上架感言」「请假条」，正文几十个字，拿它认正文会认到页脚上去。
+     */
+    val sampleChapter: DetectedChapter
+        get() = chapters.take(SAMPLE_WINDOW).firstOrNull { ChapterTitles.isRegularChapter(it.title) }
+            ?: chapters.first()
+
+    private companion object {
+        const val SAMPLE_WINDOW = 10
+    }
+}
 
 /**
  * 目录页识别：在页面的所有站内链接里找出「章节列表」那一组，并生成选出它的规则。

@@ -105,7 +105,7 @@ fun SourceDetailScreen(
                 CompactTextField(
                     value = state.testKeyword,
                     onValueChange = viewModel::setTestKeyword,
-                    placeholder = "测试关键词",
+                    placeholder = if (state.searchable) "测试关键词" else "书的网址",
                     modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
                 )
                 SecondaryButton(
@@ -125,7 +125,7 @@ fun SourceDetailScreen(
             }
 
             Text(
-                "规则（只读，改规则请重新导入）",
+                "规则（只读，要改请重新导入或重新新建）",
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.padding(top = Dimens.gapL, bottom = Dimens.gapS),
             )

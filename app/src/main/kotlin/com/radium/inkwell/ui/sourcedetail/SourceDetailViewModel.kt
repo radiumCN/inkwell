@@ -25,6 +25,11 @@ data class SourceDetailUiState(
     val missing: Boolean = false,
     val name: String = "",
     val jsonText: String = "",
+    /**
+     * 有没有搜索规则。「新建书源」生成的源没有：冒烟测试就不能从搜索开始，
+     * 输入框改要一本书的网址，直接从详情页走起。
+     */
+    val searchable: Boolean = true,
     val testKeyword: String = "剑",
     val testing: Boolean = false,
     val testReport: String = "",
@@ -52,7 +57,15 @@ class SourceDetailViewModel(
             }
             // 解析 + 美化一整份规则 JSON（带大段脚本的源几十 KB），别在主线程上做
             val pretty = withContext(Dispatchers.Default) { prettyOrRaw(entity.json) }
-            _state.value = _state.value.copy(loaded = true, name = entity.name, jsonText = pretty)
+            val searchable = sourceRepo.getRule(sourceId)?.search != null
+            _state.value = _state.value.copy(
+                loaded = true,
+                name = entity.name,
+                jsonText = pretty,
+                searchable = searchable,
+                // 不能搜索的源要的是网址，预填的搜索词留着只会被当成网址去抓
+                testKeyword = if (searchable) _state.value.testKeyword else "",
+            )
         }
     }
 
@@ -64,10 +77,15 @@ class SourceDetailViewModel(
         _state.value = _state.value.copy(testKeyword = text)
     }
 
-    /** 搜索→取第1本→详情→目录→第1章正文，一键冒烟 */
+    /** 搜索→取第1本→详情→目录→第1章正文，一键冒烟；不能搜索的源从用户给的网址开始 */
     fun testSearchChain() {
         val rule = sourceRepo.parseRule(_state.value.jsonText).getOrElse {
             messages.emit("规则解析失败: ${it.message?.take(120)}")
+            return
+        }
+        val input = _state.value.testKeyword.trim()
+        if (rule.search == null && input.isEmpty()) {
+            messages.emit("这个书源不能搜索，请填一本书的网址")
             return
         }
         viewModelScope.launch {
@@ -81,12 +99,18 @@ class SourceDetailViewModel(
             }
             val finished = withTimeoutOrNull(TEST_TIMEOUT_MS) {
                 try {
-                    val page = engine.search(rule, _state.value.testKeyword)
-                    step("✔ 搜索: ${page.items.size} 条结果")
-                    val first = page.items.firstOrNull() ?: error("搜索无结果")
-                    step("  首条: ${first.title} / ${first.author ?: "?"}")
+                    val bookUrl = if (rule.search != null) {
+                        val page = engine.search(rule, input)
+                        step("✔ 搜索: ${page.items.size} 条结果")
+                        val first = page.items.firstOrNull() ?: error("搜索无结果")
+                        step("  首条: ${first.title} / ${first.author ?: "?"}")
+                        first.bookUrl
+                    } else {
+                        step("· 不能搜索，从网址开始")
+                        input
+                    }
 
-                    val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, first.bookUrl)
+                    val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, bookUrl)
                     step("✔ 详情: ${detail.title} tocUrl=${detail.tocUrl.take(60)}")
                     step("✔ 目录: ${toc.size} 章")
                     val firstChapter = toc.firstOrNull() ?: error("目录为空")

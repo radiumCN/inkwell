@@ -27,6 +27,15 @@ internal object ChapterTitles {
     fun isChapterLike(title: String): Boolean =
         ORDINAL.containsMatchIn(title) || LEADING_NUMBER.containsMatchIn(title) || SPECIAL.containsMatchIn(title)
 
+    /**
+     * 带序号的正文章节，且不是公告类（「第0章 上架感言」「12、请假条」）。
+     * 比 [isChapterLike] 严：拿来挑识别正文用的样本章，宁缺毋滥。
+     */
+    fun isRegularChapter(title: String): Boolean =
+        (ORDINAL.containsMatchIn(title) || LEADING_NUMBER.containsMatchIn(title)) && !NOTICE.containsMatchIn(title)
+
+    private val NOTICE = Regex("感言|请假|公告|通知|说明|作品相关|新书|推荐|求票|月票|加更|致歉|抱歉")
+
     /** 章节序号；「第一百零三章」→ 103，「012 xxx」→ 12。抠不出来返回 null */
     fun numberOf(title: String): Int? {
         ORDINAL.find(title)?.let { m -> parseNumber(m.groupValues[1])?.let { return it } }

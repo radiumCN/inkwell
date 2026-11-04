@@ -76,6 +76,14 @@ class SiteAnalyzer(
         if (renderedBest > best) rendered else plain
     }
 
+    /**
+     * 只认书名、作者、封面、简介，不找目录。用已有书源按网址打开一本书时，预览页要个书名占位 ——
+     * 书源自己的详情规则未必认得出（不少源的书名只在搜索结果里给）。一页静态抓取，失败返回空。
+     */
+    suspend fun peekBookInfo(url: String): DetectedBookInfo = withContext(Dispatchers.IO) {
+        load(url, render = false)?.let { BookInfoDetector.detect(it) } ?: DetectedBookInfo()
+    }
+
     private suspend fun inspectBook(doc: Document, render: Boolean): BookPageAnalysis {
         val info = BookInfoDetector.detect(doc)
         val here = TocDetector.detect(doc)
@@ -188,4 +196,8 @@ object SourceDraftBuilder {
         val port = if (u.port == okhttp3.HttpUrl.defaultPort(u.scheme)) "" else ":${u.port}"
         return "${u.scheme}://${u.host}$port"
     }
+
+    /** 默认书源名：去掉 `www.` 的域名。书源列表里认站点靠它，用户可以改 */
+    fun defaultName(url: String): String =
+        url.toHttpUrlOrNull()?.host?.removePrefix("www.") ?: url
 }

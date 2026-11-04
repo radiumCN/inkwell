@@ -56,6 +56,26 @@ class InkwellNavigatorTest {
         )
     }
 
+    /**
+     * 新建书源：从书源管理下钻进向导；存好后向导换成预览页（导航入口里先 back 再 go）。
+     * 从预览返回要落在书源管理 —— 落回向导的话再点一次保存，就是第二份重复书源。
+     */
+    @Test
+    fun `新建书源存好后向导换成预览页`() {
+        val s = stack(BookshelfRoute, SettingsRoute, ReadingSettingsRoute, SourceManageRoute)
+        s.navigateTo(SourceWizardRoute)
+        assertEquals(SourceWizardRoute, s.last(), "向导应叠在书源管理之上")
+        assertEquals(SourceManageRoute, s[s.lastIndex - 1])
+
+        val preview = BookPreviewRoute("arg")
+        s.removeLastOrNull()
+        s.navigateTo(preview)
+        assertEquals(
+            listOf(BookshelfRoute, SettingsRoute, ReadingSettingsRoute, SourceManageRoute, preview),
+            s,
+        )
+    }
+
     // ---------- 兄弟替换：宽屏 detail pane 只有一格 ----------
 
     @Test

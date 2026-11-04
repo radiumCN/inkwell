@@ -391,4 +391,59 @@ class BookSourceImportTest {
         assertEquals(CheckStatus.OK, a.checkStatus)
         assertEquals(321L, a.respondTime)
     }
+
+    // ---- 新建书源 ----
+
+    private fun created(url: String) = com.radium.inkwell.core.source.BookSourceRule(
+        bookSourceUrl = url,
+        bookSourceName = "自建",
+        bookSourceGroup = BookSourceRepository.CREATED_GROUP,
+        ruleToc = com.radium.inkwell.core.source.TocRuleSet(chapterList = "@css:#list dd a", chapterName = "text", chapterUrl = "href"),
+        ruleContent = com.radium.inkwell.core.source.ContentRuleSet(content = "@css:#content@html"),
+    )
+
+    /** 同站已有导入的书源：新建的那个加后缀另存，导入的那个（连同它的搜索规则）原样不动 */
+    @Test
+    fun `新建书源撞上同站书源时加后缀，不覆盖`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+
+        val first = repo.addCreated(created("https://a.com"))
+        assertEquals("https://a.com#自建", first.id)
+        val second = repo.addCreated(created("https://a.com"))
+        assertEquals("https://a.com#自建2", second.id)
+
+        assertTrue(repo.getRule("https://a.com")!!.search != null, "导入的书源被覆盖了")
+        assertEquals("自建", dao.store.getValue("https://a.com#自建").groupName)
+        // 后缀不进请求地址
+        assertEquals("https://a.com", first.baseUrl)
+    }
+
+    /** 删掉的书源只剩墓碑，不算占用：直接用站点地址，删除在同步里也不会赢回去（新时间戳） */
+    @Test
+    fun `新建书源可以复用已删除书源的地址`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+        repo.delete("https://a.com")
+
+        val saved = repo.addCreated(created("https://a.com"))
+        assertEquals("https://a.com", saved.id)
+        assertTrue(!dao.store.getValue("https://a.com").deleted)
+    }
+
+    /** 按网址找已有书源只认同一主机：m. 与 www. 往往是两套页面，规则套不上 */
+    @Test
+    fun `按主机找已有书源`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+        repo.addCreated(created("https://a.com"))
+
+        val found = repo.findByHost("https://a.com/book/1/").map { it.id }
+        assertEquals(listOf("https://a.com", "https://a.com#自建"), found)
+        assertTrue(repo.findByHost("https://m.a.com/book/1/").isEmpty())
+        assertTrue(repo.findByHost("不是网址").isEmpty())
+    }
 }
