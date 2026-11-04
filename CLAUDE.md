@@ -74,7 +74,7 @@ App 的 UI 库是 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（Hyper
 
 Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16，对齐 Miuix 卡片)/`extraLarge`(28，对齐 Miuix 底部面板)，用 Dp 半径（`AppShapes.radiusMedium`）。
 
-**12dp 及以上的「面」一律 squircle**（HyperOS 的连续曲率圆角，`miuix-squircle`；Miuix 的卡片、按钮、面板、页签全是它）：卡片用 Miuix `Card`，其余的面用 `AppSurface`，修饰符级别用 `Modifier.squircleSurface` / `squircleClip`，描边 `squircleBorder`，分组卡里按角切的行用 `SquircleCorners`（后三样都在 `ui/components/AppSurface.kt`）。毛玻璃要圆角时，外面套 `squircleClip`、玻璃本身给 `RectangleShape`（见 `SelectionToolbar`）。**别**再 `clip(AppShapes.large)` / Miuix `Surface(shape = …)` —— 那是普通圆弧，夹在 Miuix 组件中间弯法差一截，被指出过「圆角不统一」。Shape（`AppShapes.small` 等）只留给 4~8dp 的标签、封面、热力图格子：连续曲率在小半径上看不出来，而 squircle 每个都开一个离屏层，书架一屏几十本封面不值。挨在一起的控件同一档：分段槽、页签槽、卡里的按钮都是 48dp 高 + `radiusMedium`，槽里的浮块 `radiusSmall`。**不要**裸写 `RoundedCornerShape(12.dp)`。
+**12dp 及以上的「面」一律 squircle**（HyperOS 的连续曲率圆角，`miuix-squircle`；Miuix 的卡片、按钮、面板、页签全是它）：卡片用 Miuix `Card`，其余的面用 `AppSurface`，修饰符级别用 `Modifier.squircleSurface` / `squircleClip`，描边 `squircleBorder`，分组卡里按角切的行用 `SquircleCorners`（后三样都在 `ui/components/AppSurface.kt`）。毛玻璃要圆角时，外面套 `squircleClip`、玻璃本身给 `RectangleShape`（见 `SelectionToolbar`）；玻璃带边缘高光的，shape 给同一条曲线的 `squircleShape(radius)`（同文件），否则高光是直角、四个角被裁掉。**别**再 `clip(AppShapes.large)` / Miuix `Surface(shape = …)` —— 那是普通圆弧，夹在 Miuix 组件中间弯法差一截，被指出过「圆角不统一」。Shape（`AppShapes.small` 等）只留给 4~8dp 的标签、封面、热力图格子：连续曲率在小半径上看不出来，而 squircle 每个都开一个离屏层，书架一屏几十本封面不值。挨在一起的控件同一档：分段槽、页签槽、卡里的按钮都是 48dp 高 + `radiusMedium`，槽里的浮块 `radiusSmall`。**不要**裸写 `RoundedCornerShape(12.dp)`。
 
 ### 颜色 → `MiuixTheme.colorScheme` 语义槽位
 
@@ -98,9 +98,9 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 按钮（带 loading，不撑大） | `PrimaryButton`（强调色实心）/ `SecondaryButton`（默认灰实心）（`AppButtons.kt`）；卡片里的小号浅底按钮用 `TonalButton`（和分段控件的槽同一档）。HyperOS 没有描边按钮，别再引入 |
 | 文字按钮（展开/收起、撤销、行尾「加入」） | `AppTextButton("文字", onClick)`：强调色文字（body2 + Medium）、无底色，可点高度保底 48dp、带按钮读屏角色；危险操作传 `contentColor = error`。字号要不一样的才用带 content 的重载，别再手写 `Text(…, body2, Medium)`。Miuix 的 `TextButton` 是**有底色**的按钮，不是这个 |
 | 图标按钮 | `AppIconButton`（`AppButtons.kt`）；顶栏返回键一律 `BackButton`（Miuix 的细线箭头）。**别裸写 Miuix `IconButton`** —— 它默认 40dp，低于 48dp 触控下限，禁用时图标也不变灰 |
-| 页面骨架 | `AppScaffold`（`AppScaffold.kt`），**别再直接铺 Miuix `Scaffold`**。它把内容录进 miuix-blur 的 `LayerBackdrop`，`AppTopBar` / `AppToolbar` 自动变成毛玻璃（透明 + 取样模糊 + 八成栏底色）。前提是内容**真的滚到顶栏下面**：外层只 `padding(padding.horizontalOnly())`，顶栏高度垫进滚动内容开头（Lazy 进 `contentPadding.top`、滚动 Column 加在 `verticalScroll` 之后）；贴在标题下不随列表滚的东西（chip 条、页签）放进顶栏的 `bottomContent`。内容是 WebView 的页面传 `blurBars = false`（录不进图层）。主滚动区挂 `Modifier.pageScroll()`（HyperOS 回弹 + 到底轻震，内容不满一屏也弹）并给滚动组件传 `overscrollEffect = null`，免得和主题自带的回弹叠两层 |
+| 页面骨架 | `AppScaffold`（`AppScaffold.kt`），**别再直接铺 Miuix `Scaffold`**。它把内容录进 miuix-blur 的 `LayerBackdrop`，`AppTopBar` / `AppToolbar` 自动变成毛玻璃（透明 + 取样模糊 + 八成栏底色；是渐进模糊，只在栏最底下 16dp 里淡出，内容滚进去不是一道硬线）。前提是内容**真的滚到顶栏下面**：外层只 `padding(padding.horizontalOnly())`，顶栏高度垫进滚动内容开头（Lazy 进 `contentPadding.top`、滚动 Column 加在 `verticalScroll` 之后）；贴在标题下不随列表滚的东西（chip 条、页签）放进顶栏的 `bottomContent`。内容是 WebView 的页面传 `blurBars = false`（录不进图层）。主滚动区挂 `Modifier.pageScroll()`（HyperOS 回弹 + 到底轻震，内容不满一屏也弹）并给滚动组件传 `overscrollEffect = null`，免得和主题自带的回弹叠两层 |
 | 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Miuix 大标题 `TopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏 |
-| 窄顶栏（标题位放控件 / 多选态 / 书架首页） | `AppToolbar { … }` + 纯文字标题 `ToolbarTitle`（同文件）：52dp、自己让开状态栏。搜索页/发现页的标题位是交互控件，书架与书源管理有多选态，书架首页压着隐藏区与下拉刷新 —— 理由写在 `AppTopBar` 的 KDoc 里 |
+| 窄顶栏（标题位放控件 / 多选态 / 书架首页） | `AppToolbar { … }` + 纯文字标题 `ToolbarTitle`（同文件）：52dp、自己让开状态栏。搜索页/发现页的标题位是交互控件，书架与书源管理有多选态，书架首页压着隐藏区与下拉刷新，关于页的流动头部本身就是标题（栏停在顶部时透明、头部滚上去才叠色出标题：`containerColor` 的透明度会乘进玻璃的叠色）—— 理由写在 `AppTopBar` 的 KDoc 里 |
 | 弹出列表（⋮、导入方式、长按菜单、按钮触发的单选） | `AppDropdownMenu` + `AppMenuItem`（`AppMenu.kt`，Miuix `WindowDropdownPopup`）：和锚点放进同一个 `Box`（长按一本书就把菜单放进那本书的格子）。从几项里选一个（排序方式、切换书源）给当前项标 `selected`，弹出来带勾。**不要**再为单选或长按弹底部面板 |
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（Miuix `TextField` 带浮动 label、最矮五十多 dp 塞不下），但底色/占位色/聚焦描边取 Miuix 输入框读的槽位，别自己发明 |
 | 多行文本输入 | `CompactTextArea`（同文件）：同一套底色，高度 `textAreaMinHeight`，圆角 `radiusLarge`。**不要**用胶囊圆角 —— 160dp 高的框会变成两头大圆 |
@@ -114,6 +114,9 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 设置分组卡 | `SettingGroup`（Miuix `Card`）+ `SettingRow(..., position = First/Middle/Last/Alone)` / `SwitchRow(..., position = …)`；底栏/选择面板等「一条一卡」保持 `position = null` |
 | 设置类页面骨架 | **只有一种**：灰底（`surface`）+ `SectionHeader` + `SettingGroup`（左右 16dp），控件全部装进卡里。卡里不是「行」的内容（表单、分段按钮、说明）包 `SettingBlock`；卡下的说明小字用 `SettingFootnote`。小标题、卡里的字、脚注左边在同一条竖线上 |
 | 内容列表行（可点/单选/多选/纯展示） | `ContentListItem` / `ChapterListItem`（`ContentListItem.kt`）；书籍行再用 `BookListRow`。页面上的列表（书架列表、搜索结果、书源列表）**装进卡片**：每行 `Modifier.groupedCardItem(index, count)` + `ContentListDefaults.plainColors()`，行间不加 `spacedBy`（HyperOS 是灰底白卡，不是通栏的行）。槽位只替你设颜色，**字号要显式给**：`ContentListDefaults.titleStyle` / `supportingStyle` / `overlineStyle`（Miuix 没有给子树设字号的公开入口，裸 `Text` 会是 17sp）。长按、单选、多选语义都在这里，别为了长按另搓 Row |
+| 封面毛玻璃卡（一页上唯一带颜色的面：书架「继续阅读」、设置概览、阅读记录「今天」） | `CoverGlassCard`（`CoverGlass.kt`）：这本书的封面铺满，盖渐进模糊 + Colored Thick 混色 + 边缘高光 + 一层卡片色薄底。卡里的字读 `LocalContentColor`、统一一种颜色，**别用 `onSurfaceVariantSummary`**（薄底是半透明的，对比度只按 onSurface 在 `CoverGlassTest` 里钉过）。封面来自 `BookDao.observeLatestRead()` 的地方**不含隐藏的书**；查完了没书传 null，退回实色卡；**还在查**时传 `pending = true`（先画无封面的玻璃、封面淡进来），别拿「还没查回来」当「没书」，否则进页面先闪一下实色卡（`LatestRead` 包一层就是为了分开这两种 null）。详情页头部的封面底是同文件的 `CoverHeaderBackground`。`tiltHighlight = true` 时边缘高光跟着陀螺仪动 —— 只给书架「继续阅读」开 |
+| HyperOS 流动彩色底（「关于手机」那种） | `FlowBackground`（`FlowBackground.kt`，移植自 Miuix 示例 App，Apache-2.0）：固定的 HyperOS 配色，不跟主题色；系统关了动画时定格。目前只有关于页头部用，配玻璃字（`textureBlur` + `contentBlendMode = DstIn`） |
+| 按压反馈（一整块可点的面：书架上的书、继续阅读卡、色板） | `Modifier.sinkOnPress(source)`（按下整块微缩）/ `tiltOnPress(source)`（大卡片，按哪个角哪个角沉），`PressFeedback.kt`。挂在**外层**，里面的 clickable / selectable 传**同一个** `interactionSource`、indication 照旧 `LocalIndication.current`（Miuix `Card(pressFeedbackType)` 的接法）。贴在卡片里的设置行、列表行不加（HyperOS 是按下变灰），Miuix 按钮自带，别叠 |
 | 底部面板 | `AppBottomSheet`（`AppSheet.kt`，Miuix `WindowBottomSheet`）：调用方照旧 `if (show) AppBottomSheet(onDismissRequest = …)`；点了选项要「收起后再办事」用内容里的 `dismiss { … }`，别自己管 sheetState。会滚动的面板传 `padNavigationBar = false`，列表末尾垫 `sheetBottomInset()`。有未保存改动的编辑面板：`allowDismiss = false` 关掉下滑/蒙层，标题行 `startAction` 放 ×，返回键在内容里另挂 `NavigationBackHandler` 先问一句（见净化规则编辑）。`enableWindowDim = false` 只给阅读设置面板（要看着正文调排版，也不做背后模糊）。别再直接铺 `WindowBottomSheet` |
 | 空态 / 错误态 | `EmptyState`（`Common.kt`）/ `ErrorState`（`ErrorState.kt`），错误态**必须**带重试出口 |
 | 整页加载态 | `LoadingState`（`Common.kt`） |
@@ -121,9 +124,9 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Miuix `LinearProgressIndicator`）；搜索/书源校验/更新下载/离线缓存走它 |
 | 阅读进度（静止的读数） | `ReadingProgressMeter`（`Common.kt`）：书封底边、「继续阅读」卡片，4dp 细线。任务进度条表示「有活在跑」，静止的进度别用 `DeterminateProgressBar` |
 | 相对时间（「3 小时前」「昨天」） | `formatRelativeTime`（`RelativeTime.kt`），按日历天而不是 24 小时算 |
-| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`，`SnackbarHostState` 是 Miuix 的）。**居中、随文案收窄的胶囊**（短提示是药丸，长提示才横向展开）。页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
+| 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`，`SnackbarHostState` 是 Miuix 的）。**居中、随文案收窄的胶囊**（短提示是药丸，长提示才横向展开）；在 `AppScaffold` 里是毛玻璃 + 边缘高光，叠色厚度与操作键颜色按最坏的页面内容算（`CoverGlassTest`）。页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
 | 不是卡片、也不是按钮的圆角面（提示条、阅读页小提示、预览框） | `AppSurface`（`AppSurface.kt`）：Miuix `Surface` 的 squircle 版，`borderColor` 给描边。卡片用 Miuix `Card`。别用 Miuix `Surface(shape = …)`（普通圆弧） |
-| 对话框 | `AppAlertDialog`（`AppDialog.kt`，Miuix `WindowDialog`）：居中标题 + 正文/内容 + 等宽 `SecondaryButton` / `PrimaryButton`。调用方照旧条件组合；取消/点外面先播退场动画再回调，收起中的点击一律吞掉。`confirmLoading` 期间次按钮是「取消这次操作」（立刻回调、弹窗留着），要禁掉就传 `dismissEnabled = false`。别手搓居中 `Surface` 冒充弹层 |
+| 对话框 | `AppAlertDialog`（`AppDialog.kt`，Miuix `WindowDialog`）：居中标题 + 正文/内容 + 等宽 `SecondaryButton` / `PrimaryButton`。调用方照旧条件组合；取消/点外面先播退场动画再回调，收起中的点击一律吞掉。`confirmLoading` 期间次按钮是「取消这次操作」（立刻回调、弹窗留着），要禁掉就传 `dismissEnabled = false`。要自己画头部的（更新弹窗：图标 + 版本）传 `title = null`；内容里自己有滚动区的传 `scrollable = false`，别让外层再套一层滚动。别手搓居中 `Surface` 冒充弹层 |
 
 对话框与底部面板背后的页面会模糊（`DialogWindowBlur`，`WindowBlur.kt`，系统跨窗口模糊 `blurBehindRadius`）：封装里已经调了，自己另写弹层时也放进弹层内容里调。系统关了跨窗口模糊时自动退回只压暗。
 
