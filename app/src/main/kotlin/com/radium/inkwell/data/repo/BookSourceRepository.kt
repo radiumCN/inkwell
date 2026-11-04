@@ -155,15 +155,17 @@ class BookSourceRepository(
         deduped.forEach { rule ->
             try {
                 val existing = existingById[rule.id]
+                val live = existing?.takeIf { !it.deleted }
                 val ruleJson = rule.toJson()
                 // 规则没变才留着旧的校验结论；规则一变，上一版的"可用"就不能给新规则背书了
                 val keepCheck = existing?.takeIf { it.json == ruleJson }
                 toWrite += BookSourceEntity(
                     id = rule.id,
                     name = rule.name,
-                    // 重复导入保留用户的启用/禁用与排序
-                    enabled = existing?.enabled ?: rule.enabled,
-                    sortOrder = existing?.sortOrder ?: 0,
+                    // 重复导入保留用户的启用/禁用与排序。墓碑（已删除的行）不算：它是「加回来」，
+                    // 照新书源处理 —— 删前是禁用的，新建 / 重导进来的照样禁用，搜索、换源里都找不到它
+                    enabled = live?.enabled ?: rule.enabled,
+                    sortOrder = live?.sortOrder ?: 0,
                     json = ruleJson,
                     // 同一份规则原样再导一遍不算修改：盖 now 的话，这一行会带着本机的旧启停/分组
                     // 在 WebDAV 合并里赢过别的设备刚做的修改（合并按 updatedAt 做 LWW）。
@@ -261,7 +263,7 @@ class BookSourceRepository(
     }
     private val decoded = ConcurrentHashMap<String, Decoded>()
 
-    /** 「有没有搜索规则」，书源管理的「仅发现页」筛选用。只是个布尔，强引用常驻，不怕 GC 收走后整表重解 */
+    /** 「是不是仅发现页」，书源管理的「仅发现页」筛选用。只是个布尔，强引用常驻，不怕 GC 收走后整表重解 */
     private val searchless = ConcurrentHashMap<String, Pair<Long, Boolean>>()
 
     private fun decode(entity: BookSourceEntity): BookSourceRule? {
@@ -296,14 +298,17 @@ class BookSourceRepository(
     }
 
     /**
-     * 无搜索规则（仅发现页可用）的书源 id。[items] 是 (id, updatedAt)。
+     * 仅发现页可用的书源 id：没有搜索、**有**发现页。[items] 是 (id, updatedAt)。
+     * 两样都没有的（「新建书源」没设置搜索的）不算 —— 标成仅发现，用户会去发现页里找它。
      * 书源管理每当书源集合或 updatedAt 变了就重算一遍；只有 updatedAt 变了的那几条要重新取规则 ——
      * 从前拨一下开关（会动 updatedAt）就把几千份规则整表重解。
      */
     suspend fun exploreOnlyIds(items: List<Pair<String, Long>>): Set<String> = withContext(Dispatchers.Default) {
         inLanes(items) { (id, at) ->
             val flag = searchless[id]?.takeIf { it.first == at }?.second
-                ?: ruleAt(id, at)?.let { rule -> (rule.search == null).also { searchless[id] = at to it } }
+                ?: ruleAt(id, at)?.let { rule ->
+                    (rule.search == null && rule.explore.isNotEmpty()).also { searchless[id] = at to it }
+                }
             id.takeIf { flag == true }
         }.filterNotNullTo(HashSet())
     }

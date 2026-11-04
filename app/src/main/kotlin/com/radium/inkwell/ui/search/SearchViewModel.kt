@@ -366,11 +366,16 @@ class SearchViewModel(
             val searchable = SearchScheduling.order(withLiveSpeed(enabled.filter { it.rule.search != null }))
             val rules = searchable.map { it.rule }
             if (rules.isEmpty()) {
-                // 区分"没有书源"和"启用的都是仅发现页的源"，后者曾误导用户以为启用没生效
+                // 区分"没有书源"和"启用的都是仅发现页的源"，后者曾误导用户以为启用没生效。
+                // 「新建书源」没设置搜索的源连发现页也没有：别叫人去发现页里找它
                 messages.emit(
-                    if (enabled.isEmpty()) "没有启用的书源，请先导入并启用书源"
-                    else "已启用的 ${enabled.size} 个书源都不支持搜索（仅发现页可用），" +
-                        "请到发现页浏览，或导入带搜索规则的书源"
+                    when {
+                        enabled.isEmpty() -> "没有启用的书源，请先导入并启用书源"
+                        enabled.any { it.rule.explore.isNotEmpty() } ->
+                            "已启用的 ${enabled.size} 个书源都不支持搜索（仅发现页可用），" +
+                                "请到发现页浏览，或导入带搜索规则的书源"
+                        else -> "已启用的 ${enabled.size} 个书源都不支持搜索，请导入带搜索规则的书源"
+                    },
                 )
                 return@launch
             }

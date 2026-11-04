@@ -446,4 +446,34 @@ class BookSourceImportTest {
         assertTrue(repo.findByHost("https://m.a.com/book/1/").isEmpty())
         assertTrue(repo.findByHost("不是网址").isEmpty())
     }
+
+    /** 删掉的书源若是禁用的，复用它地址的新书源不能跟着禁用：否则新建的源搜索、换源里都找不到它，也没有任何提示 */
+    @Test
+    fun `复用已删除书源地址的新书源是启用的`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(legadoArray).getOrThrow()
+        repo.setEnabledAll(listOf("https://a.com"), false)
+        repo.moveToTop(listOf("https://a.com"))
+        repo.delete("https://a.com")
+
+        repo.addCreated(created("https://a.com"))
+        val row = dao.store.getValue("https://a.com")
+        assertTrue(row.enabled)
+        assertEquals(0, row.sortOrder)
+    }
+
+    /** 「仅发现页」得真有发现页：新建的书源既不能搜索也没有发现页，标成仅发现，用户会去发现页里找它 */
+    @Test
+    fun `没有发现页的书源不算仅发现页`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        repo.importJson(
+            """{"bookSourceUrl":"https://e.com","bookSourceName":"发现源","exploreUrl":"玄幻::/xh/{{page}}",
+               "ruleExplore":{"bookList":"class.item","name":"tag.h3@text","bookUrl":"tag.a@href"}}""",
+        ).getOrThrow()
+        repo.addCreated(created("https://x.com"))
+        val items = dao.store.values.map { it.id to it.updatedAt }
+        assertEquals(setOf("https://e.com"), repo.exploreOnlyIds(items))
+    }
 }

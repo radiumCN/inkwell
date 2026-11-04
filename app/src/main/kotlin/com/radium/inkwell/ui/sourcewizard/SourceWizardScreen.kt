@@ -41,11 +41,11 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SectionHeader
-import com.radium.inkwell.ui.components.SegmentedChoice
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SettingGroup
@@ -70,9 +70,8 @@ fun SourceWizardScreen(
     viewModel: SourceWizardViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) {
-        viewModel.openBook.collect(onOpenBook)
-    }
+    // 跳转看状态而不是收一次性事件（见 SourceWizardUiState.opened）：页面重建后照样跳
+    state.opened?.let { book -> LaunchedEffect(book) { onOpenBook(book) } }
     // 子步骤（网页、高级、核对）按返回先退一步，退到输入页才离开整页
     BackHandler(state.step != WizardStep.Input) { viewModel.back() }
     val goBack = { if (!viewModel.back()) onBack() }
@@ -263,8 +262,9 @@ private fun ReviewStep(state: SourceWizardUiState, viewModel: SourceWizardViewMo
     SettingGroup {
         SettingBlock {
             val candidates = book.tocCandidates
+            // 候选几组不定（点选后还会多一组），按规范用能横滚的 ChipRow，不用定档的分段按钮
             if (candidates.size > 1) {
-                SegmentedChoice(
+                ChipRow(
                     options = choiceLabels(candidates.map { "${it.chapters.size} 章" }),
                     selectedIndex = state.tocIndex,
                     onSelect = viewModel::selectToc,
@@ -343,7 +343,7 @@ private fun ColumnScope.ContentSummary(state: SourceWizardUiState, viewModel: So
         chapter != null -> {
             val candidates = chapter.contentCandidates
             if (candidates.size > 1) {
-                SegmentedChoice(
+                ChipRow(
                     options = choiceLabels(candidates.map { "${it.textLength} 字" }),
                     selectedIndex = state.contentIndex,
                     onSelect = viewModel::selectContent,
@@ -481,7 +481,7 @@ private fun ChapterPeek(chapters: List<DetectedChapter>) {
     }
 }
 
-/** 分段按钮的标签撞了（两组都是 30 章）就改用序号，否则用户分不出点的是哪个 */
+/** 候选标签撞了（两组都是 30 章）就改用序号，否则用户分不出点的是哪个 */
 private fun choiceLabels(labels: List<String>): List<String> =
     if (labels.toSet().size == labels.size) labels else labels.indices.map { "第 ${it + 1} 组" }
 

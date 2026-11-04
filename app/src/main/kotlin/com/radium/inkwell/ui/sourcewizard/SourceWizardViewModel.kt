@@ -22,9 +22,7 @@ import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -73,6 +71,12 @@ data class SourceWizardUiState(
     /** 这个站已经有书源了：弹窗问是用它打开，还是重新识别 */
     val existing: BookSourceRule? = null,
     val openingExisting: Boolean = false,
+    /**
+     * 存好（或选了已有书源）后要打开的那本书，页面看到它就跳预览页。放在状态里而不是一次性事件：
+     * 保存可能要一分多钟，恰好在存完那一刻页面重建（转屏、切深色）的话，一次性事件发出去没人收就丢了 ——
+     * 用户停在核对页、保存按钮又能点了，再点一次就是第二份书源。
+     */
+    val opened: SearchResult? = null,
 
     // ---- 搜索（P2） ----
     val search: SearchAnalysis? = null,
@@ -94,7 +98,7 @@ data class SourceWizardUiState(
     val toc: TocCandidate? get() = book?.tocCandidates?.getOrNull(tocIndex)
 
     val canSave: Boolean
-        get() = !saving && !chapterLoading && !searchLoading &&
+        get() = opened == null && !saving && !chapterLoading && !searchLoading &&
             (customRule != null || chapter?.contentCandidates?.getOrNull(contentIndex) != null) &&
             (book?.info?.name != null || manualTitle.isNotBlank())
 }
@@ -119,10 +123,6 @@ class SourceWizardViewModel(
 
     private val _state = MutableStateFlow(SourceWizardUiState())
     val state: StateFlow<SourceWizardUiState> = _state.asStateFlow()
-
-    /** 存好（或选了已有书源）后要打开的那本书，页面据此跳到预览页 */
-    private val _openBook = MutableSharedFlow<SearchResult>(extraBufferCapacity = 1)
-    val openBook: SharedFlow<SearchResult> = _openBook
 
     /** 识别 / 保存 / 用已有书源打开：同一时刻只跑一个，新的开始前掐掉旧的，免得旧结果串进来 */
     private var job: Job? = null
@@ -164,7 +164,11 @@ class SourceWizardViewModel(
     }
 
     /** 弹窗外点一下：两样都不选，回到输入页 */
-    fun dismissExisting() = _state.update { it.copy(existing = null) }
+    fun dismissExisting() {
+        // 「直接打开」已经在认了：关掉弹窗就是不要了，别等它认完又自己跳走
+        if (_state.value.openingExisting) job?.cancel()
+        _state.update { it.copy(existing = null, openingExisting = false) }
+    }
 
     /** 弹窗里选了「重新识别」：不管已有的书源，照常识别、另建一个 */
     fun analyzeAnyway() {
@@ -187,18 +191,16 @@ class SourceWizardViewModel(
             _state.update { it.copy(openingExisting = true) }
             val peek = attempt(PEEK_TIMEOUT_MS) { analyzer.peekBook(url) }.getOrDefault(BookPeek(url, DetectedBookInfo()))
             val info = peek.info
-            _state.update { it.copy(openingExisting = false, existing = null) }
-            _openBook.emit(
-                SearchResult(
-                    title = info.name?.value.orEmpty(),
-                    bookUrl = peek.bookUrl,
-                    author = info.author?.value,
-                    coverUrl = info.coverUrl?.value,
-                    intro = info.intro?.value,
-                    sourceId = rule.id,
-                    sourceName = rule.name,
-                ),
+            val book = SearchResult(
+                title = info.name?.value.orEmpty(),
+                bookUrl = peek.bookUrl,
+                author = info.author?.value,
+                coverUrl = info.coverUrl?.value,
+                intro = info.intro?.value,
+                sourceId = rule.id,
+                sourceName = rule.name,
             )
+            _state.update { it.copy(openingExisting = false, existing = null, opened = book) }
         }
     }
 
@@ -351,13 +353,8 @@ class SourceWizardViewModel(
     fun confirmSearchCapture() {
         val s = _state.value
         val book = s.book ?: return
-        val form = capturedForm
-        val (template, keyword) = when {
-            form != null -> SearchTemplates.fromForm(form.action, form.method, form.charset, form.fields) to
-                SearchTemplates.formKeyword(form.fields)
-            else -> SearchTemplates.fromUrl(s.webUrl, SiteAnalyzer.SUGGESTED_KEYWORD) to SiteAnalyzer.SUGGESTED_KEYWORD
-        }
-        if (template == null || keyword == null) {
+        val attempts = searchAttempts(capturedForm, s.webUrl)
+        if (attempts.isEmpty()) {
             _state.update {
                 it.copy(searchError = "没看出这次搜索的请求。请用网站自己的搜索框搜「${SiteAnalyzer.SUGGESTED_KEYWORD}」，出现结果后再点")
             }
@@ -367,10 +364,17 @@ class SourceWizardViewModel(
         _state.update { it.copy(searchLoading = true, searchError = null, search = null, customRule = null) }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            val result = attempt(SEARCH_TIMEOUT_MS) { analyzer.analyzeSearch(template, keyword, book.bookUrl) }
-            _state.update {
-                it.copy(searchLoading = false, search = result.getOrNull(), searchError = result.exceptionOrNull()?.let(::failureText))
+            // 第一个认得出结果列表的为准；都不行就报第一个的原因（表单那条最有可能是对的，它的原因最有用）
+            var firstError: Throwable? = null
+            for ((template, keyword) in attempts) {
+                val result = attempt(SEARCH_TIMEOUT_MS) { analyzer.analyzeSearch(template, keyword, book.bookUrl) }
+                result.onSuccess { found ->
+                    _state.update { it.copy(searchLoading = false, search = found, searchError = null) }
+                    return@launch
+                }
+                if (firstError == null) firstError = result.exceptionOrNull()
             }
+            _state.update { it.copy(searchLoading = false, searchError = firstError?.let(::failureText)) }
         }
     }
 
@@ -536,18 +540,16 @@ class SourceWizardViewModel(
                 return@launch
             }
             val saved = sourceRepo.addCreated(draft)
-            _state.update { it.copy(saving = false) }
-            _openBook.emit(
-                SearchResult(
-                    title = detail.title.ifBlank { book.info.name?.value ?: s.manualTitle.trim() },
-                    bookUrl = book.bookUrl,
-                    author = detail.author ?: book.info.author?.value,
-                    coverUrl = detail.coverUrl ?: book.info.coverUrl?.value,
-                    intro = detail.intro ?: book.info.intro?.value,
-                    sourceId = saved.id,
-                    sourceName = saved.name,
-                ),
+            val opened = SearchResult(
+                title = detail.title.ifBlank { book.info.name?.value ?: s.manualTitle.trim() },
+                bookUrl = book.bookUrl,
+                author = detail.author ?: book.info.author?.value,
+                coverUrl = detail.coverUrl ?: book.info.coverUrl?.value,
+                intro = detail.intro ?: book.info.intro?.value,
+                sourceId = saved.id,
+                sourceName = saved.name,
             )
+            _state.update { it.copy(saving = false, opened = opened) }
         }
     }
 
