@@ -47,6 +47,8 @@ internal val LocalBarBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null 
  *
  * @param blurBars false 时退回实色顶栏：内容里有 WebView 这类不在 Compose 里画的东西时关掉 ——
  *   录不进图层，顶栏下面会是一片空白
+ * @param floatingToolbar 底部居中的悬浮工具条（多选态的 [BatchActionBar]）。Miuix Scaffold **不**把它算进
+ *   给内容的 padding，列表末尾要自己再垫它的高度（见 [BatchActionBar]）
  */
 @Composable
 fun AppScaffold(
@@ -54,6 +56,7 @@ fun AppScaffold(
     topBar: @Composable () -> Unit = {},
     floatingActionButton: @Composable () -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    floatingToolbar: @Composable () -> Unit = {},
     containerColor: Color = MiuixTheme.colorScheme.surface,
     blurBars: Boolean = true,
     content: @Composable (PaddingValues) -> Unit,
@@ -74,6 +77,7 @@ fun AppScaffold(
             topBar = topBar,
             floatingActionButton = floatingActionButton,
             snackbarHost = snackbarHost,
+            floatingToolbar = floatingToolbar,
             containerColor = containerColor,
         ) { padding ->
             CompositionLocalProvider(LocalBarBackdrop provides null) {

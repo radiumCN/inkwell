@@ -27,18 +27,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
-import com.radium.inkwell.ui.components.SquircleCorners
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppFilterChip
@@ -51,6 +51,8 @@ import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.BatchAction
+import com.radium.inkwell.ui.components.BatchActionBar
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
@@ -75,10 +77,11 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Blocklist
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Import
-import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Sort
@@ -135,7 +138,8 @@ fun SourceManageScreen(
     var confirmDeleteInvalid by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
-    var deleteTarget by remember { mutableStateOf<BookSourceListItem?>(null) }
+    // 多选态底部操作条占掉的高度（BatchActionBar 量好报上来），垫到列表末尾
+    var batchBarHeight by remember { mutableStateOf(0.dp) }
     var showUrlImport by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
     var importUrl by remember { mutableStateOf("") }
@@ -173,9 +177,7 @@ fun SourceManageScreen(
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
-                // 批量操作栏：文字按钮塞不下五个（标题会被挤成竖排单字）。
-                // 高频动作留成图标，低频的收进溢出菜单。
-                var overflowOpen by remember { mutableStateOf(false) }
+                // HyperOS 编辑模式：顶栏只留 × · 已选 N 个 · 全选，批量动作在底部的操作条里（见 floatingToolbar）
                 AppToolbar(
                     navigationIcon = {
                         AppIconButton(onClick = viewModel::clearSelection) {
@@ -186,48 +188,6 @@ fun SourceManageScreen(
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
                             Icon(MiuixIcons.SelectAll, contentDescription = "全选")
-                        }
-                        // 同普通状态：先挑选项（弹窗按「有选中就只校验选中的」写好了），校验进行中不给 ——
-                        // 从前多选里直接开跑、跳过了选项；正在校验时再点则静默无效
-                        if (checkProgress == null) {
-                            // 校验用 Tasks（打勾的方框），不用 SelectAll：旁边的「全选」已经是它，两个一样的图标挨着分不清
-                            AppIconButton(onClick = { showCheckOptions = true }) {
-                                Icon(MiuixIcons.Tasks, contentDescription = "校验")
-                            }
-                        }
-                        AppIconButton(onClick = { confirmBatchDelete = true }) {
-                            Icon(
-                                MiuixIcons.Delete,
-                                contentDescription = "删除",
-                                tint = MiuixTheme.colorScheme.error,
-                            )
-                        }
-                        Box {
-                            AppIconButton(onClick = { overflowOpen = true }) {
-                                Icon(MiuixIcons.More, contentDescription = "更多")
-                            }
-                            AppDropdownMenu(
-                                expanded = overflowOpen,
-                                onDismissRequest = { overflowOpen = false },
-                                items = listOf(
-                                    AppMenuItem("启用", onClick = {
-                                        overflowOpen = false
-                                        viewModel.setEnabledSelected(true)
-                                    }),
-                                    AppMenuItem("禁用", onClick = {
-                                        overflowOpen = false
-                                        viewModel.setEnabledSelected(false)
-                                    }),
-                                    AppMenuItem("置顶", onClick = { overflowOpen = false; viewModel.moveToTop() }),
-                                    AppMenuItem("置底", onClick = { overflowOpen = false; viewModel.moveToBottom() }),
-                                    AppMenuItem("设置分组", onClick = {
-                                        overflowOpen = false
-                                        groupInput = ""
-                                        showGroupAssign = true
-                                    }),
-                                    AppMenuItem("导出选中", onClick = { overflowOpen = false; viewModel.exportSelected() }),
-                                ),
-                            )
                         }
                     },
                     bottomContent = listHeader,
@@ -295,6 +255,34 @@ fun SourceManageScreen(
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
+        // 批量动作：高频的四个摆出来（图标在上、字在下），低频的收进「更多」。
+        // 校验同普通状态：先挑选项（弹窗按「有选中就只校验选中的」写好了），校验进行中不给
+        floatingToolbar = {
+            BatchActionBar(
+                visible = selectionMode,
+                actions = listOf(
+                    BatchAction(MiuixIcons.Ok, "启用", onClick = { viewModel.setEnabledSelected(true) }),
+                    BatchAction(MiuixIcons.Blocklist, "禁用", onClick = { viewModel.setEnabledSelected(false) }),
+                    BatchAction(
+                        MiuixIcons.Tasks,
+                        "校验",
+                        onClick = { showCheckOptions = true },
+                        enabled = checkProgress == null,
+                    ),
+                    BatchAction(MiuixIcons.Delete, "删除", onClick = { confirmBatchDelete = true }, destructive = true),
+                ),
+                more = listOf(
+                    AppMenuItem("置顶", onClick = viewModel::moveToTop),
+                    AppMenuItem("置底", onClick = viewModel::moveToBottom),
+                    AppMenuItem("设置分组", onClick = {
+                        groupInput = ""
+                        showGroupAssign = true
+                    }),
+                    AppMenuItem("导出选中", onClick = viewModel::exportSelected),
+                ),
+                onHeightChange = { batchBarHeight = it },
+            )
+        },
     ) { padding ->
         if (!sourcesLoaded) {
             // 库还没读回来：先空着，别闪一下「还没有书源」
@@ -341,7 +329,8 @@ fun SourceManageScreen(
                     .pageScroll(),
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + Dimens.gapS,
-                    bottom = padding.calculateBottomPadding(),
+                    // 多选时底部还压着操作条：最后几行要能滚到它上面
+                    bottom = padding.calculateBottomPadding() + if (selectionMode) batchBarHeight else 0.dp,
                 ),
                 overscrollEffect = null,
             ) {
@@ -356,9 +345,8 @@ fun SourceManageScreen(
                             if (selectionMode) viewModel.toggleSelect(source.id)
                             else onOpen(source.id)
                         },
-                        // 长按进多选，和书架的删除手势一致
+                        // 长按进多选（删除、启停、分组都在多选的底部操作条里）
                         onLongClick = { viewModel.toggleSelect(source.id) },
-                        onDelete = { deleteTarget = source },
                         onToggleEnabled = { viewModel.setEnabled(source.id, it) },
                         modifier = Modifier.groupedCardItem(index, visible.size),
                     )
@@ -482,19 +470,6 @@ fun SourceManageScreen(
                     onValueChange = { importUrl = it },
                     placeholder = "https://…/sources.json",
                 )
-            },
-        )
-    }
-
-    deleteTarget?.let { source ->
-        AppAlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = "删除书源",
-            text = "确定删除「${source.name}」吗？",
-            confirmText = "删除",
-            onConfirm = {
-                viewModel.delete(source.id)
-                deleteTarget = null
             },
         )
     }
@@ -635,42 +610,29 @@ private fun SourceListRow(
     selectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onDelete: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val leading: (@Composable () -> Unit)? = if (selectionMode) {
+    // 行尾：平时是启用开关；多选时换成勾选框（HyperOS 编辑模式的勾在行尾，与书架列表一致）。
+    // 从前平时行尾是「删除图标 + 开关」，48dp 的垃圾桶紧挨着开关，挤，也容易手滑点到 —— 删除走多选。
+    // 勾选框纯展示：整行是一个复选语义目标（ContentListItem 的 checked 重载），框自己不可点，读屏不会多一个焦点
+    val trailing: @Composable () -> Unit = if (selectionMode) {
         {
-            // 纯展示：整行是一个复选语义目标（ContentListItem 的 checked 重载），框自己不可点，读屏不会多一个焦点
             Checkbox(
                 state = ToggleableState(selected),
                 onClick = null,
+                modifier = Modifier.clearAndSetSemantics {},
             )
         }
     } else {
-        null
-    }
-    val trailing: (@Composable () -> Unit)? = if (!selectionMode) {
         {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 图标走摘要色：outline / dividerLine 只给边框/分隔线，拿它画可点的图标在浅色下对比度不够
-                AppIconButton(onClick = onDelete) {
-                    Icon(
-                        MiuixIcons.Delete,
-                        contentDescription = "删除",
-                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-                Switch(
-                    checked = source.enabled,
-                    onCheckedChange = onToggleEnabled,
-                    // 行尾开关自己是一个焦点，得有名字：只念「开关，已开启」听不出开的是哪个源
-                    modifier = Modifier.semantics { contentDescription = "启用「${source.name}」" },
-                )
-            }
+            Switch(
+                checked = source.enabled,
+                onCheckedChange = onToggleEnabled,
+                // 行尾开关自己是一个焦点，得有名字：只念「开关，已开启」听不出开的是哪个源
+                modifier = Modifier.semantics { contentDescription = "启用「${source.name}」" },
+            )
         }
-    } else {
-        null
     }
     val supporting: @Composable () -> Unit = {
         Column {
@@ -743,10 +705,8 @@ private fun SourceListRow(
             onCheckedChange = { onClick() },
             onLongClick = onLongClick,
             modifier = modifier,
-            // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
-            colors = ContentListDefaults.colors(containerColor = Color.Transparent),
-            corners = SquircleCorners.Square,
-            leadingContent = leading,
+            // 勾没勾只看行尾的勾选框，行不变色（同书架列表）
+            colors = ContentListDefaults.plainColors(),
             trailingContent = trailing,
             supportingContent = supporting,
             content = headline,
@@ -756,10 +716,6 @@ private fun SourceListRow(
             onClick = onClick,
             onLongClick = onLongClick,
             modifier = modifier,
-            // 底与圆角由外面的卡（groupedCardItem）画；行本身透明、直角，只在多选选中时铺淡强调底
-            colors = ContentListDefaults.colors(containerColor = Color.Transparent),
-            corners = SquircleCorners.Square,
-            leadingContent = leading,
             trailingContent = trailing,
             supportingContent = supporting,
             content = headline,

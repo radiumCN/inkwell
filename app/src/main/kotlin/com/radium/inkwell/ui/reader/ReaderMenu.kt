@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.IconLabelButton
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.settingsCardColor
@@ -90,7 +91,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import com.radium.inkwell.ui.components.AppBottomSheet
@@ -472,7 +472,7 @@ private fun MenuActions(
 }
 
 /**
- * 操作条上的一个动作：图标在上、字在下。走 [AppTextButton]（按下有 Miuix 的压暗反馈，禁用时自动压到 38%）。
+ * 操作条上的一个动作：图标在上、字在下（[IconLabelButton]，多选态的底部操作条也是它）。四格均分整条宽，左右不再加内边距。
  *
  * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、自动翻页 Play/Pause、设置 Tune）：
  * 同一排里混两套线宽一眼就看得出，所以要换就整排一起换。
@@ -485,19 +485,14 @@ private fun BarAction(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    AppTextButton(
+    IconLabelButton(
+        icon = icon,
+        label = label,
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
         contentPadding = PaddingValues(vertical = Dimens.gapXS),
-        contentColor = MiuixTheme.colorScheme.onSurface,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 名字由下面的字给，图标不再单独进读屏
-            Icon(icon, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
-            Text(label, style = MiuixTheme.textStyles.footnote1, maxLines = 1)
-        }
-    }
+    )
 }
 
 @Composable

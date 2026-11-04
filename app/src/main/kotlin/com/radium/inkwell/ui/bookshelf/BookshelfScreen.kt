@@ -12,7 +12,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +76,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.util.BiometricAuth
@@ -93,6 +93,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.ui.components.BatchAction
+import com.radium.inkwell.ui.components.BatchActionBar
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.EmptyState
@@ -110,10 +112,11 @@ import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Hide
-import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
@@ -197,6 +200,8 @@ fun BookshelfScreen(
     val group by viewModel.group.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val selectionMode = selected.isNotEmpty()
+    // 多选态底部操作条占掉的高度（BatchActionBar 量好报上来），垫到书架末尾
+    var batchBarHeight by remember { mutableStateOf(0.dp) }
     // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
     BackHandler(selectionMode) { viewModel.clearSelection() }
     var actionTarget by remember { mutableStateOf<BookEntity?>(null) }
@@ -465,8 +470,8 @@ fun BookshelfScreen(
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
-                // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
-                var overflowOpen by remember { mutableStateOf(false) }
+                // HyperOS 编辑模式：顶栏只留 × · 已选 N 本 · 全选，批量动作在底部的操作条里（见 floatingToolbar）。
+                // 从前四个动作全挤在顶栏，「设置分组」还藏在 ⋮ 里
                 AppToolbar(
                     navigationIcon = {
                         AppIconButton(onClick = viewModel::clearSelection) {
@@ -477,46 +482,6 @@ fun BookshelfScreen(
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
                             Icon(MiuixIcons.SelectAll, contentDescription = "全选")
-                        }
-                        AppIconButton(onClick = { confirmBatchDelete = true }) {
-                            Icon(
-                                MiuixIcons.Delete,
-                                contentDescription = "删除",
-                                tint = MiuixTheme.colorScheme.error,
-                            )
-                        }
-                        Box {
-                            AppIconButton(onClick = { overflowOpen = true }) {
-                                Icon(MiuixIcons.More, contentDescription = "更多")
-                            }
-                            AppDropdownMenu(
-                                expanded = overflowOpen,
-                                onDismissRequest = { overflowOpen = false },
-                                items = buildList {
-                                    add(
-                                        AppMenuItem("设置分组", onClick = {
-                                            overflowOpen = false
-                                            groupInput = ""
-                                            showGroupAssign = true
-                                        }),
-                                    )
-                                    // 隐藏相关只在隐藏区露面 —— 平时菜单里出现「隐藏」等于把功能写在脸上
-                                    if (showHidden) {
-                                        add(
-                                            AppMenuItem("从书架隐藏", onClick = {
-                                                overflowOpen = false
-                                                viewModel.setHiddenSelected(true)
-                                            }),
-                                        )
-                                        add(
-                                            AppMenuItem("取消隐藏", onClick = {
-                                                overflowOpen = false
-                                                viewModel.setHiddenSelected(false)
-                                            }),
-                                        )
-                                    }
-                                },
-                            )
                         }
                     },
                     bottomContent = shelfHeader,
@@ -598,6 +563,26 @@ fun BookshelfScreen(
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
+        floatingToolbar = {
+            BatchActionBar(
+                visible = selectionMode,
+                actions = buildList {
+                    add(
+                        BatchAction(MiuixIcons.Folder, "分组", onClick = {
+                            groupInput = ""
+                            showGroupAssign = true
+                        }),
+                    )
+                    // 隐藏相关只在隐藏区露面 —— 平时这里出现「隐藏」等于把功能写在脸上
+                    if (showHidden) {
+                        add(BatchAction(MiuixIcons.Hide, "隐藏", onClick = { viewModel.setHiddenSelected(true) }))
+                        add(BatchAction(MiuixIcons.Show, "取消隐藏", onClick = { viewModel.setHiddenSelected(false) }))
+                    }
+                    add(BatchAction(MiuixIcons.Delete, "删除", onClick = { confirmBatchDelete = true }, destructive = true))
+                },
+                onHeightChange = { batchBarHeight = it },
+            )
+        },
     ) { padding ->
         // Room 第一帧还没到：先空着。这时 allBooks 的空不代表书架是空的，落进下面的空态
         // 就是每次启动都先闪一下「书架空空如也 / 导入本地书」。本地库通常几十毫秒就回来，转圈也只会一闪
@@ -628,7 +613,8 @@ fun BookshelfScreen(
             // 垫在列表开头，导航栏的高度垫在末尾 —— 书封既能滚到顶栏下面透出来，也能滚到手势条下面，
             // 而第一排、最后一排仍能完整露出来（见 AppScaffold / horizontalOnly）
             val topInset = padding.calculateTopPadding()
-            val bottomInset = padding.calculateBottomPadding()
+            // 多选时底部还压着操作条：最后一排要能滚到它上面
+            val bottomInset = padding.calculateBottomPadding() + if (selectionMode) batchBarHeight else 0.dp
             // Miuix 的下拉刷新（HyperOS 那种把内容往下拽、顶上冒出圆圈与一行状态字）。
             // 状态字默认是英文，这里换成中文 —— 书架下拉干的是「追更」，字也照这个说
             PullToRefresh(
@@ -912,7 +898,6 @@ private fun BookShelfListRow(
     val leadingContent: @Composable () -> Unit = {
         BookShelfListLeading(
             book = book,
-            selected = selected,
             selectionMode = selectionMode,
             anchor = cover,
         )
@@ -985,7 +970,6 @@ private fun BookShelfListRow(
 @Composable
 private fun BookShelfListLeading(
     book: BookEntity,
-    selected: Boolean,
     selectionMode: Boolean,
     anchor: CoverAnchor,
 ) {
@@ -998,19 +982,9 @@ private fun BookShelfListLeading(
         BookCover(
             title = book.title,
             coverModel = book.coverPath,
+            // 多选时勾没勾只看行尾的勾选框（HyperOS 编辑模式），书封不再另描一圈强调色
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (selectionMode && selected) {
-                        Modifier.border(
-                            width = Dimens.gapXS,
-                            color = MiuixTheme.colorScheme.primary,
-                            shape = coverShape,
-                        )
-                    } else {
-                        Modifier
-                    },
-                )
                 .onPlaced { anchor.coordinates = it },
             placeholderChars = 2,
             // 书名是这一行的标题，封面不再进读屏
@@ -1089,39 +1063,28 @@ private fun BookCard(
                 onLongClick = onLongClick,
             )
     ) {
-        // 多选态外圈留出与描边等宽的 padding：未选不画边、已选才描 primary，
-        // 占位却始终在 —— 勾选不会把封面挤小一圈。
-        // （以前给每本都画 outline，整架书像进了铁笼，也不合系统相册那种媒体多选：
-        //  未选只靠角标，已选靠半透明遮罩 + 描边。）
+        // 多选时书封原样大小：勾没勾看右上角的勾选框，已选的再压一层淡淡的强调色（HyperOS 相册多选的样子）。
+        // 从前进多选整架书先缩一圈（给描边让位），已选的再描一道 4dp 的强调色粗边 —— 缩、描、压三层信号叠在一起，
+        // 书架一进多选就像换了一页；粗边配小圆角的封面，也比 HyperOS 的样子重得多
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(3f / 4f)
-                .then(if (selectionMode) Modifier.padding(Dimens.gapXS) else Modifier),
+                .aspectRatio(3f / 4f),
         ) {
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (selectionMode && selected) {
-                            Modifier.border(
-                                width = Dimens.gapXS,
-                                color = MiuixTheme.colorScheme.primary,
-                                shape = coverShape,
-                            )
-                        } else Modifier
-                    )
                     .onPlaced { cover.coordinates = it },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
                 // 卡片下面就印着书名，封面不再进读屏
                 contentDescription = null,
             )
-            // 多选时让位给描边与勾选：选中态才是那时要看的
+            // 多选时让位给勾选：选中态才是那时要看的
             if (!selectionMode) CoverProgressOverlay(book.readingProgress(), coverShape)
-            // 已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
+            // 已选盖一层 primary 半透明：只看右上角那个小勾，书一多就得挨本找
             if (selectionMode && selected) {
                 Box(
                     Modifier
