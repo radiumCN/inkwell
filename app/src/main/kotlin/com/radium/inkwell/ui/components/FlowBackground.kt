@@ -1,7 +1,7 @@
 // 移植自 Miuix 示例 App 的背景特效（compose-miuix-ui/miuix，example/shared/src/commonMain/kotlin/component/effect：
 // BgEffectBackground / BgEffectConfig / BgEffectModifier / BgEffectPainter / OS3BgFrag），
 // Copyright 2026 compose-miuix-ui contributors，Apache License 2.0。
-// 改动：只留 OS3 那套参数与着色器；着色器直接用 Android 的 RuntimeShader（minSdk 35，不必走 Miuix 的跨平台包装）；
+// 改动：只留 OS3 那套参数与着色器；着色器直接用 Android 的 RuntimeShader（minSdk 33，不必走 Miuix 的跨平台包装）；
 // 不再按「是否双栏」而是按最短边判断平板；动画跟系统的「移除动画」开关走。
 package com.radium.inkwell.ui.components
 
@@ -42,7 +42,7 @@ import kotlin.math.sin
  *
  * 动画：位置每帧挪一点（最多 60 帧 / 秒），颜色每隔几秒用一段很慢的弹簧换到下一组。这两样是这块背景自己的节奏
  * （照搬 Miuix 示例），不是界面动效，所以不读 AppTheme.motionScheme；系统关了动画时整块定格在第一帧。
- * 着色器要 API 33，我们 minSdk 35，不必做降级。
+ * 着色器要 API 33，我们 minSdk 33，不必做降级。
  *
  * @param bgModifier 挂在画背景的那一层上，不含 [content]：要拿这块背景做毛玻璃取样时在这里挂 layerBackdrop
  */

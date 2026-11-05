@@ -16,7 +16,7 @@ import java.util.zip.ZipOutputStream
  *
  * 为什么是 logcat 而不是自己包一层 Logger：要的是「完整运行日志」—— 系统替我们打的
  * （Activity 生命周期、OkHttp/Coil 的报错、StrictMode、AndroidRuntime 的崩溃堆栈）
- * 一样有价值，自己的 Logger 只收得到自己写的那几行。minSdk 35，`--pid` 一定可用，
+ * 一样有价值，自己的 Logger 只收得到自己写的那几行。`--pid` 从 Android 7 起就有（minSdk 33），
  * 读本进程的日志也不需要任何权限。
  *
  * 「从启动起」靠的是 logcat 的默认行为：不带 `-d` 时先把缓冲区里已有的内容吐出来再跟着往下流。

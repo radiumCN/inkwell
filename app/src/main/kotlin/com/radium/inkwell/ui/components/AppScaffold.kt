@@ -43,7 +43,7 @@ internal val LocalBarBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null 
  * 外层照旧 `padding(padding)` 整块往下推的话，顶栏下面永远只有页面底色，模糊等于没做。
  * 不滚动的居中态（加载、空态、错误态）照旧整块 `padding(padding)`。
  *
- * 模糊要 RuntimeShader（API 33），我们 minSdk 35，不必做降级。
+ * 模糊要 RuntimeShader（API 33），我们 minSdk 33，不必做降级。
  *
  * @param blurBars false 时退回实色顶栏：内容里有 WebView 这类不在 Compose 里画的东西时关掉 ——
  *   录不进图层，顶栏下面会是一片空白

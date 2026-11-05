@@ -259,10 +259,9 @@ abstract class InkwellDb : RoomDatabase() {
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("DELETE FROM book_source")
-                // 历史列随原生化下线（minSdk 35 的 SQLite 支持 DROP COLUMN）。
-                // 只删 book_source 的；rss_source 的同名列仍在用，不动。
-                connection.execSQL("ALTER TABLE book_source DROP COLUMN sourceJson")
-                connection.execSQL("ALTER TABLE book_source DROP COLUMN converterVersion")
+                // 历史列随原生化下线。只删 book_source 的；rss_source 的同名列仍在用，不动。
+                // 不直接写 DROP COLUMN：Android 13 的 SQLite（3.32）没有它，见 dropColumns
+                connection.dropColumns("book_source", setOf("sourceJson", "converterVersion"))
             }
         }
 
