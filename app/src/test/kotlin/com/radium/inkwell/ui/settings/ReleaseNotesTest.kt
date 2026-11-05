@@ -1,7 +1,9 @@
 package com.radium.inkwell.ui.settings
 
+import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class ReleaseNotesTest {
 
@@ -72,5 +74,16 @@ class ReleaseNotesTest {
             listOf(NoteSection(null, listOf("这次没有 fix：只是调整"))),
             parseReleaseNotes("这次没有 fix：只是调整"),
         )
+    }
+
+    /** 关于页「v… 更新内容」头部的发布日期：今年的不写年份，认不出的不显示 */
+    @Test
+    fun `发布日期标签`() {
+        val today = LocalDate.of(2026, 11, 5)
+        assertEquals("11 月 5 日发布", releaseDateLabel("2026-11-05", today))
+        assertEquals("2025 年 12 月 30 日发布", releaseDateLabel("2025-12-30\n", today))
+        assertNull(releaseDateLabel(null, today))
+        assertNull(releaseDateLabel("", today))
+        assertNull(releaseDateLabel("Wed Nov 5", today))
     }
 }

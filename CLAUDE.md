@@ -183,7 +183,8 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 
 - 版本号**唯一来源**：`gradle/libs.versions.toml` 的 `inkwell = "x.y.z"`。CI 校验 tag 必须等于 `v$版本`。
 - 发布 = 打**附注 tag** `vx.y.z` 并推送 → 触发 `.github/workflows/release.yml`。
-- **tag 注解正文 = GitHub Release 正文 = 应用内更新弹窗内容**。CI 会自动剔掉 `Co-Authored-By`/`Signed-off-by` trailer 和 `Full Changelog`。
+- **tag 注解正文 = GitHub Release 正文 = 应用内更新弹窗内容 = 关于页点「版本」看到的内容**。CI 会自动剔掉 `Co-Authored-By`/`Signed-off-by` trailer 和 `Full Changelog`。
+- 关于页那份是打包前写进安装包的（release.yml 的「Extract tag message」把正文与 tag 日期写进 `app/src/main/assets/release/`，该目录不入库；读取见 `BundledReleaseNotes`）：所以那一步**必须在 `assembleRelease` 之前**。本地编的包没有它，弹窗里写「这个安装包没有附带更新说明」。
 - 带 `-` 后缀的 tag（如 `v0.1.4-beta.1`）自动标记为**预发布**，只推测试渠道。
 
 ### 发行说明格式

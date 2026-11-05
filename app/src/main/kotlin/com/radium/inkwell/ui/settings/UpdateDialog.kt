@@ -57,6 +57,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /*
  * 更新弹窗的三块：头部（[UpdateHero]）、更新说明（[ReleaseNotesPanel]）、下载进度（[UpdateDownloadStatus]）。
+ * 关于页点「版本」看这一版的说明，用的是同一套：头部换成 [CurrentVersionHero]，说明面板原样复用。
  * 外壳仍是 AppAlertDialog（标题传 null、内容区不替我们滚动），收起、按钮、模糊背景都照旧走封装。
  *
  * 从前是 Miuix 弹窗的默认排法：居中标题 + 一整段居中的纯文本。Release 正文是给纯文本渲染写的
@@ -72,20 +73,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 internal fun UpdateHero(currentVersion: String, info: UpdateInfo, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    // 查组件状态是一次跨进程调用：弹窗开着时桌面图标不会变，查一次就够
-    val icon = remember(context) { AppIconManager.current(context) }
     val scheme = MiuixTheme.colorScheme
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Image(
-            painter = painterResource(icon.preview),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(Dimens.dialogHeroIcon)
-                .squircleClip(AppShapes.radiusLarge)
-                .squircleBorder(Dimens.strokeThin, scheme.dividerLine, AppShapes.radiusLarge),
-        )
+        HeroIcon()
         Text(
             "发现新版本",
             style = MiuixTheme.textStyles.title3,
@@ -126,6 +116,53 @@ internal fun UpdateHero(currentVersion: String, info: UpdateInfo, modifier: Modi
 }
 
 /**
+ * 关于页点「版本」弹出的头部：和 [UpdateHero] 同一个样子（一看就是一家的），写的是这一版本身 ——
+ * 「v0.5.1-beta.9 更新内容」、测试版 / 正式版、发布日期（[dateLabel] 为 null 不画）。
+ */
+@Composable
+internal fun CurrentVersionHero(version: String, dateLabel: String?, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        HeroIcon()
+        Text(
+            "v$version 更新内容",
+            style = MiuixTheme.textStyles.title3,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .padding(top = Dimens.gapM)
+                .semantics { heading() },
+        )
+        Row(
+            Modifier.padding(top = Dimens.gapS),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+        ) {
+            // 同发版约定：版本号带 '-' 的是预发布（0.5.1-beta.9）
+            UpdateTag(if ('-' in version) "测试版" else "正式版", accent = true)
+            dateLabel?.let { UpdateTag(it, accent = false) }
+        }
+    }
+}
+
+/**
+ * 头部的图标：取 [AppIconManager.current]（桌面上摆着的那个），裁成与 Miuix 卡片同档的平滑圆角，再描一圈细线 ——
+ * 几款图标的底色都很浅（米白、浅灰），白弹窗上没有这圈就看不出边。
+ */
+@Composable
+private fun HeroIcon() {
+    val context = LocalContext.current
+    // 查组件状态是一次跨进程调用：弹窗开着时桌面图标不会变，查一次就够
+    val icon = remember(context) { AppIconManager.current(context) }
+    Image(
+        painter = painterResource(icon.preview),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(Dimens.dialogHeroIcon)
+            .squircleClip(AppShapes.radiusLarge)
+            .squircleBorder(Dimens.strokeThin, MiuixTheme.colorScheme.dividerLine, AppShapes.radiusLarge),
+    )
+}
+
+/**
  * 小标签：头部的「正式版」「9.2 MB」、更新说明的组标题。强调的那种是淡强调底 + 强调色字（与选中 chip 同一对槽，
  * 对比度在 AppThemesTest 里钉着），不强调的是页面底 + 摘要字。8dp 圆角的小面，按 CLAUDE.md 用普通 Shape 不开 squircle。
  */
@@ -151,7 +188,12 @@ private fun UpdateTag(text: String, accent: Boolean) {
  * 糊进面板底色，滚过了顶边也一样 —— 一眼看得出能滚，字也不会在面板边上被齐刷刷切断。滚到头的那一边不糊。
  */
 @Composable
-internal fun ReleaseNotesPanel(notes: String, modifier: Modifier = Modifier) {
+internal fun ReleaseNotesPanel(
+    notes: String,
+    modifier: Modifier = Modifier,
+    /** 说明是空的时候写什么。关于页：本地编的包没带说明，说清是这个包的事，别像是这一版没改东西 */
+    emptyText: String = "暂无更新说明",
+) {
     val sections = remember(notes) { parseReleaseNotes(notes) }
     val panel = MiuixTheme.colorScheme.surface
     val scroll = rememberScrollState()
@@ -173,7 +215,7 @@ internal fun ReleaseNotesPanel(notes: String, modifier: Modifier = Modifier) {
             ) {
                 if (sections.isEmpty()) {
                     Text(
-                        "暂无更新说明",
+                        emptyText,
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )

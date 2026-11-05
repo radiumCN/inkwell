@@ -1,5 +1,8 @@
 package com.radium.inkwell.ui.settings
 
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
+
 /**
  * 更新说明里的一组：「新功能」「修复」「优化」…；[title] 为 null 是没带类型前缀的那些行。
  */
@@ -48,3 +51,16 @@ private val SECTION_TITLES = mapOf(
     "docs" to "文档",
     "文档" to "文档",
 )
+
+/**
+ * 「11 月 5 日发布」；不是今年的带上年份。[date] 是 tag 日期（`yyyy-MM-dd`），认不出返回 null（不显示这个标签）。
+ */
+internal fun releaseDateLabel(date: String?, today: LocalDate = LocalDate.now()): String? {
+    val d = try {
+        LocalDate.parse(date?.trim() ?: return null)
+    } catch (_: DateTimeParseException) {
+        return null
+    }
+    val day = "${d.monthValue} 月 ${d.dayOfMonth} 日发布"
+    return if (d.year == today.year) day else "${d.year} 年 $day"
+}

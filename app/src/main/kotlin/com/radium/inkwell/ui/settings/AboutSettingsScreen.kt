@@ -14,6 +14,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -31,7 +33,14 @@ import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.update.BundledReleaseNotes
 import com.radium.inkwell.update.UpdateChecker
+import com.radium.inkwell.update.loadBundledReleaseNotes
+import com.radium.inkwell.ui.components.AppAlertDialog
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import com.radium.inkwell.ui.components.AppScaffold
@@ -74,7 +83,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 网页版 / 官网，与 README 里的 book.skylark.run 同一处 */
 private const val SITE_URL = "https://book.skylark.run"
 
-/** 连点版本号几下打开开发者模式（同系统设置的 7 下）；从第 [DEV_TAPS_HINT_FROM] 下起提示还差几下 */
+/**
+ * 连点头部的版本号几下打开开发者模式（同系统设置的 7 下）；从第 [DEV_TAPS_HINT_FROM] 下起提示还差几下。
+ * 从前连点的是「应用信息」里的「版本」行，那一行现在点开是这一版的更新内容，两件事不抢同一次点击。
+ */
 private const val DEV_TAPS = 7
 private const val DEV_TAPS_HINT_FROM = 3
 /** 两下之间超过这个间隔就从头数：隔了半天又点一下，不该接着上次的数 */
@@ -110,6 +122,30 @@ fun AboutSettingsScreen(
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"
     }
+    val onVersionTap: () -> Unit = {
+        if (developerMode) {
+            messages.emit("已处于开发者模式")
+        } else {
+            val now = SystemClock.uptimeMillis()
+            versionTaps = if (now - lastTapAt > DEV_TAP_WINDOW_MS) 1 else versionTaps + 1
+            lastTapAt = now
+            val left = DEV_TAPS - versionTaps
+            when {
+                left <= 0 -> {
+                    versionTaps = 0
+                    scope.launch { appPrefs.setDeveloperMode(true) }
+                    messages.emit("已开启开发者模式")
+                }
+                versionTaps >= DEV_TAPS_HINT_FROM ->
+                    messages.emit("再点 $left 次进入开发者模式")
+            }
+        }
+    }
+    // 这一版的更新说明（随安装包带的，见 BundledReleaseNotes）。外层 null = 还在读；读完了 notes 为 null = 这个包没带
+    val bundledNotes by produceState<NotesLoad?>(null, context) {
+        value = NotesLoad(loadBundledReleaseNotes(context.assets))
+    }
+    var showNotes by remember { mutableStateOf(false) }
 
     val pageColor = settingsPageColor()
     val scroll = rememberScrollState()
@@ -149,6 +185,7 @@ fun AboutSettingsScreen(
                 version = currentVersion,
                 topInset = padding.calculateTopPadding(),
                 pageColor = pageColor,
+                onVersionTap = onVersionTap,
                 modifier = Modifier.onSizeChanged { heroHeight = it.height },
             )
             SectionHeader("支持")
@@ -173,28 +210,11 @@ fun AboutSettingsScreen(
             }
             SectionHeader("应用信息")
             SettingGroup {
+                // 行尾带 ›，点开就是这一版改了什么（从前点了只在数「再点 N 次进入开发者模式」）
                 SettingRow(
                     title = "版本",
                     value = "v$currentVersion",
-                    onClick = {
-                        if (developerMode) {
-                            messages.emit("已处于开发者模式")
-                        } else {
-                            val now = SystemClock.uptimeMillis()
-                            versionTaps = if (now - lastTapAt > DEV_TAP_WINDOW_MS) 1 else versionTaps + 1
-                            lastTapAt = now
-                            val left = DEV_TAPS - versionTaps
-                            when {
-                                left <= 0 -> {
-                                    versionTaps = 0
-                                    scope.launch { appPrefs.setDeveloperMode(true) }
-                                    messages.emit("已开启开发者模式")
-                                }
-                                versionTaps >= DEV_TAPS_HINT_FROM ->
-                                    messages.emit("再点 $left 次进入开发者模式")
-                            }
-                        }
-                    },
+                    onClick = { showNotes = true },
                     position = SettingGroupPosition.First,
                 )
                 SettingRow(
@@ -218,7 +238,35 @@ fun AboutSettingsScreen(
             Spacer(Modifier.height(Dimens.gapXL))
         }
     }
+
+    if (showNotes) {
+        val load = bundledNotes
+        // 和「发现新版本」弹窗同一套排法：头部 + 分组的说明面板 + 一个按钮
+        AppAlertDialog(
+            onDismissRequest = { showNotes = false },
+            title = null,
+            confirmText = "知道了",
+            dismissText = null,
+            onConfirm = { showNotes = false },
+            scrollable = false,
+            content = {
+                CurrentVersionHero(
+                    version = currentVersion,
+                    dateLabel = releaseDateLabel(load?.notes?.date),
+                    modifier = Modifier.padding(bottom = Dimens.gapXS),
+                )
+                ReleaseNotesPanel(
+                    notes = load?.notes?.notes.orEmpty(),
+                    // 还在读（几毫秒）就先空着，别闪一下「没有说明」
+                    emptyText = if (load == null) "" else "这个安装包没有附带更新说明",
+                )
+            },
+        )
+    }
 }
+
+/** 读随包说明的结果；[notes] 为 null = 这个包没带（本地编的） */
+private class NotesLoad(val notes: BundledReleaseNotes?)
 
 /**
  * 关于页头部：HyperOS 流动彩色底（[FlowBackground]）上放当前桌面图标、应用名、版本，底边化进页面底色。
@@ -230,7 +278,14 @@ fun AboutSettingsScreen(
  * 图标取 [AppIconManager.current]（桌面上摆着的那款），裁成平滑圆角。
  */
 @Composable
-private fun AboutHero(version: String, topInset: Dp, pageColor: Color, modifier: Modifier = Modifier) {
+private fun AboutHero(
+    version: String,
+    topInset: Dp,
+    pageColor: Color,
+    /** 连点版本号进开发者模式（见 [DEV_TAPS]） */
+    onVersionTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val icon = remember(context) { AppIconManager.current(context) }
     val dark = pageColor.luminance() < 0.5f
@@ -252,7 +307,8 @@ private fun AboutHero(version: String, topInset: Dp, pageColor: Color, modifier:
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(top = topInset + Dimens.gapXXL, bottom = Dimens.gapXXL + Dimens.gapXL),
+                // 下边距比从前少一截：版本号那行撑到了触控下限 48dp，多出来的高度从这里还回去
+                .padding(top = topInset + Dimens.gapXXL, bottom = Dimens.gapXXL + Dimens.gapS),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
@@ -278,12 +334,26 @@ private fun AboutHero(version: String, topInset: Dp, pageColor: Color, modifier:
                         contentBlendMode = BlendMode.DstIn,
                     ),
             )
-            Text(
-                "v$version",
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = Dimens.gapXS),
-            )
+            // 连点进开发者模式的地方。不给按压反馈：这是个彩蛋，点一下就闪一块灰反倒像坏了；
+            // 可点区撑到触控下限，读屏照样念得到、点得到
+            Box(
+                Modifier
+                    .heightIn(min = Dimens.touchTarget)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onVersionTap,
+                    )
+                    .padding(horizontal = Dimens.gapM),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "v$version",
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
         }
     }
 }
