@@ -155,4 +155,6 @@ object Dimens {
     val sliderCompact = 20.dp
     /** 主题页滑块左侧标签列宽，避免「字号」「行距」和滑块对不齐 */
     val sliderLabelWidth = 120.dp
+    /** 阅读页右边缘调亮度时浮出的那根竖条（见 QuickAdjustOverlay）：手指滑过半屏多，竖条有个能读的长度就够 */
+    val brightnessHudHeight = 160.dp
 }

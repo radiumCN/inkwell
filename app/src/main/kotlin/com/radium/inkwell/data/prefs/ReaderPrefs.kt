@@ -72,6 +72,8 @@ class ReaderPrefs(
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
         val SCROLL_CLICK_TO_FLIP = booleanPreferencesKey("scroll_click_to_flip")
+        val PINCH_FONT_SIZE = booleanPreferencesKey("pinch_font_size")
+        val EDGE_BRIGHTNESS = booleanPreferencesKey("edge_brightness")
         /** 九宫格点击分区，见 [TapZones.encode] */
         val TAP_ZONES = stringPreferencesKey("tap_zones")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
@@ -133,6 +135,8 @@ class ReaderPrefs(
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
             scrollClickToFlip = p[Keys.SCROLL_CLICK_TO_FLIP] ?: false,
+            pinchFontSize = p[Keys.PINCH_FONT_SIZE] ?: true,
+            edgeBrightness = p[Keys.EDGE_BRIGHTNESS] ?: true,
             tapZones = TapZones.decode(p[Keys.TAP_ZONES]),
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
@@ -180,6 +184,8 @@ class ReaderPrefs(
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
             p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
+            p[Keys.PINCH_FONT_SIZE] = settings.pinchFontSize
+            p[Keys.EDGE_BRIGHTNESS] = settings.edgeBrightness
             p[Keys.TAP_ZONES] = settings.tapZones.encode()
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
@@ -297,6 +303,8 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "volume_key_flip" to s.volumeKeyFlip.toString(),
             "flip_haptic" to s.flipHaptic.toString(),
             "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
+            "pinch_font_size" to s.pinchFontSize.toString(),
+            "edge_brightness" to s.edgeBrightness.toString(),
             "tap_zones" to s.tapZones.encode(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
@@ -346,6 +354,8 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
             flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
             scrollClickToFlip = v["scroll_click_to_flip"]?.toBooleanStrictOrNull() ?: base.scrollClickToFlip,
+            pinchFontSize = v["pinch_font_size"]?.toBooleanStrictOrNull() ?: base.pinchFontSize,
+            edgeBrightness = v["edge_brightness"]?.toBooleanStrictOrNull() ?: base.edgeBrightness,
             // 键缺失（旧版本的备份）或读不懂（新版本加了动作）→ 保留本地，别冲成默认
             tapZones = TapZones.decodeOrNull(v["tap_zones"]) ?: base.tapZones,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,

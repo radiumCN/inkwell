@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowBottomSheet
@@ -66,6 +67,8 @@ interface AppSheetScope {
  *   （内容里的比面板自己的后注册，优先拿到返回事件）
  * @param startAction 标题行左侧的动作位（HyperOS 编辑面板的「×」）。要配 [title] 才有那一行
  * @param endAction 标题行右侧的动作位（HyperOS 编辑面板的「✓」，保存 / 确定）。要配 [title] 才有那一行
+ * @param dragHandleColor 顶上拖动条的颜色。只有阅读设置面板会换：拖着字号 / 亮度滑轨时面板整个让开（底色、拖动条一起淡掉），
+ *   只留手上那一条，整屏正文都是预览
  */
 @Composable
 fun AppBottomSheet(
@@ -78,6 +81,7 @@ fun AppBottomSheet(
     allowDismiss: Boolean = true,
     startAction: (@Composable AppSheetScope.() -> Unit)? = null,
     endAction: (@Composable AppSheetScope.() -> Unit)? = null,
+    dragHandleColor: Color = BottomSheetDefaults.dragHandleColor(),
     content: @Composable AppSheetScope.() -> Unit,
 ) {
     var show by remember { mutableStateOf(true) }
@@ -100,6 +104,7 @@ fun AppBottomSheet(
         backgroundColor = backgroundColor,
         enableWindowDim = enableWindowDim,
         allowDismiss = allowDismiss,
+        dragHandleColor = dragHandleColor,
         // 左右边距由内容按 cardMargin() 自己留（见上面「面板里怎么排」）：输入框、卡片离面板边 24dp，
         // 卡里的行再自带 16dp。交给 Miuix 留的话，分组卡、groupedCardItem 自带的外边距会再叠一层
         insideMargin = DpSize(0.dp, 0.dp),

@@ -1,7 +1,33 @@
 package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.ui.components.sheetBottomInset
-import com.radium.inkwell.ui.components.TonalButton
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BrightnessHigh
+import androidx.compose.material.icons.outlined.BrightnessLow
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
+import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.theme.AppTheme
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
+import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.runtime.mutableFloatStateOf
+import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,7 +50,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -33,7 +58,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,7 +71,6 @@ import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSlider
 import androidx.compose.animation.AnimatedVisibility
 import com.radium.inkwell.ui.components.AppTabContent
-import com.radium.inkwell.ui.components.AppTabRow
 import com.radium.inkwell.ui.components.bottomBarEnter
 import com.radium.inkwell.ui.components.bottomBarExit
 import com.radium.inkwell.ui.components.scrimEnter
@@ -312,14 +335,43 @@ fun ReaderMenu(
     if (showSettings) {
         // 不压暗正文：面板只占半屏，上面露出来的正文就是排版的实时预览；隔着一层黑看，行距字距勉强看得出，
         // 纸色和亮度根本没法判断。底与菜单的浮层同色（readerOverlayColor，与纸面差一档 —— 同色的话面板上沿等于不存在）。
-        // 导航栏高度由面板内容自己垫在滚动末尾（见 TypographyPanel），这里不垫
+        // 导航栏高度由面板内容自己垫在滚动末尾（见 TypographyPanel），这里不垫。
+        //
+        // 面板在哪一页、手上正拖着哪条滑轨都提到这一层：面板的标题行（二级页的 ‹ 和页名）、底色、拖动条都跟着它们变。
+        // 拖着字号 / 亮度时面板让开 —— 底色和拖动条淡掉，只剩手上那一条（见 TypographyPanel）
+        var page by remember { mutableStateOf(SettingsPage.Main) }
+        var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
+        val effects = AppTheme.motionScheme.defaultEffectsSpec<Color>()
+        val overlayColor = readerOverlayColor()
+        val handleColor = BottomSheetDefaults.dragHandleColor()
+        val sheetColor by animateColorAsState(
+            if (dragging != null) overlayColor.copy(alpha = 0f) else overlayColor,
+            effects,
+            label = "settingsSheet",
+        )
+        val sheetHandle by animateColorAsState(
+            if (dragging != null) handleColor.copy(alpha = 0f) else handleColor,
+            effects,
+            label = "settingsHandle",
+        )
         AppBottomSheet(
             onDismissRequest = { showSettings = false },
-            backgroundColor = readerOverlayColor(),
+            backgroundColor = sheetColor,
             padNavigationBar = false,
             enableWindowDim = false,
+            title = page.title,
+            startAction = if (page != SettingsPage.Main) {
+                { BackButton(onClick = { page = SettingsPage.Main }) }
+            } else {
+                null
+            },
+            dragHandleColor = sheetHandle,
         ) {
             TypographyPanel(
+                page = page,
+                onOpen = { page = it },
+                dragging = dragging,
+                onDragging = { dragging = it },
                 settings = session.settings,
                 onUpdate = onUpdateSettings,
                 onPreview = onPreviewSettings,
@@ -643,26 +695,31 @@ private val MARGIN_H_OPTIONS = listOf(
 )
 
 /**
- * 阅读设置面板。
+ * 阅读设置面板：一级页 + 三个二级页（排版 / 翻页 / 更多），**全在这一个面板里**。
  *
- * 分四页，按「改的频率」而不是按「技术类别」分：
- * - 排版：字号、行距、亮度、字体、纸张、方案 —— 最常调的，打开面板第一眼就该是它们
- * - 版式：段距、字距、缩进、对齐、标题与边距 —— 调一次就很少再动的细节
- * - 翻页：翻页方式、自动翻页间隔、音量键翻页、点击区域
- * - 更多：设一次基本不再动的（预加载、屏幕常亮）
+ * - **一级页**放最常调、要边看边调的：亮度、字号、行距、纸张、字体，一屏放下；底下三个入口进二级页（见 [MainPage]）。
+ *   从前是四个页签：页签只是把设置分成四堆，最常调的和一年调一次的都得先挑对页签；「排版」「版式」两个近义词更是猜不出哪页放什么。
+ * - **二级页**从右滑入，标题行左边 ‹ 返回、中间页名（HyperOS 面板标准的标题行），系统返回键也是先回一级。
+ *   二级页还在这个面板里、正文照样露在上面 —— 段距、边距这些细节也是边调边看，不用进单独的设置页。
+ * - **面板定高**：一级页的标题行只有 Miuix 那 18dp 留白，二级页多一个返回键（48dp），内容区相应矮 48dp，
+ *   进出二级页面板总高不变、不跳。
+ * - **拖滑块时面板让开**（[dragging]）：手按在字号或亮度滑轨上拖起来，面板底色、拖动条和别的设置项一起淡掉，
+ *   只剩手上那一条浮在原位，整屏正文都是预览；松手回来。HyperOS 控制中心拖亮度就是这样。
  *
  * 层次靠三档色阶拉开（见 ReaderThemeScope）：面板本身与纸面差一档（[readerOverlayColor]），
- * 设置项收进分组卡（[ReaderGroup]，[readerCardColor]），卡里的分段按钮未选中再差一档、选中的实心填强调色。从前是十几组「小标题 + 一排 chip」平铺在纸上，
- * 每组长得一模一样，选中的 chip 只是一层淡底，一屏看下来没有任何东西跳出来。
+ * 设置项收进分组卡（[ReaderGroup]，[readerCardColor]），卡里的分段按钮未选中再差一档、选中的实心填强调色。
  *
  * **只占半屏、不压暗正文**：调排版要看得见效果。从前面板固定 560dp 高、底下还压着一层黑，
  * 改行距字距时正文被盖住大半，纸色和亮度隔着蒙层更是没法判断。现在上面露出来的正文就是实时预览。
  *
- * Tab 与切换过渡都走 [AppTabRow] / [AppTabContent]（`ui/components`）—— 全应用同一套形态
- * 与节奏，别在这里手写 TabRow。
+ * 页与页之间的过渡走 [AppTabContent]（轻横移 + 淡入淡出，与全应用的页签切换同一套节奏）。
  */
 @Composable
 private fun TypographyPanel(
+    page: SettingsPage,
+    onOpen: (SettingsPage) -> Unit,
+    dragging: SettingsSlider?,
+    onDragging: (SettingsSlider?) -> Unit,
     settings: ReaderSettings,
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
@@ -671,44 +728,56 @@ private fun TypographyPanel(
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
 ) {
-    var tab by remember { mutableIntStateOf(0) }
-    val scroll = rememberScrollState()
-    // 换 tab 把滚动复位：否则从「排版」滚到一半切到「翻页」，人会落在空白里发愣
-    LaunchedEffect(tab) { scroll.scrollTo(0) }
+    // 二级页上按返回先回一级。内容里的比面板自己的后注册，先拿到返回事件；一级页上不拦，返回照旧收起面板
+    val backState = rememberNavigationEventState(currentInfo = NavigationEventInfo.None)
+    NavigationBackHandler(
+        state = backState,
+        isBackEnabled = page != SettingsPage.Main,
+        onBackCompleted = { onOpen(SettingsPage.Main) },
+    )
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
     // 内容区定高（别用 heightIn(max)：那只是上限，内容矮时面板跟着缩，切到长的那页又被顶起来）。
-    // 按窗口比例取，大屏封顶：加上 Tab 与拖拽把手，整个面板约半屏
-    val contentHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight)
+    // 按窗口比例取、大屏封顶，再加回从前页签占的那一行（一级页正好一屏放下）；二级页的标题行高出一个返回键，内容区让出同样的高度
+    val mainHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight) + Dimens.touchTarget
+    val contentHeight = if (page == SettingsPage.Main) mainHeight else mainHeight - Dimens.touchTarget
 
-    Column(Modifier.fillMaxWidth()) {
-        // TabRow 钉在顶不滚，只让下面的内容滚。左右与下面的分组卡对齐（面板里的卡离两边 cardMargin；从前贴着面板两边，
-        // 「排版」「更多」两格被面板边切掉一截）。槽是 surfaceContainerHighest（比面板深一档），
-        // 浮起的那一格是卡片色 —— 和下面卡里分段按钮的槽同一种长相
-        AppTabRow(
-            titles = SETTINGS_TABS,
-            selectedIndex = tab,
-            onSelect = { tab = it },
-            modifier = Modifier.padding(horizontal = cardMargin()),
-        )
-        AppTabContent(
-            targetState = tab,
-            label = "readerSettingsTab",
-            modifier = Modifier
-                .fillMaxWidth()
-                // 导航栏高度加进定高、也垫在滚动内容末尾：面板铺到屏幕底、设置项滚到手势条下面，看得见的高度不变
-                .height(contentHeight + sheetBottomInset())
+    AppTabContent(
+        targetState = page.ordinal,
+        label = "readerSettingsPage",
+        modifier = Modifier
+            .fillMaxWidth()
+            // 导航栏高度加进定高、也垫在滚动内容末尾：面板铺到屏幕底、设置项滚到手势条下面，看得见的高度不变
+            .height(contentHeight + sheetBottomInset()),
+    ) { index ->
+        val current = SettingsPage.entries[index]
+        // 每页自己一个滚动状态：进出二级页都从顶上开始，不会落在上一页滚到的半截
+        Column(
+            Modifier
+                .fillMaxSize()
                 .pageScroll()
-                .verticalScroll(scroll, overscrollEffect = null)
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(horizontal = cardMargin())
-                .padding(top = Dimens.gapM, bottom = Dimens.gapXXL + sheetBottomInset()),
-        ) { current ->
-            Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapL)) {
-                when (current) {
-                    0 -> LayoutTab(settings, onUpdate, onPreview, onCommit, typography)
-                    1 -> StyleTab(settings, onUpdate)
-                    2 -> FlipTab(settings, onUpdate)
-                    else -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+                .padding(bottom = Dimens.gapXXL + sheetBottomInset()),
+            // 一级页要一屏放下，卡与卡之间收紧一档
+            verticalArrangement = Arrangement.spacedBy(if (current == SettingsPage.Main) Dimens.gapM else Dimens.gapL),
+        ) {
+            when (current) {
+                SettingsPage.Main -> MainPage(
+                    settings = settings,
+                    onUpdate = onUpdate,
+                    onPreview = onPreview,
+                    onCommit = onCommit,
+                    typography = typography,
+                    dragging = dragging,
+                    onDragging = onDragging,
+                    onOpen = onOpen,
+                )
+                SettingsPage.Typeset -> {
+                    LayoutSchemeSection(settings, typography)
+                    TypesetTab(settings, onUpdate)
                 }
+                SettingsPage.Flip -> FlipTab(settings, onUpdate)
+                SettingsPage.More -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
         }
     }
@@ -718,23 +787,42 @@ private fun TypographyPanel(
  * 设置面板里的一张分组卡：标题在卡外，用次要文字色（不跟选中态抢强调色）；内容在卡里（底色见 [readerCardColor]）。
  * 卡内的行自己带左右内缩（[ReaderRow] / [ReaderBlock] / 分组 [SwitchRow] 都是 listHorizontal），
  * 卡本身只给上下一点留白。
+ *
+ * @param trailing 标题行尾的文字按钮（字体的「导入」、排版方案的「存为方案」）。动作放这儿，卡里只剩选项：
+ *   从前「导入字体」是 chip 条末尾的一个 chip，和「默认」「衬线」长得一模一样，看着像一款叫「导入字体」的字。
+ *   有它时标题行垫到触控高度（同 SectionHeader），按钮的字右边对齐卡里的字
+ * @param color 卡片底色。只有一级页会换：拖着字号 / 亮度时卡片淡掉（见 [MainPage]）
  */
 @Composable
-private fun ReaderGroup(
+internal fun ReaderGroup(
     title: String? = null,
+    trailing: (@Composable RowScope.() -> Unit)? = null,
+    color: Color = readerCardColor(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column {
         if (title != null) {
-            Text(
-                title,
-                style = MiuixTheme.textStyles.body2,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier
-                    .padding(start = Dimens.listHorizontal, bottom = Dimens.gapS)
-                    .semantics { heading() },
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = Dimens.listHorizontal,
+                        end = if (trailing != null) Dimens.listHorizontal - Dimens.gapM else Dimens.listHorizontal,
+                        bottom = if (trailing != null) 0.dp else Dimens.gapS,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    title,
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { heading() },
+                )
+                trailing?.invoke(this)
+            }
         }
         // Miuix 的卡片（squircle 圆角，和面板、按钮、分段同一种弯法）。从前是 clip(RoundedCornerShape)，
         // 普通圆弧夹在一堆 squircle 中间，几种圆角放一起就显得不统一
@@ -742,7 +830,7 @@ private fun ReaderGroup(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = AppShapes.radiusLarge,
             insideMargin = PaddingValues(vertical = Dimens.gapXS),
-            colors = CardDefaults.defaultColors(color = readerCardColor()),
+            colors = CardDefaults.defaultColors(color = color),
             content = content,
         )
     }
@@ -814,132 +902,305 @@ private fun SegmentRow(
 }
 
 /**
- * [onPreview] / [onCommit]：连续拖动的滑块（纸色、亮度）拖着时只预览、松手才落库，
- * 见 [ReaderViewModel.previewSettings]。点一下就定的项照旧走 [onUpdate]。
+ * 一级页：最常调、要边看边调的五样 + 进二级页的三个入口，一屏放下。
+ *
+ * - 第一张卡：亮度、字号两条**拉满宽的滑轨**（[BrightnessRow]、[FontSizeRow]）+ 行距。
+ * - 第二张卡：纸张色板 + 字体条，都是一点就换（字体条见 [FontSection]）。
+ * - 入口：排版 › 翻页 › 更多 ›（[PageLinks]）。
+ *
+ * [dragging] 不为 null（手正拖着某条滑轨）时，别的一概淡掉、卡片底色也淡掉，只有那一行自己铺一块卡片底、浮在原位。
+ * [onPreview] / [onCommit]：连续拖动的滑块拖着时只预览、松手才落库（见 ReaderViewModel.previewSettings）；点一下就定的项走 [onUpdate]。
  */
 @Composable
-private fun LayoutTab(
+private fun MainPage(
     settings: ReaderSettings,
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     typography: TypographyActions,
+    dragging: SettingsSlider?,
+    onDragging: (SettingsSlider?) -> Unit,
+    onOpen: (SettingsPage) -> Unit,
 ) {
-    // 最常调的三样放第一张卡，打开面板不用滚就在眼前
-    ReaderGroup {
-        ReaderRow("字号", slots = 3) { FontSizeStepper(settings, onUpdate) }
-        SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
-            onUpdate(settings.copy(lineSpacingMult = it))
-        }
-        // 和字号、行距一样「标签在左、控件在右」：从前 slots 给到 6，常见宽度的手机上一律摞成两行，
-        // 「亮度」两个字孤零零占一行，跟上面两行排法不一样。现在控件只剩滑轨 + 「系统」，4 格放得下
-        ReaderRow("亮度", slots = 4) { BrightnessControl(settings, onUpdate, onPreview, onCommit) }
-    }
+    // 1 = 面板照常；0 = 让开，只剩手上那条滑轨
+    val shown by animateFloatAsState(
+        if (dragging == null) 1f else 0f,
+        AppTheme.motionScheme.defaultEffectsSpec(),
+        label = "settingsShown",
+    )
+    // 松手后 dragging 立刻变回 null，面板却还在淡回来：留住刚才拖的是哪一条，淡回来的这段它别跟着闪没
+    var active by remember { mutableStateOf<SettingsSlider?>(null) }
+    if (dragging != null && active != dragging) active = dragging
+    val card = readerCardColor()
+    // 卡片淡掉了，拖着的那一行自己铺一块卡片底（与卡片的淡出此消彼长，看着是这一行从卡里浮出来）；别的行跟着淡掉
+    val floatingRow = Modifier.squircleBackground(card.copy(alpha = card.alpha * (1f - shown)), AppShapes.radiusLarge)
+    val fadingRow = Modifier.alpha(shown)
+    fun rowModifier(kind: SettingsSlider): Modifier = if (active == kind) floatingRow else fadingRow
 
-    ReaderGroup("字体") {
-        Box(Modifier.padding(vertical = Dimens.gapS)) {
-            FontSection(
-                settings = settings,
-                actions = typography,
-                onSelect = { onUpdate(settings.copy(fontId = it)) },
-                horizontalPadding = Dimens.listHorizontal,
-            )
-        }
-    }
-
-    ReaderGroup("纸张") {
-        Column(Modifier.padding(vertical = Dimens.gapS)) {
-            ThemeSwatches(settings, onUpdate, horizontalPadding = Dimens.listHorizontal)
-            // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
-            if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-                Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
-                    CustomPaperEditor(
-                        theme = settings.theme,
-                        onChange = { onPreview(settings.copy(theme = it)) },
-                        onChangeFinished = onCommit,
-                    )
-                }
+    ReaderGroup(color = card.copy(alpha = card.alpha * shown)) {
+        BrightnessRow(
+            settings = settings,
+            onUpdate = onUpdate,
+            onPreview = onPreview,
+            onCommit = onCommit,
+            onDragging = { onDragging(if (it) SettingsSlider.Brightness else null) },
+            modifier = rowModifier(SettingsSlider.Brightness),
+        )
+        FontSizeRow(
+            settings = settings,
+            onUpdate = onUpdate,
+            onPreview = onPreview,
+            onCommit = onCommit,
+            onDragging = { onDragging(if (it) SettingsSlider.FontSize else null) },
+            modifier = rowModifier(SettingsSlider.FontSize),
+        )
+        Box(Modifier.alpha(shown)) {
+            SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
+                onUpdate(settings.copy(lineSpacingMult = it))
             }
         }
     }
 
-    ReaderGroup("排版方案") {
-        Box(Modifier.padding(vertical = Dimens.gapS)) {
-            LayoutSchemeSection(settings, typography, horizontalPadding = Dimens.listHorizontal)
+    // 纸张和字体同一张卡：都是「点一下就换、当场看效果」的，不用两个小标题各占一行
+    Box(Modifier.alpha(shown)) {
+        ReaderGroup {
+            Column(Modifier.padding(vertical = Dimens.gapS)) {
+                ThemeSwatches(settings, onUpdate, horizontalPadding = Dimens.listHorizontal)
+                // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
+                if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
+                    Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
+                        CustomPaperEditor(
+                            theme = settings.theme,
+                            onChange = { onPreview(settings.copy(theme = it)) },
+                            onChangeFinished = onCommit,
+                        )
+                    }
+                }
+                HorizontalDivider(Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS))
+                FontSection(
+                    settings = settings,
+                    actions = typography,
+                    onSelect = { onUpdate(settings.copy(fontId = it)) },
+                )
+            }
         }
     }
+
+    PageLinks(onOpen = onOpen, modifier = Modifier.alpha(shown))
 }
 
 /**
- * 字号：加减按钮 + 当前值，一行搞定。
- * 用 [TonalButton]（浅底实心，与分段按钮的槽同一档）：同一张卡里下面就是一排分段按钮，按钮若另起一种底色，
- * 看着像两套控件拼在一起。按钮的上下内边距把高度撑到 48dp 以上，触控区够。
- * 「A−」读屏只会念成「A 减」，补一个说清用途的名字
+ * 亮度：小太阳 · 滑轨 · 大太阳 · 「系统」。
+ *
+ * - 两头的太阳就是标签（不再占一列 80dp 的「亮度」），滑轨因此拉满整行，同样一拖调得更细。图标只是标签，不可点。
+ * - 跟随系统时滑轨照样能拖，一拖就接管（「系统」自动熄掉）；从前跟随系统时滑轨是禁用的，得先点掉「系统」才拖得动，
+ *   而禁用的滑轨看着和能拖的差不多，拖了没反应。跟随系统时滑轨换成禁用色，表示它此刻不管事，
+ *   位置停在系统此刻的亮度上（[systemBrightnessLevel]）—— 一拖从那儿接手，不会先跳到一半亮度。
+ * - 再点「系统」切回手动时回到这次面板里最后拖到的位置。
  */
 @Composable
-private fun FontSizeStepper(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        TonalButton(
-            text = "A−",
-            onClick = { if (settings.fontSizeSp > 12f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp - 1)) },
-            modifier = Modifier.weight(1f).semantics { contentDescription = "字号减小" },
-        )
-        Text(
-            "${settings.fontSizeSp.toInt()}",
-            // 数字两侧留出间距，宽度至少一个触控目标：字号从 9 变到 10 时两侧按钮别跟着挪
-            Modifier.padding(horizontal = Dimens.gapM).widthIn(min = Dimens.touchTarget),
-            textAlign = TextAlign.Center,
-            style = MiuixTheme.textStyles.title3,
-        )
-        TonalButton(
-            text = "A＋",
-            onClick = { if (settings.fontSizeSp < 32f) onUpdate(settings.copy(fontSizeSp = settings.fontSizeSp + 1)) },
-            modifier = Modifier.weight(1f).semantics { contentDescription = "字号增大" },
-        )
-    }
-}
-
-@Composable
-private fun BrightnessControl(
+private fun BrightnessRow(
     settings: ReaderSettings,
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    onDragging: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    // 滑轨两头不再放月亮 / 太阳图标：标签已经写着「亮度」，两个图标挤掉的是滑轨的长度（放进一行后只剩一百出头 dp）
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    val context = LocalContext.current
+    val following = settings.brightnessOverride == null
+    val systemLevel = remember { systemBrightnessLevel(context) ?: HALF_BRIGHTNESS }
+    var manual by remember { mutableFloatStateOf(settings.brightnessOverride ?: systemLevel) }
+    val scheme = MiuixTheme.colorScheme
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+    ) {
+        Icon(Icons.Outlined.BrightnessLow, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
         AppSlider(
-            value = settings.brightnessOverride ?: 0.5f,
+            value = settings.brightnessOverride ?: manual,
             onValueChange = { v ->
-                onPreview(settings.copy(brightnessOverride = v.coerceIn(0.01f, 1f)))
+                manual = v.coerceIn(MIN_BRIGHTNESS, 1f)
+                onPreview(settings.copy(brightnessOverride = manual))
             },
             onValueChangeFinished = onCommit,
             label = "亮度",
-            enabled = settings.brightnessOverride != null,
-            modifier = Modifier.weight(1f),
+            activeColor = if (following) scheme.disabledPrimarySlider else null,
+            inactiveColor = if (following) scheme.disabledSecondary else null,
+            modifier = Modifier
+                .weight(1f)
+                .reportDragging(onDragging),
         )
+        Icon(Icons.Outlined.BrightnessHigh, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
         AppFilterChip(
-            selected = settings.brightnessOverride == null,
-            onClick = {
-                onUpdate(
-                    settings.copy(
-                        brightnessOverride = if (settings.brightnessOverride == null) 0.5f else null,
-                    )
-                )
-            },
+            selected = following,
+            onClick = { onUpdate(settings.copy(brightnessOverride = if (following) manual else null)) },
             label = "系统",
-            modifier = Modifier.padding(start = Dimens.gapM),
             solidSelection = true,
         )
     }
 }
 
 /**
- * 版式：段距、字距、缩进、对齐，以及标题与边距。都是「调一次就很少再动」的细节，
- * 从排版页挪出来，让排版页一屏就能看到字号、字体和纸色。
+ * 字号：小 A · 分档滑轨 · 大 A · 当前字号。
+ *
+ * 从 16 调到 24 一拖就到（每过一档轻震一下，旁边的数字跟着变），不用连点八下；要微调就点两头的 A，一次 ±1，
+ * 到头（[ReaderSettings.FONT_SIZE_MIN] / [ReaderSettings.FONT_SIZE_MAX]）的那一头变灰。
+ * 拖着时每过一档预览一次（正文重排一次），松手落盘 —— 和亮度滑轨一样不在拖动中写 DataStore。
+ * 「A」读屏只会念成「A」，两头补上说清用途的名字。
  */
 @Composable
-private fun StyleTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun FontSizeRow(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    onPreview: (ReaderSettings) -> Unit,
+    onCommit: () -> Unit,
+    onDragging: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val size = settings.fontSizeSp
+    val min = ReaderSettings.FONT_SIZE_MIN
+    val max = ReaderSettings.FONT_SIZE_MAX
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+    ) {
+        FontSizeEnd(
+            text = "A",
+            style = MiuixTheme.textStyles.footnote1,
+            description = "字号减小",
+            enabled = size > min,
+            onClick = { onUpdate(settings.copy(fontSizeSp = (size - 1).coerceAtLeast(min))) },
+        )
+        AppSlider(
+            value = size,
+            valueRange = min..max,
+            // 两头之间每 1sp 一档
+            steps = (max - min).toInt() - 1,
+            onValueChange = { v ->
+                val sp = v.roundToInt().toFloat()
+                if (sp != settings.fontSizeSp) onPreview(settings.copy(fontSizeSp = sp))
+            },
+            onValueChangeFinished = onCommit,
+            label = "字号",
+            hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+            modifier = Modifier
+                .weight(1f)
+                .reportDragging(onDragging),
+        )
+        FontSizeEnd(
+            text = "A",
+            style = MiuixTheme.textStyles.title3,
+            description = "字号增大",
+            enabled = size < max,
+            onClick = { onUpdate(settings.copy(fontSizeSp = (size + 1).coerceAtMost(max))) },
+        )
+        Text(
+            "${size.toInt()}",
+            style = MiuixTheme.textStyles.body1,
+            fontWeight = FontWeight.Medium,
+            // 数字已经由滑轨念过（读屏念滑轨的当前值），这里不再念一遍
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+    }
+}
+
+/** 字号滑轨两头的小 A / 大 A：一个触控目标大小的可点区，点一下 ±1 */
+@Composable
+private fun FontSizeEnd(
+    text: String,
+    style: TextStyle,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val color = MiuixTheme.colorScheme.onSurface
+    Box(
+        Modifier
+            .size(Dimens.touchTarget)
+            .squircleClip(AppShapes.radiusMedium)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = style,
+            fontWeight = FontWeight.Medium,
+            color = if (enabled) color else color.copy(alpha = color.alpha * DISABLED_CONTENT_ALPHA),
+        )
+    }
+}
+
+/**
+ * 进二级页的三个入口：一排三块，各写着页名和 ›。和设置页「点了进下一层」的行同一个意思（行尾 ›），
+ * 只是并排成一行 —— 一级页要一屏放下，三行入口太占地方。
+ */
+@Composable
+private fun PageLinks(onOpen: (SettingsPage) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
+        listOf(SettingsPage.Typeset, SettingsPage.Flip, SettingsPage.More).forEach { target ->
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(Dimens.touchTarget)
+                    .squircleSurface(readerCardColor(), AppShapes.radiusMedium)
+                    .clickable(role = Role.Button) { onOpen(target) },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(target.title.orEmpty(), style = MiuixTheme.textStyles.body2)
+                Icon(
+                    MiuixIcons.Basic.ArrowRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(Dimens.iconSm),
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 手指按在这条滑轨上、**真拖起来**（过了 touch slop）时报 true，抬手报 false；只点一下不报 —— 点按不该让整个面板闪一下。
+ * 只在 Initial 阶段旁观、不消费，滑轨自己的拖动照常。被掐（面板收起）时也报一次 false，别把面板留在「让开」的样子。
+ */
+@Composable
+private fun Modifier.reportDragging(onDragging: (Boolean) -> Unit): Modifier {
+    val latest by rememberUpdatedState(onDragging)
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var dragging = false
+            try {
+                while (true) {
+                    val change = awaitPointerEvent(PointerEventPass.Initial).changes
+                        .firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                        dragging = true
+                        latest(true)
+                    }
+                }
+            } finally {
+                if (dragging) latest(false)
+            }
+        }
+    }
+}
+
+/**
+ * 排版页（二级）：段距、字距、缩进、对齐，以及标题与边距。都是「调一次就很少再动」的细节，
+ * 从一级页挪出来，让一级页一屏就能放下字号、字体和纸色。排版方案在这页最上面（见 TypographyPanel）。
+ */
+@Composable
+private fun TypesetTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
     ReaderGroup("间距") {
         SegmentRow("段距", PARA_SPACING_OPTIONS, settings.paragraphSpacingEm, 0.05f) {
             onUpdate(settings.copy(paragraphSpacingEm = it))
@@ -1204,6 +1465,24 @@ private fun MoreTab(
             position = SettingGroupPosition.Last,
         )
     }
+
+    // 不开菜单直接调（见 QuickAdjust.kt）。默认开；觉得误触的可以在这儿关
+    ReaderGroup("手势") {
+        SwitchRow(
+            title = "双指缩放调字号",
+            subtitle = "不用开菜单，在正文上双指张开、捏合",
+            checked = settings.pinchFontSize,
+            onCheckedChange = { onUpdate(settings.copy(pinchFontSize = it)) },
+            position = SettingGroupPosition.First,
+        )
+        SwitchRow(
+            title = "右边缘上下滑调亮度",
+            subtitle = "沿屏幕右边缘竖着滑，往上亮、往下暗。滚动翻页时不可用",
+            checked = settings.edgeBrightness,
+            onCheckedChange = { onUpdate(settings.copy(edgeBrightness = it)) },
+            position = SettingGroupPosition.Last,
+        )
+    }
 }
 
 /**
@@ -1379,7 +1658,19 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
     }
 }
 
-private val SETTINGS_TABS = listOf("排版", "版式", "翻页", "更多")
+/** 阅读设置面板的一级页与三个二级页。[title] 是二级页标题行上的页名，也是一级页入口上的字；一级页没有标题 */
+private enum class SettingsPage(val title: String?) {
+    Main(null),
+    Typeset("排版"),
+    Flip("翻页"),
+    More("更多"),
+}
+
+/** 一级页上拖起来会让面板让开的两条滑轨 */
+private enum class SettingsSlider { Brightness, FontSize }
+
+/** 到头不可点的字号 A 的透明度，同 AppIconButton 等封装的禁用态 */
+private const val DISABLED_CONTENT_ALPHA = 0.38f
 
 /** 设置面板内容区占窗口高度的比例。加上 Tab 与拖拽把手约半屏，上半屏留给正文当实时预览 */
 private const val PANEL_HEIGHT_FRACTION = 0.42f
