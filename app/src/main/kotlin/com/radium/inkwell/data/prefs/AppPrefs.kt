@@ -55,6 +55,8 @@ class AppPrefs(private val context: Context) {
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
         val ONBOARDED = booleanPreferencesKey("onboarded")
+        /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
+        val TOC_REVERSED = booleanPreferencesKey("toc_reversed")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
@@ -206,6 +208,19 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setOnboarded() {
         context.appDataStore.edit { it[Keys.ONBOARDED] = true }
+    }
+
+    /**
+     * 阅读页目录是否倒序（最新章在上）。追连载的人打开目录要看的是最新几章，正序得一路拖到底；
+     * 记住上次的选择，下次打开还是那个顺序。默认正序。
+     */
+    val tocReversedState: StateFlow<Boolean?> = context.appDataStore.data
+        .map { it[Keys.TOC_REVERSED] ?: false }
+        .distinctUntilChanged()
+        .warm()
+
+    suspend fun setTocReversed(on: Boolean) {
+        context.appDataStore.edit { it[Keys.TOC_REVERSED] = on }
     }
 
     /** 书架顶栏是否显示「发现」入口。不看发现页的人，那个图标只是碍事 */

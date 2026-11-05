@@ -22,11 +22,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.LocalContentColor
@@ -144,6 +149,15 @@ object ContentListDefaults {
         horizontal = Dimens.listHorizontal,
         vertical = Dimens.gapS,
     )
+
+    /**
+     * 单行的长列表（目录）：最小高度给到触控下限 [Dimens.touchTarget]（48dp）而不是 56dp，上下各 12dp。
+     * 目录动辄几千章，56dp 是给两三行字的设置行、内容行配的，放在目录里一屏少两三章；配 `minHeight = Dimens.touchTarget` 用
+     */
+    val CompactPadding: PaddingValues = PaddingValues(
+        horizontal = Dimens.listHorizontal,
+        vertical = Dimens.gapM,
+    )
 }
 
 /** [ContentListItem] 的配色。用 [ContentListDefaults.colors] / [ContentListDefaults.plainColors] 建 */
@@ -211,6 +225,8 @@ fun ContentListItem(
     contentPadding: PaddingValues = ContentListDefaults.DefaultPadding,
     colors: ContentListColors = ContentListDefaults.colors(),
     corners: SquircleCorners = SquircleCorners.Square,
+    /** 行的最小高度。只有单行的长列表（目录）配 [ContentListDefaults.CompactPadding] 给到 [Dimens.touchTarget] */
+    minHeight: Dp = Dimens.listItemMinHeight,
     content: @Composable () -> Unit,
 ) {
     ListRow(
@@ -233,6 +249,7 @@ fun ContentListItem(
         contentPadding = contentPadding,
         colors = colors,
         corners = corners,
+        minHeight = minHeight,
         content = content,
     )
 }
@@ -319,8 +336,13 @@ fun ContentListItem(
 }
 
 /**
- * 目录章名行。详情 / 预览页的目录、阅读菜单的目录面板共用，当前章走选中色（淡强调底 + 加粗）。
- * 三处都一样装进一张卡：`modifier = Modifier.groupedCardItem(i, n)`。
+ * 目录章名行。详情 / 预览页的目录、阅读菜单的目录面板共用，三处都一样装进一张卡：`modifier = Modifier.groupedCardItem(i, n)`。
+ *
+ * 从前每一行长得一样：读过的、在读的、没读的只有当前章那一抹底色能分，翻目录看不出「读到哪了、后面还剩多少」。
+ * - **在读那章**（[selected]）：淡强调底 + 加粗 + 行尾「在读」（占掉行尾，[trailingContent] 这一行不显示）。
+ * - **读过的**（[read]）：字换成说明小字那一档（`onSurfaceVariantSummary`，卡上对比度仍 ≥ 4.5:1），读屏补一句「已读」。
+ * - **48dp 高**（[ContentListDefaults.CompactPadding]）：目录是单行的长列表，内容行默认的 56dp 放在这里一屏少两三章。
+ * - [highlight]：搜索章节时，章名里命中的字标强调色。
  */
 @Composable
 fun ChapterListItem(
@@ -329,24 +351,52 @@ fun ChapterListItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    read: Boolean = false,
+    highlight: String? = null,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
+    val dimmed = read && !selected
+    val accent = MiuixTheme.colorScheme.primary
+    val text = remember(title, highlight, accent) { highlightMatches(title, highlight, accent) }
     ContentListItem(
         selected = selected,
         onClick = onClick,
-        modifier = modifier,
+        modifier = if (dimmed) modifier.semantics { stateDescription = "已读" } else modifier,
         enabled = enabled,
-        trailingContent = trailingContent,
+        contentPadding = ContentListDefaults.CompactPadding,
+        minHeight = Dimens.touchTarget,
+        trailingContent = if (selected) {
+            { Text("在读", style = MiuixTheme.textStyles.footnote1, fontWeight = FontWeight.Medium) }
+        } else {
+            trailingContent
+        },
         content = {
             Text(
-                title,
+                text,
                 style = MiuixTheme.textStyles.body2,
+                color = if (dimmed) MiuixTheme.colorScheme.onSurfaceVariantSummary else LocalContentColor.current,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
     )
+}
+
+/** 章名里每一处 [query]（不分大小写）标成 [color]、加粗一档；[query] 为空就原样返回 */
+internal fun highlightMatches(text: String, query: String?, color: Color): AnnotatedString {
+    val q = query?.trim().orEmpty()
+    if (q.isEmpty()) return AnnotatedString(text)
+    return buildAnnotatedString {
+        append(text)
+        var from = 0
+        while (true) {
+            val at = text.indexOf(q, from, ignoreCase = true)
+            if (at < 0) break
+            addStyle(SpanStyle(color = color, fontWeight = FontWeight.Medium), at, at + q.length)
+            from = at + q.length
+        }
+    }
 }
 
 /**
@@ -387,6 +437,7 @@ private fun ListRow(
     colors: ContentListColors,
     corners: SquircleCorners,
     content: @Composable () -> Unit,
+    minHeight: Dp = Dimens.listItemMinHeight,
 ) {
     val container = if (selected) colors.selectedContainerColor else colors.containerColor
     val alpha = if (enabled) 1f else DISABLED_ALPHA
@@ -397,7 +448,7 @@ private fun ListRow(
             .fillMaxWidth()
             .squircleSurface(container, corners)
             .then(interaction)
-            .heightIn(min = Dimens.listItemMinHeight)
+            .heightIn(min = minHeight)
             .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {

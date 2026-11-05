@@ -244,6 +244,8 @@ fun BookDetailScreen(
                             ChapterListItem(
                                 title = chapter.title,
                                 selected = current,
+                                // 读过的变灰：一眼看出读到哪、后面还剩多少（同阅读页的目录面板）
+                                read = b.readAt > 0 && chapter.index < b.readChapterIndex,
                                 onClick = { viewModel.openChapter(chapter.index) },
                                 modifier = Modifier.groupedCardItem(i, chapters.size),
                             )

@@ -123,6 +123,8 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 整页加载态 | `LoadingState`（`Common.kt`） |
 | 不确定进度 | `AppLoadingIndicator`（`Common.kt`，Miuix `InfiniteProgressIndicator`）：从按钮里的 18dp 到整页的 32dp 同一个组件，调用点统一走封装 |
 | 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Miuix `LinearProgressIndicator`）；搜索/书源校验/更新下载/离线缓存走它 |
+| 目录（章节列表） | `ChapterListItem`（`ContentListItem.kt`）：详情、预览、阅读页的目录面板共用。单行 48dp（`ContentListDefaults.CompactPadding` + `minHeight`，几千章的单行列表用不着 56dp）；在读那章淡强调底 + 行尾「在读」，读过的传 `read` 字换说明色 —— 从前每行一个样，看不出读到哪；搜索时传 `highlight` 标出命中的字。阅读页的目录面板另有标题行的正序 / 倒序（`AppPrefs.tocReversedState`，只记本机）、「共 N 章 · ● 已缓存 N 章」概况行、在读那章滚出视野时的「定位当前章」 |
+| 长列表快速滚动（上百行：目录） | `FastScroller`（`FastScroller.kt`）：和 LazyColumn 放进同一个 Box、`matchParentSize()` 叠上去，`contentPadding` 给列表同样的上下留白；不够 `FAST_SCROLL_MIN_ITEMS` 行不出现，滚动时露出、停下一会儿隐去，拖动时气泡写那一行。Miuix 没有滚动条，别另搓 |
 | 阅读进度（静止的读数） | `ReadingProgressMeter`（`Common.kt`）：书封底边、「继续阅读」卡片，4dp 细线。任务进度条表示「有活在跑」，静止的进度别用 `DeterminateProgressBar` |
 | 相对时间（「3 小时前」「昨天」） | `formatRelativeTime`（`RelativeTime.kt`），按日历天而不是 24 小时算 |
 | 一次性提示（Snackbar） | `MessageBus` + `CollectMessages` + `AppSnackbarHost`（`Messages.kt`，`SnackbarHostState` 是 Miuix 的）。**居中、随文案收窄的胶囊**（短提示是药丸，长提示才横向展开）；在 `AppScaffold` 里是毛玻璃 + 边缘高光，叠色厚度与操作键颜色按最坏的页面内容算（`CoverGlassTest`）。页面别自己写 `snackbarHost = { SnackbarHost(...) }` |
