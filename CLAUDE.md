@@ -211,4 +211,4 @@ fix：一句话说明修了什么问题
 ## 提交信息
 
 - 讲清「改了什么、为什么」，与仓库既有 commit 风格一致（中文、分段）。
-- 结尾加：`Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`（AI 参与时）。
+- 结尾**不要**加 `Co-Authored-By` / `Signed-off-by` 之类的 trailer —— AI 参与时也不加。
