@@ -28,6 +28,20 @@ import org.koin.core.component.inject
 
 data class ExploreSource(val id: String, val name: String, val categories: List<String>)
 
+/**
+ * 换源后该停在哪个分类：新源的分类里有**同名**的（首尾空白不计）就停在它上面，接不上才回第一个。
+ * 不这么做的话，两个源都有「玄幻小说」时每换一次源都得再点一遍分类，切源浏览的心流被切碎。
+ */
+internal fun matchedCategoryIndex(newCategories: List<String>, previousName: String?): Int {
+    if (previousName.isNullOrBlank()) return 0
+    val target = previousName.trim()
+    return newCategories.indexOfFirst { it.trim() == target }.coerceAtLeast(0)
+}
+
+/** 最近用过的书源 id（新→旧）：[id] 提到最前，超出 [limit] 的旧源丢掉 */
+internal fun pushRecentSource(current: List<String>, id: String, limit: Int = AppPrefs.RECENT_EXPLORE_SOURCES_MAX): List<String> =
+    (listOf(id) + current.filterNot { it == id }).take(limit)
+
 /** 发现页列表里一本书的标识：列表按它做 key，合并分页也按它去重 —— 两处必须是同一个 */
 internal val SearchResult.exploreKey: String get() = "$sourceId|$bookUrl"
 
@@ -68,6 +82,8 @@ data class ExploreUiState(
     val addingUrls: Set<String> = emptySet(),
     /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书） */
     val shelfKeys: Set<Pair<String, String>> = emptySet(),
+    /** 最近用过的书源 id（新→旧，最多 3 个）。选择器「最近」区按它置顶 */
+    val recentSourceIds: List<String> = emptyList(),
 ) {
     val currentSource: ExploreSource? get() = sources.getOrNull(sourceIndex)
     val categories: List<String> get() = currentSource?.categories.orEmpty()
@@ -108,6 +124,14 @@ class ExploreViewModel(
                 .distinctUntilChanged()
                 .collectLatest { reloadSources() }
         }
+        // 「最近」的初值从盘上读回来：选择器面板一打开就该有，不能等第一次切源才出现
+        viewModelScope.launch {
+            appPrefs.recentExploreSources.collectLatest { ids ->
+                if (ids != _state.value.recentSourceIds) {
+                    _state.value = _state.value.copy(recentSourceIds = ids)
+                }
+            }
+        }
     }
 
     private suspend fun reloadSources() {
@@ -138,8 +162,18 @@ class ExploreViewModel(
     }
 
     fun selectSource(index: Int) {
-        if (index == _state.value.sourceIndex) return
-        _state.value = _state.value.copy(sourceIndex = index, categoryIndex = 0)
+        val prev = _state.value
+        if (index == prev.sourceIndex) return
+        val source = prev.sources.getOrNull(index) ?: return
+        // 同名分类跟着走（见 matchedCategoryIndex）；顺手把源记进「最近」
+        val recent = pushRecentSource(prev.recentSourceIds, source.id)
+        _state.value = prev.copy(
+            sourceIndex = index,
+            categoryIndex = matchedCategoryIndex(source.categories, prev.categories.getOrNull(prev.categoryIndex)),
+            recentSourceIds = recent,
+        )
+        // 跨启动记住逛过哪些源。写失败不该影响切源本身 —— 最多下次面板里「最近」少一个
+        viewModelScope.launch { runCatching { appPrefs.setRecentExploreSources(recent) } }
         loadPage(reset = true)
     }
 
