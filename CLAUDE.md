@@ -124,6 +124,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 不确定进度 | `AppLoadingIndicator`（`Common.kt`，Miuix `InfiniteProgressIndicator`）：从按钮里的 18dp 到整页的 32dp 同一个组件，调用点统一走封装 |
 | 确定进度条 | `DeterminateProgressBar`（`Common.kt`，Miuix `LinearProgressIndicator`）；搜索/书源校验/更新下载/离线缓存走它 |
 | 目录（章节列表） | `ChapterListItem`（`ContentListItem.kt`）：详情、预览、阅读页的目录面板共用。单行 48dp（`ContentListDefaults.CompactPadding` + `minHeight`，几千章的单行列表用不着 56dp）；在读那章淡强调底 + 行尾「在读」，读过的传 `read` 字换说明色 —— 从前每行一个样，看不出读到哪；搜索时传 `highlight` 标出命中的字。阅读页的目录面板另有标题行的正序 / 倒序（`AppPrefs.tocReversedState`，只记本机）、「共 N 章 · ● 已缓存 N 章」概况行、在读那章滚出视野时的「定位当前章」 |
+| 换源面板 | `ChangeSourceSheet`（`ui/reader/`）：当前源单独一张卡钉在最上（淡强调底 + 行尾「当前」+ 它的最新章），下面每个候选拿它比。候选行**书源名做主行、最新章做副行**，书名 / 作者和这本一样就不重复写，对不上才多一行「书名：… · 作者：…」（从前每行最大的字是同一个书名，被指出要调整）；行尾「多 N 章 / 少 N 章」走 `ChapterOrdinal.gap`（core，只认「第X章」，认不出或编号对不上返回 null，就不标）。候选区**定高**，别改回 `heightIn(max)`：结果边搜边出，面板会一格一格往上长。「只看同作者」是概况行上的 chip，它筛掉的数目（`authorMismatched`）要说出来、给「显示」出口；点了一个源，那一行就地转圈、其他行变灰 |
 | 长列表快速滚动（上百行：目录） | `FastScroller`（`FastScroller.kt`）：和 LazyColumn 放进同一个 Box、`matchParentSize()` 叠上去，`contentPadding` 给列表同样的上下留白；不够 `FAST_SCROLL_MIN_ITEMS` 行不出现，滚动时露出、停下一会儿隐去，拖动时气泡写那一行。Miuix 没有滚动条，别另搓 |
 | 阅读进度（静止的读数） | `ReadingProgressMeter`（`Common.kt`）：书封底边、「继续阅读」卡片，4dp 细线。任务进度条表示「有活在跑」，静止的进度别用 `DeterminateProgressBar` |
 | 相对时间（「3 小时前」「昨天」） | `formatRelativeTime`（`RelativeTime.kt`），按日历天而不是 24 小时算 |

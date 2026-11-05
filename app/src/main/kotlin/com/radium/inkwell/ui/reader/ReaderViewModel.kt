@@ -84,6 +84,8 @@ data class TocItem(val index: Int, val title: String, val cached: Boolean = fals
 
 data class ReaderUiState(
     val bookTitle: String = "",
+    /** 书行上的作者。换源面板拿它认「作者对不上」的候选 */
+    val bookAuthor: String = "",
     /** 进书 splash 用：正文还没就位时，在纸面上显示这本书的封面（见 ReaderScreen 加载分支的 splash） */
     val coverPath: String? = null,
     val chapterTitle: String = "",
@@ -119,6 +121,15 @@ data class ReaderUiState(
     val sourcesTotal: Int = 0,
     /** 换源是否用作者卡人（同 Legado 的 changeSourceCheckAuthor） */
     val checkAuthor: Boolean = true,
+    /**
+     * 开着「只看同作者」时被筛掉的候选数（找到了同名书、作者对不上）。
+     * 面板据此说「另有 N 个书源……作者对不上 · 显示」，而不是让它们悄悄消失
+     */
+    val authorMismatched: Int = 0,
+    /** 手动换源正在换到的书源（[SearchResult.sourceId]）：面板上那一行就地转圈。null = 没在手动换源 */
+    val changingTo: String? = null,
+    /** 换源面板「当前」卡上写的最新章：开面板时取本机目录的最后一章，目录还没有就取书行记的 */
+    val currentLatestChapter: String? = null,
     /** 正在自动换源（正文读不出来时自动找一个能读的源） */
     val autoChanging: Boolean = false,
     val autoChangeDone: Int = 0,
@@ -172,6 +183,7 @@ data class ReaderSessionUi(
     val textSelectionEnabled: Boolean = true,
     /** 未上架的试读：退出阅读时提示是否加入书架 */
     val inShelf: Boolean = true,
+    val bookAuthor: String = "",
 )
 
 data class ReaderOverlayUi(
@@ -188,6 +200,9 @@ data class ReaderOverlayUi(
     val autoChangeTotal: Int = 0,
     val autoChangedTo: String? = null,
     val readerSheetOpen: Boolean = false,
+    val authorMismatched: Int = 0,
+    val changingTo: String? = null,
+    val currentLatestChapter: String? = null,
 )
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
@@ -197,12 +212,13 @@ private fun ReaderUiState.toPage() = ReaderPageUi(
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
     bookTitle, coverPath, chapterCount, settings, isNetBook, currentSourceName, textSelectionEnabled, inShelf,
+    bookAuthor,
 )
 
 private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
     menuVisible, autoFlipping, sourceCandidates, searchingSources, changingSource,
     sourcesDone, sourcesTotal, checkAuthor, autoChanging, autoChangeDone, autoChangeTotal,
-    autoChangedTo, readerSheetOpen,
+    autoChangedTo, readerSheetOpen, authorMismatched, changingTo, currentLatestChapter,
 )
 
 /**
@@ -455,6 +471,7 @@ class ReaderViewModel(
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
             _state.value = _state.value.copy(
                 bookTitle = b.title,
+                bookAuthor = b.author,
                 coverPath = b.coverPath,
                 inShelf = b.inShelf && !b.deleted,
             )
@@ -509,6 +526,7 @@ class ReaderViewModel(
             }
             _state.value = _state.value.copy(
                 bookTitle = b.title,
+                bookAuthor = b.author,
                 coverPath = b.coverPath,
                 chapterCount = src.chapterCount,
                 chapterIndex = position.chapterIndex,
@@ -854,7 +872,7 @@ class ReaderViewModel(
     // ---------- 换源 ----------
 
     private var sourceSearchJob: Job? = null
-    /** 候选列表防抖发布：每个源回来就 filtered()+写 State 会在源多时打爆重组 */
+    /** 候选列表防抖发布：每个源回来就重筛 + 写 State 会在源多时打爆重组 */
     private var candidatePublishJob: Job? = null
 
     /** 书名已命中的全部结果（未按作者过滤）；作者开关一拨就地重筛，不必重搜 */
@@ -884,9 +902,9 @@ class ReaderViewModel(
         // 同一次阅读会话里搜过（含半截）→ 直接摊开；要打新请求只能点「重新搜索」
         if (!force && sourceSearchStarted && sourceSearchJob?.isActive != true) {
             _state.value = _state.value.copy(
-                sourceCandidates = filtered(),
                 searchingSources = false,
-            )
+                currentLatestChapter = currentLatestChapter(b),
+            ).withCandidates()
             return
         }
         sourceSearchJob?.cancel()
@@ -910,10 +928,12 @@ class ReaderViewModel(
                 val done = AtomicInteger(0)
                 _state.value = _state.value.copy(
                     sourceCandidates = emptyList(),
+                    authorMismatched = 0,
                     searchingSources = true,
                     sourcesDone = 0,
                     sourcesTotal = all.size,
                     checkAuthor = checkAuthor,
+                    currentLatestChapter = currentLatestChapter(b),
                 )
                 // 与搜索页同样限流：几百个书源同时发请求只会集体超时/被限流
                 val limiter = Semaphore(8)
@@ -954,33 +974,26 @@ class ReaderViewModel(
                 candidatePublishJob?.cancel()
                 sourceSearchComplete = true
                 _state.value = _state.value.copy(
-                    sourceCandidates = filtered(),
                     sourcesDone = done.get(),
                     searchingSources = false,
-                )
+                ).withCandidates()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 sourceSearchComplete = true
-                _state.value = _state.value.copy(
-                    sourceCandidates = filtered(),
-                    searchingSources = false,
-                )
+                _state.value = _state.value.copy(searchingSources = false).withCandidates()
             }
         }
     }
 
-    /** 进度 + 候选列表合并刷新，避免每个源完成都 filtered() 一次 */
+    /** 进度 + 候选列表合并刷新，避免每个源完成都重筛一次 */
     private fun scheduleCandidatePublish(done: AtomicInteger) {
         if (candidatePublishJob?.isActive == true) return
         candidatePublishJob = viewModelScope.launch {
             delay(CANDIDATE_PUBLISH_DEBOUNCE_MS)
             ensureActive()
-            val candidates = filtered()
             val n = done.get()
-            _state.update {
-                it.copy(sourceCandidates = candidates, sourcesDone = n)
-            }
+            _state.update { it.copy(sourcesDone = n).withCandidates() }
         }
     }
 
@@ -1020,19 +1033,27 @@ class ReaderViewModel(
     /** 拨动「匹配作者」：就地重筛已搜到的结果，不重新发请求 */
     fun setCheckAuthor(on: Boolean) {
         viewModelScope.launch { appPrefs.setChangeSourceCheckAuthor(on) }
-        _state.value = _state.value.copy(checkAuthor = on)
-        _state.value = _state.value.copy(sourceCandidates = filtered())
+        _state.value = _state.value.copy(checkAuthor = on).withCandidates()
     }
 
-    private fun filtered(): List<SearchResult> {
+    /**
+     * 把 [rawCandidates] 筛好写进状态：面板列的候选 + 「只看同作者」筛掉了几个。
+     * 筛掉的数目一起给，面板才说得出「另有 N 个书源找到同名书，作者对不上」—— 从前它们悄悄消失，
+     * 用户只看到「没找到」，想不到是开关卡掉的。
+     */
+    private fun ReaderUiState.withCandidates(): ReaderUiState {
         val author = book?.author.orEmpty()
         // 换源成功后 rawCandidates 里还躺着刚选上的那个源；列表里再出现「当前源」没意义，点了也是空跑
         val currentId = book?.sourceId
-        val snap = synchronized(rawCandidates) { rawCandidates.toList() }
-        val byAuthor = if (!_state.value.checkAuthor) snap.asSequence()
-        else snap.asSequence().filter { authorMatches(it.author, author) }
-        return byAuthor.filter { it.sourceId != currentId }.toList()
+        val others = synchronized(rawCandidates) { rawCandidates.toList() }.filter { it.sourceId != currentId }
+        if (!checkAuthor) return copy(sourceCandidates = others, authorMismatched = 0)
+        val (kept, mismatched) = others.partition { authorMatches(it.author, author) }
+        return copy(sourceCandidates = kept, authorMismatched = mismatched.size)
     }
+
+    /** 换源面板「当前」卡上的最新章：本机目录的最后一章；目录还没抓到（书打不开）退回书行上记的 */
+    private fun currentLatestChapter(b: BookEntity): String? =
+        _state.value.toc.lastOrNull()?.title ?: b.latestChapterTitle
 
     // 书名/作者判定见 TitleMatch —— 手动换源与自动换源必须用同一套标准，
     // 各写一份迟早写出分歧（列表里明明列着的源，自动换源却说找不到）
@@ -1052,6 +1073,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(
                 changingSource = true,
+                changingTo = candidate.sourceId,
                 autoChanging = false,
                 searchingSources = false,
             )
@@ -1066,7 +1088,7 @@ class ReaderViewModel(
                 if (rule == null) {
                     // 提示而不是 error：error 会把整个阅读区换成报错页，可旧源明明还读得好好的 ——
                     // 换源没成，眼前这一页不该跟着没了
-                    _state.value = _state.value.copy(changingSource = false)
+                    _state.value = _state.value.copy(changingSource = false, changingTo = null)
                     messageBus.emit("书源不存在")
                     return@launch
                 }
@@ -1097,6 +1119,7 @@ class ReaderViewModel(
                         }
                         _state.value = _state.value.copy(
                             changingSource = false,
+                            changingTo = null,
                             sourceCandidates = null,
                             menuVisible = false,
                             loading = true,
@@ -1110,7 +1133,7 @@ class ReaderViewModel(
                     .onFailure {
                         // 同上：旧源还能读，失败只提示一句，面板留着让用户换一个试。
                         // 本来就停在报错页（读不出来才来换源）的，报错页原样留着，重试/换源的出口都还在
-                        _state.value = _state.value.copy(changingSource = false)
+                        _state.value = _state.value.copy(changingSource = false, changingTo = null)
                         messageBus.emit("换源失败: ${it.message}")
                     }
             } finally {

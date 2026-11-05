@@ -663,6 +663,8 @@ fun ReaderScreen(
             ChangeSourceSheet(
                 overlay = overlay,
                 currentSourceName = session.currentSourceName,
+                bookTitle = session.bookTitle,
+                bookAuthor = session.bookAuthor,
                 candidates = candidates,
                 onApplySource = { viewModel.applyChangeSource(it) },
                 onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },

@@ -8,7 +8,7 @@ package com.radium.inkwell.core.source.detect
  */
 internal object ChapterTitles {
 
-    private const val CN_DIGITS = "0-9０-９零〇一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟"
+    internal const val CN_DIGITS = "0-9０-９零〇一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟"
 
     /** 「第X章」可以出现在标题中间：「正文 第一章」「VIP 第12章 xxx」 */
     private val ORDINAL = Regex("第\\s*([$CN_DIGITS]+)\\s*[章节回话集卷部篇幕]")
