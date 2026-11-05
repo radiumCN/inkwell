@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -372,6 +373,16 @@ fun SettingBlock(
 @Composable
 fun SettingFootnote(
     text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+) {
+    SettingFootnote(AnnotatedString(text), modifier, color)
+}
+
+/** 带样式的脚注：一段里要加深一句（「反馈会公开发布」这种不能被略过的话）时用 */
+@Composable
+fun SettingFootnote(
+    text: AnnotatedString,
     modifier: Modifier = Modifier,
     color: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
 ) {

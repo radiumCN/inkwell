@@ -5,7 +5,6 @@ import com.radium.inkwell.ui.components.pageScroll
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +21,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.repo.FeedbackRepository
@@ -39,6 +40,11 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SettingBlock
+import com.radium.inkwell.ui.components.SettingFootnote
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
@@ -89,6 +95,8 @@ fun FeedbackScreen(
             return@AppScaffold
         }
 
+        // 与别的设置页同一副骨架：小标题 + 白卡，输入框装进卡里（同 WebDAV 登录）。
+        // 从前输入框直接铺在灰底上，灰框压灰底看不清边；几段说明从屏幕边起、ⓘ 那段又缩进一截，左边对不齐
         Column(
             Modifier
                 .fillMaxSize()
@@ -100,67 +108,76 @@ fun FeedbackScreen(
                 .imePadding()
                 .pageScroll()
                 .verticalScroll(rememberScrollState(), overscrollEffect = null)
-                .padding(Dimens.screenPadding)
-                .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(Dimens.gapL),
+                .padding(
+                    top = padding.calculateTopPadding() + Dimens.gapS,
+                    bottom = Dimens.gapXL + padding.calculateBottomPadding(),
+                ),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapS)) {
-                CompactTextArea(
-                    value = state.content,
-                    onValueChange = viewModel::setContent,
-                    placeholder = "遇到了什么问题",
-                    isError = state.overLimit,
-                    // 字数实时可见，别等提交被拒才发现白写了
-                    supportingText = "${state.content.length} / ${FeedbackRepository.MAX_CONTENT_LENGTH}",
-                )
-                // 提示放框外：写进 placeholder 的话一落笔就消失，第一行当标题这件事就看不见了
-                Text(
-                    "第一行会成为标题，尽量写得具体些：什么操作触发的、是必现还是偶发",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
+            SectionHeader("问题描述")
+            SettingGroup {
+                SettingBlock {
+                    Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
+                        CompactTextArea(
+                            value = state.content,
+                            onValueChange = viewModel::setContent,
+                            placeholder = "遇到了什么问题",
+                            isError = state.overLimit,
+                        )
+                        // 字数实时可见，别等提交被拒才发现白写了。贴在框下靠右，不单独占一行
+                        Text(
+                            "${state.content.length} / ${FeedbackRepository.MAX_CONTENT_LENGTH}",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = if (state.overLimit) {
+                                MiuixTheme.colorScheme.error
+                            } else {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            },
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
+                }
             }
+            // 提示放框外：写进 placeholder 的话一落笔就消失，第一行当标题这件事就看不见了
+            SettingFootnote("第一行会成为标题，尽量写得具体些：什么操作触发的、是必现还是偶发")
 
-            CompactTextField(
-                value = state.contact,
-                onValueChange = viewModel::setContact,
-                placeholder = "联系方式（选填）",
-            )
-
+            SectionHeader("联系方式")
+            SettingGroup {
+                SettingBlock {
+                    CompactTextField(
+                        value = state.contact,
+                        onValueChange = viewModel::setContact,
+                        placeholder = "邮箱、QQ 等（选填）",
+                    )
+                }
+            }
             // 这条警告不能省，也不能只写在副标题里：反馈会变成公开仓库里的一条 issue，
             // 用户不可能自己知道这件事。他填邮箱时以为只有开发者看得到，实际全网可见 ——
-            // 必须在他填之前就说清楚。
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
-            ) {
-                Icon(
-                    MiuixIcons.Info,
-                    contentDescription = null,
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.size(Dimens.iconSm),
-                )
-                Text(
-                    "反馈会作为一条 issue 公开发布在开源仓库，任何人都能看到。" +
-                        "填了联系方式就等于公开它 —— 不想公开可以留空，" +
-                        "我们仍会看到你的反馈，只是没法直接回复你。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
+            // 必须在他填之前就说清楚，所以紧挨着联系方式。分量靠第一句加深，不靠图标
+            // （从前挂一个 ⓘ，是全页唯一带图标的一段，左边还差一截）
+            SettingFootnote(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)) {
+                        append("反馈会作为一条 issue 公开发布在开源仓库，任何人都能看到。")
+                    }
+                    append("填了联系方式就等于公开它 —— 不想公开可以留空，我们仍会看到你的反馈，只是没法直接回复你。")
+                },
+            )
 
             PrimaryButton(
                 text = "提交",
                 onClick = viewModel::submit,
                 enabled = state.canSubmit,
                 loading = state.submitting,
-                modifier = Modifier.fillMaxWidth(),
+                // 和卡片左右对齐（从前比卡宽一截）
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = cardMargin())
+                    .padding(top = Dimens.gapXL),
             )
-
-            Text(
-                "提交时会附带应用版本、机型与系统版本，便于定位问题。",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            // 写出具体附带了什么，不让人猜
+            SettingFootnote(
+                "提交时会附带：${viewModel.attachedInfo}",
+                modifier = Modifier.padding(top = Dimens.gapS),
             )
         }
     }

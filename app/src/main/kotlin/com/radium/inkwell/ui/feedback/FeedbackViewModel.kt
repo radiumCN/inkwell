@@ -38,6 +38,15 @@ class FeedbackViewModel(
 
     val messages = MessageBus()
 
+    private val device = "${Build.MANUFACTURER} ${Build.MODEL}"
+    private val osVersion = "Android ${Build.VERSION.RELEASE}"
+
+    /**
+     * 提交时附带的环境信息，原样写给用户看（「v0.5.1-beta.9 · Xiaomi 24129PN74C · Android 16」）。
+     * 从前只写「会附带应用版本、机型与系统版本」，附带的具体是什么得自己猜；现在和提交的是同一份。
+     */
+    val attachedInfo: String = listOfNotNull(appVersion(), device, osVersion).joinToString(" · ")
+
     fun setContent(v: String) {
         _state.value = _state.value.copy(content = v)
     }
@@ -56,8 +65,8 @@ class FeedbackViewModel(
                 content = s.content.trim(),
                 contact = s.contact.trim().takeIf { it.isNotEmpty() },
                 appVersion = appVersion(),
-                device = "${Build.MANUFACTURER} ${Build.MODEL}",
-                osVersion = "Android ${Build.VERSION.RELEASE}",
+                device = device,
+                osVersion = osVersion,
                 channel = appPrefs.updateChannel.first().name.lowercase(),
             )
             _state.value = _state.value.copy(submitting = false)
