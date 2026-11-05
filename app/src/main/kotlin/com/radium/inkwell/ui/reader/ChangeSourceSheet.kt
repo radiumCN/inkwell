@@ -35,6 +35,7 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.compactWhitespace
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupedCardItem
@@ -459,14 +460,6 @@ private fun mismatchLine(c: SearchResult, bookTitle: String, bookAuthor: String,
 /** 「最新：第13370章 xxx」；书源没给就明说，别留一行空白 */
 private fun latestLine(latest: String?): String =
     latest?.compactWhitespace()?.takeIf { it.isNotEmpty() }?.let { "最新：$it" } ?: "没有最新章节信息"
-
-/**
- * 换行、全角空格、连串空白压成一个空格。书源的最新章字段常夹着换行（「04-18\n第13370章 …」），
- * 单行显示时只剩第一行，于是被截成「04-18…」。
- */
-private fun String.compactWhitespace(): String = trim().replace(WHITESPACE, " ")
-
-private val WHITESPACE = Regex("[\\s\\u3000]+")
 
 /** 书源展示名：有名称用名称；否则从 sourceId 里抠主机名，别把整段 URL 甩到主视觉上 */
 private fun SearchResult.sourceDisplayName(): String {

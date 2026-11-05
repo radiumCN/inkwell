@@ -127,6 +127,8 @@ object Dimens {
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
     val coverThumbHeight = 64.dp
+    /** 「有新东西」的小红点（书架「继续阅读」卡上的「● 3 章更新」）：只是个点，不是数字角标 */
+    val newDot = 8.dp
     /** 详情 / 预览页书封（3:4） */
     val coverDetailWidth = 96.dp
     val coverDetailHeight = 128.dp
