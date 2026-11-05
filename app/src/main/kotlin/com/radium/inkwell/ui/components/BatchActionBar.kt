@@ -75,17 +75,13 @@ data class BatchAction(
 )
 
 /**
- * 多选态的底部操作条，HyperOS 编辑模式的样子：顶栏只留「× · 已选 N 项 · 全选」，批量动作沉到屏幕底部一条悬浮的胶囊里
- * （Miuix [FloatingToolbar]），图标在上、字在下。放进 [AppScaffold] 的 `floatingToolbar`。
+ * 多选态的底部操作条，HyperOS 编辑模式的样子：顶栏只留「× · 已选 N 项 · 全选」，批量动作沉到屏幕底部一条悬浮的玻璃胶囊里
+ * （[FloatingGlassBar]），图标在上、字在下。放进 [AppScaffold] 的 `floatingToolbar`。
  *
  * 从前批量动作全挤在顶栏：三四个光秃秃的图标加一个 ⋮，认不出哪个是哪个，「设置分组」这种常用的还藏在菜单里。
  * 拇指够得着的是屏幕底部，HyperOS 的相册、笔记、文件管理多选都是这么排的。
  *
- * 进出多选时从底部滑入滑出（[bottomBarEnter] / [bottomBarExit]）。胶囊是卡片色、带一圈分隔线：深色下卡片色和
- * 列表的卡同一个色，只靠阴影（黑底上看不见）分不出条在哪。
- *
- * **Miuix Scaffold 不把它算进给内容的 padding**：[onHeightChange] 报出它占掉的高度（连同 Scaffold 把它往上抬的那一截），
- * 调用方在多选态把它垫到列表末尾 —— 不垫的话最后一两行压在条下面，选不到也看不见。
+ * [onHeightChange] 的用法见 [FloatingGlassBar]：多选态把它垫到列表末尾。
  *
  * @param more 一条放不下的低频动作：末尾放一个「更多」，点开是这些（[AppDropdownMenu]）
  */
@@ -96,14 +92,65 @@ fun BatchActionBar(
     onHeightChange: (Dp) -> Unit,
     more: List<AppMenuItem> = emptyList(),
 ) {
+    val scheme = MiuixTheme.colorScheme
+    FloatingGlassBar(visible = visible, onHeightChange = onHeightChange) { floor ->
+        Row(Modifier.padding(horizontal = Dimens.gapS)) {
+            // 「删除」的红字：玻璃上按最坏的底推一档（有的配色里 error 红放在实色卡片上都不到 4.5:1），实色照旧
+            val delete = remember(scheme.error, floor) { AppThemes.readableOn(scheme.error, floor) }
+            actions.forEach { action ->
+                IconLabelButton(
+                    icon = action.icon,
+                    label = action.label,
+                    onClick = action.onClick,
+                    enabled = action.enabled,
+                    contentColor = if (action.destructive) delete else scheme.onSurface,
+                )
+            }
+            if (more.isNotEmpty()) {
+                var open by remember { mutableStateOf(false) }
+                // 菜单和「更多」放进同一个 Box，从按钮上弹出来（见 AppDropdownMenu）
+                Box {
+                    IconLabelButton(icon = MiuixIcons.More, label = "更多", onClick = { open = true })
+                    AppDropdownMenu(
+                        expanded = open,
+                        onDismissRequest = { open = false },
+                        // 点了哪项都先收起菜单，调用方的 onClick 不必各自记得关
+                        items = more.map { item -> item.copy(onClick = { open = false; item.onClick() }) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 屏幕底部悬浮的玻璃胶囊（Miuix [FloatingToolbar]）：多选态的 [BatchActionBar]、书架隐藏区展开后的状态胶囊都是它。
+ * 放进 [AppScaffold] 的 `floatingToolbar`，出现 / 收起时从底部滑入滑出（[bottomBarEnter] / [bottomBarExit]）。
+ * 几样同时放进那个槽时（书架：隐藏区胶囊 + 多选操作条），各自给 [visible]，同一时刻只亮一个。
+ *
+ * **玻璃**（在 AppScaffold 里才有可取样的页面图层）：对列表取样糊开，Colored Thick 混色、Small Container 那档边缘高光，
+ * 再垫一层卡片色薄底（同封面玻璃卡：底下是一本黑封面时字照样读得清，厚度见 CoverGlassTest）。胶囊的形状自己裁：
+ * Miuix 的悬浮工具条只画一块实心底，没有玻璃这一档。不在 AppScaffold 里时退回实色胶囊（卡片色、带一圈分隔线：
+ * 深色下卡片色和列表的卡同一个色，只靠阴影 —— 黑底上看不见 —— 分不出条在哪）。
+ *
+ * **Miuix Scaffold 不把它算进给内容的 padding**：[onHeightChange] 报出它占掉的高度（连同 Scaffold 把它往上抬的那一截），
+ * 调用方在它露着时把这段高度垫到列表末尾 —— 不垫的话最后一两行压在胶囊下面，点不到也看不见。
+ * 提示条（Snackbar）不用管：Miuix Scaffold 自己把它摆在悬浮工具条上面。
+ *
+ * @param content 胶囊里的内容。参数是玻璃最坏时的底色（[toolbarGlassFloor]；实色时就是卡片色）：
+ *   说明色、红字这些不是 onSurface 的字拿它推对比度（`AppThemes.readableOn`），见 CLAUDE.md「玻璃上的字按最坏的底算」
+ */
+@Composable
+fun FloatingGlassBar(
+    visible: Boolean,
+    onHeightChange: (Dp) -> Unit,
+    content: @Composable (floor: Color) -> Unit,
+) {
     val density = LocalDensity.current
     val backdrop = LocalBarBackdrop.current
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.surface.luminance() < 0.5f
     val radius = FloatingToolbarDefaults.CornerRadius
-    // 毛玻璃（在 AppScaffold 里才有可取样的页面图层）：对列表取样糊开，Colored Thick 混色、Small Container 那档边缘高光，
-    // 再垫一层卡片色薄底（同封面玻璃卡：底下是一本黑封面时字照样读得清，厚度见 CoverGlassTest）。
-    // 胶囊的形状自己裁：Miuix 的悬浮工具条只画一块实心底，没有玻璃这一档
     val glass = if (backdrop != null) {
         val shape = remember(radius) { squircleShape(radius) }
         Modifier
@@ -119,6 +166,7 @@ fun BatchActionBar(
     } else {
         Modifier
     }
+    val floor = if (backdrop != null) toolbarGlassFloor(scheme.surfaceContainer, dark) else scheme.surfaceContainer
     AnimatedVisibility(visible = visible, enter = bottomBarEnter(), exit = bottomBarExit()) {
         FloatingToolbar(
             // 量的是连同外边距在内的整块：Scaffold 就按这一块的高度往导航栏上面摆。
@@ -130,37 +178,11 @@ fun BatchActionBar(
             color = if (backdrop != null) Color.Transparent else FloatingToolbarDefaults.defaultColor(),
             outSidePadding = PaddingValues(0.dp),
             // 玻璃不投影、不描实心的边：Miuix 的投影和那圈「分隔线」都是画在胶囊底下的实心块，半透明的玻璃会把它们透出来，
-            // 胶囊里糊着一层灰。玻璃的边由边缘高光来画。没有玻璃（实色）时照旧描边：深色下卡片色和列表的卡同色，只靠阴影分不出来
+            // 胶囊里糊着一层灰。玻璃的边由边缘高光来画。没有玻璃（实色）时照旧描边
             shadowElevation = if (backdrop != null) 0.dp else FLAT_TOOLBAR_SHADOW,
             showDivider = backdrop == null,
         ) {
-            Row(Modifier.padding(horizontal = Dimens.gapS)) {
-                // 「删除」的红字：玻璃上按最坏的底推一档（有的配色里 error 红放在实色卡片上都不到 4.5:1），实色照旧
-                val floor = if (backdrop != null) toolbarGlassFloor(scheme.surfaceContainer, dark) else scheme.surfaceContainer
-                val delete = remember(scheme.error, floor) { AppThemes.readableOn(scheme.error, floor) }
-                actions.forEach { action ->
-                    IconLabelButton(
-                        icon = action.icon,
-                        label = action.label,
-                        onClick = action.onClick,
-                        enabled = action.enabled,
-                        contentColor = if (action.destructive) delete else scheme.onSurface,
-                    )
-                }
-                if (more.isNotEmpty()) {
-                    var open by remember { mutableStateOf(false) }
-                    // 菜单和「更多」放进同一个 Box，从按钮上弹出来（见 AppDropdownMenu）
-                    Box {
-                        IconLabelButton(icon = MiuixIcons.More, label = "更多", onClick = { open = true })
-                        AppDropdownMenu(
-                            expanded = open,
-                            onDismissRequest = { open = false },
-                            // 点了哪项都先收起菜单，调用方的 onClick 不必各自记得关
-                            items = more.map { item -> item.copy(onClick = { open = false; item.onClick() }) },
-                        )
-                    }
-                }
-            }
+            content(floor)
         }
     }
 }
