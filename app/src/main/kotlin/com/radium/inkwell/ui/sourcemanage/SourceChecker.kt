@@ -23,7 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 书源校验，挂在**应用级**作用域上（DI 单例），不随书源管理页的 ViewModel 走。
@@ -81,35 +80,51 @@ class SourceChecker(
         if (job?.isActive == true) return false
         if (targets.isEmpty()) return true
         val opts = _options.value
-        _progress.value = CheckProgress(0, targets.size)
+        _progress.value = CheckProgress(0, targets.size, pending = targets.toSet())
         // LAZY：先把 job 记好再开跑，协程里拿它跟自己比才有意义
         val run = scope.launch(start = CoroutineStart.LAZY) {
             val self = coroutineContext[Job]
-            fun publish(p: CheckProgress?) {
-                if (job === self) _progress.value = p
+            // 计数和两张名单（正在跑的、还没出结果的）一起改、一起发：后台作用域是多线程的，
+            // 分开的几个原子量拼不出一致的一帧（页面上会出现「done 涨了、那一行还在转圈」）
+            val lock = Any()
+            val running = HashSet<String>()
+            val pending = HashSet(targets)
+            var done = 0
+            var bad = 0
+            fun publishLocked() {
+                if (job === self) {
+                    _progress.value = CheckProgress(done, targets.size, bad, running.toSet(), pending.toSet())
+                }
             }
-            // 后台作用域是多线程的：计数用原子量（从前跑在主线程上，++ 才不出错）
-            val done = AtomicInteger(0)
-            val bad = AtomicInteger(0)
             val limiter = Semaphore(CHECK_CONCURRENCY)
             try {
                 coroutineScope {
                     targets.map { id ->
                         async {
                             limiter.withPermit {
+                                synchronized(lock) {
+                                    running += id
+                                    publishLocked()
+                                }
                                 val check = checkOne(id, opts)
                                 sourceRepo.saveCheck(id, check.ok, check.message, check.respondMs)
-                                if (!check.ok) bad.incrementAndGet()
-                                publish(CheckProgress(done.incrementAndGet(), targets.size))
+                                synchronized(lock) {
+                                    running -= id
+                                    pending -= id
+                                    done++
+                                    if (!check.ok) bad++
+                                    publishLocked()
+                                }
                             }
                         }
                     }.awaitAll()
                 }
                 // 按这一轮的实际结果计数：从前数的是列表流里的 checkStatus，最后几条 saveCheck
                 // 还没回流到 sources 时就少算了失效数
-                _finished.tryEmit("校验完成：可用 ${targets.size - bad.get()}，失效 ${bad.get()}")
+                val failed = synchronized(lock) { bad }
+                _finished.tryEmit("校验完成：可用 ${targets.size - failed}，失效 $failed")
             } finally {
-                publish(null)
+                if (job === self) _progress.value = null
             }
         }
         job = run
@@ -129,31 +144,34 @@ class SourceChecker(
         if (rule.search == null) {
             // 「新建书源」生成的源连发现页也没有：说「仅发现页」就是错的，用户会去发现页里找它
             val what = if (rule.explore.isEmpty()) "无搜索规则，按网址加书" else "仅发现页"
-            return SourceCheck(true, "$what（不校验搜索）")
+            return SourceCheck(true, "$what${CheckMessages.SEARCH_SKIPPED}")
         }
         val startedAt = System.currentTimeMillis()
+        // 走到哪一步了：失败原因前面写上它（「详情页被拒」「正文超时」）。超时是外层 withTimeout 掐断的，
+        // 掐断时停在哪一步也只有靠它知道
+        var step = CheckStep.SEARCH
         return runCatching {
             withTimeout(opts.timeoutMs) {
                 val hit = engine.search(rule, opts.keyword).items.firstOrNull()
-                    ?: error("搜索无结果")
+                    ?: throw CheckFailed("搜索无结果")
                 if (!opts.checkDetail && !opts.checkToc && !opts.checkContent) {
-                    return@withTimeout ok(toc = 0, chars = -1, startedAt)
+                    return@withTimeout ok(chars = -1, startedAt)
                 }
 
-                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl)
-                if (!opts.checkToc && !opts.checkContent) {
-                    return@withTimeout ok(toc.size, chars = -1, startedAt)
-                }
-                check(toc.isNotEmpty()) { "目录为空" }
-                if (!opts.checkContent) return@withTimeout ok(toc.size, chars = -1, startedAt)
+                step = CheckStep.DETAIL
+                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl) { step = CheckStep.TOC }
+                if (!opts.checkToc && !opts.checkContent) return@withTimeout ok(chars = -1, startedAt)
+                if (toc.isEmpty()) throw CheckFailed("目录为空")
+                if (!opts.checkContent) return@withTimeout ok(chars = -1, startedAt)
 
+                step = CheckStep.CONTENT
                 val urls = toc.mapTo(HashSet()) { it.url }
                 val probes = listOfNotNull(
                     toc.first(),
                     toc.getOrNull(toc.size / 2).takeIf { toc.size > 1 },
                 )
                 var best = 0
-                var lastError: String? = null
+                var lastError: Throwable? = null
                 for (chapter in probes) {
                     val chars = runCatching {
                         engine.getContent(
@@ -168,14 +186,15 @@ class SourceChecker(
                         // 取消（含外层 withTimeout 到点）必须放出去给外层那段判定：吞在这里的话，
                         // 超时的源会被写成「正文为空」而不是超时，用户取消校验也会被记成失效。
                         if (it is CancellationException) throw it
-                        lastError = it.message
+                        lastError = it
                         0
                     }
                     if (chars > best) best = chars
                     if (best >= SHORT_CONTENT_CHARS) break
                 }
-                check(best > 0) { lastError ?: "正文为空" }
-                ok(toc.size, best, startedAt)
+                // 两章都抓不到：有报错就拿报错归类（「正文被拒」「正文超时」），没报错才是真的空
+                if (best == 0) throw (lastError ?: CheckFailed("正文为空"))
+                ok(best, startedAt)
             }
         }.getOrElse {
             // 用户点「取消校验」时，在飞的这些源抛的是 CancellationException。把它当成判定结果
@@ -183,20 +202,24 @@ class SourceChecker(
             // 结果又是落库的 —— 用户得重跑一遍才能洗掉。取消不是判定结果，原样抛出去。
             // 但 withTimeout 的 TimeoutCancellationException 是判定结果（这个源太慢），要留下。
             if (it is CancellationException && it !is TimeoutCancellationException) throw it
-            SourceCheck(false, it.message?.take(60) ?: "失败", System.currentTimeMillis() - startedAt)
+            // 从前存的是异常原文截 60 字（「Timed out waiting for 60000 ms」「HTTP 403: https://…」），
+            // 现在归类说人话、带上哪一步，见 CheckMessages
+            val message = if (it is CheckFailed) it.message.orEmpty() else CheckMessages.failure(step, it)
+            SourceCheck(false, message, System.currentTimeMillis() - startedAt)
         }
     }
 
-    private fun ok(toc: Int, chars: Int, startedAt: Long): SourceCheck {
+    /**
+     * 章数不再记：那是拿关键词随手搜到的第一本书的章数，跟书源好坏无关。
+     * [chars] 是探到的正文字数，-1 = 没校验正文。
+     */
+    private fun ok(chars: Int, startedAt: Long): SourceCheck {
         val ms = System.currentTimeMillis() - startedAt
-        val parts = buildList {
-            add("可用")
-            if (toc > 0) add("$toc 章")
-            add("${ms}ms")
-            if (chars in 1 until SHORT_CONTENT_CHARS) add("正文偏短（$chars 字）")
-        }
-        return SourceCheck(true, parts.joinToString(" · "), ms)
+        return SourceCheck(true, CheckMessages.ok(ms, shortContent = chars in 1 until SHORT_CONTENT_CHARS), ms)
     }
+
+    /** 校验自己下的结论（搜索无结果、目录为空、正文为空）：原样当失败原因，不再归类、不加步骤 */
+    private class CheckFailed(message: String) : Exception(message)
 
     private companion object {
         /** 并发上限。几百个源同时打网站只会集体被限流，反而校验出一堆假的"失效" */

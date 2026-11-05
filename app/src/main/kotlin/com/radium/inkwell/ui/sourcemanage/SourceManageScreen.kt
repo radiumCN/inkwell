@@ -27,14 +27,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
@@ -75,7 +79,6 @@ import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Blocklist
 import top.yukonga.miuix.kmp.icon.extended.Close
@@ -99,7 +102,7 @@ fun SourceManageScreen(
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val sourcesLoaded by viewModel.sourcesLoaded.collectAsStateWithLifecycle()
     val visible by viewModel.visibleSources.collectAsStateWithLifecycle()
-    val exploreOnlyIds by viewModel.exploreOnlyIds.collectAsStateWithLifecycle()
+    val searchless by viewModel.searchless.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val checkProgress by viewModel.checkProgress.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -336,9 +339,20 @@ fun SourceManageScreen(
             ) {
                 // 一张卡装下整个列表（HyperOS 的灰底白卡），行与行之间不留缝
                 itemsIndexed(visible, key = { _, it -> it.id }) { index, source ->
+                    val progress = checkProgress
                     SourceListRow(
                         source = source,
-                        exploreOnly = source.id in exploreOnlyIds,
+                        tag = when (source.id) {
+                            in searchless.exploreOnly -> "仅发现"
+                            in searchless.urlOnly -> "无搜索"
+                            else -> null
+                        },
+                        checkState = when {
+                            progress == null -> RowCheck.IDLE
+                            source.id in progress.running -> RowCheck.RUNNING
+                            source.id in progress.pending -> RowCheck.QUEUED
+                            else -> RowCheck.IDLE
+                        },
                         selected = source.id in selected,
                         selectionMode = selectionMode,
                         onClick = {
@@ -558,30 +572,37 @@ private fun SourceListHeader(
                 Text("正在导入书源…", style = MiuixTheme.textStyles.footnote1)
             }
         }
-        // 校验进度：一次几百个源，得让人看到还剩多少、并且能中断
+        // 校验进度：一次几百个源，得让人看到还剩多少、这一轮已经坏了几个，并且能中断。
+        // 文字和「停止」一行、下面一条通栏细进度条（同换源面板的概况行）；从前进度条夹在文字和「停止」之间，
+        // 「停止」上下都对不齐
         checkProgress?.let { p ->
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                Modifier.fillMaxWidth().padding(start = Dimens.listHorizontal, end = TRAILING_BUTTON_END),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "正在校验 ${p.done}/${p.total}",
-                        style = MiuixTheme.textStyles.footnote1,
-                    )
-                    DeterminateProgressBar(
-                        progress = if (p.total == 0) 0f else p.done.toFloat() / p.total,
-                        modifier = Modifier.padding(top = Dimens.gapXS),
-                    )
-                }
+                Text(
+                    buildAnnotatedString {
+                        append("正在校验 ${p.done} / ${p.total}")
+                        if (p.failed > 0) {
+                            append(" · ")
+                            withStyle(SpanStyle(color = MiuixTheme.colorScheme.error)) { append("失效 ${p.failed}") }
+                        }
+                    },
+                    style = MiuixTheme.textStyles.footnote1,
+                    modifier = Modifier.weight(1f),
+                )
                 AppTextButton("停止", onClick = onCancelCheck)
             }
+            DeterminateProgressBar(
+                progress = if (p.total == 0) 0f else p.done.toFloat() / p.total,
+                modifier = Modifier.padding(start = Dimens.listHorizontal, end = Dimens.listHorizontal, bottom = Dimens.gapXS),
+            )
         }
         // 校验完最想干的事。禁用放在删除前面：删是不可逆的，而站点抽风、临时封 IP
         // 都会造成一次性的"失效"，禁用了还能改天再校验一次
         if (checkProgress == null && failedCount > 0) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = Dimens.listHorizontal),
+                Modifier.fillMaxWidth().padding(start = Dimens.listHorizontal, end = TRAILING_BUTTON_END),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -602,10 +623,21 @@ private fun SourceListHeader(
     }
 }
 
+/** 一行在这一轮校验里的位置。不在校验时都是 [IDLE] */
+private enum class RowCheck {
+    IDLE,
+    /** 正在跑：就地转圈 */
+    RUNNING,
+    /** 排队还没轮到：行上是上一次的结果，变淡 */
+    QUEUED,
+}
+
 @Composable
 private fun SourceListRow(
     source: BookSourceListItem,
-    exploreOnly: Boolean,
+    /** 没有搜索规则的源挂在标题后的标签：「仅发现」「无搜索」；能搜索的为 null */
+    tag: String?,
+    checkState: RowCheck,
     selected: Boolean,
     selectionMode: Boolean,
     onClick: () -> Unit,
@@ -642,33 +674,13 @@ private fun SourceListRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (source.checkStatus != CheckStatus.UNCHECKED) {
-                val ok = source.checkStatus == CheckStatus.OK
-                val statusColor = if (ok) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.error
-                }
-                Row(
-                    Modifier.padding(top = Dimens.gapXS),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (ok) MiuixIcons.Basic.Check else MiuixIcons.Close,
-                        contentDescription = null,
-                        Modifier.size(Dimens.iconSm),
-                        tint = statusColor,
-                    )
-                    Text(
-                        source.checkMessage,
-                        Modifier.padding(start = Dimens.gapXS),
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = statusColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+            // 没有搜索规则的源一步都没校验（库里只记了一句「不校验搜索」）：不写状态，标题后的标签已经说清了。
+            // 从前它们和「可用」一样打蓝勾，十几个字每个这类源重复一遍
+            CheckStatusLine(
+                source = source,
+                state = checkState,
+                searchless = tag != null || CheckMessages.skippedSearch(source.checkMessage),
+            )
         }
     }
     val headline: @Composable () -> Unit = {
@@ -679,10 +691,10 @@ private fun SourceListRow(
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (exploreOnly) {
+            if (tag != null) {
                 // 淡强调底 + 强调色字（tertiaryContainer 一对），与选中的 chip 同一种「标签」语汇
                 Text(
-                    "仅发现",
+                    tag,
                     style = MiuixTheme.textStyles.footnote2,
                     fontWeight = FontWeight.Medium,
                     color = MiuixTheme.colorScheme.onTertiaryContainer,
@@ -724,6 +736,58 @@ private fun SourceListRow(
 }
 
 /**
+ * 行上的校验状态。满屏扫下去只有两种颜色：失效红（✕ + 原因）、正在跑的蓝（就地转圈）；
+ * 可用的灰字、不带勾 —— 从前每行一条蓝 ✓，几百个源满屏强调色，真正要处理的红字反倒不显眼。
+ * 排队还没轮到的，上一次的结果变淡：分得清哪些是这一轮刚出的、哪些还是旧账。
+ * 库里的文案经 [CheckMessages] 重写再显示，旧结果也是新说法。
+ */
+@Composable
+private fun CheckStatusLine(source: BookSourceListItem, state: RowCheck, searchless: Boolean) {
+    if (searchless) return
+    if (state == RowCheck.RUNNING) {
+        Row(
+            Modifier.padding(top = Dimens.gapXS),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+        ) {
+            AppLoadingIndicator(size = Dimens.buttonSpinner)
+            Text(
+                "正在校验…",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+        }
+        return
+    }
+    if (source.checkStatus == CheckStatus.UNCHECKED) return
+    val ok = source.checkStatus == CheckStatus.OK
+    val color = if (ok) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.error
+    Row(
+        Modifier
+            .padding(top = Dimens.gapXS)
+            .alpha(if (state == RowCheck.QUEUED) STALE_ALPHA else 1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+    ) {
+        if (!ok) {
+            Icon(MiuixIcons.Close, contentDescription = null, Modifier.size(Dimens.iconSm), tint = color)
+        }
+        Text(
+            if (ok) {
+                CheckMessages.okLine(source.respondTime, source.checkMessage)
+            } else {
+                CheckMessages.display(source.checkMessage)
+            },
+            style = MiuixTheme.textStyles.footnote1,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
  * 校验选项里的开关行。整行就是一个开关：toggleable(role = Switch)，行内 Switch 只做展示 ——
  * 从前是 `clickable {}` 套一个能单独拨的 Switch，读屏上一行出两个焦点，行那个还念不出开关状态。
  */
@@ -742,3 +806,11 @@ private fun CheckItemRow(label: String, checked: Boolean, onChange: (Boolean) ->
     }
 }
 
+/** 排队还没轮到的行：上一次的结果淡到这个程度（同禁用态的 0.38） */
+private const val STALE_ALPHA = 0.38f
+
+/**
+ * 行尾是文字按钮的那一行（「停止」「删除」）右边只留这么多：按钮自带 gapM 的左右内边距，
+ * 4 + 12 = 16，按钮的字和上面的搜索框、下面通栏进度条的右端对齐
+ */
+private val TRAILING_BUTTON_END = Dimens.gapXS

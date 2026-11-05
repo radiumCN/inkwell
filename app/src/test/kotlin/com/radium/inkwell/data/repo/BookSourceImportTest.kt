@@ -463,7 +463,7 @@ class BookSourceImportTest {
         assertEquals(0, row.sortOrder)
     }
 
-    /** 「仅发现页」得真有发现页：新建的书源既不能搜索也没有发现页，标成仅发现，用户会去发现页里找它 */
+    /** 「仅发现页」得真有发现页：新建的书源既不能搜索也没有发现页，标成仅发现，用户会去发现页里找它；它是「无搜索」 */
     @Test
     fun `没有发现页的书源不算仅发现页`() = runTest {
         val dao = FakeDao()
@@ -474,6 +474,8 @@ class BookSourceImportTest {
         ).getOrThrow()
         repo.addCreated(created("https://x.com"))
         val items = dao.store.values.map { it.id to it.updatedAt }
-        assertEquals(setOf("https://e.com"), repo.exploreOnlyIds(items))
+        val searchless = repo.searchlessIds(items)
+        assertEquals(setOf("https://e.com"), searchless.exploreOnly)
+        assertEquals(setOf("https://x.com"), searchless.urlOnly)
     }
 }

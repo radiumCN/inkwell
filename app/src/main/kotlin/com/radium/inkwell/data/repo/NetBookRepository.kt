@@ -33,8 +33,11 @@ class NetBookRepository(
     suspend fun fetchDetailAndToc(
         rule: BookSourceRule,
         bookUrl: String,
+        /** 详情页拿到了、开始取目录时调一下。书源校验靠它分清坏在详情页还是目录 */
+        onDetailFetched: () -> Unit = {},
     ): Pair<RemoteBookDetail, List<RemoteChapter>> {
         val detail = engine.getDetail(rule, bookUrl)
+        onDetailFetched()
         val toc = engine.getToc(
             rule, detail.tocUrl.ifBlank { bookUrl },
             bookUrl = bookUrl, bookTitle = detail.title, bookAuthor = detail.author.orEmpty(),
