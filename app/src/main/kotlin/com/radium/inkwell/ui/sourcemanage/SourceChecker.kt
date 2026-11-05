@@ -144,7 +144,8 @@ class SourceChecker(
         if (rule.search == null) {
             // 「新建书源」生成的源连发现页也没有：说「仅发现页」就是错的，用户会去发现页里找它
             val what = if (rule.explore.isEmpty()) "无搜索规则，按网址加书" else "仅发现页"
-            return SourceCheck(true, "$what${CheckMessages.SEARCH_SKIPPED}")
+            // 耗时记 -1（没测）而不是 0：从前的 0 让「按响应速度」把这些搜不了的源排在了最前面
+            return SourceCheck(true, "$what${CheckMessages.SEARCH_SKIPPED}", respondMs = -1)
         }
         val startedAt = System.currentTimeMillis()
         // 走到哪一步了：失败原因前面写上它（「详情页被拒」「正文超时」）。超时是外层 withTimeout 掐断的，

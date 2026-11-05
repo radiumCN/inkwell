@@ -77,13 +77,15 @@ enum class SourceSort(val label: String) {
  * 排序比较器。抽成顶层函数是为了能直接测 —— 尤其「按响应速度」这条：
  * 未校验和失效的书源 respondTime 是 -1，直接拿它排会让 -1 冒充"最快"，
  * 一堆死源排到最前面，正好排反了。
+ * 0 也算没测到（同搜索调度、自动换源的口径）：没有搜索规则的源校验时一步都不跑，从前记的耗时是 0，
+ * 「按响应速度」就把这些根本搜不了的源全排在了最前面。现在校验记 -1，库里已经存着的 0 靠这里兜住。
  */
 fun sourceComparator(sort: SourceSort): Comparator<BookSourceListItem> = when (sort) {
     SourceSort.MANUAL -> compareBy({ it.sortOrder }, { it.name })
     SourceSort.NAME -> compareBy { it.name }
     SourceSort.UPDATED -> compareByDescending { it.updatedAt }
     SourceSort.RESPOND_TIME -> compareBy(
-        { if (it.respondTime < 0) Long.MAX_VALUE else it.respondTime },
+        { if (it.respondTime <= 0) Long.MAX_VALUE else it.respondTime },
         { it.name },
     )
 }

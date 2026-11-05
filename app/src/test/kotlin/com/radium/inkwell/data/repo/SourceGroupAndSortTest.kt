@@ -30,6 +30,7 @@ class SourceGroupAndSortTest {
     /**
      * 按响应速度排序时，未校验(-1)和失效(-1)的书源必须沉到最后。
      * 如果直接拿 respondTime 排，-1 会冒充"最快"，一堆死源排在最前面 —— 正好排反了。
+     * 没有搜索规则的源从前校验记的是 0（一步没跑），库里还存着：0 也是没测到，不是「最快」。
      */
     @Test
     fun `按响应速度排序：未校验与失效的沉到最后`() {
@@ -38,9 +39,10 @@ class SourceGroupAndSortTest {
             entity("未校验", respondTime = -1, status = CheckStatus.UNCHECKED),
             entity("快源", respondTime = 300, status = CheckStatus.OK),
             entity("失效", respondTime = -1, status = CheckStatus.FAILED),
+            entity("无搜索", respondTime = 0, status = CheckStatus.OK),
         )
         val sorted = list.sortedWith(sourceComparator(SourceSort.RESPOND_TIME))
-        assertEquals(listOf("快源", "慢源", "失效", "未校验"), sorted.map { it.name })
+        assertEquals(listOf("快源", "慢源", "失效", "无搜索", "未校验"), sorted.map { it.name })
     }
 
     private fun entity(name: String, respondTime: Long, status: Int) = BookSourceListItem(
