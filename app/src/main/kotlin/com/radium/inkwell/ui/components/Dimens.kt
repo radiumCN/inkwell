@@ -37,15 +37,15 @@ object Dimens {
     val screenPadding = 20.dp
     /** 设置行的左右内边距（少数尚未迁到 ContentListItem 的表单行仍用） */
     val rowHorizontal = 20.dp
-    /** 设置行上下内边距（少数尚未迁到 ContentListItem 的表单行仍用）。圆角列表行请用 [listVertical] */
+    /** 设置行上下内边距（少数尚未迁到 ContentListItem 的表单行仍用）。列表行请用 ContentListItem */
     val rowVertical = 10.dp
     /** 内容列表行（书籍、书源、文章、设置卡片）的左右内边距 */
     val listHorizontal = 16.dp
     /**
-     * 内容列表 / 设置卡片行的上下内边距（Compact 默认密度）。
+     * 紧凑的上下内边距：列表上面压着的状态行（导入中、校验进度）、阅读页浮层里的小块。
      *
-     * 取 4 而非 8：两行字（标题 + 副标题）再叠 8+8，卡片相对字重显得虚高，
-     * 设置页一屏少看一组。触控高度靠行的最小高度 [listItemMinHeight] 兜住。
+     * 列表行本身**不**用它：行的上下边距是 `ContentListDefaults.DefaultPadding` 的 16dp（同 Miuix `BasicComponent`）。
+     * 从前列表行用的就是这 4dp，两三行字的行挤在卡里，和同一页上 Miuix 原生的设置行不是一个密度。
      */
     val listVertical = 4.dp
     /**
@@ -88,6 +88,13 @@ object Dimens {
     val iconMd = 24.dp
     /** 48dp。空状态正中那个 */
     val iconXL = 48.dp
+    /**
+     * 64dp。弹窗头部的应用图标（更新弹窗）：比空状态的线条图标大一档 —— 它是一张有底色的图，
+     * 48dp 放在弹窗顶上像个列表行的缩略图，撑不起「头部」
+     */
+    val dialogHeroIcon = 64.dp
+    /** 88dp。关于页头部的应用图标：整页的主角，照 HyperOS「关于手机」与 Miuix 示例关于页的尺寸 */
+    val aboutHeroIcon = 88.dp
     /** 整页加载态的转圈（[AppLoadingIndicator] 默认尺寸）。与 Miuix 圆形进度的 30dp 默认值相近、落在栅格上 */
     val loadingIndicator = 32.dp
 
@@ -115,11 +122,13 @@ object Dimens {
      * Miuix `IconButton` 默认只有 40dp，[AppIconButton] 把它抬到这个数。
      */
     val touchTarget = 48.dp
-    /** 主题色板 / 图标预览的圆形色块 */
+    /** 主题色板 / 图标预览的色块（52dp；图标预览按 squircle 裁，见 AppIconSheet） */
     val swatch = 52.dp
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
     val coverThumbHeight = 64.dp
+    /** 「有新东西」的小红点（书架「继续阅读」卡上的「● 3 章更新」）：只是个点，不是数字角标 */
+    val newDot = 8.dp
     /** 详情 / 预览页书封（3:4） */
     val coverDetailWidth = 96.dp
     val coverDetailHeight = 128.dp
@@ -148,4 +157,6 @@ object Dimens {
     val sliderCompact = 20.dp
     /** 主题页滑块左侧标签列宽，避免「字号」「行距」和滑块对不齐 */
     val sliderLabelWidth = 120.dp
+    /** 阅读页右边缘调亮度时浮出的那根竖条（见 QuickAdjustOverlay）：手指滑过半屏多，竖条有个能读的长度就够 */
+    val brightnessHudHeight = 160.dp
 }

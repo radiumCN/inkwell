@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.blockTouchesBelow
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
@@ -34,6 +35,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.extendSelection
@@ -215,6 +217,8 @@ fun ReaderScreen(
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
+    /** 正在双指调字号 / 右边缘调亮度时的读数（见 QuickAdjustOverlay）；null = 没在调 */
+    var quickAdjust by remember { mutableStateOf<QuickAdjust?>(null) }
     val haptic = LocalHapticFeedback.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -339,11 +343,51 @@ fun ReaderScreen(
             splashVisible = false
         }
 
+        // 不开菜单直接调：双指缩放调字号、右边缘竖滑调亮度（见 QuickAdjust.kt）。只在正文就位、
+        // 没有任何浮层（菜单、面板、换源、选字）时挂 —— 浮层开着时这些手势要么被盖住、要么会和面板里的滑块抢
+        val context = LocalContext.current
+        val quickHandler = rememberUpdatedState(
+            QuickAdjustHandler(
+                fontSize = { session.settings.fontSizeSp },
+                brightness = {
+                    session.settings.brightnessOverride ?: systemBrightnessLevel(context) ?: HALF_BRIGHTNESS
+                },
+                onFontSize = { sp ->
+                    // 每过一档轻震一下：手指在张，眼睛在看正文，靠手感数档
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    viewModel.previewSettings(session.settings.copy(fontSizeSp = sp))
+                },
+                onBrightness = { level -> viewModel.previewSettings(session.settings.copy(brightnessOverride = level)) },
+                onFinish = { viewModel.commitSettings() },
+                onHud = { quickAdjust = it },
+            ),
+        )
+        val quickAdjustEnabled = !overlay.menuVisible &&
+            !overlay.readerSheetOpen &&
+            overlay.sourceCandidates == null &&
+            selection == null &&
+            !overlay.autoChanging &&
+            pageUi.error == null &&
+            !pageUi.loading &&
+            layout != null
+
         // 翻页区（含页眉页脚）录进 pageBackdrop：阅读菜单与选字工具条对它取样做毛玻璃（readerGlass），只在 recordPage 时录。
         // 页面全是 Compose 自己画的（PageCanvas、仿真页的位图也画在 Compose 画布上），图层录得下来；
         // 菜单和各种浮层都在这一层**外面**，不会自己糊自己。录下来的那份不带纸色（纸色是外层 Box 画的），
         // 透明处先垫一层纸，否则模糊时边缘会渗进黑色。
-        Box(Modifier.fillMaxSize().then(if (recordPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (recordPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)
+                // 挂在翻页容器、长按选字的父节点上：它在 Initial 阶段先看到事件，认出是自己的手势才接走
+                .quickAdjustGestures(
+                    enabled = quickAdjustEnabled,
+                    pinch = session.settings.pinchFontSize,
+                    // 滚动模式下上下滑就是翻页，边缘竖滑不接
+                    edge = session.settings.edgeBrightness && session.settings.flipAnimation != FlipAnimation.SCROLL,
+                    handler = quickHandler,
+                ),
+        ) {
             when {
                 // 排在 error 前面：自动换源正是由报错触发的，底下那条 error 还挂着。
                 // 让用户对着"章节加载失败"干等，却不知道 App 其实正在替他找源 —— 那叫失联。
@@ -564,7 +608,10 @@ fun ReaderScreen(
             ReaderThemeScope(session.settings.theme) {
                 AppSurface(
                     cornerRadius = AppShapes.radiusMedium,
-                    modifier = Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                    // 点到「已自动换到…」那行字上别漏给纸面（翻页、唤出菜单）
+                    modifier = Modifier
+                        .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)
+                        .blockTouchesBelow(),
                     // 纸面上的小提示条：比纸面深/亮一档（surfaceContainerHigh），不投影 —— 同色纸上的阴影是脏灰线
                     color = MiuixTheme.colorScheme.surfaceContainerHigh,
                 ) {
@@ -614,10 +661,14 @@ fun ReaderScreen(
         // 不必挨个传颜色（漏一个就露馅）。
         ReaderThemeScope(session.settings.theme) {
 
+        QuickAdjustOverlay(quickAdjust)
+
         overlay.sourceCandidates?.let { candidates ->
             ChangeSourceSheet(
                 overlay = overlay,
                 currentSourceName = session.currentSourceName,
+                bookTitle = session.bookTitle,
+                bookAuthor = session.bookAuthor,
                 candidates = candidates,
                 onApplySource = { viewModel.applyChangeSource(it) },
                 onToggleCheckAuthor = { viewModel.setCheckAuthor(it) },

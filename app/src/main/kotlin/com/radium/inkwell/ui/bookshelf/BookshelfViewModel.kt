@@ -266,7 +266,7 @@ class BookshelfViewModel(
     // ---- 隐藏 ----
 
     /**
-     * 是否处于隐藏区（显示隐藏的书 + 顶上那条状态条）。
+     * 是否处于隐藏区（显示隐藏的书 + 底部那颗隐藏区胶囊）。
      *
      * **进程内状态，不落库** —— 退出 App 就复位。落库的话「隐藏」就形同虚设：
      * 用户看完一次，开关一直开着，那些书就再也没被隐藏过。
@@ -339,12 +339,12 @@ class BookshelfViewModel(
         return allBooks.value.any { it.hidden && inGroup(it, g) }
     }
 
-    /** 「展开需验证」只在隐藏区状态条上露面，所以设置这件事归书架管，而不是设置页 */
+    /** 「展开需验证」只在隐藏区胶囊上露面，所以设置这件事归书架管，而不是设置页 */
     fun setHiddenRequireAuth(on: Boolean) {
         viewModelScope.launch { appPrefs.setHiddenRequireAuth(on) }
     }
 
-    /** 退出隐藏区：状态条收起，隐藏的书也藏回去 */
+    /** 退出隐藏区：胶囊收起，隐藏的书也藏回去 */
     fun collapseHiddenAll() {
         _showHidden.value = false
     }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -18,17 +19,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.em
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.LoadingState
@@ -36,12 +38,12 @@ import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.horizontalOnly
-import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.pageScroll
-import com.radium.inkwell.ui.components.rememberAppTopBarScroll
+import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
 import com.radium.inkwell.ui.components.settingsPageColor
-import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
@@ -62,34 +64,42 @@ fun RssArticleScreen(
     viewModel: RssArticleViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val messages = remember { MessageBus() }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(messages, snackbar)
 
-    fun openInBrowser() {
-        if (state.link.isBlank()) return
-        // 从前拉不起浏览器时静默吞掉：按钮点了没反应，用户只会以为没点中
-        if (!context.openExternalLink(state.link)) messages.emit(NO_BROWSER_MESSAGE)
-    }
+    // 从前拉不起浏览器时静默吞掉：按钮点了没反应，用户只会以为没点中。
+    // 原文链接来自订阅源，先把地址亮出来问一句再跳（见 rememberExternalLinkOpener）
+    val links = rememberExternalLinkOpener { messages.emit(NO_BROWSER_MESSAGE) }
+    fun openInBrowser() = links.open(state.link)
 
     val pageColor = settingsPageColor()
-    val topBarScroll = rememberAppTopBarScroll()
+    // 窄栏，不用大标题栏：这一页的标题就是文章标题。从前停在顶部时是大标题「文章」压在文章标题上面 ——
+    // 两行大字，第一行没有信息量，左边还和下面的标题错开 6dp（Miuix 大标题缩进 26dp、正文 20dp）。
+    // 栏里的标题等页面上的文章标题滚到栏底下才淡出来（见 ToolbarTitleReveal）
+    val listState = rememberLazyListState()
+    val reveal = rememberToolbarTitleReveal(listState)
     AppScaffold(
-        modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         snackbarHost = { AppSnackbarHost(snackbar) },
         topBar = {
-            AppTopBar("文章", topBarScroll, onBack = onBack, containerColor = pageColor, actions = {
-                if (state.link.isNotBlank()) {
-                    AppIconButton(onClick = ::openInBrowser) {
-                        Icon(
-                            MiuixIcons.Forward,
-                            contentDescription = "浏览器打开原文",
-                        )
+            AppToolbar(
+                modifier = reveal.bar,
+                navigationIcon = { BackButton(onClick = onBack) },
+                containerColor = pageColor,
+                actions = {
+                    if (state.link.isNotBlank()) {
+                        AppIconButton(onClick = ::openInBrowser) {
+                            Icon(
+                                MiuixIcons.Forward,
+                                contentDescription = "浏览器打开原文",
+                            )
+                        }
                     }
-                }
-            })
+                },
+            ) {
+                ToolbarTitle(state.title, Modifier.graphicsLayer { alpha = reveal.titleAlpha })
+            }
         },
     ) { padding ->
         if (state.loading) {
@@ -100,12 +110,15 @@ fun RssArticleScreen(
         // 懒加载：长文、多图的文章从前一次把全部段落和图片组合完才出第一屏。
         // 列表也让「上面的图加载出来、高度变了」不再把正在读的那段往下推 —— 位置锚在可见的那一项上
         val imageRatios = remember { mutableStateMapOf<String, Float>() }
+        // 正文的行高：Miuix 的字体样式不设行高，按字体默认的行距排，长篇中文挤成一片。只在文章正文里放宽，不动全局
+        val paragraphStyle = MiuixTheme.textStyles.body1.copy(lineHeight = ARTICLE_LINE_HEIGHT)
         LazyColumn(
             Modifier
                 .fillMaxSize()
                 // 只让开两侧：顶栏高度垫在列表开头（正文滚到毛玻璃顶栏下面），导航栏高度垫在末尾（见 AppScaffold）
                 .padding(padding.horizontalOnly())
                 .pageScroll(),
+            state = listState,
             contentPadding = PaddingValues(
                 start = Dimens.screenPadding,
                 end = Dimens.screenPadding,
@@ -118,7 +131,7 @@ fun RssArticleScreen(
                 Column {
                     Text(
                         state.title,
-                        Modifier.padding(top = Dimens.gapS),
+                        Modifier.padding(top = Dimens.gapS).then(reveal.title),
                         style = MiuixTheme.textStyles.title2,
                     )
                     state.pubDate?.let {
@@ -141,16 +154,18 @@ fun RssArticleScreen(
                 contentType = { _, el -> el::class },
             ) { _, el ->
                 when (el) {
+                    // 小标题比正文大一档（title4 = 18sp）：从前用 headline2，在 Miuix 里和正文 body1 一样是 16sp，
+                    // 只差一个字重，看不出是标题。上面留得比下面多，让它贴着自己领起的那一段
                     is ContentElement.Heading -> Text(
                         el.text,
-                        Modifier.padding(vertical = Dimens.gapS),
-                        style = MiuixTheme.textStyles.headline2,
+                        Modifier.padding(top = Dimens.gapL, bottom = Dimens.gapXS),
+                        style = MiuixTheme.textStyles.title4,
                         fontWeight = FontWeight.Medium,
                     )
                     is ContentElement.Paragraph -> Text(
                         el.text,
                         Modifier.padding(vertical = Dimens.gapS),
-                        style = MiuixTheme.textStyles.body1,
+                        style = paragraphStyle,
                     )
                     is ContentElement.Image -> ArticleImage(el, imageRatios)
                     ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
@@ -230,6 +245,9 @@ private fun ArticleImage(el: ContentElement.Image, ratios: MutableMap<String, Fl
 }
 
 private const val PLACEHOLDER_RATIO = 4f / 3f
+
+/** 文章正文的行高（字号的倍数）：中文长文常用 1.5~1.8，取中 */
+private val ARTICLE_LINE_HEIGHT = 1.6.em
 
 /** [ArticleImage] 的比例表里「这张加载失败」的标记 */
 private const val FAILED_IMAGE = -1f

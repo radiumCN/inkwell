@@ -7,11 +7,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.components.AppAlertDialog
-import com.radium.inkwell.ui.components.DeterminateProgressBar
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.openExternalLink
@@ -24,8 +26,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 设置主页「检查更新」用的状态与弹窗，避免把整套下载逻辑塞进二级页。 */
 internal class UpdateCheckState(
@@ -100,8 +100,9 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
             val direct = info.directInstall
             AppAlertDialog(
                 onDismissRequest = { if (!downloading) dismissDialog() },
-                title = "发现新版本 v${info.latestVersion}" + if (info.isPrerelease) "（测试版）" else "",
-                text = info.notes.ifBlank { "暂无更新说明" },
+                // 头部（图标、标题、版本、标签）和更新说明都由下面的 content 自己画，见 UpdateDialog.kt
+                title = null,
+                scrollable = false,
                 confirmText = when {
                     direct != null -> if (downloadError != null) "重试" else "下载并安装"
                     info.browserIsApk -> "下载 APK"
@@ -151,21 +152,9 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
                     }
                 },
                 content = {
-                    if (downloading) {
-                        DeterminateProgressBar(progress = downloadProgress)
-                        Text(
-                            "正在下载并校验… ${(downloadProgress * 100).toInt()}%",
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
-                    }
-                    downloadError?.let {
-                        Text(
-                            it,
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.error,
-                        )
-                    }
+                    UpdateHero(currentVersion, info, Modifier.padding(bottom = Dimens.gapXS))
+                    ReleaseNotesPanel(info.notes)
+                    UpdateDownloadStatus(downloading, downloadProgress, direct?.size, downloadError)
                 },
             )
         }

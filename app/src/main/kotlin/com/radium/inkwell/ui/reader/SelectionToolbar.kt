@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.blockTouchesBelow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,8 +41,10 @@ import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import androidx.compose.ui.graphics.RectangleShape
 import top.yukonga.miuix.kmp.squircle.squircleClip
+import androidx.compose.ui.graphics.luminance
+import com.radium.inkwell.ui.components.smallGlassHighlight
+import com.radium.inkwell.ui.components.squircleShape
 
 /**
  * 选中文字后的操作条。
@@ -52,7 +55,8 @@ import top.yukonga.miuix.kmp.squircle.squircleClip
  * 两者的底都取浮层色（[readerOverlayColor]）而不是卡片色：它们直接压在纸面上，
  * 而浅色纸的卡片色就是纸本身 —— 用卡片色等于纸上放一张看不见的纸。
  * 也不投影：同色纸上的阴影是一道脏灰线，层次只靠色阶（见 ReaderThemeScope）。
- * 给了 [pageBackdrop] 时和阅读菜单一样是毛玻璃（[readerGlass]）：浮层色只叠八成，底下的正文隐约透出来。
+ * 给了 [pageBackdrop] 时和阅读菜单一样是毛玻璃（[readerGlass]）：浮层色只叠八成，底下的正文隐约透出来；
+ * 两块都是浮起来的玻璃，再描一圈边缘高光（浅色纸用亮模式那档、深色纸用暗模式那档）。
  */
 @Composable
 fun SelectionToolbar(
@@ -67,6 +71,7 @@ fun SelectionToolbar(
 ) {
     val overlayColor = readerOverlayColor()
     val fill = if (pageBackdrop != null) Color.Transparent else overlayColor
+    val highlight = smallGlassHighlight(dark = overlayColor.luminance() < 0.5f)
     var replacing by remember { mutableStateOf(false) }
     var replacement by remember { mutableStateOf("") }
 
@@ -79,7 +84,8 @@ fun SelectionToolbar(
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                 // 圆角用 squircle 遮罩裁（和 Miuix 卡片同一种弯法），玻璃本身铺成直角、被这层一起裁进去
                 .squircleClip(AppShapes.radiusLarge)
-                .readerGlass(pageBackdrop, RectangleShape, overlayColor)
+                // 玻璃给同一条 squircle：边缘高光沿它画，给直角的话四个角的高光被上面那层裁掉
+                .readerGlass(pageBackdrop, squircleShape(AppShapes.radiusLarge), overlayColor, highlight)
                 // 点在表单空白处别漏到纸面：纸面那层的「点空白取消选区」会把正在填的表单连同选区一起收掉
                 .blockTouchesBelow(),
             color = fill,
@@ -139,7 +145,8 @@ fun SelectionToolbar(
             )
             FloatingToolbar(
                 // 药丸是 50dp 圆角，比自身高度一半还大，等于两头全圆：模糊区用同一个胶囊形
-                modifier = Modifier.readerGlass(pageBackdrop, CircleShape, overlayColor),
+                // 按钮之间的空隙别漏到纸面：纸面那层「点空白取消选区」会把选区收掉
+                modifier = Modifier.readerGlass(pageBackdrop, CircleShape, overlayColor, highlight).blockTouchesBelow(),
                 color = fill,
                 // 外层 Column 已经留了边距；默认的 12/8dp 外边距再叠一层，药丸就离选中的那行字太远
                 outSidePadding = PaddingValues(0.dp),

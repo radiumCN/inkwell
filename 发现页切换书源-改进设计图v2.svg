@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1040" font-family="'PingFang SC','Microsoft YaHei',-apple-system,sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L9 5 L0 10" fill="none" stroke="#277AF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L9 5 L0 10" fill="none" stroke="#8E8E93" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arSm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L9 5 L0 10" fill="none" stroke="#277AF7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- 画布 -->
+  <rect width="1440" height="1040" fill="#F4F4F6"/>
+
+  <!-- 标题 -->
+  <text x="72" y="66" font-size="26" font-weight="600" fill="#1A1A1C">发现页 · 切换书源 改进设计 v2</text>
+  <text x="72" y="98" font-size="13" fill="#6E6E73">Inkwell · 交互设计 · 底部书源胶囊（同书架隐藏区隐私胶囊）</text>
+  <rect x="72" y="112" width="86" height="3" rx="1.5" fill="#277AF7"/>
+
+  <!-- ================= 手机 A：改版后 · 常态 ================= -->
+  <text x="100" y="162" font-size="13" font-weight="600" fill="#277AF7">改版后 · 常态</text>
+  <text x="196" y="162" font-size="12" fill="#6E6E73">切源入口沉到底部玻璃胶囊</text>
+
+  <!-- 机身 -->
+  <rect x="100" y="178" width="310" height="650" rx="34" fill="#0B0B0C" stroke="#D2D2D7" stroke-width="2"/>
+  <rect x="106" y="184" width="298" height="638" rx="28" fill="#000000"/>
+
+  <!-- 状态栏 -->
+  <text x="128" y="216" font-size="11" fill="#FFFFFF">20:10</text>
+  <rect x="352" y="209" width="3" height="7" rx="1" fill="#FFFFFF"/>
+  <rect x="358" y="206" width="3" height="10" rx="1" fill="#FFFFFF"/>
+  <rect x="364" y="203" width="3" height="13" rx="1" fill="#FFFFFF"/>
+  <rect x="372" y="207" width="14" height="8" rx="2" fill="none" stroke="#FFFFFF" stroke-width="1.2"/>
+  <rect x="374" y="209" width="9" height="4" rx="1" fill="#FFFFFF"/>
+
+  <!-- 顶栏：返回 + 大标题「发现」 -->
+  <path d="M130 252 L120 260 L130 268" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="146" y="268" font-size="19" font-weight="600" fill="#FFFFFF">发现</text>
+  <!-- ② 标注 -->
+  <circle cx="222" cy="261" r="9" fill="#277AF7"/>
+  <text x="222" y="265" font-size="10" font-weight="600" fill="#FFFFFF" text-anchor="middle">2</text>
+
+  <!-- 分类 chips -->
+  <rect x="116" y="292" width="66" height="28" rx="14" fill="#24406B"/>
+  <text x="149" y="310" font-size="11" fill="#6BA3FF" text-anchor="middle">玄幻小说</text>
+  <rect x="190" y="292" width="66" height="28" rx="14" fill="#2C2C2E"/>
+  <text x="223" y="310" font-size="11" fill="#D8D8DC" text-anchor="middle">修真小说</text>
+  <rect x="264" y="292" width="66" height="28" rx="14" fill="#2C2C2E"/>
+  <text x="297" y="310" font-size="11" fill="#D8D8DC" text-anchor="middle">都市小说</text>
+  <rect x="338" y="292" width="66" height="28" rx="14" fill="#2C2C2E"/>
+  <text x="371" y="310" font-size="11" fill="#D8D8DC" text-anchor="middle">历史小说</text>
+
+  <!-- 书列表 -->
+  <rect x="116" y="338" width="278" height="280" rx="12" fill="#1C1C1E"/>
+  <rect x="130" y="350" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="176" y="366" font-size="11" fill="#FFFFFF">凡人修仙传</text>
+  <text x="176" y="383" font-size="9" fill="#8E8E93">忘语 · 最新：第两千三百章</text>
+  <rect x="344" y="360" width="36" height="22" rx="11" fill="#24406B"/>
+  <text x="362" y="375" font-size="10" fill="#6BA3FF" text-anchor="middle">加入</text>
+  <line x1="130" y1="408" x2="380" y2="408" stroke="#2A2A2E" stroke-width="1"/>
+  <rect x="130" y="420" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="176" y="436" font-size="11" fill="#FFFFFF">修真聊天群</text>
+  <text x="176" y="453" font-size="9" fill="#8E8E93">圣骑士的传说 · 更新至 1892 章</text>
+  <rect x="344" y="430" width="36" height="22" rx="11" fill="#24406B"/>
+  <text x="362" y="445" font-size="10" fill="#6BA3FF" text-anchor="middle">加入</text>
+  <line x1="130" y1="478" x2="380" y2="478" stroke="#2A2A2E" stroke-width="1"/>
+  <rect x="130" y="490" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="176" y="506" font-size="11" fill="#FFFFFF">一念永恒</text>
+  <text x="176" y="523" font-size="9" fill="#8E8E93">耳根 · 最新：第 817 章</text>
+  <line x1="130" y1="548" x2="380" y2="548" stroke="#2A2A2E" stroke-width="1"/>
+  <rect x="130" y="560" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="176" y="576" font-size="11" fill="#FFFFFF">大奉打更人</text>
+  <text x="176" y="593" font-size="9" fill="#8E8E93">卖报小郎君 · 最新：第 1120 章</text>
+
+  <!-- ① 底部玻璃胶囊 -->
+  <rect x="118" y="726" width="274" height="52" rx="26" fill="#2E2E33" opacity="0.88" stroke="#5E5E66" stroke-width="1"/>
+  <!-- 换源图标（两条反向箭头） -->
+  <path d="M138 746 H156 M150 741 L156 746 L150 751" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M156 758 H138 M144 753 L138 758 L144 763" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="166" y="757" font-size="12" fill="#FFFFFF">97小说/无限小说网</text>
+  <line x1="292" y1="740" x2="292" y2="764" stroke="#5E5E66" stroke-width="1"/>
+  <text x="304" y="757" font-size="11" fill="#D8D8DC">切换书源</text>
+  <path d="M366 750 L371 745 L376 750 M366 758 L371 763 L376 758" fill="none" stroke="#D8D8DC" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- ① 序号 -->
+  <circle cx="414" cy="752" r="10" fill="#277AF7"/>
+  <text x="414" y="756" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">1</text>
+  <path d="M392 752 H402" stroke="#277AF7" stroke-width="1.2" marker-end="url(#arSm)"/>
+
+  <!-- 胶囊下的说明 -->
+  <text x="118" y="856" font-size="10.5" fill="#277AF7">FloatingGlassBar · 与书架隐藏区胶囊同组件、同玻璃、同进出动画</text>
+
+  <!-- home indicator -->
+  <rect x="205" y="800" width="100" height="4" rx="2" fill="#6A6A6E"/>
+
+  <!-- ================= 手机 B：点开面板 ================= -->
+  <text x="530" y="162" font-size="13" font-weight="600" fill="#277AF7">改版后 · 选书源</text>
+  <text x="626" y="162" font-size="12" fill="#6E6E73">点胶囊弹出书源面板（全程拇指区）</text>
+
+  <rect x="530" y="178" width="310" height="650" rx="34" fill="#0B0B0C" stroke="#D2D2D7" stroke-width="2"/>
+  <rect x="536" y="184" width="298" height="638" rx="28" fill="#000000"/>
+
+  <text x="558" y="216" font-size="11" fill="#FFFFFF">20:10</text>
+  <rect x="782" y="209" width="3" height="7" rx="1" fill="#FFFFFF"/>
+  <rect x="788" y="206" width="3" height="10" rx="1" fill="#FFFFFF"/>
+  <rect x="794" y="203" width="3" height="13" rx="1" fill="#FFFFFF"/>
+  <rect x="802" y="207" width="14" height="8" rx="2" fill="none" stroke="#FFFFFF" stroke-width="1.2"/>
+  <rect x="804" y="209" width="9" height="4" rx="1" fill="#FFFFFF"/>
+
+  <!-- 背景页（压暗） -->
+  <path d="M560 252 L550 260 L560 268" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="576" y="268" font-size="19" font-weight="600" fill="#FFFFFF">发现</text>
+  <rect x="546" y="292" width="66" height="28" rx="14" fill="#24406B"/>
+  <text x="579" y="310" font-size="11" fill="#6BA3FF" text-anchor="middle">玄幻小说</text>
+  <rect x="620" y="292" width="66" height="28" rx="14" fill="#2C2C2E"/>
+  <text x="653" y="310" font-size="11" fill="#D8D8DC" text-anchor="middle">修真小说</text>
+  <rect x="546" y="338" width="278" height="124" rx="12" fill="#1C1C1E"/>
+  <rect x="560" y="350" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="606" y="366" font-size="11" fill="#FFFFFF">凡人修仙传</text>
+  <text x="606" y="383" font-size="9" fill="#8E8E93">忘语 · 最新：第两千三百章</text>
+  <rect x="560" y="420" width="34" height="46" rx="4" fill="#2E2E32"/>
+  <text x="606" y="436" font-size="11" fill="#FFFFFF">修真聊天群</text>
+  <text x="606" y="453" font-size="9" fill="#8E8E93">圣骑士的传说 · 更新至 1892 章</text>
+
+  <!-- 压暗层 -->
+  <rect x="536" y="184" width="298" height="638" rx="28" fill="#000000" opacity="0.55"/>
+
+  <!-- 底部书源面板 -->
+  <path d="M536 822 V416 Q536 396 556 396 H814 Q834 396 834 416 V822 Z" fill="#111113"/>
+  <rect x="665" y="408" width="36" height="4" rx="2" fill="#5A5A5E"/>
+  <text x="556" y="444" font-size="15" font-weight="600" fill="#FFFFFF">切换书源</text>
+  <text x="818" y="443" font-size="12" fill="#6BA3FF" text-anchor="end">管理</text>
+
+  <!-- 搜索框 -->
+  <rect x="552" y="462" width="266" height="34" rx="10" fill="#2A2A2E"/>
+  <circle cx="570" cy="478" r="5" fill="none" stroke="#8E8E93" stroke-width="1.4"/>
+  <line x1="574" y1="482" x2="578" y2="486" stroke="#8E8E93" stroke-width="1.4" stroke-linecap="round"/>
+  <text x="588" y="483" font-size="11" fill="#8E8E93">搜索书源名称或网址</text>
+
+  <!-- 最近 -->
+  <text x="556" y="518" font-size="10" fill="#8E8E93">最近</text>
+  <rect x="552" y="528" width="266" height="128" rx="12" fill="#1E1E22"/>
+  <text x="566" y="552" font-size="11" fill="#FFFFFF">97小说/无限小说网</text>
+  <text x="566" y="566" font-size="9" fill="#8E8E93">8 个分类</text>
+  <text x="802" y="554" font-size="11" fill="#6BA3FF" text-anchor="end">✓</text>
+  <line x1="566" y1="578" x2="804" y2="578" stroke="#2A2A2E" stroke-width="1"/>
+  <text x="566" y="602" font-size="11" fill="#FFFFFF">笔趣阁</text>
+  <text x="566" y="616" font-size="9" fill="#8E8E93">12 个分类</text>
+  <line x1="566" y1="628" x2="804" y2="628" stroke="#2A2A2E" stroke-width="1"/>
+  <text x="566" y="644" font-size="11" fill="#FFFFFF">番茄小说</text>
+  <text x="566" y="656" font-size="9" fill="#8E8E93">6 个分类</text>
+
+  <!-- 全部书源 -->
+  <text x="556" y="682" font-size="10" fill="#8E8E93">全部书源</text>
+  <rect x="552" y="692" width="266" height="112" rx="12" fill="#1E1E22"/>
+  <text x="566" y="716" font-size="11" fill="#FFFFFF">顶点小说</text>
+  <text x="566" y="730" font-size="9" fill="#8E8E93">10 个分类</text>
+  <line x1="566" y1="742" x2="804" y2="742" stroke="#2A2A2E" stroke-width="1"/>
+  <text x="566" y="766" font-size="11" fill="#FFFFFF">纵横中文网</text>
+  <text x="566" y="780" font-size="9" fill="#8E8E93">7 个分类</text>
+
+  <!-- 序号点 -->
+  <circle cx="852" cy="479" r="10" fill="#277AF7"/>
+  <text x="852" y="483" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">3</text>
+  <circle cx="852" cy="556" r="10" fill="#277AF7"/>
+  <text x="852" y="560" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">4</text>
+  <circle cx="852" cy="716" r="10" fill="#277AF7"/>
+  <text x="852" y="720" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">5</text>
+
+  <!-- home indicator -->
+  <rect x="635" y="800" width="100" height="4" rx="2" fill="#6A6A6E"/>
+
+  <!-- 中间箭头 -->
+  <line x1="438" y1="500" x2="508" y2="500" stroke="#8E8E93" stroke-width="1.6" marker-end="url(#arG)"/>
+  <text x="473" y="488" font-size="11" fill="#8E8E93" text-anchor="middle">点胶囊</text>
+
+  <!-- ================= 右栏：改动要点 ================= -->
+  <text x="920" y="176" font-size="15" font-weight="600" fill="#1A1A1C">v2 改动要点</text>
+  <text x="920" y="202" font-size="11.5" fill="#8E8E93">上一版面板结构保留（搜索 / 最近 / 全部），改的是入口：从顶部标题挪到底部胶囊</text>
+
+  <!-- 1 -->
+  <line x1="920" y1="243" x2="428" y2="243" stroke="none"/>
+  <circle cx="932" cy="239" r="10" fill="#277AF7"/>
+  <text x="932" y="243" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">1</text>
+  <text x="952" y="237" font-size="13" font-weight="600" fill="#1A1A1C">切源入口沉到底部玻璃胶囊</text>
+  <text x="952" y="259" font-size="12" fill="#6E6E73">FloatingGlassBar —— 与书架隐藏区隐私胶囊同组件、</text>
+  <text x="952" y="277" font-size="12" fill="#6E6E73">同玻璃、同进出动画。整条可点，常驻显示当前书源名；</text>
+  <text x="952" y="295" font-size="12" fill="#6E6E73">列表末尾按胶囊高度垫高，最后一本书不被压住。</text>
+
+  <!-- 2 -->
+  <circle cx="932" cy="339" r="10" fill="#277AF7"/>
+  <text x="932" y="343" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">2</text>
+  <text x="952" y="337" font-size="13" font-weight="600" fill="#1A1A1C">顶栏回归大标题「发现」</text>
+  <text x="952" y="359" font-size="12" fill="#6E6E73">切源挪走后标题位不再放按钮，换回标准 AppTopBar；</text>
+  <text x="952" y="377" font-size="12" fill="#6E6E73">分类 chips 照旧钉在顶栏，随列表滚动在玻璃下。</text>
+
+  <!-- 3 -->
+  <line x1="920" y1="415" x2="866" y2="479" stroke="#277AF7" stroke-width="1.2" marker-end="url(#arSm)"/>
+  <circle cx="932" cy="411" r="10" fill="#277AF7"/>
+  <text x="932" y="415" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">3</text>
+  <text x="952" y="409" font-size="13" font-weight="600" fill="#1A1A1C">书源面板从底部弹出</text>
+  <text x="952" y="431" font-size="12" fill="#6E6E73">搜索框与书源管理同款；搜索时平铺过滤结果。</text>
+
+  <!-- 4 -->
+  <line x1="920" y1="481" x2="866" y2="556" stroke="#277AF7" stroke-width="1.2" marker-end="url(#arSm)"/>
+  <circle cx="932" cy="477" r="10" fill="#277AF7"/>
+  <text x="932" y="481" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">4</text>
+  <text x="952" y="475" font-size="13" font-weight="600" fill="#1A1A1C">「最近」置顶 + 当前打勾</text>
+  <text x="952" y="497" font-size="12" fill="#6E6E73">最近用过的 3 个源置顶（跨启动记住）；</text>
+  <text x="952" y="515" font-size="12" fill="#6E6E73">常逛的源不用每次重新找。</text>
+
+  <!-- 5 -->
+  <line x1="920" y1="563" x2="866" y2="716" stroke="#277AF7" stroke-width="1.2" marker-end="url(#arSm)"/>
+  <circle cx="932" cy="559" r="10" fill="#277AF7"/>
+  <text x="932" y="563" font-size="11" font-weight="600" fill="#FFFFFF" text-anchor="middle">5</text>
+  <text x="952" y="557" font-size="13" font-weight="600" fill="#1A1A1C">点行即换 · 行式列表</text>
+  <text x="952" y="579" font-size="12" fill="#6E6E73">书源行：名称 +「N 个分类」；点行即选中收起；</text>
+  <text x="952" y="597" font-size="12" fill="#6E6E73">行尾「管理」直通书源管理（缺源/导入的出路）。</text>
+
+  <!-- 分类保持 -->
+  <rect x="920" y="636" width="460" height="112" rx="12" fill="#FFFFFF" stroke="#E2E2E7" stroke-width="1"/>
+  <rect x="936" y="656" width="76" height="26" rx="13" fill="#24406B"/>
+  <text x="974" y="673" font-size="11" fill="#6BA3FF" text-anchor="middle">玄幻小说</text>
+  <rect x="1020" y="656" width="76" height="26" rx="13" fill="#EDEDF0"/>
+  <text x="1058" y="673" font-size="11" fill="#6E6E73" text-anchor="middle">修真小说</text>
+  <text x="1122" y="674" font-size="11" fill="#8E8E93">切源前</text>
+  <line x1="1180" y1="669" x2="1226" y2="669" stroke="#8E8E93" stroke-width="1.4" marker-end="url(#arG)"/>
+  <rect x="1244" y="656" width="76" height="26" rx="13" fill="#24406B"/>
+  <text x="1282" y="673" font-size="11" fill="#6BA3FF" text-anchor="middle">玄幻小说</text>
+  <rect x="1328" y="656" width="40" height="26" rx="13" fill="#EDEDF0"/>
+  <text x="1348" y="673" font-size="11" fill="#6E6E73" text-anchor="middle">…</text>
+  <text x="936" y="714" font-size="11" fill="#6E6E73">切源保持同名分类：新源有「玄幻小说」就停在它上面，接不上才回第一个分类</text>
+
+  <!-- 范围外 -->
+  <text x="920" y="790" font-size="11" fill="#8E8E93">范围外：书源分组筛选、置顶/收藏（「最近」已覆盖高频场景）、横滑切源手势</text>
+  <text x="920" y="812" font-size="11" fill="#8E8E93">加载 / 空态 / 错误态沿用现有组件；无书源时仍走「去导入规则」空态</text>
+  <text x="920" y="834" font-size="11" fill="#8E8E93">多选 / 其他浮层互斥同书架规则：同一时刻 floatingToolbar 槽只亮一个</text>
+</svg>

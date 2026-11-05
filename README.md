@@ -2,7 +2,7 @@
 
 > 一款克制、专注的文本阅读器 —— 暖纸质感、仿真翻页、进度永不丢失。本地 txt / EPUB / MOBI(AZW3) 阅读 · 可选自定义规则 · WebDAV 跨端同步。Android 客户端无需账号；[网页版](https://book.skylark.run) 需登录注册后使用。
 
-![platform](https://img.shields.io/badge/Android-15%2B%20(minSdk%2035)-3DDC84?logo=android&logoColor=white)
+![platform](https://img.shields.io/badge/Android-13%2B%20(minSdk%2033)-3DDC84?logo=android&logoColor=white)
 [![web](https://img.shields.io/badge/Web-book.skylark.run-111111)](https://book.skylark.run)
 ![kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white)
 ![compose](https://img.shields.io/badge/Jetpack%20Compose-UI-4285F4)

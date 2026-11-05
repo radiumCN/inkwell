@@ -321,7 +321,10 @@ fun PageFlipContainer(
                             // 系统收走手势（边缘侧滑返回、下拉通知栏、弹窗抢焦点）时，Compose 把 ACTION_CANCEL
                             // 合成为一次「已消费的抬手」。只看 pressed 会当成真松手：没过 slop 判成点按 →
                             // 翻页或开菜单，过了 slop 按松手速度提交翻页。真抬手到这里还没人消费过。
-                            if (!change.pressed && change.isConsumed) {
+                            // 手指还按着、事件却已被消费，是外层在 Initial 阶段把这一手接走了（阅读页的双指调字号、
+                            // 右边缘调亮度）：同样按取消收场 —— 否则第二根手指按下前那一截位移会被当成翻页，
+                            // 边调字号边卷页。这一层自己的 consume 只作用于当次事件，不会让下一次事件看着「已消费」
+                            if (change.isConsumed) {
                                 cancelled = true
                                 break
                             }

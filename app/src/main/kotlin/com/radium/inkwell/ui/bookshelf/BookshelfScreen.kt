@@ -10,12 +10,19 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import com.radium.inkwell.ui.components.FloatingGlassBar
+import com.radium.inkwell.ui.theme.AppThemes
+import top.yukonga.miuix.kmp.basic.VerticalDivider
+import top.yukonga.miuix.kmp.icon.extended.Unlock
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,7 +69,6 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroupPosition
-import com.radium.inkwell.ui.components.settingsCardColor
 import com.radium.inkwell.ui.components.settingsPageColor
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
@@ -77,6 +83,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.radium.inkwell.util.BiometricAuth
@@ -93,12 +100,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.ui.components.BatchAction
+import com.radium.inkwell.ui.components.BatchActionBar
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.CollectMessages
-import com.radium.inkwell.ui.components.expandEnter
-import com.radium.inkwell.ui.components.expandExit
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.Badge
@@ -110,20 +117,21 @@ import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Hide
-import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.icon.extended.SearchDevice
 import top.yukonga.miuix.kmp.icon.extended.Notes
+import androidx.compose.foundation.LocalIndication
+import com.radium.inkwell.ui.components.sinkOnPress
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
  * 点哪本书，阅读页就从哪本书那儿长出来。位置未知（书还没测量 / 窗口尺寸为 0）就退回中心。
@@ -195,6 +203,10 @@ fun BookshelfScreen(
     val group by viewModel.group.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val selectionMode = selected.isNotEmpty()
+    // 多选态底部操作条占掉的高度（BatchActionBar 量好报上来），垫到书架末尾
+    var batchBarHeight by remember { mutableStateOf(0.dp) }
+    // 隐藏区展开时底部那颗状态胶囊的高度，同上
+    var hiddenBarHeight by remember { mutableStateOf(0.dp) }
     // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
     BackHandler(selectionMode) { viewModel.clearSelection() }
     var actionTarget by remember { mutableStateOf<BookEntity?>(null) }
@@ -287,7 +299,7 @@ fun BookshelfScreen(
         biometricAvailable = BiometricAuth.isAvailable(context)
         if (!biometricAvailable) {
             openHidden()
-            viewModel.messages.emit("这台设备没有设置锁屏，已跳过验证。不需要这把锁的话，可以在上方关掉它")
+            viewModel.messages.emit("这台设备没有设置锁屏，已跳过验证。不需要这把锁的话，可以在下方关掉它")
             return
         }
         scope.launch {
@@ -346,34 +358,17 @@ fun BookshelfScreen(
     // 欢迎页只给真正空、且从没用过的书架（全藏起来的不算，见 WelcomeState）。
     // 标记还没读到（null）时两样都先不画：别先闪一下普通空态再换成欢迎页
     val showWelcome = allBooks.isEmpty() && onboarded != true
-    // 有书可摆：Room 第一帧到了、不是欢迎页也不是空态。隐藏区状态条与分组筛选条只在这时出现
+    // 有书可摆：Room 第一帧到了、不是欢迎页也不是空态。隐藏区胶囊与分组筛选条只在这时出现
     val showShelf = shelfReady && !showWelcome && allBooks.isNotEmpty() && !allHidden
 
     /**
-     * 钉在顶栏下面、不随书滚走的两样：隐藏区状态条、分组筛选条。放进顶栏的 bottomContent（多选栏也放，
-     * 挑书时照样能切分组），书就能从它们下面滚过去、一起被毛玻璃盖住 —— 放在内容区顶上的话，
-     * 那一截永远挡着书架，玻璃顶栏下面也就没东西可透。
+     * 钉在顶栏下面、不随书滚走的分组筛选条。放进顶栏的 bottomContent（多选栏也放，挑书时照样能切分组），
+     * 书就能从它下面滚过去、一起被毛玻璃盖住 —— 放在内容区顶上的话，那一截永远挡着书架，玻璃顶栏下面也就没东西可透。
+     * 隐藏区的状态不在这里，在底部的玻璃胶囊里（见 [HiddenCapsule]）。
      */
     val shelfHeader: @Composable () -> Unit = {
         if (showShelf) {
             Column {
-                // 隐藏区的状态条。**只在已经展开时出现** —— 它的存在本身就是线索，
-                // 所以它只能长在你已经进来之后的地方。设置页里一个字都不提隐藏书籍。
-                // 「展开需验证」直接挂在条上，不再套一层设置弹层。
-                AnimatedVisibility(
-                    visible = showHidden,
-                    enter = expandEnter(),
-                    exit = expandExit(),
-                ) {
-                    HiddenStatusBar(
-                        requireAuth = requireAuth,
-                        biometricAvailable = biometricAvailable,
-                        onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
-                        // ✕ = 退出整个隐藏区（状态条收起 + 书藏回去），与长按标题一键收摊等价
-                        onCollapse = { viewModel.collapseHiddenAll() },
-                    )
-                }
-
                 // 只有真的分了组才显示筛选条 —— 没分组的人不该被一排"全部"占掉一行屏幕。
                 // 收敛到共享 ChipRow（与发现页/订阅页同一形态、同一首尾边距）
                 if (groups.isNotEmpty()) {
@@ -463,8 +458,8 @@ fun BookshelfScreen(
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
-                // 批量操作栏：跟书源管理同一套 —— 高频动作留成图标，低频的收进溢出菜单。
-                var overflowOpen by remember { mutableStateOf(false) }
+                // HyperOS 编辑模式：顶栏只留 × · 已选 N 本 · 全选，批量动作在底部的操作条里（见 floatingToolbar）。
+                // 从前四个动作全挤在顶栏，「设置分组」还藏在 ⋮ 里
                 AppToolbar(
                     navigationIcon = {
                         AppIconButton(onClick = viewModel::clearSelection) {
@@ -475,46 +470,6 @@ fun BookshelfScreen(
                     actions = {
                         AppIconButton(onClick = viewModel::selectAll) {
                             Icon(MiuixIcons.SelectAll, contentDescription = "全选")
-                        }
-                        AppIconButton(onClick = { confirmBatchDelete = true }) {
-                            Icon(
-                                MiuixIcons.Delete,
-                                contentDescription = "删除",
-                                tint = MiuixTheme.colorScheme.error,
-                            )
-                        }
-                        Box {
-                            AppIconButton(onClick = { overflowOpen = true }) {
-                                Icon(MiuixIcons.More, contentDescription = "更多")
-                            }
-                            AppDropdownMenu(
-                                expanded = overflowOpen,
-                                onDismissRequest = { overflowOpen = false },
-                                items = buildList {
-                                    add(
-                                        AppMenuItem("设置分组", onClick = {
-                                            overflowOpen = false
-                                            groupInput = ""
-                                            showGroupAssign = true
-                                        }),
-                                    )
-                                    // 隐藏相关只在隐藏区露面 —— 平时菜单里出现「隐藏」等于把功能写在脸上
-                                    if (showHidden) {
-                                        add(
-                                            AppMenuItem("从书架隐藏", onClick = {
-                                                overflowOpen = false
-                                                viewModel.setHiddenSelected(true)
-                                            }),
-                                        )
-                                        add(
-                                            AppMenuItem("取消隐藏", onClick = {
-                                                overflowOpen = false
-                                                viewModel.setHiddenSelected(false)
-                                            }),
-                                        )
-                                    }
-                                },
-                            )
                         }
                     },
                     bottomContent = shelfHeader,
@@ -580,8 +535,8 @@ fun BookshelfScreen(
                         // 贴在脸上，隐藏功能等于没做。隐藏的入口本身也必须是隐藏的：
                         // 改为长按顶栏的「书架」标题。
                         //
-                        // 这里也**不放**「收起隐藏的书」：收起的出口是隐藏状态条上的 ✕，
-                        // 而状态条恰恰在 showHidden 时才出现 —— 与这个按钮的出现时机完全重合，
+                        // 这里也**不放**「收起隐藏的书」：收起的出口是底部隐藏区胶囊上的 ✕，
+                        // 而胶囊恰恰在 showHidden 时才出现 —— 与这个按钮的出现时机完全重合，
                         // 两个按钮干同一件事。曾经短暂加过一个，随即因重复删掉。
                         //
                         // 从前这里是个三点菜单，里头只有「书源管理」和「设置」两条 ——
@@ -596,6 +551,39 @@ fun BookshelfScreen(
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
+        floatingToolbar = {
+            // 同一个底部悬浮槽里两样，同一时刻只亮一个：平时（隐藏区展开着）是隐藏区胶囊，多选时让位给操作条。
+            // 底边居中对齐：一个滑出、一个滑入的那一下，两颗胶囊叠在同一个位置
+            Box(contentAlignment = Alignment.BottomCenter) {
+            HiddenCapsule(
+                visible = showHidden && showShelf && !selectionMode,
+                requireAuth = requireAuth,
+                biometricAvailable = biometricAvailable,
+                onToggleAuth = { viewModel.setHiddenRequireAuth(it) },
+                // ✕ = 退出整个隐藏区（胶囊收起 + 书藏回去），与长按标题一键收摊等价
+                onCollapse = { viewModel.collapseHiddenAll() },
+                onHeightChange = { hiddenBarHeight = it },
+            )
+            BatchActionBar(
+                visible = selectionMode,
+                actions = buildList {
+                    add(
+                        BatchAction(MiuixIcons.Folder, "分组", onClick = {
+                            groupInput = ""
+                            showGroupAssign = true
+                        }),
+                    )
+                    // 隐藏相关只在隐藏区露面 —— 平时这里出现「隐藏」等于把功能写在脸上
+                    if (showHidden) {
+                        add(BatchAction(MiuixIcons.Hide, "隐藏", onClick = { viewModel.setHiddenSelected(true) }))
+                        add(BatchAction(MiuixIcons.Show, "取消隐藏", onClick = { viewModel.setHiddenSelected(false) }))
+                    }
+                    add(BatchAction(MiuixIcons.Delete, "删除", onClick = { confirmBatchDelete = true }, destructive = true))
+                },
+                onHeightChange = { batchBarHeight = it },
+            )
+            }
+        },
     ) { padding ->
         // Room 第一帧还没到：先空着。这时 allBooks 的空不代表书架是空的，落进下面的空态
         // 就是每次启动都先闪一下「书架空空如也 / 导入本地书」。本地库通常几十毫秒就回来，转圈也只会一闪
@@ -622,11 +610,16 @@ fun BookshelfScreen(
                 modifier = Modifier.padding(padding),
             )
         } else {
-            // 书铺满整屏、滚到玻璃顶栏下面：外层只让开两侧；顶栏（连同钉在它下面的状态条、筛选条）的高度
+            // 书铺满整屏、滚到玻璃顶栏下面：外层只让开两侧；顶栏（连同钉在它下面的筛选条）的高度
             // 垫在列表开头，导航栏的高度垫在末尾 —— 书封既能滚到顶栏下面透出来，也能滚到手势条下面，
             // 而第一排、最后一排仍能完整露出来（见 AppScaffold / horizontalOnly）
             val topInset = padding.calculateTopPadding()
-            val bottomInset = padding.calculateBottomPadding()
+            // 底部还压着悬浮胶囊（多选的操作条 / 隐藏区胶囊）：最后一排要能滚到它上面
+            val bottomInset = padding.calculateBottomPadding() + when {
+                selectionMode -> batchBarHeight
+                showHidden -> hiddenBarHeight
+                else -> 0.dp
+            }
             // Miuix 的下拉刷新（HyperOS 那种把内容往下拽、顶上冒出圆圈与一行状态字）。
             // 状态字默认是英文，这里换成中文 —— 书架下拉干的是「追更」，字也照这个说
             PullToRefresh(
@@ -910,7 +903,6 @@ private fun BookShelfListRow(
     val leadingContent: @Composable () -> Unit = {
         BookShelfListLeading(
             book = book,
-            selected = selected,
             selectionMode = selectionMode,
             anchor = cover,
         )
@@ -959,7 +951,7 @@ private fun BookShelfListRow(
             trailingContent = trailingContent,
             overlineContent = overlineContent,
             supportingContent = supportingContent,
-            contentPadding = ContentListDefaults.ComfortablePadding,
+            contentPadding = ContentListDefaults.MediaPadding,
             colors = colors,
             corners = corners,
             content = headline,
@@ -972,7 +964,7 @@ private fun BookShelfListRow(
             leadingContent = leadingContent,
             overlineContent = overlineContent,
             supportingContent = supportingContent,
-            contentPadding = ContentListDefaults.ComfortablePadding,
+            contentPadding = ContentListDefaults.MediaPadding,
             colors = colors,
             corners = corners,
             content = headline,
@@ -983,7 +975,6 @@ private fun BookShelfListRow(
 @Composable
 private fun BookShelfListLeading(
     book: BookEntity,
-    selected: Boolean,
     selectionMode: Boolean,
     anchor: CoverAnchor,
 ) {
@@ -996,19 +987,9 @@ private fun BookShelfListLeading(
         BookCover(
             title = book.title,
             coverModel = book.coverPath,
+            // 多选时勾没勾只看行尾的勾选框（HyperOS 编辑模式），书封不再另描一圈强调色
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (selectionMode && selected) {
-                        Modifier.border(
-                            width = Dimens.gapXS,
-                            color = MiuixTheme.colorScheme.primary,
-                            shape = coverShape,
-                        )
-                    } else {
-                        Modifier
-                    },
-                )
                 .onPlaced { anchor.coordinates = it },
             placeholderChars = 2,
             // 书名是这一行的标题，封面不再进读屏
@@ -1059,6 +1040,8 @@ private fun BookCard(
     val cover = remember { CoverAnchor() }
     // 与 BookCover 的 shape 对齐 —— 选中描边若用 medium，封面却是 small，就会看出「框套框」
     val coverShape = AppShapes.small
+    // 按下整本书（封面连书名）微微沉下去，HyperOS 桌面图标那种手感；见 sinkOnPress
+    val press = remember { MutableInteractionSource() }
     Column(
         // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
         // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
@@ -1067,6 +1050,7 @@ private fun BookCard(
         // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
         // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
         modifier
+            .sinkOnPress(press)
             .semantics(mergeDescendants = true) {
                 // 多选时整张卡就是一个 Checkbox：读屏报「已选中/未选中」，
                 // 而不是「封面装饰图标 + 可点击区」两个焦点。
@@ -1076,45 +1060,36 @@ private fun BookCard(
                 }
             }
             .combinedClickable(
+                interactionSource = press,
+                indication = LocalIndication.current,
                 // 平时整张卡就是一个按钮（点开读、长按出菜单）；多选时角色由上面的 Checkbox 给
                 role = if (selectionMode) null else Role.Button,
                 onClick = { onClick(cover.boundsInWindow()) },
                 onLongClick = onLongClick,
             )
     ) {
-        // 多选态外圈留出与描边等宽的 padding：未选不画边、已选才描 primary，
-        // 占位却始终在 —— 勾选不会把封面挤小一圈。
-        // （以前给每本都画 outline，整架书像进了铁笼，也不合系统相册那种媒体多选：
-        //  未选只靠角标，已选靠半透明遮罩 + 描边。）
+        // 多选时书封原样大小：勾没勾看右上角的勾选框，已选的再压一层淡淡的强调色（HyperOS 相册多选的样子）。
+        // 从前进多选整架书先缩一圈（给描边让位），已选的再描一道 4dp 的强调色粗边 —— 缩、描、压三层信号叠在一起，
+        // 书架一进多选就像换了一页；粗边配小圆角的封面，也比 HyperOS 的样子重得多
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(3f / 4f)
-                .then(if (selectionMode) Modifier.padding(Dimens.gapXS) else Modifier),
+                .aspectRatio(3f / 4f),
         ) {
             BookCover(
                 title = book.title,
                 coverModel = book.coverPath,
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (selectionMode && selected) {
-                            Modifier.border(
-                                width = Dimens.gapXS,
-                                color = MiuixTheme.colorScheme.primary,
-                                shape = coverShape,
-                            )
-                        } else Modifier
-                    )
                     .onPlaced { cover.coordinates = it },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
                 // 卡片下面就印着书名，封面不再进读屏
                 contentDescription = null,
             )
-            // 多选时让位给描边与勾选：选中态才是那时要看的
+            // 多选时让位给勾选：选中态才是那时要看的
             if (!selectionMode) CoverProgressOverlay(book.readingProgress(), coverShape)
-            // 已选盖一层 primary 半透明，比给每本套灰框更轻、也更像系统相册多选
+            // 已选盖一层 primary 半透明：只看右上角那个小勾，书一多就得挨本找
             if (selectionMode && selected) {
                 Box(
                     Modifier
@@ -1185,75 +1160,94 @@ private fun BookCard(
 }
 
 /**
- * 隐藏区状态条。打开隐藏区 = 就是在看隐藏书。
- * 「下次展开需验证」直接挂在条上（进了隐藏区才能改，外人翻设置看不到）；✕ 退出。
+ * 隐藏区展开后的状态胶囊，悬浮在屏幕底部（[FloatingGlassBar]，和多选操作条同一种玻璃）：🔓 隐藏区 ｜ 展开需验证 [开关] ✕。
  *
- * 形态对齐设置分组卡：`large` 圆角 + [settingsCardColor]（书架画布已与设置页同用
- * [settingsPageColor]，浅色灰底白卡 / 深色黑底浅卡）。
- * 开关行语义与 [SwitchRow] 相同：整行可点，Switch 只展示；✕ 不进开关焦点。
+ * 打开隐藏区 = 就是在看隐藏书，这颗胶囊一直摆在那儿提醒着。**只在已经展开时出现** —— 它的存在本身就是线索，
+ * 所以它只能长在你已经进来之后的地方，设置页里一个字都不提隐藏书籍。「展开需验证」因此也挂在这里
+ * （进了隐藏区才能改，外人翻设置看不到）；✕ 退出整个隐藏区。
  *
+ * 从前是钉在顶栏下面的一张实心白卡：顶栏是渐进模糊的玻璃，书往上滚时在卡的上方、两边是糊的，一钻到卡底下又立刻清楚 ——
+ * 一条栏里「糊 / 实心 / 清楚」三层，书像是被卡切开了（被指出「滑动书架有点割裂」），还常驻占掉 72dp。
+ * 挪到底部的玻璃胶囊里：书从顶栏和胶囊下面滑过，上下都是玻璃；开关和 ✕ 也到了拇指够得着的地方。
+ *
+ * 开关那一段整段可点（Switch 只展示，读屏一个焦点，同 [SwitchRow]）；✕ 单独一个按钮。
  * 设备上没有锁屏时开不了锁（无从验证），但**已经开着的锁必须关得掉**：用户删了锁屏密码之后，
  * 偏好里还记着「需验证」，这时把开关置灰，等他哪天重新设上锁屏，锁又悄悄生效了，而他以为早关了。
  */
 @Composable
-private fun HiddenStatusBar(
+private fun HiddenCapsule(
+    visible: Boolean,
     requireAuth: Boolean,
     biometricAvailable: Boolean,
     onToggleAuth: (Boolean) -> Unit,
     onCollapse: () -> Unit,
-    modifier: Modifier = Modifier,
+    onHeightChange: (Dp) -> Unit,
 ) {
+    val scheme = MiuixTheme.colorScheme
     // 开关显示的是偏好本身；能不能拨：能验证就能开关，不能验证则只许关
     val toggleEnabled = biometricAvailable || requireAuth
-    // 与 SettingGroup 同一种卡：Miuix Card（squircle 圆角、卡片色）
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = Dimens.listHorizontal)
-            // 与 SettingGroup 上下同一档留白
-            .padding(vertical = Dimens.gapS),
-        cornerRadius = AppShapes.radiusLarge,
-        colors = CardDefaults.defaultColors(color = settingsCardColor()),
-    ) {
+    FloatingGlassBar(visible = visible, onHeightChange = onHeightChange) { floor ->
+        // 「拨不了」时那行字用说明色：玻璃上按最坏的底推一档（见 FloatingGlassBar 的 floor）
+        val summary = remember(scheme.onSurfaceVariantSummary, floor) {
+            AppThemes.readableOn(scheme.onSurfaceVariantSummary, floor)
+        }
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.padding(start = Dimens.gapL, end = Dimens.gapXS),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 开关区吃掉剩余宽度；按压反馈的形用 Middle（直角），外层卡片裁出大圆角，
-            // 避免 Alone 四角圆贴到 ✕ 左侧看起来像两块卡。
-            ContentListItem(
-                checked = requireAuth,
-                onCheckedChange = onToggleAuth,
-                modifier = Modifier.weight(1f),
-                enabled = toggleEnabled,
-                role = Role.Switch,
-                trailingContent = {
-                    Switch(
-                        checked = requireAuth,
-                        enabled = toggleEnabled,
-                        onCheckedChange = null,
-                    )
-                },
-                colors = ContentListDefaults.plainColors(),
-                corners = settingGroupItemCorners(SettingGroupPosition.Middle),
-                content = {
-                    Text(
-                        when {
-                            biometricAvailable -> "展开需验证"
-                            requireAuth -> "未设锁屏，验证暂不生效"
-                            else -> "无法上锁"
-                        },
-                        style = ContentListDefaults.titleStyle,
-                        color = if (biometricAvailable) {
-                            MiuixTheme.colorScheme.onSurface
-                        } else {
-                            MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
+            Icon(
+                MiuixIcons.Unlock,
+                contentDescription = null,
+                tint = scheme.onSurface,
+                modifier = Modifier.size(Dimens.iconSm),
             )
+            Text(
+                "隐藏区",
+                style = MiuixTheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.padding(start = Dimens.gapXS),
+            )
+            VerticalDivider(
+                Modifier
+                    .padding(horizontal = Dimens.gapM)
+                    .height(Dimens.iconSm),
+            )
+            // 地方不够（大字号、窄屏）时先缩这一段的字，开关和 ✕ 不被挤掉
+            Row(
+                Modifier
+                    .weight(1f, fill = false)
+                    .heightIn(min = Dimens.touchTarget)
+                    .squircleClip(AppShapes.radiusMedium)
+                    .toggleable(
+                        value = requireAuth,
+                        enabled = toggleEnabled,
+                        role = Role.Switch,
+                        onValueChange = onToggleAuth,
+                    )
+                    .padding(horizontal = Dimens.gapS),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+            ) {
+                Text(
+                    when {
+                        biometricAvailable -> "展开需验证"
+                        requireAuth -> "未设锁屏，验证暂不生效"
+                        else -> "无法上锁"
+                    },
+                    style = MiuixTheme.textStyles.body2,
+                    color = if (biometricAvailable) scheme.onSurface else summary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Switch(
+                    checked = requireAuth,
+                    enabled = toggleEnabled,
+                    onCheckedChange = null,
+                )
+            }
             AppIconButton(onClick = onCollapse) {
                 Icon(MiuixIcons.Close, contentDescription = "收起隐藏区")
             }

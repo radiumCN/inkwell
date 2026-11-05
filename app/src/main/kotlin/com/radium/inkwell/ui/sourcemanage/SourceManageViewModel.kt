@@ -32,7 +32,16 @@ import okhttp3.Request
 data class SourceCheck(val ok: Boolean, val message: String, val respondMs: Long = 0)
 
 /** 校验进度；null = 没在校验 */
-data class CheckProgress(val done: Int, val total: Int)
+data class CheckProgress(
+    val done: Int,
+    val total: Int,
+    /** 这一轮已经判成失效的个数：概况行跟着涨，不用等跑完才知道坏了多少 */
+    val failed: Int = 0,
+    /** 正在跑的书源（同时最多几个）：那几行就地转圈 */
+    val running: Set<String> = emptySet(),
+    /** 这一轮还没出结果的（含 [running]）：行上还是上一次的结果，显示时变淡，分得清新旧 */
+    val pending: Set<String> = emptySet(),
+)
 
 /**
  * 校验选项。
@@ -68,13 +77,15 @@ enum class SourceSort(val label: String) {
  * 排序比较器。抽成顶层函数是为了能直接测 —— 尤其「按响应速度」这条：
  * 未校验和失效的书源 respondTime 是 -1，直接拿它排会让 -1 冒充"最快"，
  * 一堆死源排到最前面，正好排反了。
+ * 0 也算没测到（同搜索调度、自动换源的口径）：没有搜索规则的源校验时一步都不跑，从前记的耗时是 0，
+ * 「按响应速度」就把这些根本搜不了的源全排在了最前面。现在校验记 -1，库里已经存着的 0 靠这里兜住。
  */
 fun sourceComparator(sort: SourceSort): Comparator<BookSourceListItem> = when (sort) {
     SourceSort.MANUAL -> compareBy({ it.sortOrder }, { it.name })
     SourceSort.NAME -> compareBy { it.name }
     SourceSort.UPDATED -> compareByDescending { it.updatedAt }
     SourceSort.RESPOND_TIME -> compareBy(
-        { if (it.respondTime < 0) Long.MAX_VALUE else it.respondTime },
+        { if (it.respondTime <= 0) Long.MAX_VALUE else it.respondTime },
         { it.name },
     )
 }
@@ -298,25 +309,25 @@ class SourceManageViewModel(
     }
 
     /**
-     * 无搜索规则（仅发现页可用）的书源 id。
+     * 无搜索规则的书源 id（仅发现页可用的、只能按网址加书的）。
      * 规则按 id **逐条**取 —— 不能再对列表里的 json 字段做 map（列表投影已不含 json）。
      *
      * 只在书源集合或规则本身变了（id / updatedAt）才重算：校验时每个源 saveCheck 一次都会让
      * 列表流重发，从前每发一次就把几百条规则重新解码一遍。
-     * 重算也只重取 updatedAt 变了的那几条（[BookSourceRepository.exploreOnlyIds]）：启停、置顶、分组
+     * 重算也只重取 updatedAt 变了的那几条（[BookSourceRepository.searchlessIds]）：启停、置顶、分组
      * 都会动 updatedAt，从前拨一下开关就把几千份规则整表重解，IO 上跑好几秒，期间「仅发现页」筛选是空的。
      * 必须声明在 [visibleSources] 之前 —— 它是后者 combine 的一路输入，构造期就要取到。
      */
-    val exploreOnlyIds: StateFlow<Set<String>> = sourceRepo.sources
+    val searchless: StateFlow<BookSourceRepository.SearchlessIds> = sourceRepo.sources
         .map { list -> list.map { it.id to it.updatedAt } }
         .distinctUntilChanged()
-        .mapLatest { list -> sourceRepo.exploreOnlyIds(list) }
+        .mapLatest { list -> sourceRepo.searchlessIds(list) }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookSourceRepository.SearchlessIds())
 
     /**
      * 列表实际显示的书源：搜索 + 筛选 + 分组 + 排序。
-     * [exploreOnlyIds] 也是一路输入：从前只在筛选时读它的当前值，「仅发现页」在它算完之前点下去
+     * [searchless] 也是一路输入：从前只在筛选时读它的当前值，「仅发现页」在它算完之前点下去
      * （或导入之后）列表就一直是空的 / 旧的，直到别的条件变一下。
      *
      * 整条在 Default 上算：几千个源每敲一个字就是上万次 contains 再排一次序，校验时每存一条结果又重来一遍，
@@ -327,7 +338,7 @@ class SourceManageViewModel(
         kotlinx.coroutines.flow.combine(
             sources,
             _query.debounce { if (it.isEmpty()) 0L else QUERY_DEBOUNCE_MS },
-            _filter, _sort, _group, exploreOnlyIds,
+            _filter, _sort, _group, searchless,
         ) { args ->
             @Suppress("UNCHECKED_CAST")
             val list = args[0] as List<BookSourceListItem>
@@ -335,8 +346,7 @@ class SourceManageViewModel(
             val f = args[2] as SourceFilter
             val o = args[3] as SourceSort
             val g = args[4] as String?
-            @Suppress("UNCHECKED_CAST")
-            val exploreOnly = args[5] as Set<String>
+            val exploreOnly = (args[5] as BookSourceRepository.SearchlessIds).exploreOnly
             list.asSequence()
                 .filter { matchesQuery(it, q) }
                 .filter { matchesFilter(it, f, exploreOnly) }

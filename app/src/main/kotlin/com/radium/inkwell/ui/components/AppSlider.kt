@@ -20,6 +20,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   主题 primary 在深色纸上会糊掉。其余地方一律不传，走主题。
  *
  * @param height 轨道高度。默认 Miuix 的 28dp；夹在两行字之间的（阅读底栏进度）传 [Dimens.sliderCompact]
+ * @param hapticEffect 触感。默认 Miuix 的（拖到两头震一下）；分档的滑轨（阅读设置的字号）传 `Step`，每过一档轻震一下
  */
 @Composable
 fun AppSlider(
@@ -35,6 +36,7 @@ fun AppSlider(
     inactiveColor: Color? = null,
     label: String? = null,
     height: Dp = SliderDefaults.MinHeight,
+    hapticEffect: SliderDefaults.SliderHapticEffect = SliderDefaults.DefaultHapticEffect,
 ) {
     val scheme = MiuixTheme.colorScheme
     val colors = if (activeColor == null && inactiveColor == null) {
@@ -55,5 +57,6 @@ fun AppSlider(
         onValueChangeFinished = onValueChangeFinished,
         height = height,
         colors = colors,
+        hapticEffect = hapticEffect,
     )
 }

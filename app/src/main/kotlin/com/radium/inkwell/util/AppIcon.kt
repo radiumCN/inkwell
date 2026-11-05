@@ -25,7 +25,7 @@ enum class AppIcon(
     CLASSIC(
         component = ".IconClassic",
         label = "钢笔与墨水",
-        description = "版画质感的蘸水笔，默认",
+        description = "版画质感的蘸水笔",
         preview = R.mipmap.ic_icon_classic,
     ),
     LINE(

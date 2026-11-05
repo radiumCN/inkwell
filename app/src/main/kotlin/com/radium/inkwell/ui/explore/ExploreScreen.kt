@@ -1,25 +1,17 @@
 package com.radium.inkwell.ui.explore
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
-import com.radium.inkwell.ui.components.AppDropdownMenu
-import com.radium.inkwell.ui.components.AppMenuItem
-import com.radium.inkwell.ui.components.AppScaffold
-import com.radium.inkwell.ui.components.groupedCardItem
-import com.radium.inkwell.ui.components.horizontalOnly
-import com.radium.inkwell.ui.components.pageScroll
-import com.radium.inkwell.ui.components.AppLoadingIndicator
-import com.radium.inkwell.ui.components.AppTextButton
-import com.radium.inkwell.ui.components.BackButton
-import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppToolbar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -28,30 +20,45 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import com.radium.inkwell.ui.components.Dimens
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.bookKey
+import com.radium.inkwell.ui.components.AppLoadingIndicator
+import com.radium.inkwell.ui.components.AppScaffold
+import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.ContentListDefaults
+import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.FloatingGlassBar
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.horizontalOnly
+import com.radium.inkwell.ui.components.pageScroll
+import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.topBarScroll
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowUpDown
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.SearchDevice
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun ExploreScreen(
@@ -64,7 +71,11 @@ fun ExploreScreen(
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     val listState = rememberLazyListState()
-    var sourceMenuOpen by remember { mutableStateOf(false) }
+    val topBarScroll = rememberAppTopBarScroll()
+    var sourceSheetOpen by remember { mutableStateOf(false) }
+    // 书源胶囊占掉的高度：Miuix Scaffold 不把它算进给内容的 padding，列表末尾自己垫（同书架）
+    var sourceBarHeight by remember { mutableStateOf(0.dp) }
+    val capsuleVisible = state.sourcesLoaded && state.sources.isNotEmpty()
 
     // 滚到底部自动加载下一页
     val nearEnd by remember {
@@ -94,13 +105,16 @@ fun ExploreScreen(
     val pageColor = settingsPageColor()
     val showCategories = state.sourcesLoaded && state.sources.isNotEmpty() && state.categories.size > 1
     AppScaffold(
+        // 顶栏大标题折叠挂在 Scaffold 的 modifier 上（见 topBarScroll）
+        modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = {
-            // 留窄栏：标题位是个可点的书源切换按钮，大标题那一行只收文字、放不下控件
-            AppToolbar(
-                navigationIcon = {
-                    BackButton(onClick = onBack)
-                },
+            // 切书源的入口在底部胶囊（SourceCapsule），顶栏只留页面标题 —— 标题位不再放控件，
+            // 换回标准的大标题栏（AppTopBar 的例外清单里「发现页的书源切换按钮」一条随这次改动取消）
+            AppTopBar(
+                title = "发现",
+                scrollBehavior = topBarScroll,
+                onBack = onBack,
                 containerColor = pageColor,
                 // 分类 chips 钉在顶栏里：书列表从它下面滚过去、一起被毛玻璃盖住
                 bottomContent = {
@@ -117,45 +131,18 @@ fun ExploreScreen(
                         )
                     }
                 },
-            ) {
-                // 选书源从标题处弹出列表（当前书源打勾）：从前是裸 DropdownMenu，选中态全靠猜。
-                // 字号字重照窄栏标题（title3 / Medium）、字色照标题的 onSurface —— 它就是这一页的标题，
-                // 只是能点；行尾的 ⇅ 交代「点了能换」
-                Box {
-                    AppTextButton(
-                        onClick = { sourceMenuOpen = true },
-                        contentColor = MiuixTheme.colorScheme.onSurface,
-                        contentPadding = PaddingValues(horizontal = Dimens.gapS),
-                    ) {
-                        Text(
-                            state.currentSource?.name ?: "发现",
-                            modifier = Modifier.weight(1f, fill = false),
-                            fontSize = MiuixTheme.textStyles.title3.fontSize,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Icon(
-                            MiuixIcons.Basic.ArrowUpDown,
-                            contentDescription = "切换书源",
-                            modifier = Modifier.padding(start = Dimens.gapXS).size(Dimens.iconSm),
-                        )
-                    }
-                    AppDropdownMenu(
-                        expanded = sourceMenuOpen,
-                        onDismissRequest = { sourceMenuOpen = false },
-                        items = state.sources.mapIndexed { index, source ->
-                            AppMenuItem(
-                                text = source.name,
-                                selected = source.id == state.currentSource?.id,
-                                onClick = { viewModel.selectSource(index) },
-                            )
-                        },
-                    )
-                }
-            }
+            )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
+        floatingToolbar = {
+            // 底部书源胶囊：与书架隐藏区胶囊同一种玻璃。发现页没有多选态，这个槽里只有它
+            SourceCapsule(
+                visible = capsuleVisible,
+                sourceName = state.currentSource?.name.orEmpty(),
+                onClick = { sourceSheetOpen = true },
+                onHeightChange = { sourceBarHeight = it },
+            )
+        },
     ) { padding ->
         // 库还没读回来：先空着。不能落进下面的空态 —— 那会每次进页都闪一下「没有可用的发现来源」
         if (!state.sourcesLoaded) return@AppScaffold
@@ -189,10 +176,11 @@ fun ExploreScreen(
             // 列表滚到玻璃顶栏与手势条下面（见 AppScaffold）。书行拼成一张卡，行间不留缝
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(padding.horizontalOnly()).pageScroll(),
+                modifier = Modifier.fillMaxWidth().padding(padding.horizontalOnly()).pageScroll(),
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + Dimens.gapS,
-                    bottom = padding.calculateBottomPadding(),
+                    // 末尾除了导航栏，还要让开底部的书源胶囊 —— 最后一行才不被它压住（同书架的 hiddenBarHeight）
+                    bottom = padding.calculateBottomPadding() + if (capsuleVisible) sourceBarHeight + Dimens.gapS else 0.dp,
                 ),
                 overscrollEffect = null,
             ) {
@@ -234,6 +222,85 @@ fun ExploreScreen(
                     }
                 }
             }
+        }
+    }
+
+    // 选书源：底部面板（搜索 / 最近 / 全部），点行即换（见 ExploreSourceSheet）
+    if (sourceSheetOpen) {
+        ExploreSourceSheet(
+            sources = state.sources,
+            recentIds = state.recentSourceIds,
+            currentId = state.currentSource?.id,
+            onPick = { viewModel.selectSource(it) },
+            onOpenManage = onOpenSourceManage,
+            onDismiss = { sourceSheetOpen = false },
+        )
+    }
+}
+
+/**
+ * 底部「书源胶囊」，悬浮在屏幕底部（[FloatingGlassBar]，和书架隐藏区胶囊、多选操作条同一种玻璃）：
+ * 换源图标 + 当前书源名 ｜ 切换书源 ⇅。整条可点，点开是 [ExploreSourceSheet]。
+ *
+ * 书源切换从前挂在顶栏标题上（下拉菜单）：书源一多列表就没法搜、只能一路滑，而且入口在屏幕左上角，
+ * 换一次源要抬手到够不着的地方。沉到底部后开面板与点选项都在拇指区 —— 与书架隐藏区把开关和 ✕
+ * 收进底部胶囊是同一个理由（见 HiddenCapsule 的注释）。
+ *
+ * 没有可发现的书源时不显示（空态里「去导入规则」才是出路）；胶囊占掉的高度经 [onHeightChange]
+ * 报出去，调用方垫到列表末尾。
+ */
+@Composable
+private fun SourceCapsule(
+    visible: Boolean,
+    sourceName: String,
+    onClick: () -> Unit,
+    onHeightChange: (Dp) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    FloatingGlassBar(visible = visible, onHeightChange = onHeightChange) { floor ->
+        Row(
+            Modifier
+                // 整条一个动作（开选择器）：一个可点区，读屏一个焦点
+                .clickable(role = Role.Button, onClick = onClick)
+                .heightIn(min = Dimens.touchTarget)
+                .padding(start = Dimens.gapL, end = Dimens.gapM),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                MiuixIcons.Replace,
+                contentDescription = null,
+                tint = scheme.onSurface,
+                modifier = Modifier.size(Dimens.iconSm),
+            )
+            Text(
+                sourceName.ifBlank { "选择书源" },
+                style = MiuixTheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+                color = scheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(start = Dimens.gapXS),
+            )
+            VerticalDivider(
+                Modifier
+                    .padding(horizontal = Dimens.gapM)
+                    .height(Dimens.iconSm),
+            )
+            Text(
+                "切换书源",
+                style = MiuixTheme.textStyles.body2,
+                color = scheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.padding(end = Dimens.gapXS),
+            )
+            Icon(
+                MiuixIcons.Basic.ArrowUpDown,
+                contentDescription = null,
+                tint = scheme.onSurface,
+                modifier = Modifier.size(Dimens.iconSm),
+            )
         }
     }
 }

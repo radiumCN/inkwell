@@ -263,8 +263,10 @@ class BookSourceRepository(
     }
     private val decoded = ConcurrentHashMap<String, Decoded>()
 
-    /** 「是不是仅发现页」，书源管理的「仅发现页」筛选用。只是个布尔，强引用常驻，不怕 GC 收走后整表重解 */
-    private val searchless = ConcurrentHashMap<String, Pair<Long, Boolean>>()
+    /** 能不能搜索，书源管理的「仅发现」「无搜索」标签与「仅发现页」筛选用。只是个枚举，强引用常驻，不怕 GC 收走后整表重解 */
+    private val searchless = ConcurrentHashMap<String, Pair<Long, SearchKind>>()
+
+    private enum class SearchKind { SEARCHABLE, EXPLORE_ONLY, URL_ONLY }
 
     private fun decode(entity: BookSourceEntity): BookSourceRule? {
         decoded[entity.id]?.takeIf { it.updatedAt == entity.updatedAt }?.ref?.get()?.let { return it }
@@ -298,19 +300,35 @@ class BookSourceRepository(
     }
 
     /**
-     * 仅发现页可用的书源 id：没有搜索、**有**发现页。[items] 是 (id, updatedAt)。
-     * 两样都没有的（「新建书源」没设置搜索的）不算 —— 标成仅发现，用户会去发现页里找它。
-     * 书源管理每当书源集合或 updatedAt 变了就重算一遍；只有 updatedAt 变了的那几条要重新取规则 ——
-     * 从前拨一下开关（会动 updatedAt）就把几千份规则整表重解。
+     * 没有搜索规则的书源，分两种：[exploreOnly] 有发现页（「仅发现」），[urlOnly] 连发现页也没有、只能按网址加书
+     * （「新建书源」没设置搜索的，「无搜索」）。后者不能标成仅发现 —— 用户会去发现页里找它。
      */
-    suspend fun exploreOnlyIds(items: List<Pair<String, Long>>): Set<String> = withContext(Dispatchers.Default) {
-        inLanes(items) { (id, at) ->
-            val flag = searchless[id]?.takeIf { it.first == at }?.second
-                ?: ruleAt(id, at)?.let { rule ->
-                    (rule.search == null && rule.explore.isNotEmpty()).also { searchless[id] = at to it }
-                }
-            id.takeIf { flag == true }
-        }.filterNotNullTo(HashSet())
+    data class SearchlessIds(
+        val exploreOnly: Set<String> = emptySet(),
+        val urlOnly: Set<String> = emptySet(),
+    )
+
+    /**
+     * [items] 是 (id, updatedAt)。书源管理每当书源集合或 updatedAt 变了就重算一遍；只有 updatedAt 变了的那几条
+     * 要重新取规则 —— 从前拨一下开关（会动 updatedAt）就把几千份规则整表重解。
+     */
+    suspend fun searchlessIds(items: List<Pair<String, Long>>): SearchlessIds = withContext(Dispatchers.Default) {
+        val kinds = inLanes(items) { (id, at) ->
+            id to (
+                searchless[id]?.takeIf { it.first == at }?.second
+                    ?: ruleAt(id, at)?.let { rule ->
+                        when {
+                            rule.search != null -> SearchKind.SEARCHABLE
+                            rule.explore.isNotEmpty() -> SearchKind.EXPLORE_ONLY
+                            else -> SearchKind.URL_ONLY
+                        }.also { searchless[id] = at to it }
+                    }
+                )
+        }
+        SearchlessIds(
+            exploreOnly = kinds.mapNotNullTo(HashSet()) { (id, k) -> id.takeIf { k == SearchKind.EXPLORE_ONLY } },
+            urlOnly = kinds.mapNotNullTo(HashSet()) { (id, k) -> id.takeIf { k == SearchKind.URL_ONLY } },
+        )
     }
 
     suspend fun getEntity(id: String): BookSourceEntity? = loadEntity(id)

@@ -378,13 +378,7 @@ private fun SearchHistoryList(
         overscrollEffect = null,
     ) {
         item(key = "header") {
-            Row(
-                Modifier.padding(horizontal = Dimens.listHorizontal),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SectionHeader("搜索历史", Modifier.weight(1f), horizontalInset = false)
-                AppTextButton("清空", onClick = onClear)
-            }
+            SectionHeader("搜索历史", trailing = { AppTextButton("清空", onClick = onClear) })
         }
         // key 加前缀：裸用关键词的话，搜过「header」这个词就跟标题行的 key 撞上，LazyColumn 当场崩溃，
         // 而且历史还在、每次进页都崩
@@ -399,7 +393,8 @@ private fun SearchHistoryList(
                         fadeOutSpec = motion.fastEffectsSpec(),
                     )
                     .groupedCardItem(index, history.size),
-                colors = ContentListDefaults.plainColors(),
+                // 行尾 48dp 的 × 比一行字高：它撑开行高，上下只留 8dp（照默认的 16dp 会胖成 80dp）
+                contentPadding = ContentListDefaults.MediaPadding,
                 leadingContent = {
                     Icon(MiuixIcons.Recent, contentDescription = null, Modifier.size(Dimens.iconSm))
                 },

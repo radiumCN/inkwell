@@ -83,38 +83,6 @@ fun SecondaryButton(
 }
 
 /**
- * 卡片里的小号实心按钮（阅读设置的字号加减）。底色是 `surfaceContainerHighest` ——
- * 和同一张卡里 [SegmentedChoice] 的未选中段同一档，不是卡片上再浮一块默认按钮灰。
- *
- * 高度与圆角也对齐 [SegmentedChoice] 的槽（48dp、[AppShapes.radiusMedium]）：它俩在阅读设置里上下挨着，
- * Miuix 按钮默认的 16dp 圆角配 12dp 的槽，同一张卡里两种弯法，装上就被指出「圆角不统一」。
- */
-@Composable
-fun TonalButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    val scheme = MiuixTheme.colorScheme
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        cornerRadius = AppShapes.radiusMedium,
-        minHeight = Dimens.touchTarget,
-        // 上下不留内边距、高度交给 minHeight：默认的 13dp 上下边距加上 17sp 的行高会撑到 49~50dp，比槽高出一线
-        insideMargin = PaddingValues(horizontal = Dimens.gapL),
-        colors = ButtonDefaults.buttonColors(
-            color = scheme.surfaceContainerHighest,
-            contentColor = scheme.onSurfaceContainerHighest,
-        ),
-        modifier = modifier,
-    ) {
-        ButtonContent(text, loading = false)
-    }
-}
-
-/**
  * 图标按钮。包一层的理由有两个：
  *
  * - **触控下限**：Miuix `IconButton` 默认 40×40dp，低于 48dp（[Dimens.touchTarget]）。这里把最小尺寸抬上去，

@@ -18,9 +18,11 @@ import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Timer
 import top.yukonga.miuix.kmp.icon.extended.Update
 import top.yukonga.miuix.kmp.icon.extended.UploadCloud
+import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.data.repo.describeSyncError
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
+import com.radium.inkwell.ui.stats.LatestRead
 import com.radium.inkwell.ui.stats.summarize
 import kotlinx.coroutines.flow.flowOn
 import androidx.compose.foundation.layout.Column
@@ -98,6 +100,10 @@ fun SettingsScreen(
             .map { rows -> summarize(rows, LocalDate.now()) }
             .flowOn(Dispatchers.Default)
     }.collectAsStateWithLifecycle(initialValue = null)
+    // 概览卡铺底的封面：最近在读、没藏起来的那一本（见 BookDao.observeLatestRead）。null = 还在查
+    val bookDao = koinInject<BookDao>()
+    val latestRead by remember(bookDao) { bookDao.observeLatestRead().map(::LatestRead) }
+        .collectAsStateWithLifecycle(initialValue = null)
     val webDavRepo = koinInject<WebDavRepository>()
     /** 概览卡上点了「立即同步」、还没回来 */
     var syncing by remember { mutableStateOf(false) }
@@ -172,6 +178,7 @@ fun SettingsScreen(
                     .padding(top = padding.calculateTopPadding() + Dimens.gapS),
             ) {
                 SettingsOverviewCard(
+                    latestRead = latestRead,
                     reading = readingSummary,
                     sync = syncConfig,
                     syncing = syncing,

@@ -15,6 +15,17 @@ interface BookDao {
     @Query("SELECT * FROM book WHERE deleted = 0 AND inShelf = 1 ORDER BY MAX(readAt, openedAt) DESC, addedAt DESC")
     fun observeAll(): Flow<List<BookEntity>>
 
+    /**
+     * 最近在读、**没藏起来**的那一本：设置页概览卡、阅读记录「今天」卡拿它的封面铺底。
+     * 隐藏的书不算 —— 这两页一个字都不提隐藏区，藏起来的那本的封面铺在页面最显眼的位置，等于把它说出来。
+     * 从没打开过的书（readAt 与 openedAt 都是 0）也不算「在读」。
+     */
+    @Query(
+        "SELECT * FROM book WHERE deleted = 0 AND inShelf = 1 AND hidden = 0 AND MAX(readAt, openedAt) > 0 " +
+            "ORDER BY MAX(readAt, openedAt) DESC LIMIT 1",
+    )
+    fun observeLatestRead(): Flow<BookEntity?>
+
     @Query("SELECT * FROM book WHERE id = :id")
     suspend fun getById(id: String): BookEntity?
 

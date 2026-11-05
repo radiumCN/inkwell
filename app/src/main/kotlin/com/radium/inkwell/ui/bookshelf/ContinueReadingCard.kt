@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.bookshelf
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,27 +17,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.BookCover
+import com.radium.inkwell.ui.components.CoverGlassCard
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.ReadingProgressMeter
+import com.radium.inkwell.ui.components.compactWhitespace
 import com.radium.inkwell.ui.components.formatRelativeTime
-import com.radium.inkwell.ui.theme.AppShapes
-import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.squircle.squircleSurface
+import top.yukonga.miuix.kmp.theme.LocalContentColor
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.radium.inkwell.ui.components.tiltOnPress
+import com.radium.inkwell.ui.theme.AppShapes
 
 /**
  * 书架顶上的「继续阅读」：最近在读的那本放大摆出来，点一下回到上次的位置。
@@ -46,10 +51,12 @@ import top.yukonga.miuix.kmp.squircle.squircleSurface
  * （读到哪一章、读了多少、多久之前）也正是决定「接着读还是换一本」时要看的。
  *
  * 卡片在时这本书不再在网格里重复一格（见 BookshelfScreen），所以网格封面上的那几样标记
- * —— 追更角标、隐藏标记 —— 卡片得自己画，不然这本书的「有 3 章更新」就没地方看了。
+ * —— 追更、隐藏标记 —— 卡片得自己画，不然这本书的「有 3 章更新」就没地方看了。
+ * 追更不再学网格挂封面角标（[UpdatePill]）：卡片右边有地方写字，说清「几章更新、最新是哪一章」。
  *
- * 用 primaryContainer 铺底：它是书架上唯一一块带颜色的面，一眼就能落上去；文字统一 onPrimaryContainer，
- * 层级靠字号拉开 —— 这块底色上没有对应的「次要文字」令牌，硬套 onSurfaceVariantSummary 对比度不保证。
+ * 底是这本书自己的封面毛玻璃（[CoverGlassCard]）：书架上唯一一块带颜色的面，一眼就能落上去，颜色还是这本书的。
+ * 文字统一一种颜色（玻璃给的 LocalContentColor），层级靠字号拉开 —— 半透明的玻璃上没有对应的「次要文字」令牌，
+ * 硬套 onSurfaceVariantSummary 对比度不保证。
  *
  * 交互与网格里的书一致：点开进书（从这张封面展开）、长按从卡片上弹出同一个操作菜单。
  */
@@ -63,110 +70,169 @@ internal fun ContinueReadingCard(
 ) {
     val book = entry.book
     val cover = remember { CoverAnchor() }
-    val content = MiuixTheme.colorScheme.onPrimaryContainer
     val progress = book.readingProgress()
     val chapterLine = entry.chapterTitle?.takeIf { it.isNotBlank() }
         ?: "第 ${book.readChapterIndex + 1} 章"
-    Row(
-        modifier
-            .fillMaxWidth()
-            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge)
-            // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
-            .semantics(mergeDescendants = true) {}
-            .combinedClickable(
-                role = Role.Button,
-                onClick = { onClick(cover.boundsInWindow()) },
-                onLongClick = onLongClick,
-            )
-            .padding(Dimens.gapL),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+    // 有更新时，读到的那章下面多一行最新章：上下一比就知道差几章、新的是什么（常见的「请假条」不用点进去才知道）
+    val latestLine = book.latestChapterTitle
+        ?.compactWhitespace()
+        ?.takeIf { book.newChapterCount > 0 && it.isNotEmpty() }
+        ?.let { "最新：$it" }
+    // 按下时整张玻璃卡朝按住的那个角倾一下（见 tiltOnPress）：反馈挂在卡片外层，点击在里面那行，共用这一个源
+    val press = remember { MutableInteractionSource() }
+    CoverGlassCard(
+        coverTitle = book.title,
+        coverModel = book.coverPath,
+        modifier = modifier.fillMaxWidth().tiltOnPress(press),
+        tiltHighlight = true,
     ) {
-        Box(Modifier.size(Dimens.coverDetailWidth, Dimens.coverDetailHeight)) {
-            BookCover(
-                title = book.title,
-                coverModel = book.coverPath,
-                modifier = Modifier
-                    .matchParentSize()
-                    .onPlaced { cover.coordinates = it },
-                placeholderChars = 14,
-                // 书名就在旁边，封面不再进读屏
-                contentDescription = null,
-            )
-            // 与网格书卡同一套标记：隐藏区展开时看得出它是藏着的，追更后看得出有几章新的
-            if (book.hidden) {
-                Icon(
-                    MiuixIcons.Hide,
-                    contentDescription = "已隐藏",
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(Dimens.gapXS)
-                        .size(Dimens.iconSm),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        val content = LocalContentColor.current
+        Row(
+            Modifier
+                .fillMaxWidth()
+                // 整张卡一个焦点：读屏顺着念「继续阅读、书名、章节、进度、多久前」，而不是拆成五段
+                .semantics(mergeDescendants = true) {}
+                .combinedClickable(
+                    interactionSource = press,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClick = { onClick(cover.boundsInWindow()) },
+                    onLongClick = onLongClick,
                 )
-            }
-            if (book.newChapterCount > 0) {
-                Badge(
+                .padding(Dimens.gapL),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapL),
+        ) {
+            Box(Modifier.size(Dimens.coverDetailWidth, Dimens.coverDetailHeight)) {
+                BookCover(
+                    title = book.title,
+                    coverModel = book.coverPath,
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(Dimens.gapXS)
-                        // 卡片合并了语义，光秃秃的「3」读屏听不懂：给它一句完整的话
-                        .clearAndSetSemantics { contentDescription = "${book.newChapterCount} 章更新" },
-                    containerColor = MiuixTheme.colorScheme.error,
-                    contentColor = MiuixTheme.colorScheme.onError,
-                ) {
-                    Text(if (book.newChapterCount > 99) "99+" else "${book.newChapterCount}")
+                        .matchParentSize()
+                        .onPlaced { cover.coordinates = it },
+                    placeholderChars = 14,
+                    // 书名就在旁边，封面不再进读屏
+                    contentDescription = null,
+                )
+                // 与网格书卡同一套标记：隐藏区展开时看得出它是藏着的，追更后看得出有几章新的
+                if (book.hidden) {
+                    Icon(
+                        MiuixIcons.Hide,
+                        contentDescription = "已隐藏",
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(Dimens.gapXS)
+                            .size(Dimens.iconSm),
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
                 }
             }
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .height(Dimens.coverDetailHeight),
-        ) {
-            Text("继续阅读", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
-            Text(
-                book.title,
-                style = MiuixTheme.textStyles.headline2,
-                fontWeight = FontWeight.Medium,
-                color = content,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = Dimens.gapXS),
-            )
-            Text(
-                chapterLine,
-                style = MiuixTheme.textStyles.body2,
-                color = content,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Box(Modifier.weight(1f))
-            if (progress != null) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .height(Dimens.coverDetailHeight),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ReadingProgressMeter(
-                        progress = progress,
+                    Text(
+                        "继续阅读",
+                        style = MiuixTheme.textStyles.body2,
+                        fontWeight = FontWeight.Medium,
                         color = content,
-                        trackColor = content.copy(alpha = 0.16f),
                         modifier = Modifier.weight(1f),
                     )
+                    if (book.newChapterCount > 0) UpdatePill(book.newChapterCount, content)
+                }
+                Text(
+                    book.title,
+                    style = MiuixTheme.textStyles.headline2,
+                    fontWeight = FontWeight.Medium,
+                    color = content,
+                    // 文字区和封面一样高（128dp），书名两行时已经塞满：多了最新章那行，书名就只给一行
+                    maxLines = if (latestLine != null) 1 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = Dimens.gapXS),
+                )
+                Text(
+                    chapterLine,
+                    style = MiuixTheme.textStyles.body2,
+                    color = content,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (latestLine != null) {
+                    // 同一种颜色、字号小一档：玻璃上的字只用一种颜色，层级靠字号拉开（同「上次阅读」那行）
                     Text(
-                        formatProgressPercent(progress),
+                        latestLine,
                         style = MiuixTheme.textStyles.footnote1,
                         color = content,
-                        modifier = Modifier.padding(start = Dimens.gapS),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = Dimens.gapXS),
                     )
                 }
+                Box(Modifier.weight(1f))
+                if (progress != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ReadingProgressMeter(
+                            progress = progress,
+                            color = content,
+                            trackColor = content.copy(alpha = 0.16f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            formatProgressPercent(progress),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = content,
+                            modifier = Modifier.padding(start = Dimens.gapS),
+                        )
+                    }
+                }
+                Text(
+                    "上次阅读 · ${formatRelativeTime(book.lastActiveAt())}",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = content,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = Dimens.gapXS),
+                )
             }
-            Text(
-                "上次阅读 · ${formatRelativeTime(book.lastActiveAt())}",
-                style = MiuixTheme.textStyles.footnote1,
-                color = content,
-                maxLines = 1,
-                modifier = Modifier.padding(top = Dimens.gapXS),
-            )
         }
     }
 }
+
+/**
+ * 「● 3 章更新」：「继续阅读」那一行右边的小胶囊。
+ *
+ * 从前学网格挂在封面右上角：一个红底「1」，一个什么得自己猜，红底还和封面里本来的红字、红衣服抢在一起。
+ * 卡片右边有地方写字，就把话说全。红只留给那个点（HyperOS「有新东西」的红点）；字是玻璃给的那一种颜色
+ * （对比度只按它在 CoverGlassTest 里钉过），胶囊底是同色淡淡的一层。8dp 的小面，普通 Shape，不开 squircle。
+ * 上下不加内边距，贴着 footnote2 的行高：胶囊不比「继续阅读」那行高，卡片不变高。
+ */
+@Composable
+private fun UpdatePill(count: Int, content: Color) {
+    Row(
+        Modifier
+            .padding(start = Dimens.gapS)
+            .background(content.copy(alpha = UPDATE_PILL_ALPHA), AppShapes.small)
+            .padding(horizontal = Dimens.gapS),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+    ) {
+        Box(
+            Modifier
+                .size(Dimens.newDot)
+                .background(MiuixTheme.colorScheme.error, CircleShape),
+        )
+        Text(
+            "${if (count > 99) "99+" else count} 章更新",
+            style = MiuixTheme.textStyles.footnote2,
+            fontWeight = FontWeight.Medium,
+            color = content,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 胶囊底：玻璃字色的一成，看得出是一块、又不和字抢 */
+private const val UPDATE_PILL_ALPHA = 0.1f
 
 /**
  * 封面底边的阅读进度（YouTube 看过多少那种）。贴着封面底边画、不占一行：网格里每多一行，一屏就少一排书；

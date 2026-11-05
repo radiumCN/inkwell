@@ -52,8 +52,19 @@ data class ReaderSettings(
      * 翻到章末才去抓下一章，网络书必然卡一下；提前抓好放进缓存就没有这个停顿。
      */
     val preloadChapters: Int = 3,
+    /** 在正文上双指张开 / 捏合直接调字号，不用开菜单。默认开 */
+    val pinchFontSize: Boolean = true,
+    /**
+     * 沿屏幕右边缘竖着滑直接调亮度（视频 App 那种），不用开菜单。默认开。
+     * 滚动翻页模式下不生效：上下滑在那里是翻页本身。
+     */
+    val edgeBrightness: Boolean = true,
 ) {
     companion object {
+        /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
+        const val FONT_SIZE_MIN = 12f
+        const val FONT_SIZE_MAX = 32f
+
         const val FONT_SYSTEM = "system"
         const val FONT_SERIF = "serif"
         const val FONT_SANS = "sans"

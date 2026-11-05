@@ -112,7 +112,7 @@ internal fun rememberCoverSeed(coverModel: Any?): Color? {
 }
 
 /**
- * 用封面色给这一页换强调色：primary 一族（按钮、选中章节、文字按钮、标题栏渐变）跟着封面走，
+ * 用封面色给这一页换强调色：primary 一族（按钮、选中章节、文字按钮）跟着封面走，
  * 底色、卡片、文字这些 surface 一族**原样沿用** App 主题 —— 换掉的话，从书架点进来整页底色一变，
  * 像进了另一个 App。
  *

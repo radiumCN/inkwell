@@ -4,15 +4,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -20,45 +31,69 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
+import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 分组小标题：Miuix [SmallTitle]（subtitle 字号、`onBackgroundVariant` 灰）。全 App 的分组标题一套字号/颜色。
  *
  * 左边对齐**卡片里的文字**（卡片外边距 + 行内边距），不是对齐卡片边 —— HyperOS 设置页就是这么排的：
- * 小标题、行标题在同一条竖线上。
+ * 小标题、行标题在同一条竖线上。卡片外边距随所在的层走（[cardMargin]：页面 16dp、底部面板 24dp）。
  */
 @Composable
 fun SectionHeader(
     text: String,
     modifier: Modifier = Modifier,
-    /** 调用方的内容 Column 已整体内缩时设 false，避免左右留白叠加两次 */
-    horizontalInset: Boolean = true,
+    /**
+     * 行尾的一个文字按钮（目录的「定位当前章」、搜索历史的「清空」）。有它时这一行垫到触控高度、按钮与小标题竖直居中，
+     * 按钮的字右边对齐卡片里的字（行尾留白扣掉按钮自带的 [Dimens.gapM] 内边距）
+     */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    val start = if (horizontalInset) Dimens.listHorizontal * 2 else Dimens.listHorizontal
-    SmallTitle(
-        text = text,
-        modifier = modifier,
-        insideMargin = PaddingValues(
-            start = start,
-            end = start,
-            top = Dimens.sectionHeaderTop,
-            bottom = Dimens.gapS,
-        ),
-    )
+    val start = cardMargin() + Dimens.listHorizontal
+    if (trailing == null) {
+        SmallTitle(
+            text = text,
+            modifier = modifier,
+            insideMargin = PaddingValues(
+                start = start,
+                end = start,
+                top = Dimens.sectionHeaderTop,
+                bottom = Dimens.gapS,
+            ),
+        )
+        return
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(top = Dimens.gapS, end = start - Dimens.gapM)
+            .heightIn(min = Dimens.touchTarget),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SmallTitle(
+            text = text,
+            modifier = Modifier.weight(1f),
+            insideMargin = PaddingValues(start = start, end = Dimens.gapS),
+        )
+        trailing()
+    }
 }
 
 /**
@@ -99,17 +134,26 @@ internal fun settingGroupItemCorners(position: SettingGroupPosition): SquircleCo
 @Composable
 fun settingsPageColor(): Color = MiuixTheme.colorScheme.surface
 
-/** 设置分组卡底色：Miuix 的卡片色 `surfaceContainer`（浅色白卡、深色亮一档的灰卡） */
-@Composable
-fun settingsCardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
-
 /**
- * 设置栈灰底上的内容列表行色。现在就是 [ContentListDefaults.colors] 的默认值（卡片色），
- * 留着名字是让书籍列表这类「灰底上一张张白卡」的页面读起来和设置页是一回事。
+ * 卡片坐在哪一层：卡的底色、卡离两边多远。页面上是灰底白卡（`surfaceContainer`、[Dimens.listHorizontal]）；
+ * [AppBottomSheet] 里换成面板那一套（见那里的 KDoc）。分组卡、拼成卡的列表行、分组小标题、卡下脚注都从这里取 ——
+ * 放进面板就自动对上，调用方不用挨个传。
  */
+@Immutable
+class CardLayer(val color: Color, val margin: Dp)
+
+/** null = 页面（默认那一套） */
+internal val LocalCardLayer = staticCompositionLocalOf<CardLayer?> { null }
+
+/** 分组卡底色：页面上是 Miuix 的卡片色 `surfaceContainer`（浅色白卡、深色亮一档的灰卡），面板里见 [CardLayer] */
 @Composable
-fun settingsStackListColors() =
-    ContentListDefaults.colors(containerColor = settingsCardColor())
+@ReadOnlyComposable
+fun settingsCardColor(): Color = LocalCardLayer.current?.color ?: MiuixTheme.colorScheme.surfaceContainer
+
+/** 卡片离两边的距离：页面上 [Dimens.listHorizontal]，面板里见 [CardLayer] */
+@Composable
+@ReadOnlyComposable
+fun cardMargin(): Dp = LocalCardLayer.current?.margin ?: Dimens.listHorizontal
 
 /**
  * 设置页分组卡：多条 [SettingRow] / [SwitchRow]（带 [SettingGroupPosition]）收进同一张 Miuix [Card]
@@ -126,7 +170,7 @@ fun SettingGroup(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.listHorizontal)
+            .padding(horizontal = cardMargin())
             .padding(vertical = Dimens.gapS),
         cornerRadius = AppShapes.radiusLarge,
         colors = CardDefaults.defaultColors(color = settingsCardColor()),
@@ -143,8 +187,10 @@ fun SettingGroup(
  * `trailing` 优先于 `value`（自定义尾部走它），给了 `trailing` 就不画 ›。
  * 「标题 + 当前值、点开从几项里选一个」的行别用它弹面板，用 [SpinnerSettingRow]。
  *
+ * @param destructive 退出登录、清空这类操作：标题用 error 色、行尾不画 ›（点了不是进下一页，而是先弹确认）。
+ *   单独放一张卡，别和普通入口混在一组 —— HyperOS「退出账号」的样子。
  * @param position 非 null 表示在 [SettingGroup] 内（卡片负责底色与圆角，按压反馈被卡片裁进圆角）。
- *   底栏 / 面板里「一条一卡」的场景保持 null，行自己画一张卡。
+ *   null 时行自己画一张卡 —— 现在没有页面这么用：底部面板里的行也装进 [SettingGroup]（见 [ContentListItem] 的「形态」）。
  */
 @Composable
 fun SettingRow(
@@ -159,6 +205,7 @@ fun SettingRow(
      * 找一项只能挨行读，图标是扫一眼就能落上去的锚点。二级页保持纯文字 —— 每页就几行，图标只会添乱。
      */
     icon: ImageVector? = null,
+    destructive: Boolean = false,
 ) {
     val chrome = if (position != null) Modifier else Modifier.standaloneRowCard()
     val startAction: (@Composable () -> Unit)? = icon?.let { { SettingIcon(it) } }
@@ -169,7 +216,7 @@ fun SettingRow(
         valueText != null -> { { RowValue(valueText) } }
         else -> null
     }
-    if (onClick != null && trailing == null) {
+    if (onClick != null && trailing == null && !destructive) {
         ArrowPreference(
             title = title,
             // ArrowPreference 不收 role：补上，读屏才念「按钮」
@@ -184,6 +231,11 @@ fun SettingRow(
         BasicComponent(
             modifier = chrome,
             title = title,
+            titleColor = if (destructive) {
+                BasicComponentDefaults.titleColor(color = MiuixTheme.colorScheme.error)
+            } else {
+                BasicComponentDefaults.titleColor()
+            },
             summary = summary,
             startAction = startAction,
             endActions = endActions,
@@ -194,9 +246,13 @@ fun SettingRow(
 }
 
 /**
- * 「标题 + 当前值」的选择行：Miuix [WindowSpinnerPreference]。点这一行，选项列表从行上弹出来（当前项打勾、
- * 带说明的项第二行是说明），行尾是当前值和 ⇅ —— HyperOS 设置页「从几项里选一个」都是这个样子，
- * 别再弹底部面板 + 单选圈。选中即收起，[onSelect] 在点选时回调。
+ * 「标题 + 当前值」的选择行。点这一行，选项列表从行上弹出来（当前项打勾、带说明的项第二行是说明），
+ * 行尾是当前值和 ⇅ —— HyperOS 设置页「从几项里选一个」都是这个样子，别再弹底部面板 + 单选圈。
+ * 选中即收起，[onSelect] 在点选时回调。
+ *
+ * 行就是 Miuix `WindowSpinnerPreference` 的那一行（BasicComponent + 当前值 + ⇅，弹层开着时这一行保持按下的灰），
+ * 照它拼出来而不是直接用它，只为换掉弹层：它的弹层写死是一块实色卡片，这里换成 [GlassDropdownPopup] 的毛玻璃，
+ * 与 [AppDropdownMenu] 同一个。
  *
  * 不是设置行、而是某个按钮触发的单选（排序方式、切换书源），用 [AppDropdownMenu] + [AppMenuItem.selected]。
  */
@@ -212,24 +268,63 @@ fun SpinnerSettingRow(
     enabled: Boolean = true,
 ) {
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val entry = DropdownEntry(
-        items = options.map { opt ->
-            DropdownItem(
-                text = opt.label,
-                summary = opt.subtitle?.takeIf { it.isNotBlank() },
-                selected = opt.id == selectedId,
-                onClick = { currentOnSelect(opt) },
-            )
-        },
-    )
-    WindowSpinnerPreference(
-        entry = entry,
+    // 同 Miuix：开没开跨重建保留（转屏后弹层还在），按下的灰等弹层退场播完才收
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var holdDown by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val actualEnabled = enabled && options.isNotEmpty()
+    val scheme = MiuixTheme.colorScheme
+    val actionColor = if (actualEnabled) scheme.onSurfaceVariantActions else scheme.disabledOnSecondaryVariant
+    val current = options.firstOrNull { it.id == selectedId }
+    BasicComponent(
+        modifier = if (position != null) Modifier else Modifier.standaloneRowCard(),
         title = title,
-        modifier = (if (position != null) Modifier else Modifier.standaloneRowCard())
-            .semantics { role = Role.DropdownList },
         summary = subtitle?.takeIf { it.isNotBlank() },
         startAction = icon?.let { { SettingIcon(it) } },
-        enabled = enabled,
+        endActions = {
+            if (current != null && current.label.isNotBlank()) {
+                Text(
+                    current.label,
+                    modifier = Modifier
+                        .padding(end = Dimens.gapS)
+                        .weight(1f, fill = false),
+                    style = MiuixTheme.textStyles.body2,
+                    color = actionColor,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            DropdownArrowEndAction(actionColor = actionColor)
+            if (options.isNotEmpty()) {
+                // 放在行尾这一格里：弹层按它所在的父布局定位，从行尾往下 / 往上展开（同 Miuix）
+                GlassDropdownPopup(
+                    show = expanded,
+                    items = options.map { opt ->
+                        DropdownItem(
+                            text = opt.label,
+                            summary = opt.subtitle?.takeIf { it.isNotBlank() },
+                            selected = opt.id == selectedId,
+                            onClick = { currentOnSelect(opt) },
+                        )
+                    },
+                    onDismissRequest = { expanded = false },
+                    onDismissFinished = { holdDown = false },
+                )
+            }
+        },
+        onClick = {
+            if (actualEnabled) {
+                expanded = !expanded
+                if (expanded) {
+                    holdDown = true
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                }
+            }
+        },
+        role = Role.DropdownList,
+        holdDownState = holdDown,
+        enabled = actualEnabled,
     )
 }
 
@@ -290,11 +385,21 @@ fun SettingFootnote(
     modifier: Modifier = Modifier,
     color: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
 ) {
+    SettingFootnote(AnnotatedString(text), modifier, color)
+}
+
+/** 带样式的脚注：一段里要加深一句（「反馈会公开发布」这种不能被略过的话）时用 */
+@Composable
+fun SettingFootnote(
+    text: AnnotatedString,
+    modifier: Modifier = Modifier,
+    color: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+) {
     Text(
         text,
         style = MiuixTheme.textStyles.footnote1,
         color = color,
-        modifier = modifier.padding(horizontal = Dimens.listHorizontal * 2, vertical = Dimens.gapXS),
+        modifier = modifier.padding(horizontal = cardMargin() + Dimens.listHorizontal, vertical = Dimens.gapXS),
     )
 }
 
@@ -346,15 +451,15 @@ fun SwitchRow(
 }
 
 /**
- * 内容列表（书架列表、搜索结果、书源列表）装进卡片：Lazy 列表里一行一个 item，相邻的行拼成一张圆角卡 ——
- * 第一行圆上角、最后一行圆下角、中间直角，左右露出页面底（与 [SettingGroup] 同一档外边距）。
- * HyperOS 的列表就是灰底上的白卡，不是通栏的行。
+ * 内容列表（书架列表、搜索结果、书源列表、目录……页面上的和底部面板里的都算）装进卡片：Lazy 列表里一行一个 item，
+ * 相邻的行拼成一张圆角卡 —— 第一行圆上角、最后一行圆下角、中间直角，左右露出页面底（与 [SettingGroup] 同一档外边距，
+ * 底色与外边距随所在的层走，见 [CardLayer]）。HyperOS 的列表就是灰底上的白卡，不是通栏的行。
  *
- * 行本身要透明（[ContentListDefaults.plainColors]），底色由这里画；行间别再加 `spacedBy`，否则卡会断开。
+ * 行本身透明、直角（[ContentListItem] 的默认值），底色与圆角由这里画、按压反馈也被这里裁；行间别再加 `spacedBy`，否则卡会断开。
  */
 @Composable
 fun Modifier.groupedCardItem(index: Int, count: Int): Modifier = this
-    .padding(horizontal = Dimens.listHorizontal)
+    .padding(horizontal = cardMargin())
     .squircleSurface(settingsCardColor(), settingGroupItemCorners(groupPosition(index, count)))
 
 /** 第 [index] 项（共 [count] 项）在一张卡里的位置 */

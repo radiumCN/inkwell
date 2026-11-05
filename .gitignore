@@ -13,3 +13,6 @@ captures/
 
 # 临时文件：截图、探针输出等，不入库
 /tmp/
+
+# 发版流水线打包前写进去的这一版发行说明（见 release.yml、BundledReleaseNotes），本地不带
+/app/src/main/assets/release/

@@ -55,11 +55,15 @@ class AppPrefs(private val context: Context) {
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
         val ONBOARDED = booleanPreferencesKey("onboarded")
+        /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
+        val TOC_REVERSED = booleanPreferencesKey("toc_reversed")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
         /** 搜索历史，新的在前，换行分隔（关键词入库前已把换行压成空格，见 [pushSearchHistory]） */
         val SEARCH_HISTORY = stringPreferencesKey("search_history")
+        /** 发现页选择器「最近」用过的书源 id，新的在前，换行分隔（id 是单行的网址，不会自带换行） */
+        val RECENT_EXPLORE_SOURCES = stringPreferencesKey("recent_explore_sources")
         /**
          * 已读章节正文缓存保留天数。0 = 关闭自动清理；合法值 0/7/14/30，默认 14。
          * 只清进度之前且超过该天数未碰过的缓存，当前章与其后不动。
@@ -208,6 +212,19 @@ class AppPrefs(private val context: Context) {
         context.appDataStore.edit { it[Keys.ONBOARDED] = true }
     }
 
+    /**
+     * 阅读页目录是否倒序（最新章在上）。追连载的人打开目录要看的是最新几章，正序得一路拖到底；
+     * 记住上次的选择，下次打开还是那个顺序。默认正序。
+     */
+    val tocReversedState: StateFlow<Boolean?> = context.appDataStore.data
+        .map { it[Keys.TOC_REVERSED] ?: false }
+        .distinctUntilChanged()
+        .warm()
+
+    suspend fun setTocReversed(on: Boolean) {
+        context.appDataStore.edit { it[Keys.TOC_REVERSED] = on }
+    }
+
     /** 书架顶栏是否显示「发现」入口。不看发现页的人，那个图标只是碍事 */
     val exploreEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
         p[Keys.EXPLORE_ENABLED] ?: true
@@ -268,6 +285,23 @@ class AppPrefs(private val context: Context) {
 
     suspend fun clearSearchHistory() {
         context.appDataStore.edit { it.remove(Keys.SEARCH_HISTORY) }
+    }
+
+    /**
+     * 发现页书源选择器「最近」用过的书源 id，新的在前；最多 [RECENT_EXPLORE_SOURCES_MAX] 个。
+     * 逛过哪些源是这台设备上的事，同搜索历史一样不进备份、不刷时间戳（见 [pushSearchHistory] 的注释）。
+     */
+    val recentExploreSources: Flow<List<String>> = context.appDataStore.data
+        .map { p -> p[Keys.RECENT_EXPLORE_SOURCES] }
+        .distinctUntilChanged()
+        .map { raw -> raw?.split('\n')?.filter { it.isNotBlank() }.orEmpty() }
+
+    suspend fun setRecentExploreSources(ids: List<String>) {
+        context.appDataStore.edit { p ->
+            val next = ids.filter { it.isNotBlank() }.take(RECENT_EXPLORE_SOURCES_MAX)
+            if (next.isEmpty()) p.remove(Keys.RECENT_EXPLORE_SOURCES)
+            else p[Keys.RECENT_EXPLORE_SOURCES] = next.joinToString("\n")
+        }
     }
 
     /** 书架展示：网格（封面优先）或列表（一行一书，方便扫最新章）。默认网格。 */
@@ -423,6 +457,8 @@ class AppPrefs(private val context: Context) {
         const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14
         /** 再多就得在搜索页里滚着找了，那还不如重新输 */
         const val SEARCH_HISTORY_MAX = 20
+        /** 发现页「最近」区就 3 个位置，再多人一眼扫不过来 */
+        const val RECENT_EXPLORE_SOURCES_MAX = 3
         /** 关闭 / 7 / 14 / 30 天 */
         val CACHE_AUTO_PRUNE_DAYS_OPTIONS = setOf(0, 7, 14, 30)
     }

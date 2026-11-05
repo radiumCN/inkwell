@@ -46,11 +46,15 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  *
  * 页面不要再手搓居中 Surface 冒充弹层。从几项里选一个走原位弹出的列表（[SpinnerSettingRow] /
  * [AppDropdownMenu]），不走对话框。
+ *
+ * @param title null 时不画 Miuix 自带的居中标题行，由 [content] 自己画头部（更新弹窗：图标 + 标题 + 版本）
+ * @param scrollable false 时内容区不替调用方滚动、也不限高 —— 内容里自己有滚动区时传（更新弹窗的更新说明要自己的
+ *   边缘渐隐）。外面再套一层滚动的话，里面那层会量出无限高直接崩
  */
 @Composable
 fun AppAlertDialog(
     onDismissRequest: () -> Unit,
-    title: String,
+    title: String?,
     confirmText: String,
     onConfirm: () -> Unit,
     modifier: Modifier = Modifier,
@@ -60,6 +64,7 @@ fun AppAlertDialog(
     confirmLoading: Boolean = false,
     dismissEnabled: Boolean = true,
     text: String? = null,
+    scrollable: Boolean = true,
     content: @Composable (ColumnScope.() -> Unit)? = null,
 ) {
     var show by remember { mutableStateOf(true) }
@@ -80,11 +85,17 @@ fun AppAlertDialog(
         DialogWindowBlur(visible = show)
         Column(Modifier.fillMaxWidth()) {
             if (text != null || content != null) {
+                val bodyScroll = rememberScrollState()
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(max = Dimens.dialogBodyMaxHeight)
-                        .verticalScroll(rememberScrollState()),
+                        .then(
+                            if (scrollable) {
+                                Modifier.heightIn(max = Dimens.dialogBodyMaxHeight).verticalScroll(bodyScroll)
+                            } else {
+                                Modifier
+                            },
+                        ),
                     verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
                 ) {
                     if (text != null) {

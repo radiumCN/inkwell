@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.5.0"
+inkwell = "0.5.1-beta.16"
 agp = "9.5.0"
 kotlin = "2.4.21"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
@@ -33,6 +33,9 @@ lifecycle = "2.11.0"
 # 库内事务从 `withTransaction` 拆成 `withReadTransaction` / `withWriteTransaction`。
 # 另外没有 room3-ktx 了（并进 runtime），别照着 2.x 的依赖表加。
 room = "3.0.3"
+# 只给单测用：电脑上能跑的 SQLite（BundledSQLiteDriver），测迁移里的 SQL。版本跟 Room 带的 androidx.sqlite 走，
+# 升 Room 时一起对一下（./gradlew :app:dependencies | grep sqlite）
+sqlite = "2.7.1"
 datastore = "1.3.0"
 koin = "4.2.2"
 okhttp = "5.5.1"
@@ -100,6 +103,7 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 
 room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
 room-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room" }
+sqlite-bundled-jvm = { module = "androidx.sqlite:sqlite-bundled-jvm", version.ref = "sqlite" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }

@@ -26,6 +26,36 @@ jobs:
             exit 1
           fi
 
+      # actions/checkout 触发于 tag push 时，会把这个 annotated tag 在本地存成 lightweight
+      # （ref 指向 commit 而非 tag 对象），于是下面 %(contents) 读出来的会是 **commit message**
+      # ——里头带着 Co-Authored-By 之类 trailer，正文就脏了。这里强制把 tag 对象本身重新取回来。
+      - name: Refetch annotated tag object
+        run: git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
+
+      # 把标注 tag 的注解正文取出来当 Release 正文 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
+      # 顺手剔掉 Co-Authored-By / Signed-off-by 之类 trailer 和首尾多余空行（|| true 兜底：万一被过滤空了
+      # 也不让 pipefail 把这步判失败）。
+      # 应用内更新弹窗按纯文本显示正文：tag 注解写「更新内容」+ feat/fix/优化 条目，别用 Markdown。
+      # 格式见 CLAUDE.md「发行说明格式」。
+      #
+      # 同一份正文连同 tag 日期也写进安装包（assets/release/，不入库）：关于页点「版本」看的就是它
+      # （BundledReleaseNotes）。所以这一步必须在打包之前。
+      - name: Extract tag message
+        id: tag_notes
+        run: |
+          git tag -l --format='%(contents)' "${{ github.ref_name }}" \
+            | { grep -viE '^(Co-Authored-By|Signed-off-by):' || true; } \
+            | sed -e 's/[[:space:]]*$//' \
+            | cat -s > "$RUNNER_TEMP/notes.txt"
+          {
+            echo 'body<<INKWELL_NOTES_EOF'
+            cat "$RUNNER_TEMP/notes.txt"
+            echo 'INKWELL_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+          mkdir -p app/src/main/assets/release
+          cp "$RUNNER_TEMP/notes.txt" app/src/main/assets/release/notes.txt
+          git tag -l --format='%(taggerdate:short)' "${{ github.ref_name }}" > app/src/main/assets/release/date.txt
+
       - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
@@ -69,29 +99,6 @@ jobs:
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk inkwell-${{ github.ref_name }}.apk
-
-      # actions/checkout 触发于 tag push 时，会把这个 annotated tag 在本地存成 lightweight
-      # （ref 指向 commit 而非 tag 对象），于是下面 %(contents) 读出来的会是 **commit message**
-      # ——里头带着 Co-Authored-By 之类 trailer，正文就脏了。这里强制把 tag 对象本身重新取回来。
-      - name: Refetch annotated tag object
-        run: git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
-
-      # 把标注 tag 的注解正文取出来当 Release 正文 —— 于是「打 tag 时写的说明」会直接成为 Release 正文。
-      # 顺手剔掉 Co-Authored-By / Signed-off-by 之类 trailer 和首尾多余空行（|| true 兜底：万一被过滤空了
-      # 也不让 pipefail 把这步判失败）。
-      # 应用内更新弹窗按纯文本显示正文：tag 注解写「更新内容」+ feat/fix/优化 条目，别用 Markdown。
-      # 格式见 CLAUDE.md「发行说明格式」。
-      - name: Extract tag message
-        id: tag_notes
-        run: |
-          {
-            echo 'body<<INKWELL_NOTES_EOF'
-            git tag -l --format='%(contents)' "${{ github.ref_name }}" \
-              | { grep -viE '^(Co-Authored-By|Signed-off-by):' || true; } \
-              | sed -e 's/[[:space:]]*$//' \
-              | cat -s
-            echo 'INKWELL_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

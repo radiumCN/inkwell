@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.AppTopBar
+import com.radium.inkwell.ui.components.CoverGlassCard
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
@@ -48,10 +49,10 @@ import java.time.temporal.TemporalAdjusters
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 
@@ -66,6 +67,7 @@ fun ReadingStatsScreen(
     viewModel: ReadingStatsViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val latestRead by viewModel.latestRead.collectAsStateWithLifecycle()
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     AppScaffold(
@@ -82,13 +84,13 @@ fun ReadingStatsScreen(
                 hint = "翻开一本书读几页，时长就会记在这里；配了 WebDAV 的话，各台设备的时长会合在一起",
                 modifier = Modifier.padding(padding),
             )
-            else -> StatsContent(ui, padding)
+            else -> StatsContent(ui, latestRead, padding)
         }
     }
 }
 
 @Composable
-private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
+private fun StatsContent(ui: ReadingStatsUi, latestRead: LatestRead?, padding: PaddingValues) {
     val s = ui.summary
     Column(
         Modifier
@@ -99,7 +101,7 @@ private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
             .verticalScroll(rememberScrollState(), overscrollEffect = null)
             .padding(top = padding.calculateTopPadding(), bottom = Dimens.gapXL + padding.calculateBottomPadding()),
     ) {
-        TodayCard(s, Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS))
+        TodayCard(s, latestRead, Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS))
         Row(
             Modifier
                 .fillMaxWidth()
@@ -143,34 +145,41 @@ private fun StatsContent(ui: ReadingStatsUi, padding: PaddingValues) {
 }
 
 /**
- * 今天这一张：唯一一块带颜色的面，跟书架上的「继续阅读」同一种 primaryContainer 底 ——
- * 页面上最先该看到的数字只有这一个。文字统一 onPrimaryContainer，层级靠字号拉开。
+ * 今天这一张：唯一一块带颜色的面，跟书架上的「继续阅读」、设置页概览卡同一种 —— 最近在读那本书的封面毛玻璃
+ * （[CoverGlassCard]；[latestRead] 不含隐藏的书，理由同 `ReadingStatsViewModel.topBooks`；null = 还在查）。
+ * 页面上最先该看到的数字只有这一个。文字统一一种颜色（玻璃给的 LocalContentColor），层级靠字号拉开。
  */
 @Composable
-private fun TodayCard(s: ReadingSummary, modifier: Modifier) {
-    val content = MiuixTheme.colorScheme.onPrimaryContainer
-    Column(
-        modifier
-            .fillMaxWidth()
-            .squircleSurface(MiuixTheme.colorScheme.primaryContainer, AppShapes.radiusLarge)
-            .semantics(mergeDescendants = true) {}
-            .padding(Dimens.gapXL),
+private fun TodayCard(s: ReadingSummary, latestRead: LatestRead?, modifier: Modifier) {
+    CoverGlassCard(
+        coverTitle = latestRead?.book?.title,
+        coverModel = latestRead?.book?.coverPath,
+        modifier = modifier.fillMaxWidth(),
+        pending = latestRead == null,
     ) {
-        Text("今天读了", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
-        Text(
-            formatDuration(s.todayMillis),
-            style = MiuixTheme.textStyles.title1,
-            color = content,
-            modifier = Modifier.padding(vertical = Dimens.gapXS),
-        )
-        Text(
-            buildString {
-                append(if (s.streakDays > 0) "连续读了 ${s.streakDays} 天" else "今天还没开始")
-                append(" · 共 ${s.activeDays} 天在读")
-            },
-            style = MiuixTheme.textStyles.body2,
-            color = content,
-        )
+        val content = LocalContentColor.current
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {}
+                .padding(Dimens.gapXL),
+        ) {
+            Text("今天读了", style = MiuixTheme.textStyles.body2, fontWeight = FontWeight.Medium, color = content)
+            Text(
+                formatDuration(s.todayMillis),
+                style = MiuixTheme.textStyles.title1,
+                color = content,
+                modifier = Modifier.padding(vertical = Dimens.gapXS),
+            )
+            Text(
+                buildString {
+                    append(if (s.streakDays > 0) "连续读了 ${s.streakDays} 天" else "今天还没开始")
+                    append(" · 共 ${s.activeDays} 天在读")
+                },
+                style = MiuixTheme.textStyles.body2,
+                color = content,
+            )
+        }
     }
 }
 
