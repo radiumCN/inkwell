@@ -5,6 +5,8 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -63,6 +67,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   字体名用那款字本身写，换之前就看得到长相
  * @param longClickActions 每颗 chip 的长按动作（与 [options] 一一对应，null = 不能长按）。导入的字体长按删除；
  *   [longClickLabel] 是读屏念的那个动作名
+ * @param bringSelectedIntoView 选中项换了就把它横滚进视野。给「选中项不是手点出来的」条用：协议页的节 chip
+ *   跟着正文滚动亮，亮到条外面去了得自己滚过来。默认关 —— 手点的那颗本来就在眼前，
+ *   而 bringIntoView 会一路往外层滚动容器传，条放在可滚动的页面里时会把整页也拽一下
  */
 @Composable
 fun ChipRow(
@@ -77,7 +84,16 @@ fun ChipRow(
     longClickActions: List<(() -> Unit)?>? = null,
     longClickLabel: String? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    bringSelectedIntoView: Boolean = false,
 ) {
+    val selectedRequester = remember { BringIntoViewRequester() }
+    if (bringSelectedIntoView) {
+        LaunchedEffect(selectedIndex) {
+            // 等这一帧排好版：新选中的那颗刚挂上 requester，还没有位置
+            withFrameNanos { }
+            selectedRequester.bringIntoView()
+        }
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -91,13 +107,14 @@ fun ChipRow(
             val interactionSource = remember { MutableInteractionSource() }
             val selected = i == selectedIndex
             val onLongClick = longClickActions?.getOrNull(i)
+            val bring = if (bringSelectedIntoView && selected) Modifier.bringIntoViewRequester(selectedRequester) else Modifier
             ChipPill(
                 selected = selected,
                 label = label,
                 solid = solidSelection,
                 interactionSource = interactionSource,
                 fontFamily = fontFamilies?.getOrNull(i),
-                modifier = if (onLongClick == null) {
+                modifier = bring.then(if (onLongClick == null) {
                     Modifier.selectable(
                         selected = selected,
                         onClick = { onSelect(i) },
@@ -117,7 +134,7 @@ fun ChipRow(
                             onClick = { onSelect(i) },
                         )
                         .semantics { this.selected = selected }
-                },
+                }),
             )
         }
         trailing?.invoke(this)
