@@ -14,10 +14,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
-import androidx.navigationevent.NavigationEventInfo
-import androidx.navigationevent.compose.NavigationBackHandler
-import androidx.navigationevent.compose.rememberNavigationEventState
-import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
@@ -70,7 +66,8 @@ import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSlider
 import androidx.compose.animation.AnimatedVisibility
-import com.radium.inkwell.ui.components.AppTabContent
+import com.radium.inkwell.ui.components.SheetPageHeader
+import com.radium.inkwell.ui.components.SheetPages
 import com.radium.inkwell.ui.components.bottomBarEnter
 import com.radium.inkwell.ui.components.bottomBarExit
 import com.radium.inkwell.ui.components.scrimEnter
@@ -337,8 +334,9 @@ fun ReaderMenu(
         // 纸色和亮度根本没法判断。底与菜单的浮层同色（readerOverlayColor，与纸面差一档 —— 同色的话面板上沿等于不存在）。
         // 导航栏高度由面板内容自己垫在滚动末尾（见 TypographyPanel），这里不垫。
         //
-        // 面板在哪一页、手上正拖着哪条滑轨都提到这一层：面板的标题行（二级页的 ‹ 和页名）、底色、拖动条都跟着它们变。
-        // 拖着字号 / 亮度时面板让开 —— 底色和拖动条淡掉，只剩手上那一条（见 TypographyPanel）
+        // 手上正拖着哪条滑轨提到这一层：面板底色、拖动条都跟着它变。
+        // 拖着字号 / 亮度时面板让开 —— 底色和拖动条淡掉，只剩手上那一条（见 TypographyPanel）。
+        // 二级页的标题行（‹ 和页名）不用面板自己的那一行：它得跟着页面一起滑进来（见 SheetPages）
         var page by remember { mutableStateOf(SettingsPage.Main) }
         var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
         val effects = AppTheme.motionScheme.defaultEffectsSpec<Color>()
@@ -359,12 +357,6 @@ fun ReaderMenu(
             backgroundColor = sheetColor,
             padNavigationBar = false,
             enableWindowDim = false,
-            title = page.title,
-            startAction = if (page != SettingsPage.Main) {
-                { BackButton(onClick = { page = SettingsPage.Main }) }
-            } else {
-                null
-            },
             dragHandleColor = sheetHandle,
         ) {
             TypographyPanel(
@@ -699,10 +691,10 @@ private val MARGIN_H_OPTIONS = listOf(
  *
  * - **一级页**放最常调、要边看边调的：亮度、字号、行距、纸张、字体，一屏放下；底下三个入口进二级页（见 [MainPage]）。
  *   从前是四个页签：页签只是把设置分成四堆，最常调的和一年调一次的都得先挑对页签；「排版」「版式」两个近义词更是猜不出哪页放什么。
- * - **二级页**从右滑入，标题行左边 ‹ 返回、中间页名（HyperOS 面板标准的标题行），系统返回键也是先回一级。
+ * - **二级页**整页从右推进来（[SheetPages]，和整页转场同一套几何，侧滑返回跟手），第一行是它自己的标题行：
+ *   左边 ‹ 返回、中间页名（[SheetPageHeader]），系统返回键也是先回一级。
  *   二级页还在这个面板里、正文照样露在上面 —— 段距、边距这些细节也是边调边看，不用进单独的设置页。
- * - **面板定高**：一级页的标题行只有 Miuix 那 18dp 留白，二级页多一个返回键（48dp），内容区相应矮 48dp，
- *   进出二级页面板总高不变、不跳。
+ * - **面板定高**：各页铺满同一个定高的容器，二级页 = 标题行 + 内容，进出二级页面板总高不变、不跳。
  * - **拖滑块时面板让开**（[dragging]）：手按在字号或亮度滑轨上拖起来，面板底色、拖动条和别的设置项一起淡掉，
  *   只剩手上那一条浮在原位，整屏正文都是预览；松手回来。HyperOS 控制中心拖亮度就是这样。
  *
@@ -711,8 +703,6 @@ private val MARGIN_H_OPTIONS = listOf(
  *
  * **只占半屏、不压暗正文**：调排版要看得见效果。从前面板固定 560dp 高、底下还压着一层黑，
  * 改行距字距时正文被盖住大半，纸色和亮度隔着蒙层更是没法判断。现在上面露出来的正文就是实时预览。
- *
- * 页与页之间的过渡走 [AppTabContent]（轻横移 + 淡入淡出，与全应用的页签切换同一套节奏）。
  */
 @Composable
 private fun TypographyPanel(
@@ -728,56 +718,58 @@ private fun TypographyPanel(
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
 ) {
-    // 二级页上按返回先回一级。内容里的比面板自己的后注册，先拿到返回事件；一级页上不拦，返回照旧收起面板
-    val backState = rememberNavigationEventState(currentInfo = NavigationEventInfo.None)
-    NavigationBackHandler(
-        state = backState,
-        isBackEnabled = page != SettingsPage.Main,
-        onBackCompleted = { onOpen(SettingsPage.Main) },
-    )
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
     // 内容区定高（别用 heightIn(max)：那只是上限，内容矮时面板跟着缩，切到长的那页又被顶起来）。
-    // 按窗口比例取、大屏封顶，再加回从前页签占的那一行（一级页正好一屏放下）；二级页的标题行高出一个返回键，内容区让出同样的高度
-    val mainHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight) + Dimens.touchTarget
-    val contentHeight = if (page == SettingsPage.Main) mainHeight else mainHeight - Dimens.touchTarget
+    // 按窗口比例取、大屏封顶，再加回从前页签占的那一行（一级页正好一屏放下）；二级页的标题行从这里面出
+    val pageHeight = (windowHeight * PANEL_HEIGHT_FRACTION).coerceAtMost(Dimens.sheetListMaxHeight) + Dimens.touchTarget
+    val back = { onOpen(SettingsPage.Main) }
 
-    AppTabContent(
-        targetState = page.ordinal,
-        label = "readerSettingsPage",
+    // 返回键 / 侧滑在二级页上先回一级（SheetPages 里挂着处理者），一级页上不拦，返回照旧收起面板
+    SheetPages(
+        page = page,
+        root = SettingsPage.Main,
+        onBack = back,
+        background = readerOverlayColor(),
         modifier = Modifier
             .fillMaxWidth()
             // 导航栏高度加进定高、也垫在滚动内容末尾：面板铺到屏幕底、设置项滚到手势条下面，看得见的高度不变
-            .height(contentHeight + sheetBottomInset()),
-    ) { index ->
-        val current = SettingsPage.entries[index]
-        // 每页自己一个滚动状态：进出二级页都从顶上开始，不会落在上一页滚到的半截
-        Column(
-            Modifier
-                .fillMaxSize()
-                .pageScroll()
-                .verticalScroll(rememberScrollState(), overscrollEffect = null)
-                .padding(horizontal = cardMargin())
-                .padding(bottom = Dimens.gapXXL + sheetBottomInset()),
-            // 一级页要一屏放下，卡与卡之间收紧一档
-            verticalArrangement = Arrangement.spacedBy(if (current == SettingsPage.Main) Dimens.gapM else Dimens.gapL),
-        ) {
-            when (current) {
-                SettingsPage.Main -> MainPage(
-                    settings = settings,
-                    onUpdate = onUpdate,
-                    onPreview = onPreview,
-                    onCommit = onCommit,
-                    typography = typography,
-                    dragging = dragging,
-                    onDragging = onDragging,
-                    onOpen = onOpen,
-                )
-                SettingsPage.Typeset -> {
-                    LayoutSchemeSection(settings, typography)
-                    TypesetTab(settings, onUpdate)
+            .height(pageHeight + sheetBottomInset()),
+    ) { current ->
+        Column(Modifier.fillMaxSize()) {
+            // 标题行不随内容滚：二级页滚到底也看得见 ‹
+            current.title?.let { SheetPageHeader(it, onBack = back) }
+            // 每页自己一个滚动状态：进出二级页都从顶上开始，不会落在上一页滚到的半截
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .pageScroll()
+                    .verticalScroll(rememberScrollState(), overscrollEffect = null)
+                    .padding(horizontal = cardMargin())
+                    // 二级页标题行与第一张卡之间的空，同从前 Miuix 标题行底下那一段
+                    .padding(top = if (current.title != null) Dimens.gapM else 0.dp)
+                    .padding(bottom = Dimens.gapXXL + sheetBottomInset()),
+                // 一级页要一屏放下，卡与卡之间收紧一档
+                verticalArrangement = Arrangement.spacedBy(if (current == SettingsPage.Main) Dimens.gapM else Dimens.gapL),
+            ) {
+                when (current) {
+                    SettingsPage.Main -> MainPage(
+                        settings = settings,
+                        onUpdate = onUpdate,
+                        onPreview = onPreview,
+                        onCommit = onCommit,
+                        typography = typography,
+                        dragging = dragging,
+                        onDragging = onDragging,
+                        onOpen = onOpen,
+                    )
+                    SettingsPage.Typeset -> {
+                        LayoutSchemeSection(settings, typography)
+                        TypesetTab(settings, onUpdate)
+                    }
+                    SettingsPage.Flip -> FlipTab(settings, onUpdate)
+                    SettingsPage.More -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
                 }
-                SettingsPage.Flip -> FlipTab(settings, onUpdate)
-                SettingsPage.More -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
             }
         }
     }
