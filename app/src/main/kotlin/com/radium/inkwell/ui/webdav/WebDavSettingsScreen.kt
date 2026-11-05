@@ -30,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -51,7 +50,7 @@ import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
-import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
@@ -186,7 +185,8 @@ private fun OfficialSection(state: WebDavUiState, viewModel: WebDavViewModel) {
 
 @Composable
 private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) {
-    val context = LocalContext.current
+    // 「在网页管理账号」：先把要去的地址亮出来问一句（见 rememberExternalLinkOpener）
+    val links = rememberExternalLinkOpener { viewModel.messages.emit(NO_BROWSER_MESSAGE) }
     SectionHeader("账号")
     SettingGroup {
         SettingBlock {
@@ -229,11 +229,7 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
         )
         SettingRow(
             title = "在网页管理账号",
-            onClick = {
-                if (!context.openExternalLink(OfficialWebDav.SITE)) {
-                    viewModel.messages.emit(NO_BROWSER_MESSAGE)
-                }
-            },
+            onClick = { links.open(OfficialWebDav.SITE) },
             position = SettingGroupPosition.Middle,
         )
         SettingRow(

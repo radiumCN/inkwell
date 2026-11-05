@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,7 +39,7 @@ import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
-import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
 import com.radium.inkwell.ui.components.AppScaffold
@@ -56,7 +55,8 @@ fun FeedbackScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
+    // 「查看进展」跳去 issue 页：先把地址亮出来问一句（见 rememberExternalLinkOpener）
+    val links = rememberExternalLinkOpener { viewModel.messages.emit(NO_BROWSER_MESSAGE) }
 
     CollectMessages(viewModel.messages, snackbar)
 
@@ -82,9 +82,7 @@ fun FeedbackScreen(
         if (url != null) {
             SubmittedState(
                 url = url,
-                onView = {
-                    if (!context.openExternalLink(url)) viewModel.messages.emit(NO_BROWSER_MESSAGE)
-                },
+                onView = { links.open(url) },
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize().padding(padding).padding(Dimens.screenPadding),
             )

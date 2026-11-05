@@ -25,7 +25,7 @@ import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
-import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -99,6 +99,8 @@ fun AboutSettingsScreen(
     val scope = rememberCoroutineScope()
     val developerMode = appPrefs.developerModeState.collectAsStateWithLifecycle().value ?: false
     val messages = remember { MessageBus() }
+    // 官网、开源地址：先问一句再跳去浏览器（见 rememberExternalLinkOpener）
+    val links = rememberExternalLinkOpener { messages.emit(NO_BROWSER_MESSAGE) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(messages, snackbar)
     var versionTaps by remember { mutableIntStateOf(0) }
@@ -203,19 +205,13 @@ fun AboutSettingsScreen(
                 SettingRow(
                     title = "官网（web）",
                     value = SITE_URL,
-                    onClick = {
-                        if (!context.openExternalLink(SITE_URL)) messages.emit(NO_BROWSER_MESSAGE)
-                    },
+                    onClick = { links.open(SITE_URL) },
                     position = SettingGroupPosition.Middle,
                 )
                 SettingRow(
                     title = "开源地址",
                     value = UpdateChecker.REPO_URL,
-                    onClick = {
-                        if (!context.openExternalLink(UpdateChecker.REPO_URL)) {
-                            messages.emit(NO_BROWSER_MESSAGE)
-                        }
-                    },
+                    onClick = { links.open(UpdateChecker.REPO_URL) },
                     position = SettingGroupPosition.Last,
                 )
             }

@@ -21,7 +21,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -41,7 +40,7 @@ import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.horizontalOnly
-import com.radium.inkwell.ui.components.openExternalLink
+import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
 import com.radium.inkwell.ui.components.settingsPageColor
@@ -65,16 +64,14 @@ fun RssArticleScreen(
     viewModel: RssArticleViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val messages = remember { MessageBus() }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(messages, snackbar)
 
-    fun openInBrowser() {
-        if (state.link.isBlank()) return
-        // 从前拉不起浏览器时静默吞掉：按钮点了没反应，用户只会以为没点中
-        if (!context.openExternalLink(state.link)) messages.emit(NO_BROWSER_MESSAGE)
-    }
+    // 从前拉不起浏览器时静默吞掉：按钮点了没反应，用户只会以为没点中。
+    // 原文链接来自订阅源，先把地址亮出来问一句再跳（见 rememberExternalLinkOpener）
+    val links = rememberExternalLinkOpener { messages.emit(NO_BROWSER_MESSAGE) }
+    fun openInBrowser() = links.open(state.link)
 
     val pageColor = settingsPageColor()
     // 窄栏，不用大标题栏：这一页的标题就是文章标题。从前停在顶部时是大标题「文章」压在文章标题上面 ——
