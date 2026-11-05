@@ -168,6 +168,9 @@ fun CoverHeaderBackground(title: String, coverModel: Any?, modifier: Modifier = 
     }
 }
 
+/** 示例 App 的 Colored Thick 混色（封面玻璃卡、多选操作条）。[dark] 同 [smallGlassHighlight] 的 */
+internal fun coloredThick(dark: Boolean) = if (dark) ColoredThickDark else ColoredThickLight
+
 /**
  * 示例 App 的 Small Container 那档玻璃边缘高光：卡片、浮起来的药丸、提示胶囊这类小面都用这一档。
  * [dark] 是**玻璃本身**深不深（深色主题、或浅色主题里的深色胶囊），不是 App 在不在深色模式
@@ -225,12 +228,12 @@ internal const val HEADER_VEIL_DARK = 0.85f
 
 // Miuix 示例 App 的 Colored Thick 混色（example/.../component/blend/ColorBlendToken.kt，Apache-2.0）。
 // 库里只有混合模式，没有这几组成品参数，照抄过来
-private val ColoredThickLight = listOf(
+internal val ColoredThickLight = listOf(
     BlendColorEntry(Color(0xE6BDBDBD), BlurBlendMode.Overlay),
     BlendColorEntry(Color(0x992B2B2B), BlurBlendMode.ColorDodge),
     BlendColorEntry(Color(0x339C9C9C), BlurBlendMode.SrcOver),
 )
-private val ColoredThickDark = listOf(
+internal val ColoredThickDark = listOf(
     BlendColorEntry(Color(0x667A7A7A), BlurBlendMode.ColorBurn),
     BlendColorEntry(Color(0x33747474), BlurBlendMode.Overlay),
     BlendColorEntry(Color(0x322B2B2B), BlurBlendMode.SrcOver),

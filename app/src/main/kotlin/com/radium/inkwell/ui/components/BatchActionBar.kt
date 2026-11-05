@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,15 +17,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.theme.AppThemes
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
+import top.yukonga.miuix.kmp.basic.FloatingToolbarDefaults
+import top.yukonga.miuix.kmp.blur.BlurDefaults
+import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -89,23 +97,54 @@ fun BatchActionBar(
     more: List<AppMenuItem> = emptyList(),
 ) {
     val density = LocalDensity.current
+    val backdrop = LocalBarBackdrop.current
+    val scheme = MiuixTheme.colorScheme
+    val dark = scheme.surface.luminance() < 0.5f
+    val radius = FloatingToolbarDefaults.CornerRadius
+    // 毛玻璃（在 AppScaffold 里才有可取样的页面图层）：对列表取样糊开，Colored Thick 混色、Small Container 那档边缘高光，
+    // 再垫一层卡片色薄底（同封面玻璃卡：底下是一本黑封面时字照样读得清，厚度见 CoverGlassTest）。
+    // 胶囊的形状自己裁：Miuix 的悬浮工具条只画一块实心底，没有玻璃这一档
+    val glass = if (backdrop != null) {
+        val shape = remember(radius) { squircleShape(radius) }
+        Modifier
+            .squircleClip(radius)
+            .textureBlur(
+                backdrop = backdrop,
+                shape = shape,
+                blurRadius = TOOLBAR_BLUR_RADIUS,
+                colors = BlurDefaults.blurColors(blendColors = coloredThick(dark)),
+                highlight = smallGlassHighlight(dark),
+            )
+            .background(toolbarGlassVeil(scheme.surfaceContainer, dark))
+    } else {
+        Modifier
+    }
     AnimatedVisibility(visible = visible, enter = bottomBarEnter(), exit = bottomBarExit()) {
         FloatingToolbar(
-            // 量的是连同外边距在内的整块：Scaffold 就按这一块的高度往导航栏上面摆
-            modifier = Modifier.onSizeChanged {
-                onHeightChange(with(density) { it.height.toDp() } + TOOLBAR_LIFT)
-            },
-            showDivider = true,
+            // 量的是连同外边距在内的整块：Scaffold 就按这一块的高度往导航栏上面摆。
+            // 外边距挪到玻璃外面来（玻璃只铺胶囊本身），所以 Miuix 那份外边距给 0
+            modifier = Modifier
+                .onSizeChanged { onHeightChange(with(density) { it.height.toDp() } + TOOLBAR_LIFT) }
+                .padding(FloatingToolbarDefaults.OutSidePadding)
+                .then(glass),
+            color = if (backdrop != null) Color.Transparent else FloatingToolbarDefaults.defaultColor(),
+            outSidePadding = PaddingValues(0.dp),
+            // 玻璃不投影、不描实心的边：Miuix 的投影和那圈「分隔线」都是画在胶囊底下的实心块，半透明的玻璃会把它们透出来，
+            // 胶囊里糊着一层灰。玻璃的边由边缘高光来画。没有玻璃（实色）时照旧描边：深色下卡片色和列表的卡同色，只靠阴影分不出来
+            shadowElevation = if (backdrop != null) 0.dp else FLAT_TOOLBAR_SHADOW,
+            showDivider = backdrop == null,
         ) {
             Row(Modifier.padding(horizontal = Dimens.gapS)) {
-                val scheme = MiuixTheme.colorScheme
+                // 「删除」的红字：玻璃上按最坏的底推一档（有的配色里 error 红放在实色卡片上都不到 4.5:1），实色照旧
+                val floor = if (backdrop != null) toolbarGlassFloor(scheme.surfaceContainer, dark) else scheme.surfaceContainer
+                val delete = remember(scheme.error, floor) { AppThemes.readableOn(scheme.error, floor) }
                 actions.forEach { action ->
                     IconLabelButton(
                         icon = action.icon,
                         label = action.label,
                         onClick = action.onClick,
                         enabled = action.enabled,
-                        contentColor = if (action.destructive) scheme.error else scheme.onSurface,
+                        contentColor = if (action.destructive) delete else scheme.onSurface,
                     )
                 }
                 if (more.isNotEmpty()) {
@@ -128,3 +167,31 @@ fun BatchActionBar(
 
 /** Miuix Scaffold 把悬浮工具条摆在导航栏上面时再往上抬的那一截（它的 `FloatingToolbarSpacing`，私有常量） */
 private val TOOLBAR_LIFT = Dimens.gapXS
+
+/** 实色（没有玻璃）时的投影：Miuix 悬浮工具条的默认值 */
+private val FLAT_TOOLBAR_SHADOW = Dimens.gapXS
+
+/** dp。示例「Texture Blur」的 100：胶囊小，底下是一行行书名和封面，糊狠了才摊成一层雾 */
+private const val TOOLBAR_BLUR_RADIUS = 100f
+
+/** 操作条玻璃上那层卡片色（为什么要有它见 [BatchActionBar]） */
+internal fun toolbarGlassVeil(card: Color, dark: Boolean): Color =
+    card.copy(alpha = if (dark) TOOLBAR_VEIL_DARK else TOOLBAR_VEIL_LIGHT)
+
+/**
+ * 操作条玻璃最坏时的底色：薄底叠在和字反着的一片纯色上（浅色主题纯黑、深色主题纯白，同封面玻璃卡）。
+ * 「删除」的红字按它推（不算 Colored Thick 混色 —— 它只会把底往字的反面提，往保守里算）
+ */
+internal fun toolbarGlassFloor(card: Color, dark: Boolean): Color {
+    val under = if (dark) Color.White else Color.Black
+    val a = toolbarGlassVeil(card, dark).alpha
+    return Color(
+        red = card.red * a + under.red * (1 - a),
+        green = card.green * a + under.green * (1 - a),
+        blue = card.blue * a + under.blue * (1 - a),
+    )
+}
+
+// 薄底厚度：CoverGlassTest 按所有预设算「正文压在最坏的页面上够 4.5:1」最少要多厚，这里往上取整
+internal const val TOOLBAR_VEIL_LIGHT = 0.55f
+internal const val TOOLBAR_VEIL_DARK = 0.75f

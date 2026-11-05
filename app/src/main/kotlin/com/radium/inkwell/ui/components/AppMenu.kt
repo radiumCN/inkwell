@@ -2,10 +2,7 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
-import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.popup.WindowDropdownPopup
 
 /** [AppDropdownMenu] 里的一项 */
 @Immutable
@@ -20,8 +17,8 @@ data class AppMenuItem(
 )
 
 /**
- * 锚在某个按钮 / 某一行上的弹出列表。Miuix [WindowDropdownPopup]：HyperOS 那种圆角浮层，
- * 从锚点处展开，点了某项自动收起。两种用法：
+ * 锚在某个按钮 / 某一行上的弹出列表：HyperOS 那种圆角浮层，从锚点处展开，点了某项自动收起。
+ * 浮层是毛玻璃（背后整页糊开、卡片半透明，见 [GlassDropdownPopup]）。两种用法：
  * - **动作菜单**（顶栏 ⋮、导入方式、书架长按一本书）：各项只给 `onClick`；
  * - **从几项里选一个**（排序方式、切换书源）：当前项标 [AppMenuItem.selected]，弹出来就看得到选的是谁。
  *   设置页里「标题 + 当前值」那种选择行别用它，走 [SpinnerSettingRow]（锚点就是那一行）。
@@ -44,7 +41,8 @@ fun AppDropdownMenu(
     if (items.isEmpty()) return
     // 不 remember：调用方每次重组都新建一份带新 lambda 的列表，拿它当 key 永远不命中，缓存只是摆设。
     // 几项菜单现建一遍很便宜
-    val entry = DropdownEntry(
+    GlassDropdownPopup(
+        show = expanded,
         items = items.map { item ->
             DropdownItem(
                 text = item.text,
@@ -54,14 +52,6 @@ fun AppDropdownMenu(
                 selected = item.selected,
             )
         },
-    )
-    WindowDropdownPopup(
-        entry = entry,
-        show = expanded,
-        onDismiss = onDismissRequest,
-        onDismissFinished = {},
-        maxHeight = null,
-        dropdownColors = DropdownDefaults.dropdownColors(),
-        collapseOnSelection = true,
+        onDismissRequest = onDismissRequest,
     )
 }

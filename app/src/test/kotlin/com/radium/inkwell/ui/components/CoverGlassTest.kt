@@ -131,6 +131,42 @@ class CoverGlassTest {
     }
 
     @Test
+    fun `多选操作条的玻璃上正文和删除键压在最坏的页面上也够 4点5 比 1`() {
+        // 操作条浮在列表上（书架网格里一排封面），最坏同封面玻璃卡：浅色下面一片纯黑、深色下面一片纯白。
+        // 正文 onSurface 由薄底保证；「删除」的 error 红有的配色放在不透明的卡片上都不到 4.5:1，加厚薄底救不回来，
+        // 所以是按这块最坏的底现推的（同提示胶囊的操作键），推完也得够
+        assertVeil("多选操作条", TOOLBAR_VEIL_LIGHT, TOOLBAR_VEIL_DARK) { s, dark ->
+            minAlpha(s.surfaceContainer, listOf(s.onSurface), dark)
+        }
+        schemes.forEach { (s, dark) ->
+            val floor = toolbarGlassFloor(s.surfaceContainer, dark)
+            val delete = AppThemes.readableOn(s.error, floor)
+            assertTrue(contrast(delete, floor) >= 4.5f, "操作条删除键推不到 4.5:1 dark=$dark")
+            assertTrue(contrast(s.onSurface, floor) >= 4.5f, "操作条正文对比不足 dark=$dark")
+        }
+    }
+
+    @Test
+    fun `毛玻璃弹出列表上的正文、说明和选中项压在最坏的页面上也够 4点5 比 1`() {
+        // 正文不靠推：叠色厚度本身就要让 onSurfaceContainer 够 4.5:1（推正文会把它推成纯黑 / 纯白，和说明字分不出层级）
+        assertVeil("弹出列表", POPUP_GLASS_ALPHA_LIGHT, POPUP_GLASS_ALPHA_DARK) { s, dark ->
+            minAlpha(s.surfaceContainer, listOf(s.onSurfaceContainer), dark)
+        }
+        // 说明小字、选中项的强调色是按这块最坏的底现推的（GlassDropdownPopup），推完必须够
+        schemes.forEach { (s, dark) ->
+            val floor = popupGlassFloor(s.surfaceContainer, dark)
+            listOf(
+                "正文" to s.onSurfaceContainer,
+                "说明" to s.onSurfaceVariantSummary,
+                "选中项" to s.primary,
+            ).forEach { (name, color) ->
+                val pushed = AppThemes.readableOn(color, floor)
+                assertTrue(contrast(pushed, floor) >= 4.5f, "弹出列表$name 推不到 4.5:1 dark=$dark")
+            }
+        }
+    }
+
+    @Test
     fun `玻璃的 squircle 形状把圆角半径交给边缘高光`() {
         // miuix-blur 的边缘高光只从 CornerBasedShape 读圆角半径，认不出的 Shape 按短边的一半画 ——
         // 卡片中间多出一个胶囊形的椭圆（0.5.1-beta.1 的「继续阅读」卡）

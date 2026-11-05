@@ -14,7 +14,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,19 +31,21 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
+import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -230,9 +236,13 @@ fun SettingRow(
 }
 
 /**
- * 「标题 + 当前值」的选择行：Miuix [WindowSpinnerPreference]。点这一行，选项列表从行上弹出来（当前项打勾、
- * 带说明的项第二行是说明），行尾是当前值和 ⇅ —— HyperOS 设置页「从几项里选一个」都是这个样子，
- * 别再弹底部面板 + 单选圈。选中即收起，[onSelect] 在点选时回调。
+ * 「标题 + 当前值」的选择行。点这一行，选项列表从行上弹出来（当前项打勾、带说明的项第二行是说明），
+ * 行尾是当前值和 ⇅ —— HyperOS 设置页「从几项里选一个」都是这个样子，别再弹底部面板 + 单选圈。
+ * 选中即收起，[onSelect] 在点选时回调。
+ *
+ * 行就是 Miuix `WindowSpinnerPreference` 的那一行（BasicComponent + 当前值 + ⇅，弹层开着时这一行保持按下的灰），
+ * 照它拼出来而不是直接用它，只为换掉弹层：它的弹层写死是一块实色卡片，这里换成 [GlassDropdownPopup] 的毛玻璃，
+ * 与 [AppDropdownMenu] 同一个。
  *
  * 不是设置行、而是某个按钮触发的单选（排序方式、切换书源），用 [AppDropdownMenu] + [AppMenuItem.selected]。
  */
@@ -248,24 +258,63 @@ fun SpinnerSettingRow(
     enabled: Boolean = true,
 ) {
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val entry = DropdownEntry(
-        items = options.map { opt ->
-            DropdownItem(
-                text = opt.label,
-                summary = opt.subtitle?.takeIf { it.isNotBlank() },
-                selected = opt.id == selectedId,
-                onClick = { currentOnSelect(opt) },
-            )
-        },
-    )
-    WindowSpinnerPreference(
-        entry = entry,
+    // 同 Miuix：开没开跨重建保留（转屏后弹层还在），按下的灰等弹层退场播完才收
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var holdDown by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val actualEnabled = enabled && options.isNotEmpty()
+    val scheme = MiuixTheme.colorScheme
+    val actionColor = if (actualEnabled) scheme.onSurfaceVariantActions else scheme.disabledOnSecondaryVariant
+    val current = options.firstOrNull { it.id == selectedId }
+    BasicComponent(
+        modifier = if (position != null) Modifier else Modifier.standaloneRowCard(),
         title = title,
-        modifier = (if (position != null) Modifier else Modifier.standaloneRowCard())
-            .semantics { role = Role.DropdownList },
         summary = subtitle?.takeIf { it.isNotBlank() },
         startAction = icon?.let { { SettingIcon(it) } },
-        enabled = enabled,
+        endActions = {
+            if (current != null && current.label.isNotBlank()) {
+                Text(
+                    current.label,
+                    modifier = Modifier
+                        .padding(end = Dimens.gapS)
+                        .weight(1f, fill = false),
+                    style = MiuixTheme.textStyles.body2,
+                    color = actionColor,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            DropdownArrowEndAction(actionColor = actionColor)
+            if (options.isNotEmpty()) {
+                // 放在行尾这一格里：弹层按它所在的父布局定位，从行尾往下 / 往上展开（同 Miuix）
+                GlassDropdownPopup(
+                    show = expanded,
+                    items = options.map { opt ->
+                        DropdownItem(
+                            text = opt.label,
+                            summary = opt.subtitle?.takeIf { it.isNotBlank() },
+                            selected = opt.id == selectedId,
+                            onClick = { currentOnSelect(opt) },
+                        )
+                    },
+                    onDismissRequest = { expanded = false },
+                    onDismissFinished = { holdDown = false },
+                )
+            }
+        },
+        onClick = {
+            if (actualEnabled) {
+                expanded = !expanded
+                if (expanded) {
+                    holdDown = true
+                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                }
+            }
+        },
+        role = Role.DropdownList,
+        holdDownState = holdDown,
+        enabled = actualEnabled,
     )
 }
 

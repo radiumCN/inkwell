@@ -3,19 +3,14 @@ package com.radium.inkwell.ui.components
 import android.view.WindowManager
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import com.radium.inkwell.ui.theme.AppTheme
-import java.util.function.Consumer
 
 /**
  * 弹层背后的页面模糊（HyperOS 对话框、底部面板背后那层毛玻璃）。**放在弹层内容里调用** ——
@@ -32,13 +27,7 @@ import java.util.function.Consumer
 internal fun DialogWindowBlur(visible: Boolean) {
     val view = LocalView.current
     val window = (view.parent as? DialogWindowProvider)?.window ?: return
-    val windowManager = remember(view) { view.context.getSystemService(WindowManager::class.java) }
-    var supported by remember(windowManager) { mutableStateOf(windowManager.isCrossWindowBlurEnabled) }
-    DisposableEffect(windowManager) {
-        val listener = Consumer<Boolean> { supported = it }
-        windowManager.addCrossWindowBlurEnabledListener(listener)
-        onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
-    }
+    val supported = rememberCrossWindowBlurEnabled()
     val target = if (visible && supported) with(LocalDensity.current) { BLUR_BEHIND_RADIUS.roundToPx() } else 0
     val radius by animateIntAsState(target, AppTheme.motionScheme.defaultEffectsSpec(), label = "blurBehind")
     LaunchedEffect(window) {
