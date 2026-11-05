@@ -8,6 +8,8 @@ import com.radium.inkwell.ui.components.SegmentedChoice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,19 +29,24 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import com.radium.inkwell.ui.components.AppSlider
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.topBarScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.settingsCardColor
 import com.radium.inkwell.ui.components.settingsPageColor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
@@ -62,6 +70,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import com.radium.inkwell.ui.components.AppSurface
@@ -118,12 +127,12 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             SectionHeader("日间主题")
             ThemeCard {
                 PresetRow(
-                presets = AppThemes.lightPresets,
-                wallpaper = wallpaperLight.background to wallpaperLight.primary,
-                selectedId = config.lightPreset,
-                customAccent = Color(config.customLightSeed),
-                customBg = Color(config.customLightBg),
-                onSelect = { update(config.copy(lightPreset = it)) },
+                    presets = AppThemes.lightPresets,
+                    wallpaper = wallpaperLight.background to wallpaperLight.primary,
+                    selectedId = config.lightPreset,
+                    customAccent = Color(config.customLightSeed),
+                    customBg = Color(config.customLightBg),
+                    onSelect = { update(config.copy(lightPreset = it)) },
                 )
                 if (config.lightPreset == AppThemes.CUSTOM) {
                     CustomThemeEditor(
@@ -139,18 +148,29 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                             )
                         },
                     )
+                } else {
+                    // 选中谁就预览谁：色板只有「底色 + 强调色」两个点，
+                    // 暖纸 / 净白 / 青竹的实际差别要到卡片、选中行才看得出来
+                    SchemePreview(
+                        scheme = presetScheme(config.lightPreset, AppThemes.lightPresets, wallpaperLight),
+                        modifier = Modifier.padding(
+                            start = Dimens.listHorizontal,
+                            end = Dimens.listHorizontal,
+                            top = Dimens.gapM,
+                        ),
+                    )
                 }
             }
 
             SectionHeader("夜间主题")
             ThemeCard {
                 PresetRow(
-                presets = AppThemes.darkPresets,
-                wallpaper = wallpaperDark.background to wallpaperDark.primary,
-                selectedId = config.darkPreset,
-                customAccent = Color(config.customDarkSeed),
-                customBg = Color(config.customDarkBg),
-                onSelect = { update(config.copy(darkPreset = it)) },
+                    presets = AppThemes.darkPresets,
+                    wallpaper = wallpaperDark.background to wallpaperDark.primary,
+                    selectedId = config.darkPreset,
+                    customAccent = Color(config.customDarkSeed),
+                    customBg = Color(config.customDarkBg),
+                    onSelect = { update(config.copy(darkPreset = it)) },
                 )
                 if (config.darkPreset == AppThemes.CUSTOM) {
                     CustomThemeEditor(
@@ -166,6 +186,15 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                             )
                         },
                     )
+                } else {
+                    SchemePreview(
+                        scheme = presetScheme(config.darkPreset, AppThemes.darkPresets, wallpaperDark),
+                        modifier = Modifier.padding(
+                            start = Dimens.listHorizontal,
+                            end = Dimens.listHorizontal,
+                            top = Dimens.gapM,
+                        ),
+                    )
                 }
             }
 
@@ -175,8 +204,8 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
 }
 
 /**
- * 日间 / 夜间主题那张卡：上面一排色板（横滚到卡的边缘，见 [PresetRow]），选中自定义时下面展开编辑器。
- * 编辑器和色板一样在卡内、左右与行内文字对齐。
+ * 日间 / 夜间主题那张卡：上面一排色板（横滚到卡的边缘，见 [PresetRow]），选中预设时下面展示
+ * 那套配色的 [SchemePreview]，选中自定义时换成展开的编辑器（编辑器自带预览）。
  */
 @Composable
 private fun ThemeCard(content: @Composable () -> Unit) {
@@ -184,6 +213,11 @@ private fun ThemeCard(content: @Composable () -> Unit) {
         Column(Modifier.padding(vertical = Dimens.gapM)) { content() }
     }
 }
+
+/** 选中预设的整套配色（预览用）。CUSTOM 的预览跟滑块走，在 [CustomThemeEditor] 里，不经过这里 */
+private fun presetScheme(presetId: String, presets: List<ThemePreset>, wallpaper: Colors): Colors =
+    if (presetId == AppThemes.DYNAMIC) wallpaper
+    else presets.firstOrNull { it.id == presetId }?.scheme ?: presets.first().scheme
 
 /**
  * 「跟随壁纸」+ 预设色板行 + 「自定义」入口。
@@ -199,37 +233,77 @@ private fun PresetRow(
     customBg: Color,
     onSelect: (String) -> Unit,
 ) {
-    // 横向可滚：壁纸 + 5 个预设 + 自定义 = 7 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
-    Row(
-        Modifier
-            .horizontalScroll(rememberScrollState())
-            // 内缩放在滚动内容里：色板随内容滚到卡片边缘，而不是在内缩线上被截断
-            .padding(horizontal = Dimens.listHorizontal),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-    ) {
-        ThemeSwatch(
-            bg = wallpaper.first,
-            accent = wallpaper.second,
-            label = "跟随壁纸",
-            selected = selectedId == AppThemes.DYNAMIC,
-            onClick = { onSelect(AppThemes.DYNAMIC) },
-        )
-        presets.forEach { preset ->
+    // 横向可滚：壁纸 + 6 个预设 + 自定义 = 8 个 52dp 色块，固定 Row 里会被挤扁或溢出屏幕
+    val scroll = rememberScrollState()
+    // 选中的那颗横滚进视野：进页时选中项可能在条外（上次选了最右的「自定义」），
+    // 勾画在看不见的地方等于没选。同 ChipRow 的 bringSelectedIntoView
+    val selectedRequester = remember { BringIntoViewRequester() }
+    LaunchedEffect(selectedId) {
+        // 等这一帧排好版：新选中的那颗刚挂上 requester，还没有位置
+        withFrameNanos { }
+        selectedRequester.bringIntoView()
+    }
+    Box {
+        Row(
+            Modifier
+                .horizontalScroll(scroll)
+                // 内缩放在滚动内容里：色板随内容滚到卡片边缘，而不是在内缩线上被截断
+                .padding(horizontal = Dimens.listHorizontal),
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+        ) {
+            val bring = { id: String ->
+                if (selectedId == id) Modifier.bringIntoViewRequester(selectedRequester) else Modifier
+            }
             ThemeSwatch(
-                bg = preset.previewBg,
-                accent = preset.previewAccent,
-                label = preset.label,
-                selected = selectedId == preset.id,
-                onClick = { onSelect(preset.id) },
+                bg = wallpaper.first,
+                accent = wallpaper.second,
+                label = "跟随壁纸",
+                selected = selectedId == AppThemes.DYNAMIC,
+                onClick = { onSelect(AppThemes.DYNAMIC) },
+                modifier = bring(AppThemes.DYNAMIC),
+            )
+            presets.forEach { preset ->
+                ThemeSwatch(
+                    bg = preset.previewBg,
+                    accent = preset.previewAccent,
+                    label = preset.label,
+                    selected = selectedId == preset.id,
+                    onClick = { onSelect(preset.id) },
+                    modifier = bring(preset.id),
+                )
+            }
+            ThemeSwatch(
+                bg = customBg,
+                accent = customAccent,
+                label = "自定义",
+                selected = selectedId == AppThemes.CUSTOM,
+                onClick = { onSelect(AppThemes.CUSTOM) },
+                modifier = bring(AppThemes.CUSTOM),
             )
         }
-        ThemeSwatch(
-            bg = customBg,
-            accent = customAccent,
-            label = "自定义",
-            selected = selectedId == AppThemes.CUSTOM,
-            onClick = { onSelect(AppThemes.CUSTOM) },
-        )
+        // 有余量的那一侧压一道渐隐（与卡片同色）：被截断的色板是「右边还有」的提示，
+        // 渐隐让它读作内容延伸而不是渲染坏了；滚到底后渐隐换到左边
+        val fade = settingsCardColor()
+        val showStart by remember { derivedStateOf { scroll.value > 0 } }
+        val showEnd by remember { derivedStateOf { scroll.value < scroll.maxValue } }
+        if (showStart) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .width(Dimens.gapXL)
+                    .fillMaxHeight()
+                    .background(Brush.horizontalGradient(listOf(fade, Color.Transparent))),
+            )
+        }
+        if (showEnd) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(Dimens.gapXL)
+                    .fillMaxHeight()
+                    .background(Brush.horizontalGradient(listOf(Color.Transparent, fade))),
+            )
+        }
     }
 }
 
@@ -240,8 +314,9 @@ private fun ThemeSwatch(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 外层只定尺寸、托住右下角的选中对勾；可点的圆在里层 —— 按压反馈（Miuix 的压暗）要裁成圆的，
         // 圆色板按下去冒出一个方块很难看；裁切若放在外层，会把伸出圆外的对勾一起裁掉
         // 下沉挂在外层：右下角的对勾跟着色板一起沉（见 sinkOnPress）
@@ -289,8 +364,113 @@ private fun ThemeSwatch(
             label,
             Modifier.padding(top = Dimens.gapXS),
             style = MiuixTheme.textStyles.footnote2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            // 选中的标签跟主色走（同应用图标面板的选中行标题）：一行色板只有一个勾不够醒目
+            color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontWeight = if (selected) FontWeight.Medium else null,
         )
+    }
+}
+
+/**
+ * 一套配色的分层迷你预览：页面底（surface）上的标题与强调按钮、一张卡片（surfaceContainer）、
+ * 一行选中项（tertiaryContainer）。只预览底色与强调色的话，换主题后卡片、选中行的颜色对不上预览。
+ *
+ * [CustomThemeEditor] 与预设色板共用：编辑器里预览跟滑块走，预设选中谁就预览谁。
+ */
+@Composable
+private fun SchemePreview(scheme: Colors, modifier: Modifier = Modifier) {
+    AppSurface(
+        cornerRadius = AppShapes.radiusMedium,
+        modifier = modifier.fillMaxWidth(),
+        color = scheme.surface,
+        borderColor = MiuixTheme.colorScheme.dividerLine,
+    ) {
+        Column(Modifier.padding(Dimens.gapM)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "预览标题",
+                        style = MiuixTheme.textStyles.headline2,
+                        fontWeight = FontWeight.Medium,
+                        color = scheme.onSurface,
+                    )
+                    Text(
+                        "正文文字效果",
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = scheme.onSurfaceVariantSummary,
+                    )
+                }
+                Surface(
+                    shape = AppShapes.small,
+                    color = scheme.primary,
+                ) {
+                    Text(
+                        "按钮",
+                        Modifier.padding(
+                            horizontal = Dimens.gapM,
+                            vertical = Dimens.gapXS,
+                        ),
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = scheme.onPrimary,
+                    )
+                }
+            }
+            AppSurface(
+                cornerRadius = AppShapes.radiusMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Dimens.gapS),
+                color = scheme.surfaceContainer,
+            ) {
+                Row(
+                    Modifier.padding(
+                        horizontal = Dimens.gapM,
+                        vertical = Dimens.listVertical,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight)
+                            .background(
+                                scheme.tertiaryContainer,
+                                AppShapes.small,
+                            ),
+                    )
+                    Column(Modifier.padding(start = Dimens.gapM).weight(1f)) {
+                        Text(
+                            "列表行标题",
+                            style = MiuixTheme.textStyles.body1,
+                            color = scheme.onSurfaceContainer,
+                            maxLines = 1,
+                        )
+                        Text(
+                            "容器色与正文对比",
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = scheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            AppSurface(
+                cornerRadius = AppShapes.radiusMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Dimens.gapXS),
+                color = scheme.tertiaryContainer,
+            ) {
+                Text(
+                    "选中的列表行",
+                    Modifier.padding(
+                        horizontal = Dimens.gapM,
+                        vertical = Dimens.listVertical,
+                    ),
+                    style = MiuixTheme.textStyles.body2,
+                    color = scheme.onTertiaryContainer,
+                )
+            }
+        }
     }
 }
 
@@ -336,101 +516,9 @@ private fun CustomThemeEditor(
         color = MiuixTheme.colorScheme.surface,
     ) {
         Column(Modifier.padding(Dimens.gapL)) {
-            // 实时预览照 Miuix 的分层画三样：页面底（surface）上的标题与强调按钮、一张卡片（surfaceContainer）、
-            // 一行选中项（tertiaryContainer）。只预览底色与强调色的话，换主题后卡片、选中行的颜色对不上预览
-            AppSurface(
-                cornerRadius = AppShapes.radiusMedium,
-                modifier = Modifier.fillMaxWidth(),
-                color = previewScheme.surface,
-                borderColor = MiuixTheme.colorScheme.dividerLine,
-            ) {
-                Column(Modifier.padding(Dimens.gapM)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "预览标题",
-                                style = MiuixTheme.textStyles.headline2,
-                                fontWeight = FontWeight.Medium,
-                                color = previewScheme.onSurface,
-                            )
-                            Text(
-                                "正文文字效果",
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = previewScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                        Surface(
-                            shape = AppShapes.small,
-                            color = previewScheme.primary,
-                        ) {
-                            Text(
-                                "按钮",
-                                Modifier.padding(
-                                    horizontal = Dimens.gapM,
-                                    vertical = Dimens.gapXS,
-                                ),
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = previewScheme.onPrimary,
-                            )
-                        }
-                    }
-                    AppSurface(
-                        cornerRadius = AppShapes.radiusMedium,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Dimens.gapS),
-                        color = previewScheme.surfaceContainer,
-                    ) {
-                        Row(
-                            Modifier.padding(
-                                horizontal = Dimens.gapM,
-                                vertical = Dimens.listVertical,
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(width = Dimens.coverThumbWidth, height = Dimens.coverThumbHeight)
-                                    .background(
-                                        previewScheme.tertiaryContainer,
-                                        AppShapes.small,
-                                    ),
-                            )
-                            Column(Modifier.padding(start = Dimens.gapM).weight(1f)) {
-                                Text(
-                                    "列表行标题",
-                                    style = MiuixTheme.textStyles.body1,
-                                    color = previewScheme.onSurfaceContainer,
-                                    maxLines = 1,
-                                )
-                                Text(
-                                    "容器色与正文对比",
-                                    style = MiuixTheme.textStyles.footnote1,
-                                    color = previewScheme.onSurfaceVariantSummary,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-                    }
-                    AppSurface(
-                        cornerRadius = AppShapes.radiusMedium,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Dimens.gapXS),
-                        color = previewScheme.tertiaryContainer,
-                    ) {
-                        Text(
-                            "选中的列表行",
-                            Modifier.padding(
-                                horizontal = Dimens.gapM,
-                                vertical = Dimens.listVertical,
-                            ),
-                            style = MiuixTheme.textStyles.body2,
-                            color = previewScheme.onTertiaryContainer,
-                        )
-                    }
-                }
-            }
+            // 实时预览与预设色板共用 [SchemePreview]：分层画「标题 + 按钮 + 卡片行 + 选中行」，
+            // 只预览底色与强调色的话，换主题后卡片、选中行的颜色对不上预览
+            SchemePreview(previewScheme)
 
             // 拖动只更新本地预览，松手（onFinished）才落库：避免每帧写 DataStore 与全局主题抖动
             val commit = { onChange(currentSeed(), currentBg()) }

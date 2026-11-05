@@ -122,7 +122,7 @@ object Dimens {
      * Miuix `IconButton` 默认只有 40dp，[AppIconButton] 把它抬到这个数。
      */
     val touchTarget = 48.dp
-    /** 主题色板 / 图标预览的圆形色块 */
+    /** 主题色板 / 图标预览的色块（52dp；图标预览按 squircle 裁，见 AppIconSheet） */
     val swatch = 52.dp
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
