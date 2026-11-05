@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.explore
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppTextButton
@@ -55,8 +57,14 @@ fun ExploreSourceSheet(
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    // 面板限高，开成「半开」：Miuix 的面板是内容多高开多高（最多到状态栏下沿，见 BottomSheetContentLayout
+    // 的 wrapContentHeight + heightIn），书源一多就整屏铺开、背后只剩一条压暗的边。内容最高到窗口的
+    // 六成，列表在面板里滚；内容短时照旧按内容收（小面板），不必为几行书源开半屏。
+    // 整数系数是刻意的：面板里标题、搜索框就占去小半，六成才装得下四五条书源行
+    val maxSheetHeight = LocalWindowInfo.current.containerDpSize.height * SHEET_HEIGHT_FRACTION
     AppBottomSheet(
         onDismissRequest = onDismiss,
+        modifier = Modifier.heightIn(max = maxSheetHeight),
         title = "切换书源",
         // 列表会滚到手势条下面：导航栏高度垫进列表末尾，别让面板在外面垫（见 AppBottomSheet）
         padNavigationBar = false,
@@ -148,6 +156,9 @@ fun ExploreSourceSheet(
         }
     }
 }
+
+/** 书源面板的限高比例（窗口高的六成）：为什么限高见 [ExploreSourceSheet] 里的注释 */
+private const val SHEET_HEIGHT_FRACTION = 0.6f
 
 /** 书源行：名称 + 「N 个分类」副行；当前源走单选行的选中态（读屏念「已选中」），行尾打勾 */
 @Composable
