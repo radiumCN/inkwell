@@ -38,6 +38,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownItem
@@ -186,6 +187,8 @@ fun SettingGroup(
  * `trailing` 优先于 `value`（自定义尾部走它），给了 `trailing` 就不画 ›。
  * 「标题 + 当前值、点开从几项里选一个」的行别用它弹面板，用 [SpinnerSettingRow]。
  *
+ * @param destructive 退出登录、清空这类操作：标题用 error 色、行尾不画 ›（点了不是进下一页，而是先弹确认）。
+ *   单独放一张卡，别和普通入口混在一组 —— HyperOS「退出账号」的样子。
  * @param position 非 null 表示在 [SettingGroup] 内（卡片负责底色与圆角，按压反馈被卡片裁进圆角）。
  *   null 时行自己画一张卡 —— 现在没有页面这么用：底部面板里的行也装进 [SettingGroup]（见 [ContentListItem] 的「形态」）。
  */
@@ -202,6 +205,7 @@ fun SettingRow(
      * 找一项只能挨行读，图标是扫一眼就能落上去的锚点。二级页保持纯文字 —— 每页就几行，图标只会添乱。
      */
     icon: ImageVector? = null,
+    destructive: Boolean = false,
 ) {
     val chrome = if (position != null) Modifier else Modifier.standaloneRowCard()
     val startAction: (@Composable () -> Unit)? = icon?.let { { SettingIcon(it) } }
@@ -212,7 +216,7 @@ fun SettingRow(
         valueText != null -> { { RowValue(valueText) } }
         else -> null
     }
-    if (onClick != null && trailing == null) {
+    if (onClick != null && trailing == null && !destructive) {
         ArrowPreference(
             title = title,
             // ArrowPreference 不收 role：补上，读屏才念「按钮」
@@ -227,6 +231,11 @@ fun SettingRow(
         BasicComponent(
             modifier = chrome,
             title = title,
+            titleColor = if (destructive) {
+                BasicComponentDefaults.titleColor(color = MiuixTheme.colorScheme.error)
+            } else {
+                BasicComponentDefaults.titleColor()
+            },
             summary = summary,
             startAction = startAction,
             endActions = endActions,

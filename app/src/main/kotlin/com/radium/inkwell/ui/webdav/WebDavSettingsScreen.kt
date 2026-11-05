@@ -7,6 +7,7 @@ import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SegmentedChoice
 import android.content.ClipData
+import androidx.compose.foundation.clickable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -14,23 +15,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import com.radium.inkwell.ui.components.formatRelativeTime
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -40,6 +46,7 @@ import com.radium.inkwell.data.prefs.WebDavProvider
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
+import com.radium.inkwell.ui.components.AppSurface
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
@@ -55,17 +62,21 @@ import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsPageColor
 import com.radium.inkwell.ui.components.topBarScroll
 import com.radium.inkwell.util.LocalNetworkAccess
+import com.radium.inkwell.ui.theme.AppShapes
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.font.FontWeight
 import com.radium.inkwell.ui.components.AppFormField
 import top.yukonga.miuix.kmp.basic.Icon
 import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
+import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -124,7 +135,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
             } else {
                 CustomSection(state, viewModel)
             }
-            SyncFooter(state)
+            SyncFooter()
         }
     }
 
@@ -188,30 +199,25 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
     // 「在网页管理账号」：先把要去的地址亮出来问一句（见 rememberExternalLinkOpener）
     val links = rememberExternalLinkOpener { viewModel.messages.emit(NO_BROWSER_MESSAGE) }
     SectionHeader("账号")
+    // 邮箱做主行、连接状态做副行，下面一个通栏「立即同步」。从前是一句平铺的小字「已连接官方同步 · 邮箱」，
+    // 「连接信息」很少用，却和「立即同步」平分一排大按钮 —— 它挪进了下面的「管理」
     SettingGroup {
-        SettingBlock {
-            Text(
-                "已连接官方同步" + state.officialEmail.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurface,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                PrimaryButton(
-                    text = "立即同步",
-                    onClick = viewModel::syncNow,
-                    enabled = !state.busy && state.configured,
-                    loading = state.syncing,
-                    modifier = Modifier.weight(1f),
-                )
-                SecondaryButton(
-                    text = "连接信息",
-                    onClick = { viewModel.showConnectionInfo(true) },
-                    enabled = !state.busy,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+        SettingRow(
+            title = state.officialEmail.ifBlank { "官方同步" },
+            subtitle = if (state.officialEmail.isBlank()) "已连接" else "官方同步 · 已连接",
+            position = SettingGroupPosition.First,
+        )
+        PrimaryButton(
+            text = "立即同步",
+            onClick = viewModel::syncNow,
+            enabled = !state.busy && state.configured,
+            loading = state.syncing,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = Dimens.listHorizontal, end = Dimens.listHorizontal, bottom = Dimens.listHorizontal),
+        )
     }
+    SyncStatus(state)
     SettingGroup {
         SwitchRow(
             title = "自动同步",
@@ -222,20 +228,32 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
     }
     SectionHeader("管理")
     SettingGroup {
+        // 两行挨着：都是给其他设备用的那一套码
+        SettingRow(
+            title = "连接信息",
+            subtitle = "网页版、其他设备登录时要填的地址和应用码",
+            onClick = { viewModel.showConnectionInfo(true) },
+            position = SettingGroupPosition.First,
+        )
         SettingRow(
             title = "重新生成应用码",
+            subtitle = "旧码立刻失效，其他设备要重新登录",
             onClick = viewModel::askRegenerate,
-            position = SettingGroupPosition.First,
+            position = SettingGroupPosition.Middle,
         )
         SettingRow(
             title = "在网页管理账号",
             onClick = { links.open(OfficialWebDav.SITE) },
-            position = SettingGroupPosition.Middle,
+            position = SettingGroupPosition.Last,
         )
+    }
+    // 退出单独一张卡、红字、不带 ›（点了先确认），别和普通入口长一个样
+    SettingGroup {
         SettingRow(
             title = "退出官方同步",
             onClick = viewModel::askDisconnect,
-            position = SettingGroupPosition.Last,
+            position = SettingGroupPosition.Alone,
+            destructive = true,
         )
     }
     OfficialPrivacyNote()
@@ -326,6 +344,7 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
             }
         }
     }
+    SyncStatus(state)
     SettingGroup {
         SwitchRow(
             title = "自动同步",
@@ -336,21 +355,51 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
     }
 }
 
+/**
+ * 上次同步，紧贴在「立即同步」那张卡下面：点完立刻看得到成了没有。从前沉在页面最底下，得滑到底才知道。
+ * 相对时间每分钟走一次，开着页面「刚刚」也会变成「3 分钟前」。
+ */
 @Composable
-private fun SyncFooter(state: WebDavUiState) {
+private fun SyncStatus(state: WebDavUiState) {
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(SYNC_TIME_TICK_MS)
+            value = System.currentTimeMillis()
+        }
+    }
     // 失败比成功新才说：之后成功过就不再翻旧账。重试就是上面那个「立即同步」
     if (state.lastSyncErrorAt > state.lastSyncAt) {
         SettingFootnote(
-            "上次同步失败（${formatRelativeTime(state.lastSyncErrorAt)}）：${state.lastSyncError}",
+            "上次同步失败（${formatRelativeTime(state.lastSyncErrorAt, now)}）：${state.lastSyncError}",
             color = MiuixTheme.colorScheme.error,
         )
     }
     if (state.lastSyncAt > 0) {
-        SettingFootnote(
-            "上次同步：" + SimpleDateFormat("yyyy-MM-dd HH:mm", LocalLocale.current.platformLocale)
-                .format(Date(state.lastSyncAt)),
-        )
+        SettingFootnote("上次同步：${syncTimeLabel(state.lastSyncAt, now)}")
     }
+}
+
+/**
+ * 「3 分钟前（14:32）」「昨天（21:05）」：一周内相对时间 + 钟点；再早的直接写日期时间
+ * （相对时间那时已是「11 月 3 日」，再括一个日期就重复了）。
+ */
+internal fun syncTimeLabel(at: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
+    val time = Instant.ofEpochMilli(at).atZone(zone)
+    val days = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toEpochDay() - time.toLocalDate().toEpochDay()
+    return if (days in 0 until RELATIVE_SYNC_DAYS) {
+        "${formatRelativeTime(at, now, zone)}（${time.format(CLOCK)}）"
+    } else {
+        time.format(FULL_TIME)
+    }
+}
+
+private val CLOCK = DateTimeFormatter.ofPattern("HH:mm")
+private val FULL_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+private const val RELATIVE_SYNC_DAYS = 7
+private const val SYNC_TIME_TICK_MS = 60_000L
+
+@Composable
+private fun SyncFooter() {
     SettingFootnote(
         "会同步：书架、阅读进度、阅读时长、书源、订阅源、净化规则，以及阅读与应用设置（含排版方案）。\n" +
             "不会同步：本地书的文件、导入的字体和已缓存的章节。换设备后，本地书与字体需要重新导入。\n" +
@@ -415,12 +464,20 @@ private fun SecretField(
 private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    // 反馈必须画在弹层里：页面 Snackbar 被对话框挡住，点了像没反应。
+    // 反馈必须画在弹层里：页面 Snackbar 被对话框挡住，点了像没反应。就地画在复制的那一行上，过一会儿恢复
     var copiedLabel by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(copiedLabel) {
+        if (copiedLabel != null) {
+            delay(COPIED_FEEDBACK_MS)
+            copiedLabel = null
+        }
+    }
     suspend fun copy(label: String, value: String) {
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, value)))
         copiedLabel = label
     }
+    // 一项一行（灰字标题 + 值、行尾复制图标），三项装进一块浅灰面板，一屏放得下。
+    // 从前每项是「蓝色小标题 + 值 + 一个通栏灰按钮」，三项摞起来超出弹窗，「复制应用码」被裁掉半截
     AppAlertDialog(
         onDismissRequest = onDismiss,
         title = "WebDAV 连接信息",
@@ -429,44 +486,113 @@ private fun ConnectionInfoDialog(state: WebDavUiState, onDismiss: () -> Unit) {
         dismissText = null,
         onConfirm = onDismiss,
     ) {
-        CopyRow("地址", state.url.ifBlank { state.officialDavUrl }, copiedLabel == "地址") {
-            scope.launch { copy("地址", it) }
+        // 弹窗底是 background，面板用页面底色，深 / 暗一档（同更新弹窗的说明面板）
+        AppSurface(
+            cornerRadius = AppShapes.radiusLarge,
+            color = MiuixTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column {
+                CopyRow("地址", state.url.ifBlank { state.officialDavUrl }, copiedLabel == "地址") {
+                    scope.launch { copy("地址", it) }
+                }
+                CopyRow("用户名", state.davUsername, copiedLabel == "用户名") {
+                    scope.launch { copy("用户名", it) }
+                }
+                CopyRow("应用码", state.davPassword, copiedLabel == "应用码", secret = true) {
+                    scope.launch { copy("应用码", it) }
+                }
+            }
         }
-        CopyRow("用户名", state.davUsername, copiedLabel == "用户名") {
-            scope.launch { copy("用户名", it) }
+    }
+}
+
+/**
+ * 连接信息的一项。[secret] 的值（应用码）默认遮住中间，点值那一块显示全部 —— 截一张图就带出去的东西，
+ * 先别明晃晃摆着；复制照常复制完整的。值用等宽字：应用码里的 0 / O、1 / l 才分得清。
+ */
+@Composable
+private fun CopyRow(
+    label: String,
+    value: String,
+    copied: Boolean,
+    secret: Boolean = false,
+    onCopy: (String) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val canReveal = secret && value.isNotBlank()
+    var revealed by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(end = Dimens.gapXS),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier
+                .weight(1f)
+                .heightIn(min = Dimens.listItemMinHeight)
+                .then(
+                    if (canReveal) {
+                        Modifier.clickable(
+                            role = Role.Button,
+                            onClickLabel = if (revealed) "隐藏$label" else "显示$label",
+                        ) { revealed = !revealed }
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(start = Dimens.listHorizontal, top = Dimens.gapS, bottom = Dimens.gapS),
+            verticalArrangement = Arrangement.spacedBy(Dimens.gapXS, Alignment.CenterVertically),
+        ) {
+            Text(label, style = MiuixTheme.textStyles.footnote1, color = scheme.onSurfaceVariantSummary)
+            if (copied) {
+                Text("已复制", style = MiuixTheme.textStyles.body2, color = scheme.primary)
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS),
+                ) {
+                    Text(
+                        when {
+                            value.isBlank() -> "—"
+                            canReveal && !revealed -> maskSecret(value)
+                            else -> value
+                        },
+                        style = MiuixTheme.textStyles.body2.copy(fontFamily = FontFamily.Monospace),
+                        color = scheme.onSurface,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (canReveal) {
+                        // 点的是整块（上面的 clickable），图标只是个提示
+                        Icon(
+                            if (revealed) MiuixIcons.Hide else MiuixIcons.Show,
+                            contentDescription = null,
+                            tint = scheme.onSurfaceVariantSummary,
+                            modifier = Modifier.size(Dimens.iconSm),
+                        )
+                    }
+                }
+            }
         }
-        CopyRow("应用码", state.davPassword, copiedLabel == "应用码") {
-            scope.launch { copy("应用码", it) }
-        }
-        if (copiedLabel != null) {
-            Text(
-                "已复制$copiedLabel",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.primary,
+        AppIconButton(onClick = { onCopy(value) }, enabled = value.isNotBlank()) {
+            Icon(
+                if (copied) MiuixIcons.Basic.Check else MiuixIcons.Copy,
+                contentDescription = if (copied) "已复制$label" else "复制$label",
+                tint = if (copied) scheme.primary else scheme.onSurface,
             )
         }
     }
 }
 
-@Composable
-private fun CopyRow(label: String, value: String, copied: Boolean, onCopy: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-        Text(
-            label,
-            style = MiuixTheme.textStyles.body2,
-            fontWeight = FontWeight.Medium,
-            color = MiuixTheme.colorScheme.primary,
-        )
-        Text(
-            value.ifBlank { "—" },
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurface,
-        )
-        SecondaryButton(
-            text = if (copied) "已复制" else "复制$label",
-            onClick = { onCopy(value) },
-            enabled = value.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+/** 「wd_3f9a ············ 4e81」：留头尾认得出是哪一个，中间遮住。短的只留头尾各两个字 */
+internal fun maskSecret(value: String): String {
+    val keep = if (value.length >= SECRET_LONG) SECRET_HEAD to SECRET_TAIL else 2 to 2
+    if (value.length <= keep.first + keep.second) return MASK.repeat(value.length)
+    return "${value.take(keep.first)} ${MASK.repeat(SECRET_DOTS)} ${value.takeLast(keep.second)}"
 }
+
+private const val MASK = "•"
+private const val SECRET_LONG = 16
+private const val SECRET_HEAD = 7
+private const val SECRET_TAIL = 4
+private const val SECRET_DOTS = 12
+private const val COPIED_FEEDBACK_MS = 2_000L
