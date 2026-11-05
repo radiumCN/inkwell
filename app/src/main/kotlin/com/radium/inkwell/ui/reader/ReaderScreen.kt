@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.blockTouchesBelow
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
@@ -607,7 +608,10 @@ fun ReaderScreen(
             ReaderThemeScope(session.settings.theme) {
                 AppSurface(
                     cornerRadius = AppShapes.radiusMedium,
-                    modifier = Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical),
+                    // 点到「已自动换到…」那行字上别漏给纸面（翻页、唤出菜单）
+                    modifier = Modifier
+                        .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)
+                        .blockTouchesBelow(),
                     // 纸面上的小提示条：比纸面深/亮一档（surfaceContainerHigh），不投影 —— 同色纸上的阴影是脏灰线
                     color = MiuixTheme.colorScheme.surfaceContainerHigh,
                 ) {

@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.blockTouchesBelow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -144,7 +145,8 @@ fun SelectionToolbar(
             )
             FloatingToolbar(
                 // 药丸是 50dp 圆角，比自身高度一半还大，等于两头全圆：模糊区用同一个胶囊形
-                modifier = Modifier.readerGlass(pageBackdrop, CircleShape, overlayColor, highlight),
+                // 按钮之间的空隙别漏到纸面：纸面那层「点空白取消选区」会把选区收掉
+                modifier = Modifier.readerGlass(pageBackdrop, CircleShape, overlayColor, highlight).blockTouchesBelow(),
                 color = fill,
                 // 外层 Column 已经留了边距；默认的 12/8dp 外边距再叠一层，药丸就离选中的那行字太远
                 outSidePadding = PaddingValues(0.dp),

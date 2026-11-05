@@ -115,7 +115,8 @@ fun AppSnackbar(
     }
     AppSurface(
         cornerRadius = AppShapes.radiusExtraLarge,
-        modifier = modifier.then(glass),
+        // 点在提示字上别漏给下面那一行
+        modifier = modifier.then(glass).blockTouchesBelow(),
         color = if (backdrop != null) Color.Transparent else container,
         contentColor = scheme.secondaryVariant,
     ) {

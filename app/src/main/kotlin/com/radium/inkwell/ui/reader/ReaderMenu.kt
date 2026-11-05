@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import com.radium.inkwell.ui.components.blockTouchesBelow
 import com.radium.inkwell.ui.components.sheetBottomInset
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState

@@ -174,7 +174,9 @@ fun FloatingGlassBar(
             modifier = Modifier
                 .onSizeChanged { onHeightChange(with(density) { it.height.toDp() } + TOOLBAR_LIFT) }
                 .padding(FloatingToolbarDefaults.OutSidePadding)
-                .then(glass),
+                .then(glass)
+                // 只挡胶囊本身（在外边距之后）：按钮之间的空隙别点到下面那本书 / 那一行
+                .blockTouchesBelow(),
             color = if (backdrop != null) Color.Transparent else FloatingToolbarDefaults.defaultColor(),
             outSidePadding = PaddingValues(0.dp),
             // 玻璃不投影、不描实心的边：Miuix 的投影和那圈「分隔线」都是画在胶囊底下的实心块，半透明的玻璃会把它们透出来，

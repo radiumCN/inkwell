@@ -134,6 +134,8 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 打开外部链接（官网、开源地址、订阅原文、网页管理） | `rememberExternalLinkOpener`（`ExternalLinks.kt`）：先弹「打开外部链接」把完整地址亮出来，点「打开」才拉浏览器；拉不起时调用方发 `NO_BROWSER_MESSAGE`。**别直接调 `openExternalLink`** —— 点一行就被甩进浏览器，人还没看清要去哪儿（被指出过）。只有已经在确认弹窗里的那一步（更新弹窗的「查看 Release」「下载 APK」）才直接调 |
 | 对话框 | `AppAlertDialog`（`AppDialog.kt`，Miuix `WindowDialog`）：居中标题 + 正文/内容 + 等宽 `SecondaryButton` / `PrimaryButton`。调用方照旧条件组合；取消/点外面先播退场动画再回调，收起中的点击一律吞掉。`confirmLoading` 期间次按钮是「取消这次操作」（立刻回调、弹窗留着），要禁掉就传 `dismissEnabled = false`。要自己画头部的（更新弹窗：图标 + 版本）传 `title = null`；内容里自己有滚动区的传 `scrollable = false`，别让外层再套一层滚动。别手搓居中 `Surface` 冒充弹层 |
 
+**叠在可点内容上面的面一律挂 `blockTouchesBelow()`**（`TouchBlock.kt`，一个空的 pointerInput）：Miuix 的栏、胶囊、`Surface` 都不拦触摸，Compose 会把落在空白处的点击交给下面被盖住的东西 —— 书源管理顶栏里「正在校验」那行字上一点，点到的是被玻璃糊住的那一行书源的开关（被指出过）。`AppToolbar` / `AppTopBar` / `FloatingGlassBar` / `AppSnackbar` 和阅读器的浮层都挂好了，自己另写浮层（提示条、悬浮工具条）时照做。
+
 对话框、底部面板、弹出列表背后的页面会模糊（`DialogWindowBlur`，`WindowBlur.kt`，系统跨窗口模糊 `blurBehindRadius`）：封装里已经调了，自己另写弹层时也放进弹层内容里调。系统关了跨窗口模糊时自动退回只压暗。玻璃上的字按**最坏的底**算对比度（`CoverGlassTest`：浅色主题底下一片纯黑、深色一片纯白），叠色厚度保证正文，强调色、红字、说明小字在那块底上用 `AppThemes.readableOn` 现推 —— 新加玻璃面时照这个办法加一条测试。
 
 弹层一律用 Miuix 的 **`Window*`** 系列（`WindowDialog` / `WindowBottomSheet` / `WindowDropdownPopup`），**不用 `Overlay*`**：Overlay 要挂在 Miuix `Scaffold` 的弹层宿主上，而我们是 Nav3 多个 entry 各一个 Scaffold、阅读器浮层又不在 Scaffold 里；Window 系列开独立窗口，放在哪都能弹。

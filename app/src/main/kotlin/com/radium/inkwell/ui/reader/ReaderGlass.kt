@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.input.pointer.pointerInput
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -48,15 +47,6 @@ internal fun Modifier.readerGlass(
         highlight = highlight,
     )
 }
-
-/**
- * 落在浮层空白处（标题、进度那行字）的触摸到此为止，不漏给下面的纸面。
- *
- * M3 的 `Surface` 自带这一层（一个空的 pointerInput），Miuix 的 `Surface` 没有 —— 换过来之后，
- * 点阅读菜单顶栏的书名会关掉菜单，在进度条那行字上一滑会翻页。空的 pointerInput 不消费任何事件，
- * 栏里的按钮、滑块照常收到，只是命中测试停在这里、不再往下找兄弟节点。
- */
-internal fun Modifier.blockTouchesBelow(): Modifier = this.pointerInput(Unit) {}
 
 /** dp（miuix-blur 按 dp 收半径，上限 150） */
 private const val READER_GLASS_BLUR_RADIUS = 60f

@@ -77,7 +77,8 @@ fun AppTopBar(
     TopAppBar(
         title = title,
         largeTitle = title,
-        modifier = modifier.barBlur(containerColor),
+        // 栏盖在内容上面（Miuix Scaffold 让内容铺满整屏）：落在栏上的触摸别漏给被糊住的那几行
+        modifier = modifier.barBlur(containerColor).blockTouchesBelow(),
         color = if (barBlurActive()) Color.Transparent else containerColor,
         navigationIcon = { if (onBack != null) BackButton(onClick = onBack) },
         actions = actions,
@@ -129,7 +130,9 @@ fun AppToolbar(
             modifier
                 .fillMaxWidth()
                 .barBlur(containerColor)
-                .then(if (blurred) Modifier else Modifier.background(containerColor)),
+                .then(if (blurred) Modifier else Modifier.background(containerColor))
+                // 同 AppTopBar：栏里的字、chip 之间的空隙上点一下，从前点到的是被玻璃糊住的那一行（书源管理的开关）
+                .blockTouchesBelow(),
         ) {
             ToolbarRow(navigationIcon, actions, title)
             bottomContent()
