@@ -30,7 +30,7 @@ internal fun SQLiteConnection.dropColumns(
     val indexes = prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL").use { st ->
         st.bindText(1, table)
         buildList { while (st.step()) add(st.getText(0)) }
-    }.filter { sql -> columns.none { Regex("\\b${Regex.escape(it)}\\b").containsMatchIn(sql) } }
+    }.filter { sql -> sql.split(NON_IDENTIFIER).none { it in columns } }
 
     val primaryKey = keep.filter { it.pkPosition > 0 }.sortedBy { it.pkPosition }
     val definitions = keep.map { c ->
@@ -91,3 +91,10 @@ internal fun SQLiteConnection.tableColumns(table: String): List<TableColumn> =
     }
 
 private const val DROP_COLUMN_MINOR = 35
+
+/**
+ * 把索引的建表语句切成一个个标识符，看它用没用到被删的列。不拼 `\b列名\b` 的正则：
+ * core 的 IcuRegexCompatTest 会扫全仓库的正则字面量，字符串模板的 `${…}` 在它眼里是裸花括号
+ * （0.5.1-beta.12 的 CI 就挂在这儿）。
+ */
+private val NON_IDENTIFIER = Regex("[^A-Za-z0-9_]+")
