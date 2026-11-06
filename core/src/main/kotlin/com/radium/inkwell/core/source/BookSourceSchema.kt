@@ -107,6 +107,11 @@ data class BookInfoRuleSet(
     val intro: String? = null,
     val coverUrl: String? = null,
     val tocUrl: String? = null,
+    /**
+     * Legado 的「允许修改书名作者」：非空（写什么都行）时，详情页的书名、作者盖过搜索列表里的；
+     * 空着就只拿来补搜索列表的空缺。给搜索列表把书名截短、作者带前缀的站用，见 [bookNameAndAuthor]
+     */
+    val canReName: String? = null,
 )
 
 /** 目录规则（Legado ruleToc） */

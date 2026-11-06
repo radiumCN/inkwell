@@ -61,6 +61,8 @@ data class RemoteBookDetail(
      * `variables` 交回来；不传这条链路就是断的。
      */
     val variables: Map<String, String> = emptyMap(),
+    /** 书源允许详情页改书名、作者（[BookInfoRuleSet.canReName]），见 [bookNameAndAuthor] */
+    val canReName: Boolean = false,
 )
 
 data class RemoteChapter(
@@ -279,6 +281,7 @@ class BookSourceEngine(
             tocUrl = tocUrl,
             // init 的 @put、各字段脚本里的 java.put 都写在这张表上（init 切换内容时 js 是同一个）
             variables = js.scriptVars.toMap(),
+            canReName = !info.canReName.isNullOrBlank(),
         )
     }
 

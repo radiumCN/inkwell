@@ -51,7 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
-import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.BookListRow
 import com.radium.inkwell.ui.components.ContentListItem
@@ -288,7 +287,8 @@ fun SearchScreen(
                         // 边搜边重排（源数变了、相关度变了）时让行滑到新位置，而不是一帧之内互换 ——
                         // 手指底下的那行瞬间换成别的书，点开的就不是想点的那本
                         val result = hit.result
-                        val inShelf = bookKey(result.title, result.author) in state.shelfKeys
+                        // 合并进这一行的任何一个源已经在架，这一行就是「已加入」（见 ShelfIndex）
+                        val inShelf = hit.results.any { it in state.shelf }
                         BookListRow(
                             title = result.title,
                             subtitle = listOfNotNull(

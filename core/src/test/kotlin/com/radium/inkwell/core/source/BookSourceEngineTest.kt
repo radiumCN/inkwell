@@ -506,6 +506,14 @@ class BookSourceEngineTest {
     }
 
     @Test
+    fun `详情页带上书源的 canReName —— 写了什么都算开，没写就是关`() = runBlocking {
+        assertFalse(engine().getDetail(source(), "$base/book/1").canReName)
+        val json = sourceJson(base)
+            .replace("\"ruleBookInfo\": {", "\"ruleBookInfo\": { \"canReName\": \"1\",")
+        assertTrue(engine().getDetail(BookSourceRule.fromJson(json), "$base/book/1").canReName)
+    }
+
+    @Test
     fun `详情 init 的 put 能被后续字段 get 到`() = runBlocking {
         val json = sourceJson(base)
             .replace("\"ruleBookInfo\": {", "\"ruleBookInfo\": { \"init\": \"@put:{\\\"n\\\":\\\"h1@text\\\"}\",")
