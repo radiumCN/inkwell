@@ -30,6 +30,7 @@ import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.CardViewport
 import com.radium.inkwell.ui.components.ContentListColors
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
@@ -241,59 +242,63 @@ private fun CandidateList(
     // 搜索中卡的末尾多一行「还在找」：它和候选在同一张卡里，算进分组的行数
     val rows = candidates.size + if (searching) 1 else 0
     val hidden = if (overlay.checkAuthor) overlay.authorMismatched else 0
-    LazyColumn(
-        // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
-        modifier = Modifier.pageScroll(),
-        contentPadding = PaddingValues(bottom = Dimens.gapXL + bottomInset),
-        overscrollEffect = null,
-    ) {
-        // 排列照返回先后，不在手指底下重排；先搜哪些源（以前有这本书的、校验通过的、快的）由 ViewModel 定
-        itemsIndexed(candidates, key = { _, it -> "${it.sourceId}|${it.bookUrl}" }) { i, c ->
-            ChangeSourceCandidateRow(
-                candidate = c,
-                bookTitle = bookTitle,
-                bookAuthor = bookAuthor,
-                // 开着「只看同作者」时列出来的都对得上，不必再标
-                markAuthor = !overlay.checkAuthor,
-                currentLatest = overlay.currentLatestChapter,
-                applying = overlay.changingSource && overlay.changingTo == c.sourceId,
-                enabled = !overlay.changingSource,
-                onClick = { onApplySource(c) },
-                modifier = Modifier.groupedCardItem(i, rows),
-            )
-        }
-        if (searching) {
-            item(key = "searching") {
-                ContentListItem(
-                    modifier = Modifier.groupedCardItem(rows - 1, rows),
-                    leadingContent = { AppLoadingIndicator(size = Dimens.buttonSpinner) },
-                ) {
-                    Text(
-                        "还在找其他书源…",
-                        style = ContentListDefaults.supportingStyle,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
+    // 视口裁成卡的圆上角：一滚，顶上切过的是中间的行，不裁的话卡顶是一刀直线（见 CardViewport）。
+    // 和概况行之间的缝是上面进度条那一档的留白，本来就在列表外面、不跟着滚
+    CardViewport {
+        LazyColumn(
+            // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
+            modifier = Modifier.pageScroll(),
+            contentPadding = PaddingValues(bottom = Dimens.gapXL + bottomInset),
+            overscrollEffect = null,
+        ) {
+            // 排列照返回先后，不在手指底下重排；先搜哪些源（以前有这本书的、校验通过的、快的）由 ViewModel 定
+            itemsIndexed(candidates, key = { _, it -> "${it.sourceId}|${it.bookUrl}" }) { i, c ->
+                ChangeSourceCandidateRow(
+                    candidate = c,
+                    bookTitle = bookTitle,
+                    bookAuthor = bookAuthor,
+                    // 开着「只看同作者」时列出来的都对得上，不必再标
+                    markAuthor = !overlay.checkAuthor,
+                    currentLatest = overlay.currentLatestChapter,
+                    applying = overlay.changingSource && overlay.changingTo == c.sourceId,
+                    enabled = !overlay.changingSource,
+                    onClick = { onApplySource(c) },
+                    modifier = Modifier.groupedCardItem(i, rows),
+                )
+            }
+            if (searching) {
+                item(key = "searching") {
+                    ContentListItem(
+                        modifier = Modifier.groupedCardItem(rows - 1, rows),
+                        leadingContent = { AppLoadingIndicator(size = Dimens.buttonSpinner) },
+                    ) {
+                        Text(
+                            "还在找其他书源…",
+                            style = ContentListDefaults.supportingStyle,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                 }
             }
-        }
-        // 作者对不上被筛掉的，说出来、给一个出口：从前它们悄悄消失，用户只看到「没找到」，想不到是开关卡掉的
-        if (hidden > 0) {
-            item(key = "author-hidden") {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = Dimens.gapS)
-                        // 行尾文字按钮自带 gapM 的内边距：扣掉它，按钮的字右边才对得上卡里的字
-                        .padding(start = cardMargin() + Dimens.listHorizontal, end = cardMargin() + Dimens.listHorizontal - Dimens.gapM),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "另有 $hidden 个书源找到同名书，作者对不上",
-                        Modifier.weight(1f),
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    AppTextButton("显示", onClick = onShowMismatched, enabled = !overlay.changingSource)
+            // 作者对不上被筛掉的，说出来、给一个出口：从前它们悄悄消失，用户只看到「没找到」，想不到是开关卡掉的
+            if (hidden > 0) {
+                item(key = "author-hidden") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = Dimens.gapS)
+                            // 行尾文字按钮自带 gapM 的内边距：扣掉它，按钮的字右边才对得上卡里的字
+                            .padding(start = cardMargin() + Dimens.listHorizontal, end = cardMargin() + Dimens.listHorizontal - Dimens.gapM),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "另有 $hidden 个书源找到同名书，作者对不上",
+                            Modifier.weight(1f),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        AppTextButton("显示", onClick = onShowMismatched, enabled = !overlay.changingSource)
+                    }
                 }
             }
         }

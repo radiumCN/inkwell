@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.CardViewport
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
@@ -91,64 +92,68 @@ fun ExploreSourceSheet(
             val rest = remember(sources, recent) {
                 sources.filterIndexed { i, _ -> i !in recent.toSet() }
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().pageScroll(),
-                contentPadding = PaddingValues(bottom = Dimens.gapXL + bottomInset),
-                overscrollEffect = null,
-            ) {
-                if (trimmed.isNotEmpty()) {
-                    val hits = sources.filter {
-                        it.name.contains(trimmed, ignoreCase = true) || it.id.contains(trimmed, ignoreCase = true)
-                    }
-                    if (hits.isEmpty()) {
-                        item(key = "no-match") {
-                            Column(
-                                Modifier.fillMaxWidth().padding(Dimens.gapXL),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    "没有匹配「$trimmed」的书源",
-                                    style = MiuixTheme.textStyles.body2,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            // 视口裁成卡的圆上角：一滚，顶上切过的是中间的行（「最近」「全部书源」那两段都是），
+            // 不裁的话卡顶是一刀直线（见 CardViewport）。和搜索框之间的缝是搜索框自己的下留白，不跟着滚
+            CardViewport {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().pageScroll(),
+                    contentPadding = PaddingValues(bottom = Dimens.gapXL + bottomInset),
+                    overscrollEffect = null,
+                ) {
+                    if (trimmed.isNotEmpty()) {
+                        val hits = sources.filter {
+                            it.name.contains(trimmed, ignoreCase = true) || it.id.contains(trimmed, ignoreCase = true)
+                        }
+                        if (hits.isEmpty()) {
+                            item(key = "no-match") {
+                                Column(
+                                    Modifier.fillMaxWidth().padding(Dimens.gapXL),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(
+                                        "没有匹配「$trimmed」的书源",
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                    AppTextButton("清除搜索", onClick = { query = "" })
+                                }
+                            }
+                        } else {
+                            itemsIndexed(hits, key = { _, s -> s.id }) { i, s ->
+                                SourceRow(
+                                    source = s,
+                                    selected = s.id == currentId,
+                                    onClick = { dismiss { onPick(sources.indexOfFirst { it.id == s.id }) } },
+                                    modifier = Modifier.groupedCardItem(i, hits.size),
                                 )
-                                AppTextButton("清除搜索", onClick = { query = "" })
                             }
                         }
                     } else {
-                        itemsIndexed(hits, key = { _, s -> s.id }) { i, s ->
-                            SourceRow(
-                                source = s,
-                                selected = s.id == currentId,
-                                onClick = { dismiss { onPick(sources.indexOfFirst { it.id == s.id }) } },
-                                modifier = Modifier.groupedCardItem(i, hits.size),
-                            )
+                        if (recent.isNotEmpty()) {
+                            item(key = "recent-header") { SectionHeader("最近") }
+                            itemsIndexed(
+                                recent.map { sources[it] },
+                                key = { _, s -> "recent|${s.id}" },
+                            ) { i, s ->
+                                SourceRow(
+                                    source = s,
+                                    selected = s.id == currentId,
+                                    onClick = { dismiss { onPick(recent[i]) } },
+                                    modifier = Modifier.groupedCardItem(i, recent.size),
+                                )
+                            }
                         }
-                    }
-                } else {
-                    if (recent.isNotEmpty()) {
-                        item(key = "recent-header") { SectionHeader("最近") }
-                        itemsIndexed(
-                            recent.map { sources[it] },
-                            key = { _, s -> "recent|${s.id}" },
-                        ) { i, s ->
-                            SourceRow(
-                                source = s,
-                                selected = s.id == currentId,
-                                onClick = { dismiss { onPick(recent[i]) } },
-                                modifier = Modifier.groupedCardItem(i, recent.size),
-                            )
-                        }
-                    }
-                    if (rest.isNotEmpty()) {
-                        item(key = "all-header") { SectionHeader("全部书源") }
-                        itemsIndexed(rest, key = { _, s -> s.id }) { i, s ->
-                            val index = sources.indexOfFirst { it.id == s.id }
-                            SourceRow(
-                                source = s,
-                                selected = s.id == currentId,
-                                onClick = { dismiss { onPick(index) } },
-                                modifier = Modifier.groupedCardItem(i, rest.size),
-                            )
+                        if (rest.isNotEmpty()) {
+                            item(key = "all-header") { SectionHeader("全部书源") }
+                            itemsIndexed(rest, key = { _, s -> s.id }) { i, s ->
+                                val index = sources.indexOfFirst { it.id == s.id }
+                                SourceRow(
+                                    source = s,
+                                    selected = s.id == currentId,
+                                    onClick = { dismiss { onPick(index) } },
+                                    modifier = Modifier.groupedCardItem(i, rest.size),
+                                )
+                            }
                         }
                     }
                 }

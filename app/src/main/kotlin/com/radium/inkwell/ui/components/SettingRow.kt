@@ -456,6 +456,9 @@ fun SwitchRow(
  * 底色与外边距随所在的层走，见 [CardLayer]）。HyperOS 的列表就是灰底上的白卡，不是通栏的行。
  *
  * 行本身透明、直角（[ContentListItem] 的默认值），底色与圆角由这里画、按压反馈也被这里裁；行间别再加 `spacedBy`，否则卡会断开。
+ *
+ * 列表在底部面板里定高、上面压着一行字（目录、换源候选、书源面板）时，外面再套一层 [CardViewport]：
+ * 一滚，视口顶上切过的是中间的直角行，不裁的话卡顶是一刀直线。
  */
 @Composable
 fun Modifier.groupedCardItem(index: Int, count: Int): Modifier = this

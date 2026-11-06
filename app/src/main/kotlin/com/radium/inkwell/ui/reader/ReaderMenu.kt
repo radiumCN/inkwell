@@ -89,6 +89,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChapterListItem
+import com.radium.inkwell.ui.components.CardViewport
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.IconLabelButton
 import com.radium.inkwell.ui.components.cardMargin
@@ -644,42 +645,52 @@ private fun TocList(
             // 导航栏高度垫在列表末尾、也加进高度上限：列表一直铺到屏幕底、滚到手势条下面，看得见的条数不变。
             // 章节拼成一张卡（同详情页的目录），不再一章一张小卡、行间留缝
             val bottomInset = sheetBottomInset()
-            val listPadding = PaddingValues(top = Dimens.gapS, bottom = bottomInset)
+            val listPadding = PaddingValues(bottom = bottomInset)
             val cachedDot = MiuixTheme.colorScheme.primary
             val readDot = MiuixTheme.colorScheme.onSurfaceVariantSummary
-            Box(Modifier.heightIn(max = Dimens.sheetListMaxHeight + bottomInset)) {
-                LazyColumn(
-                    state = listState,
-                    // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
-                    modifier = Modifier.pageScroll(),
-                    contentPadding = listPadding,
-                    overscrollEffect = null,
-                ) {
-                    itemsIndexed(shown, key = { _, it -> it.index }) { i, item ->
-                        val read = item.index < current
-                        ChapterListItem(
-                            title = item.title,
-                            selected = item.index == current,
-                            read = read,
-                            highlight = q,
-                            onClick = { onSelect(item.index) },
-                            modifier = Modifier.groupedCardItem(i, shown.size),
-                            trailingContent = if (showCacheState && item.cached) {
-                                {
-                                    // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
-                                    // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
-                                    // 读过的那几章点也跟着字淡一档
-                                    Box(
-                                        Modifier
-                                            .size(Dimens.gapS)
-                                            .semantics { contentDescription = "已缓存" }
-                                            .background(if (read) readDot else cachedDot, CircleShape),
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                        )
+            Box(
+                Modifier
+                    .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
+                    // 和概况行之间的缝垫在视口外面：从前在列表的 contentPadding.top 里，一滚就跟着内容滚走，
+                    // 章名直接顶到「共 N 章」底下。先限高再垫，整块的高度上限不变，面板不因此变高
+                    .padding(top = Dimens.gapS),
+            ) {
+                // 视口裁成卡的圆上角：一滚，顶上切过的是中间的行，不裁的话卡顶是一刀直线（见 CardViewport）。
+                // 快速滚动条和「定位当前章」留在视口外面，别被裁掉
+                CardViewport {
+                    LazyColumn(
+                        state = listState,
+                        // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
+                        modifier = Modifier.pageScroll(),
+                        contentPadding = listPadding,
+                        overscrollEffect = null,
+                    ) {
+                        itemsIndexed(shown, key = { _, it -> it.index }) { i, item ->
+                            val read = item.index < current
+                            ChapterListItem(
+                                title = item.title,
+                                selected = item.index == current,
+                                read = read,
+                                highlight = q,
+                                onClick = { onSelect(item.index) },
+                                modifier = Modifier.groupedCardItem(i, shown.size),
+                                trailingContent = if (showCacheState && item.cached) {
+                                    {
+                                        // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
+                                        // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
+                                        // 读过的那几章点也跟着字淡一档
+                                        Box(
+                                            Modifier
+                                                .size(Dimens.gapS)
+                                                .semantics { contentDescription = "已缓存" }
+                                                .background(if (read) readDot else cachedDot, CircleShape),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
                     }
                 }
                 FastScroller(
