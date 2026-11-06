@@ -109,6 +109,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 滑块 | `AppSlider`（`AppSlider.kt`，Miuix `Slider` 胶囊粗轨）：给 `label`（读屏名字）；夹在两行字之间的传 `height = Dimens.sliderCompact`。`activeColor` 只给阅读器浮层（纸色背景）用 |
 | 单选横滚 chip 条 | `ChipRow`（内部固定横滚，`contentPadding` 给首尾边距；额外动作 chip 走 `trailing`，别再手搓 `Row` + chip）；单个独立 chip 用 `AppFilterChip`。条末尾的「添加」（导入字体）用 `AddChip`（虚线圆 + ＋）——**动作别长成选项的样子**，从前「导入字体」是一颗普通 chip，看着像一款叫「导入字体」的字；条里的项要长按删除传 `longClickActions`。Miuix 没有 chip，这两个是自画的 HyperOS 胶囊（选中 `tertiaryContainer`）。选中项跟着滚动变、不是手点出来的（协议页的节 chip）传 `bringSelectedIntoView = true`，亮到条外面会自己横滚过来。和 `SegmentedChoice` 同处一张面板时（阅读设置）传 `solidSelection = true`，选中态与分段一样实心填强调色，别让一张面板里出现两种「选中」 |
 | 几档里选一档（固定 2~5 档） | `SegmentedChoice`（`SegmentedChoice.kt`）：灰槽里浮起一块，选中段实心填强调色（不是白块 —— 白块在白卡上分不清）。选项多或会变的（字体、方案、七档间隔）仍用 `ChipRow` |
+| 从一排色块 / 图标里挑一个（主题色板、应用图标的图形与纸色） | `SwatchChoice`（`SwatchChoice.kt`）：52dp 的块 + 下面一行名字，选中描主色圈 + 右下角一枚勾 + 名字换主色加粗，没选中的描细分隔线（浅色块放白卡上才看得出边）；`cornerRadius` 给了是 squircle（图标预览），不给是圆形色板。整块一个单选目标、带名字（名字的 Text 在可点区外）。描边叠在内容**上面**一层画 —— Miuix 的 `squircleBorder` 画在内容底下（onDrawBehind），块里铺一张不透明的图就被整个盖住 |
 | 列表行密度 | 默认 `DefaultPadding`（= Miuix `BasicComponent`）；带封面/大图标/行尾 48dp 图标按钮的行（`BookListRow`、书架列表、`AppIconSheet`、搜索历史）用 `MediaPadding`。从前默认是上下 4dp，两三行字的行（书源、净化规则、订阅文章）挤成一片，被指出不合规范 |
 | 分段 Tab + 内容切换 | `AppTabRow` + `AppTabContent`（`AppTabs.kt`）。Tab 是 Miuix `TabRowWithContour`（灰槽里浮起一块卡片色，格子均分槽宽），高度与圆角对齐 `SegmentedChoice`；`containerColor` 是槽色，要和浮块（`surfaceContainer`）差一档。别换回 Miuix `TabRow`（一格一个描边框，像一排按钮）。调用方给左右边距，和下面的内容对齐。切换过渡横移只取 1/8 宽且**关掉 SizeTransform** —— 所以内容区**必须定高**，否则又变成「切 Tab 把面板顶高」 |
 | 设置行 / 开关行 / 选择行 / 分组小标题 | `SettingRow` / `SwitchRow` / `SpinnerSettingRow` / `SectionHeader`（`SettingRow.kt`）。`SettingRow` 就是 Miuix `ArrowPreference`（可点，行尾 ›）/ `BasicComponent`（纯展示）；`SwitchRow` 是 `BasicComponent` + 纯展示的 `Switch`，整行一个开关语义 —— **别用 Miuix `SwitchPreference`**，它是「行 + 开关」双焦点。退出登录这类操作传 `destructive = true`（红字、不带 ›、点了先确认），单独放一张卡，别和普通入口混在一组。「标题 + 当前值、点开选一个」用 `SpinnerSettingRow`（照 Miuix `WindowSpinnerPreference` 拼的那一行，选项从这一行上弹出；弹层换成和 `AppDropdownMenu` 同一个毛玻璃 `GlassDropdownPopup`，别再直接用 `WindowSpinnerPreference` —— 它的弹层写死是实色卡片）。设置主页那一列入口行带 `icon`（光秃秃的线条图标、`onSurface` 色，**不垫底板** —— 垫过淡强调色方块，被指出「图标外面套了个容器」），二级页保持纯文字 |
@@ -175,6 +176,13 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 - **导航**：Jetpack **Navigation 3**（`NavBackStack` + `NavDisplay`）+ Material 3 Adaptive（`adaptive-navigation3` list-detail）+ **`lifecycle-viewmodel-navigation3`**。ViewModel **只**在 `entry { }` 内用 `org.koin.compose.viewmodel.koinViewModel` 创建（经 `rememberViewModelStoreNavEntryDecorator` 绑到 NavEntry；`koin-androidx-compose` 依赖已移除 —— 它的同名 `koinViewModel` 绑 Activity 的 store，退栈不清，别再加回来）。Screen 的 `viewModel:` 参数**不给默认值**，谁在 entry 里创建谁传。前进经 `InkwellNavigator.go`（栈顶同类替换）。**大 payload 不塞路由参数**（会随返回栈进 `onSaveInstanceState`，撑爆 Binder → `TransactionTooLargeException`）—— 用进程内 holder 按 key 暂存，路由只带短字段。阅读器始终全屏，不进双栏。
 
 ---
+
+## 桌面图标
+
+- 4 种图形（书签 / 翻页 / 叠页 / 段落）× 5 种纸色（取阅读器的纸张）= 20 个自适应图标，背景 / 前景 / 单色三层**全是矢量**，由 `tools/gen_launcher_icons.py` 生成（`--preview` 另出一张同几何的 SVG 预览）。改图形改脚本再跑，别手改生成的 XML。
+- 桌面入口是一个组合一个 `activity-alias`（Android 运行时改不了 `android:icon`），对应表在 `util/AppIcon.kt`。**alias 名一旦发布就不能改、不能删**：它写在用户桌面的快捷方式里，删掉的话换过那一款的人升级后桌面图标凭空消失。0.5.2 之前那五款的名字（`.IconClassic` 等）接着分给五个新组合；`.IconClassic` 永远是默认。表和清单对不对得上由 `AppIconManifestTest` 钉着。
+- 切换走 `setComponentEnabledSettings` 一次批量提交（minSdk 33），别改回逐个启用 / 禁用 —— 二十个组件逐个改，桌面要跟着刷十几回，顺序错了还会有一瞬间一个入口都没有。
+- 应用里画图标一律 `AppIconImage`（`ui/settings/AppIconSheet.kt`，背景、前景两层叠起来只露中间 72）：Compose 读不了 adaptive-icon 的 XML，别再另备一套位图预览。
 
 ## 书源规则
 

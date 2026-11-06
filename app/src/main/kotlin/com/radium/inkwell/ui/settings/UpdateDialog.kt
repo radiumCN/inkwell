@@ -1,7 +1,6 @@
 package com.radium.inkwell.ui.settings
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,10 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -144,22 +141,22 @@ internal fun CurrentVersionHero(version: String, dateLabel: String?, modifier: M
 
 /**
  * 头部的图标：取 [AppIconManager.current]（桌面上摆着的那个），裁成与 Miuix 卡片同档的平滑圆角，再描一圈细线 ——
- * 几款图标的底色都很浅（米白、浅灰），白弹窗上没有这圈就看不出边。
+ * 净白、暖纸这几款的底色都很浅，白弹窗上没有这圈就看不出边。描边叠在图标上面画：`squircleBorder` 画在内容底下，
+ * 挂在图标自己身上会被不透明的图整个盖住。
  */
 @Composable
 private fun HeroIcon() {
     val context = LocalContext.current
     // 查组件状态是一次跨进程调用：弹窗开着时桌面图标不会变，查一次就够
     val icon = remember(context) { AppIconManager.current(context) }
-    Image(
-        painter = painterResource(icon.preview),
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .size(Dimens.dialogHeroIcon)
-            .squircleClip(AppShapes.radiusLarge)
-            .squircleBorder(Dimens.strokeThin, MiuixTheme.colorScheme.dividerLine, AppShapes.radiusLarge),
-    )
+    Box {
+        AppIconImage(icon, Dimens.dialogHeroIcon, Modifier.squircleClip(AppShapes.radiusLarge))
+        Box(
+            Modifier
+                .matchParentSize()
+                .squircleBorder(Dimens.strokeThin, MiuixTheme.colorScheme.dividerLine, AppShapes.radiusLarge),
+        )
+    }
 }
 
 /**

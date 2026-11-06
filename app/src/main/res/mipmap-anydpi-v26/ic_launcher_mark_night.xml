@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_bg_night" />
+    <foreground android:drawable="@drawable/ic_launcher_fg_mark_night" />
+    <monochrome android:drawable="@drawable/ic_launcher_mono_mark" />
+</adaptive-icon>

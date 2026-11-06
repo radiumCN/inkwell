@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:scaleX="0.8" android:scaleY="0.8" android:pivotX="54" android:pivotY="54">
+        <group android:translateY="-3.5">
+            <path
+                android:pathData="M50,33 H80"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="5.6"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M28,44.5 H80"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="5.6"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M28,56 H80"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="5.6"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M28,67.5 H80"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="5.6"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M28,79 H52"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="5.6"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M58.8,79 A4.2,4.2 0 1 0 67.2,79 A4.2,4.2 0 1 0 58.8,79 Z"
+                android:strokeColor="#FFFFFFFF"
+                android:strokeWidth="3.6"
+                android:strokeLineCap="round" />
+        </group>
+    </group>
+</vector>

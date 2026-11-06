@@ -1,19 +1,15 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.components.SwatchChoice
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SegmentedChoice
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,23 +55,17 @@ import com.radium.inkwell.ui.theme.toArgbLong
 import com.radium.inkwell.ui.theme.toHsv
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import com.radium.inkwell.ui.theme.AppShapes
-import top.yukonga.miuix.kmp.basic.Icon
 import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import com.radium.inkwell.ui.components.AppSurface
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import com.radium.inkwell.ui.components.sinkOnPress
 
 @Composable
 fun ThemeSettingsScreen(onBack: () -> Unit) {
@@ -307,6 +297,7 @@ private fun PresetRow(
     }
 }
 
+/** 主题色板：预设的背景色铺满圆，中间一个强调色的点。选中态、按压、读屏都在 [SwatchChoice] 里 */
 @Composable
 private fun ThemeSwatch(
     bg: Color,
@@ -316,58 +307,9 @@ private fun ThemeSwatch(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        // 外层只定尺寸、托住右下角的选中对勾；可点的圆在里层 —— 按压反馈（Miuix 的压暗）要裁成圆的，
-        // 圆色板按下去冒出一个方块很难看；裁切若放在外层，会把伸出圆外的对勾一起裁掉
-        // 下沉挂在外层：右下角的对勾跟着色板一起沉（见 sinkOnPress）
-        val press = remember { MutableInteractionSource() }
-        Box(Modifier.size(Dimens.swatch).sinkOnPress(press)) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .clip(CircleShape)
-                    .background(bg)
-                    .border(
-                        width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
-                        color = if (selected) MiuixTheme.colorScheme.primary
-                        else MiuixTheme.colorScheme.dividerLine,
-                        shape = CircleShape,
-                    )
-                    // 整块色板作为单选目标带上名字与选中态：否则读屏聚焦未选中的色块什么都念不出，
-                    // 十个色块无从区分（名字 Text 在可点区之外）
-                    .selectable(
-                        selected = selected,
-                        interactionSource = press,
-                        indication = LocalIndication.current,
-                        role = Role.RadioButton,
-                        onClick = onClick,
-                    )
-                    .semantics { contentDescription = label },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(Modifier.size(Dimens.iconSm).background(accent, CircleShape))
-            }
-            if (selected) {
-                Icon(
-                    MiuixIcons.Basic.Check,
-                    contentDescription = null,
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(Dimens.iconSm)
-                        .background(MiuixTheme.colorScheme.primary, CircleShape)
-                        .padding(Dimens.gapXS),
-                    tint = MiuixTheme.colorScheme.onPrimary,
-                )
-            }
-        }
-        Text(
-            label,
-            Modifier.padding(top = Dimens.gapXS),
-            style = MiuixTheme.textStyles.footnote2,
-            // 选中的标签跟主色走（同应用图标面板的选中行标题）：一行色板只有一个勾不够醒目
-            color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontWeight = if (selected) FontWeight.Medium else null,
-        )
+    SwatchChoice(label = label, selected = selected, onClick = onClick, modifier = modifier) {
+        Box(Modifier.matchParentSize().background(bg))
+        Box(Modifier.size(Dimens.iconSm).background(accent, CircleShape))
     }
 }
 

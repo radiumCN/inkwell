@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:scaleX="0.86" android:scaleY="0.86" android:pivotX="54" android:pivotY="54">
+        <path
+            android:pathData="M46.8,31 A7.2,7.2 0 1 0 61.2,31 A7.2,7.2 0 1 0 46.8,31 Z"
+            android:strokeColor="#FF2E4033"
+            android:strokeWidth="5"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M45,45 H63 V85 L54,77.5 L45,85 Z"
+            android:fillColor="#FF3E7A55" />
+        <path
+            android:pathData="M45,45 H63 V50 H45 Z"
+            android:fillColor="#FF2B5A3D"
+            android:fillAlpha="0.55" />
+    </group>
+</vector>
