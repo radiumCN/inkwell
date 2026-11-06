@@ -12,9 +12,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -27,7 +28,6 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
-import top.yukonga.miuix.kmp.blur.LocalRuntimeShaderCache
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -42,8 +42,7 @@ import top.yukonga.miuix.kmp.window.WindowListPopup
  * - **卡片半透明**：卡片底（Miuix 在 `ListPopupContent` 里写死读 `surfaceContainer`）只在这一小块换成
  *   [POPUP_GLASS_ALPHA_LIGHT] / [POPUP_GLASS_ALPHA_DARK] 的卡片色，各行的底（`DropdownColors.containerColor`，默认也是实心卡片色）
  *   换成透明 —— 透出来的是底下那片已经糊开的页面，一层雾，而不是贴上去的一块白。
- * - **边缘高光**：和顶栏的玻璃圆按钮、底部悬浮胶囊同一种（miuix-blur 的 Small Container 那档，[smallGlassHighlight]），
- *   深色下尤其靠它分出卡片的轮廓。从前是自己描的一道白细线，顶栏换成玻璃圆以后从圆里弹出来一张描线的卡，两种边并排着，被要求统一。
+ * - **一道上亮下淡的细边**（[GlassRim]）：模仿顶栏玻璃圆、底部胶囊那种边缘高光的「顶光」，深色下尤其靠它分出卡片的轮廓。
  *
  * 字读不读得清按**最坏的页面**算（同 CoverGlassTest 里的玻璃卡）：浅色主题卡片下面一片纯黑、深色主题一片纯白。
  * 叠色厚度保证正文够 4.5:1；说明小字和选中项的强调色在这块最坏的底上现推（[AppThemes.readableOn]），
@@ -117,36 +116,27 @@ internal fun GlassDropdownPopup(
 }
 
 /**
- * 玻璃卡片的边：miuix-blur 的边缘高光，形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle —— 高光只从
- * CornerBasedShape 读圆角，所以是 [squircleShape]）。画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。
+ * 玻璃卡片的边：一道白色细线，上亮下淡 —— 顶栏玻璃圆、底部胶囊的边缘高光是从上面打的光（miuix-blur 的 BloomStroke），
+ * 这里用竖向渐变学它的样子，和它们放在一起是一套。形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle）。
+ * 画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。线一半落在裁切外面，粗档画出来是一道细线。
  *
- * 卡片的玻璃是系统跨窗口模糊糊的，这里只要高光那一笔：直接拿高光样式公开的着色器（`HighlightStyle.createShader`），
- * 照 miuix-blur 自己画高光的那几步（它的 `drawHighlight` 是 internal 的）铺一个矩形，混合模式用样式自带的 Plus ——
- * 只往上加光，压在什么上面都不会变暗。
- *
- * **别借 `drawBackdrop` + 空取样源来画**（0.5.2-beta.5 这么干过）：它在画高光之前要先画一张录下来的取样图层，
- * 在弹层自己的窗口里那张空图层成了一圈不透明的黑，菜单四周套了个黑框（真机截图被指出来）。
+ * **别换成 miuix-blur 的边缘高光**（0.5.2-beta.5 / beta.6 两回）：它按 Plus 混合往上加，前提是底下不透明 ——
+ * 主窗口里的玻璃底下是页面，没事；弹层是自己的透明窗口，卡片只有 [POPUP_GLASS_ALPHA_LIGHT] 那么厚，
+ * Plus 把高光那一圈的**透明度**也加满了，透出窗口底下的黑：beta.5 借 `drawBackdrop` 画成一圈纯黑，
+ * beta.6 直接画着色器，那一圈成了「卡片叠在黑底上」的灰，中间剩一块直角的亮矩形（真机截图量过：亮块 242 = 卡片叠在页面上，灰圈 217 = 卡片叠在纯黑上）。
+ * 白线按普通的 SrcOver 画，只会提亮，不会把卡片变不透明。
  */
 @Composable
 private fun GlassRim(dark: Boolean, modifier: Modifier) {
+    val top = Color.White.copy(alpha = if (dark) POPUP_RIM_TOP_ALPHA_DARK else POPUP_RIM_TOP_ALPHA_LIGHT)
+    val bottom = Color.White.copy(alpha = if (dark) POPUP_RIM_BOTTOM_ALPHA_DARK else POPUP_RIM_BOTTOM_ALPHA_LIGHT)
     val shape = remember { squircleShape(AppShapes.radiusLarge) }
-    val highlight = smallGlassHighlight(dark)
-    val shaderCache = LocalRuntimeShaderCache.current
     Box(
         modifier.drawWithCache {
-            val paint = Paint()
-            onDrawBehind {
-                if (highlight.width.value <= 0f || highlight.alpha <= 0f) return@onDrawBehind
-                val stroke = highlight.width.toPx().coerceAtMost(size.minDimension / 2f)
-                // 着色器是按 key 共用的一个实例（同一种高光全 App 一份），尺寸、圆角这些 uniform 每次画之前现设 ——
-                // 别挪到 drawWithCache 的缓存里，别的玻璃面一画就把它改成自己的尺寸
-                val shader = with(highlight.style) { createShader(shape, stroke, highlight.alpha, shaderCache) }
-                    ?: return@onDrawBehind
-                paint.shader = shader
-                paint.blendMode = highlight.style.blendMode
-                drawIntoCanvas { it.drawRect(0f, 0f, size.width, size.height, paint) }
-                paint.shader = null
-            }
+            val outline = shape.createOutline(size, layoutDirection, this)
+            val stroke = Stroke(width = Dimens.strokeThick.toPx())
+            val brush = Brush.verticalGradient(listOf(top, bottom))
+            onDrawBehind { drawOutline(outline, brush, style = stroke) }
         },
     )
 }
@@ -207,3 +197,12 @@ internal fun popupGlassFloor(container: Color, dark: Boolean): Color {
 // 再薄的话说明小字、选中项要推得太狠，和正文分不出层级
 internal const val POPUP_GLASS_ALPHA_LIGHT = 0.85f
 internal const val POPUP_GLASS_ALPHA_DARK = 0.85f
+
+/**
+ * 卡片边那道线的上下两头：上头亮（顶光照着的那条边），往下渐渐淡下去。浅色下卡片本身就白，线只是把边磨亮一点；
+ * 深色下靠它分出卡片的轮廓。平均下来和从前那道匀称的线（浅 0.6 / 深 0.14）差不多亮
+ */
+private const val POPUP_RIM_TOP_ALPHA_LIGHT = 0.9f
+private const val POPUP_RIM_BOTTOM_ALPHA_LIGHT = 0.35f
+private const val POPUP_RIM_TOP_ALPHA_DARK = 0.24f
+private const val POPUP_RIM_BOTTOM_ALPHA_DARK = 0.06f
