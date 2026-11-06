@@ -48,11 +48,11 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
 
         // 浅纸压深、深纸提亮；档位对齐 AppThemes.schemeFrom（深色抬得更狠，否则 OLED 纯黑上看不见卡片）
         fun step(amount: Float) = if (lightPaper) bg.darken(amount) else bg.lighten(amount)
-        val containerLow = step(if (lightPaper) 0.04f else 0.10f)
         val containerMid = step(if (lightPaper) 0.07f else 0.14f)
         val containerHigh = step(if (lightPaper) 0.10f else 0.18f)
         val containerHighest = step(if (lightPaper) 0.16f else 0.26f)
-        val overlay = if (lightPaper) containerHigh else containerLow
+        // 浮层：浅纸和 containerHigh 同一档；深纸只提亮 0.10，比卡（深纸的 containerHigh）暗一档
+        val overlay = readerOverlayOf(bg)
         val card = if (lightPaper) bg else containerHigh
         fun mix(from: Color, to: Color, t: Float) = Color(
             red = from.red + (to.red - from.red) * t,
@@ -143,6 +143,16 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
 @Composable
 @ReadOnlyComposable
 internal fun readerOverlayColor(): Color = MiuixTheme.colorScheme.background
+
+/**
+ * [paper] 这张纸上的浮层色（[ReaderThemeScope] 的 `background`）：浅纸压深一档（和它的 `surfaceContainerHigh` 同一档），
+ * 深纸提亮一档（比卡暗：深纸的卡是提亮 0.18 的 `surfaceContainerHigh`）。
+ * 抽成纯函数是为了 JVM 单测能挨款纸算玻璃上的对比度（ReaderGlassTest）
+ */
+internal fun readerOverlayOf(paper: Color): Color =
+    if (paper.luminance() > 0.5f) paper.darken(READER_OVERLAY_STEP) else paper.lighten(READER_OVERLAY_STEP)
+
+private const val READER_OVERLAY_STEP = 0.10f
 
 /**
  * 设置面板里的分组卡（[ReaderThemeScope] 里的 `surfaceContainer`）。与 App 设置页同一个思路：

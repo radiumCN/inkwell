@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import com.radium.inkwell.ui.theme.AppThemes
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -51,3 +52,29 @@ internal fun Modifier.readerGlass(
 /** dp（miuix-blur 按 dp 收半径，上限 150） */
 private const val READER_GLASS_BLUR_RADIUS = 60f
 private const val READER_GLASS_TINT_ALPHA = 0.8f
+
+/**
+ * 阅读玻璃最坏时的底色：浮层色 [tint] 叠八成，压在一整片正文色 [ink] 上。
+ *
+ * 纸面上只有纸和字，糊得再狠，底下也不会比「一整片字的颜色」更深（浅纸）/ 更亮（深纸）——
+ * 这比 App 那边按纯黑 / 纯白算（CoverGlassTest）贴实际，又仍是上界：真实的底是纸和字糊在一起，远到不了一整片字。
+ * 玻璃上的强调色字（自动换源胶囊的「撤销」）按它推，见 [readerGlassAction]
+ */
+internal fun readerGlassFloor(tint: Color, ink: Color): Color {
+    val a = READER_GLASS_TINT_ALPHA
+    return Color(
+        red = tint.red * a + ink.red * (1 - a),
+        green = tint.green * a + ink.green * (1 - a),
+        blue = tint.blue * a + ink.blue * (1 - a),
+    )
+}
+
+/**
+ * 阅读玻璃上的强调色字：纸上够 4.5:1 的强调色（浅纸上的褐），叠到更深一档的玻璃上就不够了（象牙纸约 4.2:1），
+ * 按 [readerGlassFloor] 再推一档。
+ *
+ * 推用 [AppThemes.readableOn]（黑白谁在这块底上对比更高就往谁推），**不是**本包按纸面亮度过不过 0.5 定方向的 readableOn：
+ * 浅纸的玻璃底透进了字色，亮度掉到 0.3~0.46，按 0.5 判会把褐往白里推，越推越看不清
+ */
+internal fun readerGlassAction(accent: Color, tint: Color, ink: Color): Color =
+    AppThemes.readableOn(accent, readerGlassFloor(tint, ink))
