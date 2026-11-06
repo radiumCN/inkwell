@@ -11,15 +11,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.GraphicsLayerScope
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.Density
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppThemes
 import java.util.function.Consumer
@@ -28,8 +27,7 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
-import top.yukonga.miuix.kmp.blur.Backdrop
-import top.yukonga.miuix.kmp.blur.drawBackdrop
+import top.yukonga.miuix.kmp.blur.LocalRuntimeShaderCache
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -122,33 +120,35 @@ internal fun GlassDropdownPopup(
  * 玻璃卡片的边：miuix-blur 的边缘高光，形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle —— 高光只从
  * CornerBasedShape 读圆角，所以是 [squircleShape]）。画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。
  *
- * 卡片的玻璃是系统跨窗口模糊糊的，用不着 miuix-blur 取样；借 `drawBackdrop` 只为它最后那一步画高光（画高光的函数是 internal 的）：
- * 取样源给 [NoBackdrop]、效果给空，它录一张空层、什么都不糊，然后照常画高光。
+ * 卡片的玻璃是系统跨窗口模糊糊的，这里只要高光那一笔：直接拿高光样式公开的着色器（`HighlightStyle.createShader`），
+ * 照 miuix-blur 自己画高光的那几步（它的 `drawHighlight` 是 internal 的）铺一个矩形，混合模式用样式自带的 Plus ——
+ * 只往上加光，压在什么上面都不会变暗。
+ *
+ * **别借 `drawBackdrop` + 空取样源来画**（0.5.2-beta.5 这么干过）：它在画高光之前要先画一张录下来的取样图层，
+ * 在弹层自己的窗口里那张空图层成了一圈不透明的黑，菜单四周套了个黑框（真机截图被指出来）。
  */
 @Composable
 private fun GlassRim(dark: Boolean, modifier: Modifier) {
     val shape = remember { squircleShape(AppShapes.radiusLarge) }
     val highlight = smallGlassHighlight(dark)
+    val shaderCache = LocalRuntimeShaderCache.current
     Box(
-        modifier.drawBackdrop(
-            backdrop = NoBackdrop,
-            shape = { shape },
-            effects = {},
-            highlight = { highlight },
-        ),
+        modifier.drawWithCache {
+            val paint = Paint()
+            onDrawBehind {
+                if (highlight.width.value <= 0f || highlight.alpha <= 0f) return@onDrawBehind
+                val stroke = highlight.width.toPx().coerceAtMost(size.minDimension / 2f)
+                // 着色器是按 key 共用的一个实例（同一种高光全 App 一份），尺寸、圆角这些 uniform 每次画之前现设 ——
+                // 别挪到 drawWithCache 的缓存里，别的玻璃面一画就把它改成自己的尺寸
+                val shader = with(highlight.style) { createShader(shape, stroke, highlight.alpha, shaderCache) }
+                    ?: return@onDrawBehind
+                paint.shader = shader
+                paint.blendMode = highlight.style.blendMode
+                drawIntoCanvas { it.drawRect(0f, 0f, size.width, size.height, paint) }
+                paint.shader = null
+            }
+        },
     )
-}
-
-/** 什么都不画的取样源，见 [GlassRim] */
-private object NoBackdrop : Backdrop {
-    override val isCoordinatesDependent: Boolean = false
-
-    override fun DrawScope.drawBackdrop(
-        density: Density,
-        coordinates: LayoutCoordinates?,
-        layerBlock: (GraphicsLayerScope.() -> Unit)?,
-        downscaleFactor: Int,
-    ) = Unit
 }
 
 /**
