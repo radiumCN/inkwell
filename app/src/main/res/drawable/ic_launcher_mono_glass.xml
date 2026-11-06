@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:scaleX="0.8" android:scaleY="0.8" android:pivotX="54" android:pivotY="54">
+        <group android:rotation="-9" android:pivotX="47" android:pivotY="50">
+            <path
+                android:pathData="M39,27 H55 A10,10 0 0 1 65,37 V63 A10,10 0 0 1 55,73 H39 A10,10 0 0 1 29,63 V37 A10,10 0 0 1 39,27 Z"
+                android:fillColor="#FFFFFFFF"
+                android:fillAlpha="0.45" />
+        </group>
+        <group android:rotation="6" android:pivotX="60" android:pivotY="58">
+            <path
+                android:pathData="M52,36 H68 A10,10 0 0 1 78,46 V72 A10,10 0 0 1 68,82 H52 A10,10 0 0 1 42,72 V46 A10,10 0 0 1 52,36 Z M49.0,49.2 H71.00000000000001 A1.8,1.8 0 0 1 72.80000000000001,51.0 V51.00000000000001 A1.8,1.8 0 0 1 71.00000000000001,52.800000000000004 H49.0 A1.8,1.8 0 0 1 47.2,51.00000000000001 V51.0 A1.8,1.8 0 0 1 49.0,49.2 Z M49.0,57.2 H71.00000000000001 A1.8,1.8 0 0 1 72.80000000000001,59.0 V59.00000000000001 A1.8,1.8 0 0 1 71.00000000000001,60.800000000000004 H49.0 A1.8,1.8 0 0 1 47.2,59.00000000000001 V59.0 A1.8,1.8 0 0 1 49.0,57.2 Z M49.0,65.2 H63.000000000000014 A1.8,1.8 0 0 1 64.80000000000001,67.0 V67.0 A1.8,1.8 0 0 1 63.000000000000014,68.8 H49.0 A1.8,1.8 0 0 1 47.2,67.0 V67.0 A1.8,1.8 0 0 1 49.0,65.2 Z"
+                android:fillColor="#FFFFFFFF"
+                android:fillType="evenOdd" />
+        </group>
+    </group>
+</vector>

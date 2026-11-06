@@ -18,7 +18,11 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -77,7 +81,7 @@ object ContentListDefaults {
     /**
      * 行的配色。默认透明：行装在卡里，底由卡画（页面上是卡片色，面板里是 [AppBottomSheet] 给的那一档）。
      * 选中走 `tertiaryContainer` 一对（淡强调底 + 强调色字）—— Miuix 下拉菜单的选中项也是这一对；
-     * 选中的底带被外面卡的 squircle 裁着，首尾行的圆角不会戳出去。
+     * 底不铺满整行，是卡里浮起的一块（四边缩 4dp、和卡同心的圆角，见 `selectionBlock`）。
      */
     @Composable
     @ReadOnlyComposable
@@ -339,7 +343,7 @@ fun ContentListItem(
  * 目录章名行。详情 / 预览页的目录、阅读菜单的目录面板共用，三处都一样装进一张卡：`modifier = Modifier.groupedCardItem(i, n)`。
  *
  * 从前每一行长得一样：读过的、在读的、没读的只有当前章那一抹底色能分，翻目录看不出「读到哪了、后面还剩多少」。
- * - **在读那章**（[selected]）：淡强调底 + 加粗 + 行尾「在读」（占掉行尾，[trailingContent] 这一行不显示）。
+ * - **在读那章**（[selected]）：卡里浮起的一块淡强调底 + 加粗 + 行尾「在读」（占掉行尾，[trailingContent] 这一行不显示）。
  * - **读过的**（[read]）：字换成说明小字那一档（`onSurfaceVariantSummary`，卡上对比度仍 ≥ 4.5:1），读屏补一句「已读」。
  * - **48dp 高**（[ContentListDefaults.CompactPadding]）：目录是单行的长列表，内容行默认的 56dp 放在这里一屏少两三章。
  * - [highlight]：搜索章节时，章名里命中的字标强调色。
@@ -439,14 +443,16 @@ private fun ListRow(
     content: @Composable () -> Unit,
     minHeight: Dp = Dimens.listItemMinHeight,
 ) {
-    val container = if (selected) colors.selectedContainerColor else colors.containerColor
+    val tinted = selected && colors.selectedContainerColor != colors.containerColor
     val alpha = if (enabled) 1f else DISABLED_ALPHA
     val main = (if (selected) colors.selectedContentColor else colors.contentColor).let { it.copy(alpha = it.alpha * alpha) }
     val support = (if (selected) colors.selectedSupportingColor else colors.supportingColor).let { it.copy(alpha = it.alpha * alpha) }
     Row(
         modifier
             .fillMaxWidth()
-            .squircleSurface(container, corners)
+            .squircleSurface(colors.containerColor, corners)
+            // 画在按压反馈底下：按下选中的那一行，照样整行压暗
+            .then(if (tinted) Modifier.selectionBlock(colors.selectedContainerColor) else Modifier)
             .then(interaction)
             .heightIn(min = minHeight)
             .padding(contentPadding),
@@ -475,3 +481,32 @@ private fun ListRow(
 }
 
 private const val DISABLED_ALPHA = 0.38f
+
+/**
+ * 选中行的底：卡里浮起的一块，四边各缩 [SelectionInset]、圆角 [SelectionRadius]（squircle，同 Miuix 卡片的弯法）。
+ *
+ * 从前选中是一条通栏的直角色带，从卡的左边铺到右边：目录滚到中间时，卡顶被视口切成直线、「在读」又是一条直角带，
+ * 一眼看去全是直边直角，被指出和应用的风格不搭。分段选择、页签都是「槽里浮起一块」，这里是同一个意思。
+ *
+ * 只缩底、不缩字：行的内边距不变，字的位置和没选中的行对齐。按压反馈不跟着缩，仍是整行压暗（Miuix 设置行就是这样）。
+ * 画法是一条填充路径（[squircleShape] 的轮廓，填充本身抗锯齿），不用 squircle 修饰符：那是着色器遮罩、要开一个离屏层，
+ * 为一块底色不值。
+ */
+private fun Modifier.selectionBlock(color: Color): Modifier = drawWithCache {
+    val inset = SelectionInset.toPx()
+    val block = Size(
+        (size.width - inset * 2).coerceAtLeast(0f),
+        (size.height - inset * 2).coerceAtLeast(0f),
+    )
+    val outline = squircleShape(SelectionRadius).createOutline(block, layoutDirection, this)
+    onDrawBehind { translate(inset, inset) { drawOutline(outline, color) } }
+}
+
+/** 选中块离行四边的距离 */
+private val SelectionInset = Dimens.gapXS
+
+/**
+ * 选中块的圆角：卡的圆角减去内缩（16 − 4 = 12，正好是 [AppShapes.radiusMedium]），和卡的角**同心** ——
+ * 选中的是卡里第一行、最后一行时，块的角和卡的角平行地弯过去。从卡的圆角派生，哪天卡的角改了，这里跟着变
+ */
+private val SelectionRadius = AppShapes.radiusLarge - SelectionInset

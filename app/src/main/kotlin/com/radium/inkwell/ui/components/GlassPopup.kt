@@ -12,6 +12,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -41,7 +42,7 @@ import top.yukonga.miuix.kmp.window.WindowListPopup
  * - **卡片半透明**：卡片底（Miuix 在 `ListPopupContent` 里写死读 `surfaceContainer`）只在这一小块换成
  *   [POPUP_GLASS_ALPHA_LIGHT] / [POPUP_GLASS_ALPHA_DARK] 的卡片色，各行的底（`DropdownColors.containerColor`，默认也是实心卡片色）
  *   换成透明 —— 透出来的是底下那片已经糊开的页面，一层雾，而不是贴上去的一块白。
- * - **一圈细高光**：卡片边缘描一道浅色的线（玻璃的边，同 Small Container 那档高光的意思），深色下尤其分得出卡片的轮廓。
+ * - **一道上亮下淡的细边**（[GlassRim]）：模仿顶栏玻璃圆、底部胶囊那种边缘高光的「顶光」，深色下尤其靠它分出卡片的轮廓。
  *
  * 字读不读得清按**最坏的页面**算（同 CoverGlassTest 里的玻璃卡）：浅色主题卡片下面一片纯黑、深色主题一片纯白。
  * 叠色厚度保证正文够 4.5:1；说明小字和选中项的强调色在这块最坏的底上现推（[AppThemes.readableOn]），
@@ -115,18 +116,27 @@ internal fun GlassDropdownPopup(
 }
 
 /**
- * 玻璃卡片的边：一道浅色细线，形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle）。
- * 画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。线一半落在裁切外面，粗档画出来是一道细线
+ * 玻璃卡片的边：一道白色细线，上亮下淡 —— 顶栏玻璃圆、底部胶囊的边缘高光是从上面打的光（miuix-blur 的 BloomStroke），
+ * 这里用竖向渐变学它的样子，和它们放在一起是一套。形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle）。
+ * 画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。线一半落在裁切外面，粗档画出来是一道细线。
+ *
+ * **别换成 miuix-blur 的边缘高光**（0.5.2-beta.5 / beta.6 两回）：它按 Plus 混合往上加，前提是底下不透明 ——
+ * 主窗口里的玻璃底下是页面，没事；弹层是自己的透明窗口，卡片只有 [POPUP_GLASS_ALPHA_LIGHT] 那么厚，
+ * Plus 把高光那一圈的**透明度**也加满了，透出窗口底下的黑：beta.5 借 `drawBackdrop` 画成一圈纯黑，
+ * beta.6 直接画着色器，那一圈成了「卡片叠在黑底上」的灰，中间剩一块直角的亮矩形（真机截图量过：亮块 242 = 卡片叠在页面上，灰圈 217 = 卡片叠在纯黑上）。
+ * 白线按普通的 SrcOver 画，只会提亮，不会把卡片变不透明。
  */
 @Composable
 private fun GlassRim(dark: Boolean, modifier: Modifier) {
-    val color = Color.White.copy(alpha = if (dark) POPUP_RIM_ALPHA_DARK else POPUP_RIM_ALPHA_LIGHT)
+    val top = Color.White.copy(alpha = if (dark) POPUP_RIM_TOP_ALPHA_DARK else POPUP_RIM_TOP_ALPHA_LIGHT)
+    val bottom = Color.White.copy(alpha = if (dark) POPUP_RIM_BOTTOM_ALPHA_DARK else POPUP_RIM_BOTTOM_ALPHA_LIGHT)
     val shape = remember { squircleShape(AppShapes.radiusLarge) }
     Box(
         modifier.drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)
             val stroke = Stroke(width = Dimens.strokeThick.toPx())
-            onDrawBehind { drawOutline(outline, color, style = stroke) }
+            val brush = Brush.verticalGradient(listOf(top, bottom))
+            onDrawBehind { drawOutline(outline, brush, style = stroke) }
         },
     )
 }
@@ -188,6 +198,11 @@ internal fun popupGlassFloor(container: Color, dark: Boolean): Color {
 internal const val POPUP_GLASS_ALPHA_LIGHT = 0.85f
 internal const val POPUP_GLASS_ALPHA_DARK = 0.85f
 
-/** 卡片边那道线：浅色下卡片本身就白，线只是把边磨亮一点；深色下靠它分出卡片的轮廓 */
-private const val POPUP_RIM_ALPHA_LIGHT = 0.6f
-private const val POPUP_RIM_ALPHA_DARK = 0.14f
+/**
+ * 卡片边那道线的上下两头：上头亮（顶光照着的那条边），往下渐渐淡下去。浅色下卡片本身就白，线只是把边磨亮一点；
+ * 深色下靠它分出卡片的轮廓。平均下来和从前那道匀称的线（浅 0.6 / 深 0.14）差不多亮
+ */
+private const val POPUP_RIM_TOP_ALPHA_LIGHT = 0.9f
+private const val POPUP_RIM_BOTTOM_ALPHA_LIGHT = 0.35f
+private const val POPUP_RIM_TOP_ALPHA_DARK = 0.24f
+private const val POPUP_RIM_BOTTOM_ALPHA_DARK = 0.06f

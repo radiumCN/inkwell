@@ -67,7 +67,8 @@ fun Modifier.squircleSurface(color: Color, corners: SquircleCorners): Modifier =
  * Miuix squircle 轮廓的 [Shape]：和 squircle 修饰符同一条曲线（`addSquircleRect`，Miuix 自己拿它对齐着色器那条边）。
  *
  * **只给要 Shape 参数的地方用**，目前是毛玻璃（[CoverGlassCard]、提示胶囊、选中文字后的替换表单）：
- * 玻璃取样的范围按这条曲线裁。裁切整块内容与底色仍用 squircle 修饰符 —— 那是着色器遮罩、边缘抗锯齿；
+ * 玻璃取样的范围按这条曲线裁。另有列表行选中时的那一块底（`ContentListItem.kt` 的 `selectionBlock`）按它的轮廓填色 ——
+ * 填充本身是抗锯齿的，不必为一块底色开遮罩层。裁切整块内容与底色仍用 squircle 修饰符 —— 那是着色器遮罩、边缘抗锯齿；
  * 这里是路径，拿来 clip 整块内容不如修饰符。
  *
  * 是 [CornerBasedShape] 的子类，这一点**别改回普通 Shape**：miuix-blur 的边缘高光是着色器按「圆角矩形」算的，

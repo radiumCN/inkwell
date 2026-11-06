@@ -131,12 +131,14 @@ class CoverGlassTest {
     }
 
     @Test
-    fun `多选操作条的玻璃上正文和删除键压在最坏的页面上也够 4点5 比 1`() {
+    fun `多选操作条与顶栏玻璃按钮上正文和删除键压在最坏的页面上也够 4点5 比 1`() {
         // 操作条浮在列表上（书架网格里一排封面），最坏同封面玻璃卡：浅色下面一片纯黑、深色下面一片纯白。
         // 正文 onSurface 由薄底保证；「删除」的 error 红有的配色放在不透明的卡片上都不到 4.5:1，加厚薄底救不回来，
         // 所以是按这块最坏的底现推的（同提示胶囊的操作键），推完也得够。
-        // 同一块玻璃（FloatingGlassBar）还托着书架的隐藏区胶囊：「无法上锁」那行说明色也是现推的
-        assertVeil("多选操作条", TOOLBAR_VEIL_LIGHT, TOOLBAR_VEIL_DARK) { s, dark ->
+        // 同一块玻璃（FloatingGlassBar）还托着书架的隐藏区胶囊：「无法上锁」那行说明色也是现推的。
+        // 顶栏的玻璃圆按钮 / 胶囊（BarButtonGroup）也是这块玻璃、读同一层薄底：图标是 onSurface，
+        // 最坏是书籍详情页头部那张纯黑的封面从圆底下透上来
+        assertVeil("多选操作条 / 顶栏玻璃按钮", TOOLBAR_VEIL_LIGHT, TOOLBAR_VEIL_DARK) { s, dark ->
             minAlpha(s.surfaceContainer, listOf(s.onSurface), dark)
         }
         schemes.forEach { (s, dark) ->

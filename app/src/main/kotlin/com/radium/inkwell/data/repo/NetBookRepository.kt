@@ -8,6 +8,7 @@ import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.SourceVariables
+import com.radium.inkwell.core.source.bookNameAndAuthor
 import androidx.room3.withWriteTransaction
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
@@ -118,14 +119,16 @@ class NetBookRepository(
         )
         val (readIndex, readOffset) = alignProgress(bookId, existing, toc)
         val entities = buildToc(bookId, toc)
+        // 书名作者以列表上的为准，详情页只补空缺：搜索 / 发现页认「已加入」按的是列表上那一对，见 bookNameAndAuthor
+        val (title, author) = bookNameAndAuthor(detail, fallback)
         // 书行与目录一起落库：中途被杀不会留下「有书行没目录」的半成品
         db.withWriteTransaction {
             bookDao.upsert(
                 BookEntity(
                     id = bookId,
                     type = BookType.NET,
-                    title = detail.title.ifBlank { fallback?.title.orEmpty() },
-                    author = detail.author ?: fallback?.author ?: "",
+                    title = title,
+                    author = author,
                     coverPath = detail.coverUrl ?: fallback?.coverUrl,
                     intro = (detail.intro ?: fallback?.intro)?.htmlToPlainText(),
                     sourceId = sourceId,

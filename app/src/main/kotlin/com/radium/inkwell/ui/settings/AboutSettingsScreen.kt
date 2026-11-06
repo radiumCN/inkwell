@@ -45,7 +45,6 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -59,9 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import com.radium.inkwell.ui.components.AppToolbar
@@ -311,13 +308,10 @@ private fun AboutHero(
                 .padding(top = topInset + Dimens.gapXXL, bottom = Dimens.gapXXL + Dimens.gapS),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Image(
-                painter = painterResource(icon.preview),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(Dimens.aboutHeroIcon)
-                    .squircleClip(AppShapes.radiusExtraLarge),
+            AppIconImage(
+                icon = icon,
+                size = Dimens.aboutHeroIcon,
+                modifier = Modifier.squircleClip(AppShapes.radiusExtraLarge),
             )
             Text(
                 "Inkwell",

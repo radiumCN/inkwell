@@ -1,10 +1,9 @@
 package com.radium.inkwell.ui.bookshelf
 
+import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
-import com.radium.inkwell.data.repo.bookKey
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -16,29 +15,58 @@ import kotlin.test.assertTrue
  */
 class HiddenShelfTest {
 
-    private fun book(title: String, hidden: Boolean = false) = BookEntity(
+    private fun book(title: String, hidden: Boolean = false, author: String = "作者") = BookEntity(
         id = title,
         type = BookType.NET,
         title = title,
-        author = "作者",
+        author = author,
+        sourceId = "源",
+        bookUrl = "/book/$title",
         addedAt = 0,
         updatedAt = 0,
         hidden = hidden,
     )
 
+    /** 列表上的一条：默认书名作者都和书架上那本一样、但来自别的书源 */
+    private fun listed(title: String, author: String = "作者", sourceId: String = "别的源", bookUrl: String = "/other") =
+        SearchResult(title = title, bookUrl = bookUrl, author = author, sourceId = sourceId)
+
     private val shelf = listOf(book("看得见的书"), book("藏起来的书", hidden = true))
 
     @Test
     fun `上了锁 —— 隐藏的书不算在架`() {
-        val keys = searchableShelfKeys(shelf, hiddenLocked = true)
-        assertTrue(bookKey("看得见的书", "作者") in keys)
-        assertFalse(bookKey("藏起来的书", "作者") in keys)
+        val index = searchableShelf(shelf, hiddenLocked = true)
+        assertTrue(listed("看得见的书") in index)
+        assertFalse(listed("藏起来的书") in index)
+        // 按地址认也一样拦着，别从这条缝里漏出去
+        assertFalse(listed("藏起来的书", author = "", sourceId = "源", bookUrl = "/book/藏起来的书") in index)
     }
 
     @Test
     fun `没上锁 —— 隐藏只是收起来，照旧算在架`() {
-        val keys = searchableShelfKeys(shelf, hiddenLocked = false)
-        assertEquals(setOf(bookKey("看得见的书", "作者"), bookKey("藏起来的书", "作者")), keys)
+        val index = searchableShelf(shelf, hiddenLocked = false)
+        assertTrue(listed("看得见的书") in index)
+        assertTrue(listed("藏起来的书") in index)
+        assertFalse(listed("不在架上的书") in index)
+    }
+
+    /**
+     * 书架上那本的作者存歪了（老版本取详情页的写法，作者规则取出空串）：
+     * 列表上就是加它的那一行，书名作者对不上也得认出来，否则一直亮着「加入」
+     */
+    @Test
+    fun `书名作者对不上 —— 同一个书源同一个地址照样认得`() {
+        val index = searchableShelf(listOf(book("大主宰", author = "")), hiddenLocked = false)
+        assertTrue(listed("大主宰", author = "天蚕土豆", sourceId = "源", bookUrl = "/book/大主宰") in index)
+        assertFalse(listed("大主宰", author = "天蚕土豆") in index)
+    }
+
+    @Test
+    fun `本地书没有书源和地址 —— 只按书名作者认`() {
+        val local = book("本地的书").copy(type = BookType.LOCAL_TXT, sourceId = null, bookUrl = null)
+        val index = searchableShelf(listOf(local), hiddenLocked = false)
+        assertTrue(listed("本地的书") in index)
+        assertFalse(listed("别的书", sourceId = "源", bookUrl = "/book/本地的书") in index)
     }
 
     @Test

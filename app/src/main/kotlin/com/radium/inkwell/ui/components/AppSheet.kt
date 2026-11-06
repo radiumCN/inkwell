@@ -95,38 +95,42 @@ fun AppBottomSheet(
             }
         }
     }
-    WindowBottomSheet(
-        show = show,
-        modifier = modifier,
-        title = title,
-        startAction = startAction?.let { action -> { scope.action() } },
-        endAction = endAction?.let { action -> { scope.action() } },
-        backgroundColor = backgroundColor,
-        enableWindowDim = enableWindowDim,
-        allowDismiss = allowDismiss,
-        dragHandleColor = dragHandleColor,
-        // 左右边距由内容按 cardMargin() 自己留（见上面「面板里怎么排」）：输入框、卡片离面板边 24dp，
-        // 卡里的行再自带 16dp。交给 Miuix 留的话，分组卡、groupedCardItem 自带的外边距会再叠一层
-        insideMargin = DpSize(0.dp, 0.dp),
-        onDismissRequest = { show = false },
-        onDismissFinished = {
-            // 先让调用方摘掉面板，再办事：事情若是「打开另一个面板」，两个面板不会叠着同时在组合树里
-            latestDismiss()
-            pending?.invoke()
-            pending = null
-        },
-    ) {
-        // 阅读设置面板不压暗（要看着正文调排版），同理也不糊
-        if (enableWindowDim) DialogWindowBlur(visible = show)
-        val layer = CardLayer(
-            color = sheetCardColor(MiuixTheme.colorScheme, backgroundColor),
-            margin = SHEET_MARGIN,
-        )
-        CompositionLocalProvider(LocalCardLayer provides layer) {
-            Column(Modifier.fillMaxWidth()) {
-                scope.content()
-                if (padNavigationBar) {
-                    Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+    // 弹层在自己的窗口里，却继承调用处的 CompositionLocal：面板若声明在顶栏的 actions 里，
+    // 标题行的 × / ✓ 会被排成顶栏玻璃组里的一格（见 BarButtonGroup）
+    CompositionLocalProvider(LocalBarButtonGroup provides null) {
+        WindowBottomSheet(
+            show = show,
+            modifier = modifier,
+            title = title,
+            startAction = startAction?.let { action -> { scope.action() } },
+            endAction = endAction?.let { action -> { scope.action() } },
+            backgroundColor = backgroundColor,
+            enableWindowDim = enableWindowDim,
+            allowDismiss = allowDismiss,
+            dragHandleColor = dragHandleColor,
+            // 左右边距由内容按 cardMargin() 自己留（见上面「面板里怎么排」）：输入框、卡片离面板边 24dp，
+            // 卡里的行再自带 16dp。交给 Miuix 留的话，分组卡、groupedCardItem 自带的外边距会再叠一层
+            insideMargin = DpSize(0.dp, 0.dp),
+            onDismissRequest = { show = false },
+            onDismissFinished = {
+                // 先让调用方摘掉面板，再办事：事情若是「打开另一个面板」，两个面板不会叠着同时在组合树里
+                latestDismiss()
+                pending?.invoke()
+                pending = null
+            },
+        ) {
+            // 阅读设置面板不压暗（要看着正文调排版），同理也不糊
+            if (enableWindowDim) DialogWindowBlur(visible = show)
+            val layer = CardLayer(
+                color = sheetCardColor(MiuixTheme.colorScheme, backgroundColor),
+                margin = SHEET_MARGIN,
+            )
+            CompositionLocalProvider(LocalCardLayer provides layer) {
+                Column(Modifier.fillMaxWidth()) {
+                    scope.content()
+                    if (padNavigationBar) {
+                        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+                    }
                 }
             }
         }

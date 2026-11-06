@@ -5,13 +5,14 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.RemoteBookDetail
 import com.radium.inkwell.core.source.RemoteChapter
 import com.radium.inkwell.core.source.SearchResult
+import com.radium.inkwell.core.source.bookNameAndAuthor
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
-import com.radium.inkwell.data.repo.bookKey
-import com.radium.inkwell.ui.bookshelf.searchableShelfKeys
+import com.radium.inkwell.ui.bookshelf.ShelfIndex
+import com.radium.inkwell.ui.bookshelf.searchableShelf
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -142,14 +143,18 @@ class BookPreviewViewModel(
 
     private var detail: RemoteBookDetail? = null
     private var loadJob: kotlinx.coroutines.Job? = null
+    /** 书架此刻的索引；详情抓回来时拿它判「已在书架」，不必再查一遍库 */
+    private var shelf = ShelfIndex()
 
     init {
         load()
         // 书架变动时实时刷新"已在书架"（本页刚加、别处加删、跨书源加了同名书都算）。
-        // 隐藏区上了锁时隐藏的书不算 —— 见 searchableShelfKeys
+        // 隐藏区上了锁时隐藏的书不算 —— 见 searchableShelf
         viewModelScope.launch {
-            searchableShelfKeys(bookRepo, appPrefs).collect { keys ->
-                val onShelf = bookKey(_state.value.title, _state.value.author) in keys
+            searchableShelf(bookRepo, appPrefs).collect { index ->
+                shelf = index
+                val s = _state.value
+                val onShelf = index.contains(s.title, s.author, result.sourceId, result.bookUrl)
                 if (onShelf != _state.value.inShelf) {
                     _state.value = _state.value.copy(inShelf = onShelf)
                 }
@@ -234,8 +239,8 @@ class BookPreviewViewModel(
                         continue
                     }
                     detail = d
-                    val title = d.title.ifBlank { r.title }
-                    val author = d.author ?: r.author.orEmpty()
+                    // 和入库同一套取法：页上写的、判在架用的，就是加进书架后的那一对
+                    val (title, author) = bookNameAndAuthor(d, r)
                     _state.value = _state.value.copy(
                         loading = false,
                         error = null,
@@ -245,9 +250,9 @@ class BookPreviewViewModel(
                         coverUrl = d.coverUrl ?: r.coverUrl,
                         intro = d.intro ?: r.intro,
                         chapters = toc,
-                        // 按 书名+作者 判断，而不是只认当前书源的 (sourceId,bookUrl)：同一本书跨书源
-                        // 合并、代表书源每次搜索可能不同，只认当前源会漏判成"未加入"
-                        inShelf = shelfBookId(title, author) != null,
+                        // 书名+作者 与当前书源的 (sourceId,bookUrl) 都认：同一本书跨书源合并、代表书源
+                        // 每次搜索可能不同，只认当前源会漏判；只认书名作者，老库里存歪了的那本又认不出（见 ShelfIndex）
+                        inShelf = shelf.contains(title, author, r.sourceId, r.bookUrl),
                         currentSource = current,
                         sources = sourceOptions(),
                     )

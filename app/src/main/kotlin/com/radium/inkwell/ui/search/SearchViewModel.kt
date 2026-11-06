@@ -17,7 +17,8 @@ import com.radium.inkwell.data.repo.BookSourceRepository.EnabledSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.TitleMatch
 import com.radium.inkwell.ui.bookshelf.revealsHiddenBook
-import com.radium.inkwell.ui.bookshelf.searchableShelfKeys
+import com.radium.inkwell.ui.bookshelf.ShelfIndex
+import com.radium.inkwell.ui.bookshelf.searchableShelf
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -122,8 +123,8 @@ data class SearchUiState(
      * 剩下的先不搜。与进详情页的暂停同一套机制，只是提示语不同 —— 别让用户以为搜索坏了、卡住了。
      */
     val earlyStopped: Boolean = false,
-    /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书） */
-    val shelfKeys: Set<Pair<String, String>> = emptySet(),
+    /** 书架上有哪些书；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书），见 [ShelfIndex] */
+    val shelf: ShelfIndex = ShelfIndex(),
     /** 搜索历史，新的在前。设置里关掉记录时恒为空 */
     val history: List<String> = emptyList(),
     /**
@@ -256,10 +257,10 @@ class SearchViewModel(
 
     init {
         // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）。
-        // 隐藏区上了锁时隐藏的书不算在架 —— 否则一次搜索就绕开了那把锁，见 searchableShelfKeys
+        // 隐藏区上了锁时隐藏的书不算在架 —— 否则一次搜索就绕开了那把锁，见 searchableShelf
         viewModelScope.launch {
-            searchableShelfKeys(bookRepo, appPrefs).collect { keys ->
-                _state.value = _state.value.copy(shelfKeys = keys)
+            searchableShelf(bookRepo, appPrefs).collect { shelf ->
+                _state.value = _state.value.copy(shelf = shelf)
             }
         }
         viewModelScope.launch {

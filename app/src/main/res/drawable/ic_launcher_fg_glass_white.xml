@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:rotation="-9" android:pivotX="47" android:pivotY="50">
+        <path
+            android:pathData="M39,27 H55 A10,10 0 0 1 65,37 V63 A10,10 0 0 1 55,73 H39 A10,10 0 0 1 29,63 V37 A10,10 0 0 1 39,27 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="0" android:startY="27" android:endX="0" android:endY="73">
+                    <item android:offset="0" android:color="#FF3482FF" />
+                    <item android:offset="1" android:color="#FF1F5FD6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+    <group android:rotation="6" android:pivotX="60" android:pivotY="58">
+        <path
+            android:pathData="M52,36 H68 A10,10 0 0 1 78,46 V72 A10,10 0 0 1 68,82 H52 A10,10 0 0 1 42,72 V46 A10,10 0 0 1 52,36 Z"
+            android:fillColor="#FFFFFFFF"
+            android:fillAlpha="0.55"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="1.3"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.95" />
+        <path
+            android:pathData="M49,51 H71"
+            android:strokeColor="#FF24272C"
+            android:strokeWidth="3.6"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.55" />
+        <path
+            android:pathData="M49,59 H71"
+            android:strokeColor="#FF24272C"
+            android:strokeWidth="3.6"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.55" />
+        <path
+            android:pathData="M49,67 H63"
+            android:strokeColor="#FF24272C"
+            android:strokeWidth="3.6"
+            android:strokeLineCap="round"
+            android:strokeAlpha="0.55" />
+    </group>
+</vector>

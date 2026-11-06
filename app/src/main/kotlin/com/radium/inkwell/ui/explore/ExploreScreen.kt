@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.core.source.SearchResult
-import com.radium.inkwell.data.repo.bookKey
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
@@ -186,7 +185,7 @@ fun ExploreScreen(
             ) {
                 val bookCount = state.books.size
                 itemsIndexed(state.books, key = { _, it -> it.exploreKey }) { index, book ->
-                    val inShelf = bookKey(book.title, book.author) in state.shelfKeys
+                    val inShelf = book in state.shelf
                     BookListRow(
                         title = book.title,
                         subtitle = listOfNotNull(book.author, book.latestChapter)

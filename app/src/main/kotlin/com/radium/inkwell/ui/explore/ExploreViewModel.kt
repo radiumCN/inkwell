@@ -14,7 +14,8 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
-import com.radium.inkwell.ui.bookshelf.searchableShelfKeys
+import com.radium.inkwell.ui.bookshelf.ShelfIndex
+import com.radium.inkwell.ui.bookshelf.searchableShelf
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -80,8 +81,8 @@ data class ExploreUiState(
     val loadMoreFailed: Boolean = false,
     /** 正在加入书架的那几本（bookUrl）。可以同时加好几本 */
     val addingUrls: Set<String> = emptySet(),
-    /** 书架已有书的 (书名,作者) 键；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书） */
-    val shelfKeys: Set<Pair<String, String>> = emptySet(),
+    /** 书架上有哪些书；列表据此把已在架的书显示为"已加入"（隐藏区上锁时不含隐藏的书），见 [ShelfIndex] */
+    val shelf: ShelfIndex = ShelfIndex(),
     /** 最近用过的书源 id（新→旧，最多 3 个）。选择器「最近」区按它置顶 */
     val recentSourceIds: List<String> = emptyList(),
 ) {
@@ -109,10 +110,10 @@ class ExploreViewModel(
     private val ruleCache = mutableMapOf<String, BookSourceRule>()
 
     init {
-        // 书架变动时刷新"已加入"标记。隐藏区上了锁时隐藏的书不算在架，见 searchableShelfKeys
+        // 书架变动时刷新"已加入"标记。隐藏区上了锁时隐藏的书不算在架，见 searchableShelf
         viewModelScope.launch {
-            searchableShelfKeys(bookRepo, appPrefs).collect { keys ->
-                _state.value = _state.value.copy(shelfKeys = keys)
+            searchableShelf(bookRepo, appPrefs).collect { shelf ->
+                _state.value = _state.value.copy(shelf = shelf)
             }
         }
         // 书源跟着库走，而不是进页时读一次：从「没有可用的发现源」点「去导入规则」导入回来、
