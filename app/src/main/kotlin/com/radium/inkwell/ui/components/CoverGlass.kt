@@ -168,9 +168,6 @@ fun CoverHeaderBackground(title: String, coverModel: Any?, modifier: Modifier = 
     }
 }
 
-/** 示例 App 的 Colored Thick 混色（封面玻璃卡、多选操作条）。[dark] 同 [smallGlassHighlight] 的 */
-internal fun coloredThick(dark: Boolean) = if (dark) ColoredThickDark else ColoredThickLight
-
 /**
  * 示例 App 的 Small Container 那档玻璃边缘高光：卡片、浮起来的药丸、提示胶囊这类小面都用这一档。
  * [dark] 是**玻璃本身**深不深（深色主题、或浅色主题里的深色胶囊），不是 App 在不在深色模式

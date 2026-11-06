@@ -128,8 +128,10 @@ fun BatchActionBar(
  * 放进 [AppScaffold] 的 `floatingToolbar`，出现 / 收起时从底部滑入滑出（[bottomBarEnter] / [bottomBarExit]）。
  * 几样同时放进那个槽时（书架：隐藏区胶囊 + 多选操作条），各自给 [visible]，同一时刻只亮一个。
  *
- * **玻璃**（在 AppScaffold 里才有可取样的页面图层）：对列表取样糊开，Colored Thick 混色、Small Container 那档边缘高光，
- * 再垫一层卡片色薄底（同封面玻璃卡：底下是一本黑封面时字照样读得清，厚度见 CoverGlassTest）。胶囊的形状自己裁：
+ * **玻璃**（在 AppScaffold 里才有可取样的页面图层）：对列表取样、糊开 [TOOLBAR_BLUR_RADIUS]，Small Container 那档边缘高光，
+ * 上面只垫一层卡片色薄底（同封面玻璃卡：底下是一本黑封面时字照样读得清，厚度见 CoverGlassTest）—— 照 Miuix 示例 App 的悬浮导航栏。
+ * 从前是糊 100 + Colored Thick 混色 + 薄底：100 比胶囊还高一截，底下连同四周一大片被平均成近白，混色里还有一层 20% 的灰，
+ * 压着封面的那截也是同一片浅灰，被指出「玻璃怎么没有透明的效果」。胶囊的形状自己裁：
  * Miuix 的悬浮工具条只画一块实心底，没有玻璃这一档。不在 AppScaffold 里时退回实色胶囊（卡片色、带一圈分隔线：
  * 深色下卡片色和列表的卡同一个色，只靠阴影 —— 黑底上看不见 —— 分不出条在哪）。
  *
@@ -159,7 +161,8 @@ fun FloatingGlassBar(
                 backdrop = backdrop,
                 shape = shape,
                 blurRadius = TOOLBAR_BLUR_RADIUS,
-                colors = BlurDefaults.blurColors(blendColors = coloredThick(dark)),
+                // 不混色：透不透看的是糊多狠，发灰的那层正出在 Colored Thick 里（见上面 KDoc）。字的对比度只靠下面那层薄底
+                colors = BlurDefaults.blurColors(),
                 highlight = smallGlassHighlight(dark),
             )
             .background(toolbarGlassVeil(scheme.surfaceContainer, dark))
@@ -195,8 +198,11 @@ private val TOOLBAR_LIFT = Dimens.gapXS
 /** 实色（没有玻璃）时的投影：Miuix 悬浮工具条的默认值 */
 private val FLAT_TOOLBAR_SHADOW = Dimens.gapXS
 
-/** dp。示例「Texture Blur」的 100：胶囊小，底下是一行行书名和封面，糊狠了才摊成一层雾 */
-private const val TOOLBAR_BLUR_RADIUS = 100f
+/**
+ * dp。Miuix 示例 App 悬浮导航栏的 25：底下的书名照样糊成认不出的一抹，封面的颜色、明暗块还留着，列表一滚就从胶囊里流过去。
+ * 别再调回 100（示例「Texture Blur」那一档）：那是给整张卡片铺满的，放在 56dp 高的胶囊上，底下一大片被平均成一个颜色，看着就是实心
+ */
+private const val TOOLBAR_BLUR_RADIUS = 25f
 
 /** 操作条玻璃上那层卡片色（为什么要有它见 [BatchActionBar]） */
 internal fun toolbarGlassVeil(card: Color, dark: Boolean): Color =
@@ -204,7 +210,7 @@ internal fun toolbarGlassVeil(card: Color, dark: Boolean): Color =
 
 /**
  * 操作条玻璃最坏时的底色：薄底叠在和字反着的一片纯色上（浅色主题纯黑、深色主题纯白，同封面玻璃卡）。
- * 「删除」的红字按它推（不算 Colored Thick 混色 —— 它只会把底往字的反面提，往保守里算）
+ * 「删除」的红字按它推（玻璃不混色，糊开的底就是这么坏；模糊再小也不会比「一整片纯色」更坏）
  */
 internal fun toolbarGlassFloor(card: Color, dark: Boolean): Color {
     val under = if (dark) Color.White else Color.Black
