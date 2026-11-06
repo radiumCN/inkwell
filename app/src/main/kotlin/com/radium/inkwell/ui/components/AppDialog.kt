@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,74 +74,77 @@ fun AppAlertDialog(
     var viaCancel by remember { mutableStateOf(false) }
     val latestRequest by rememberUpdatedState(onDismissRequest)
     val latestCancel by rememberUpdatedState(onDismiss ?: onDismissRequest)
-    WindowDialog(
-        show = show,
-        modifier = modifier,
-        title = title,
-        // 加载中、或调用方禁了取消（加入书架落库中）时，不让点外面 / 返回键把它关掉 ——
-        // 否则保存到一半弹窗没了，结果提示落在别的页面上。取消键灰着，外面那条路也得一起关
-        onDismissRequest = { if (!confirmLoading && dismissEnabled) show = false },
-        onDismissFinished = { if (viaCancel) latestCancel() else latestRequest() },
-    ) {
-        DialogWindowBlur(visible = show)
-        Column(Modifier.fillMaxWidth()) {
-            if (text != null || content != null) {
-                val bodyScroll = rememberScrollState()
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (scrollable) {
-                                Modifier.heightIn(max = Dimens.dialogBodyMaxHeight).verticalScroll(bodyScroll)
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+    // 同 AppBottomSheet：声明在顶栏 actions 里的弹窗别继承顶栏玻璃组（见 BarButtonGroup）
+    CompositionLocalProvider(LocalBarButtonGroup provides null) {
+        WindowDialog(
+            show = show,
+            modifier = modifier,
+            title = title,
+            // 加载中、或调用方禁了取消（加入书架落库中）时，不让点外面 / 返回键把它关掉 ——
+            // 否则保存到一半弹窗没了，结果提示落在别的页面上。取消键灰着，外面那条路也得一起关
+            onDismissRequest = { if (!confirmLoading && dismissEnabled) show = false },
+            onDismissFinished = { if (viaCancel) latestCancel() else latestRequest() },
+        ) {
+            DialogWindowBlur(visible = show)
+            Column(Modifier.fillMaxWidth()) {
+                if (text != null || content != null) {
+                    val bodyScroll = rememberScrollState()
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (scrollable) {
+                                    Modifier.heightIn(max = Dimens.dialogBodyMaxHeight).verticalScroll(bodyScroll)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+                    ) {
+                        if (text != null) {
+                            // 字号/颜色照 Miuix 弹窗的 summary：居中、body1、onSurfaceSecondary
+                            Text(
+                                text,
+                                modifier = Modifier.fillMaxWidth(),
+                                fontSize = MiuixTheme.textStyles.body1.fontSize,
+                                color = MiuixTheme.colorScheme.onSurfaceSecondary,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                        content?.invoke(this)
+                    }
+                    Spacer(Modifier.height(Dimens.gapXL))
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
                 ) {
-                    if (text != null) {
-                        // 字号/颜色照 Miuix 弹窗的 summary：居中、body1、onSurfaceSecondary
-                        Text(
-                            text,
-                            modifier = Modifier.fillMaxWidth(),
-                            fontSize = MiuixTheme.textStyles.body1.fontSize,
-                            color = MiuixTheme.colorScheme.onSurfaceSecondary,
-                            textAlign = TextAlign.Center,
+                    if (dismissText != null) {
+                        SecondaryButton(
+                            text = dismissText,
+                            // 收起中的点击只吞掉、不把按钮置灰：置灰的话两个按钮会在退场动画里闪一下禁用色
+                            onClick = {
+                                when {
+                                    !show -> Unit
+                                    confirmLoading -> latestCancel()
+                                    else -> {
+                                        viaCancel = true
+                                        show = false
+                                    }
+                                }
+                            },
+                            enabled = dismissEnabled,
+                            modifier = Modifier.weight(1f),
                         )
                     }
-                    content?.invoke(this)
-                }
-                Spacer(Modifier.height(Dimens.gapXL))
-            }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
-            ) {
-                if (dismissText != null) {
-                    SecondaryButton(
-                        text = dismissText,
-                        // 收起中的点击只吞掉、不把按钮置灰：置灰的话两个按钮会在退场动画里闪一下禁用色
-                        onClick = {
-                            when {
-                                !show -> Unit
-                                confirmLoading -> latestCancel()
-                                else -> {
-                                    viaCancel = true
-                                    show = false
-                                }
-                            }
-                        },
-                        enabled = dismissEnabled,
-                        modifier = Modifier.weight(1f),
+                    PrimaryButton(
+                        text = confirmText,
+                        onClick = { if (show) onConfirm() },
+                        enabled = confirmEnabled,
+                        loading = confirmLoading,
+                        modifier = if (dismissText != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
                     )
                 }
-                PrimaryButton(
-                    text = confirmText,
-                    onClick = { if (show) onConfirm() },
-                    enabled = confirmEnabled,
-                    loading = confirmLoading,
-                    modifier = if (dismissText != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
-                )
             }
         }
     }

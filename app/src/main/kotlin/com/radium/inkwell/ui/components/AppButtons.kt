@@ -90,6 +90,10 @@ fun SecondaryButton(
  * - **禁用态**：Miuix 的图标按钮禁用时只是不响应，图标颜色不变，看不出它点不了。这里把内容色压到 38%。
  *
  * @param contentColor 图标色。默认沿用外层（顶栏上是 onSurface）；阅读器浮层、删除这类要换色的地方传
+ *
+ * **放在顶栏里时自动变成玻璃圆**：[AppTopBar] / [AppToolbar] 把导航位、动作位包进 [BarButtonGroup]，
+ * 组里的它画成一格（[BarButtonSlot]：一枚 40dp 的玻璃圆，几个挨着就合成一条胶囊，按下整组微缩）。
+ * 页面照旧写 `AppIconButton`，别在顶栏里自己给它套底色、套圆。别处（面板标题行、阅读器浮层、行尾）不受影响
  */
 @Composable
 fun AppIconButton(
@@ -101,6 +105,12 @@ fun AppIconButton(
     content: @Composable () -> Unit,
 ) {
     val base = if (contentColor.isSpecified()) contentColor else LocalContentColor.current
+    val tint = if (enabled) base else base.copy(alpha = base.alpha * DISABLED_ALPHA)
+    val group = LocalBarButtonGroup.current
+    if (group != null) {
+        BarButtonSlot(group, onClick, modifier, enabled, tint, backgroundColor, content)
+        return
+    }
     IconButton(
         onClick = onClick,
         modifier = modifier,
@@ -109,10 +119,7 @@ fun AppIconButton(
         minWidth = Dimens.touchTarget,
         minHeight = Dimens.touchTarget,
     ) {
-        CompositionLocalProvider(
-            LocalContentColor provides if (enabled) base else base.copy(alpha = base.alpha * DISABLED_ALPHA),
-            content = content,
-        )
+        CompositionLocalProvider(LocalContentColor provides tint, content = content)
     }
 }
 
@@ -122,6 +129,7 @@ fun AppIconButton(
  * 二十来个页面从前一字不差地重复「IconButton + ArrowBack + contentDescription 返回」，
  * 抄漏一处就少一个读屏名字。收成一个组件后，无障碍名称和 RTL 镜像只有一个地方能写错。
  * 图标用 Miuix 的 [MiuixIcons.Back]（HyperOS 那条细线箭头），它不会自动镜像，RTL 下这里自己翻。
+ * 在顶栏里是一枚玻璃圆（见 [AppIconButton]）；面板二级页标题行（`SheetPageHeader`）里的还是光秃秃的箭头
  */
 @Composable
 fun BackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {

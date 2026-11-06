@@ -200,9 +200,10 @@ private val FLAT_TOOLBAR_SHADOW = Dimens.gapXS
 
 /**
  * dp。Miuix 示例 App 悬浮导航栏的 25：底下的书名照样糊成认不出的一抹，封面的颜色、明暗块还留着，列表一滚就从胶囊里流过去。
- * 别再调回 100（示例「Texture Blur」那一档）：那是给整张卡片铺满的，放在 56dp 高的胶囊上，底下一大片被平均成一个颜色，看着就是实心
+ * 别再调回 100（示例「Texture Blur」那一档）：那是给整张卡片铺满的，放在 56dp 高的胶囊上，底下一大片被平均成一个颜色，看着就是实心。
+ * 顶栏的玻璃圆按钮 / 胶囊（[BarButtonGroup]）是同一块玻璃，也读它
  */
-private const val TOOLBAR_BLUR_RADIUS = 25f
+internal const val TOOLBAR_BLUR_RADIUS = 25f
 
 /** 操作条玻璃上那层卡片色（为什么要有它见 [BatchActionBar]） */
 internal fun toolbarGlassVeil(card: Color, dark: Boolean): Color =

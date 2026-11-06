@@ -31,10 +31,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarDefaults
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -80,8 +82,10 @@ fun AppTopBar(
         // 栏盖在内容上面（Miuix Scaffold 让内容铺满整屏）：落在栏上的触摸别漏给被糊住的那几行
         modifier = modifier.barBlur(containerColor).blockTouchesBelow(),
         color = if (barBlurActive()) Color.Transparent else containerColor,
-        navigationIcon = { if (onBack != null) BackButton(onClick = onBack) },
-        actions = actions,
+        // 返回键、动作各是一组玻璃按钮（BarButtonGroup）：Miuix 给导航位、动作位各留 16dp 边距，
+        // 48dp 的格子里 40dp 的圆正好离屏幕边 20dp，和窄栏（AppToolbar）一样
+        navigationIcon = { if (onBack != null) BarButtonGroup { BackButton(onClick = onBack) } },
+        actions = { BarButtonGroup(content = actions) },
         scrollBehavior = scrollBehavior,
         bottomContent = bottomContent,
     )
@@ -110,6 +114,7 @@ fun Modifier.topBarScroll(scrollBehavior: ScrollBehavior): Modifier =
  *
  * 自己让开状态栏与刘海（顶部 + 两侧），调用方不用再垫；放进 Scaffold 的 topBar 即可。
  * 在 [AppScaffold] 里时和 [AppTopBar] 一样是毛玻璃；[bottomContent] 同 [AppTopBar] 的那个槽。
+ * 导航位、动作位里的 [AppIconButton] 自动排成玻璃圆 / 胶囊（[BarButtonGroup]），同 [AppTopBar]。
  *
  * @param navigationIcon 一般是 [BackButton]；书架首页这种根页面不传
  * @param title 标题位。传纯文字时用 [ToolbarTitle]，字号与 Miuix 窄栏一致
@@ -154,22 +159,24 @@ private fun ToolbarRow(
                     .union(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)),
             )
             .height(Dimens.toolbarHeight)
-            // 左右各 gapXS：48dp 的图标按钮自带一圈可点区，再贴 16dp 就比 Miuix 窄栏的图标往里缩了一截
-            .padding(horizontal = Dimens.gapXS),
+            // 左右边距照 Miuix 大标题栏的导航位 / 动作位（各 16dp）：48dp 格子里的 40dp 玻璃圆离屏幕边 20dp，
+            // 和页面边距一条线，两种栏之间切过去按钮不挪位。没有返回键时标题离边也是这 16dp（同从前）
+            .padding(start = TopAppBarDefaults.NavigationIconPadding, end = TopAppBarDefaults.ActionIconPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (navigationIcon != null) {
-            navigationIcon()
+            BarButtonGroup { navigationIcon() }
         }
         Box(
             Modifier
                 .weight(1f)
-                .padding(start = if (navigationIcon != null) Dimens.gapXS else Dimens.gapM, end = Dimens.gapXS),
+                // 有返回键时离圆 12dp（格子自带 4dp 余量 + 8dp）：贴得再近，标题像是长在圆上
+                .padding(start = if (navigationIcon != null) Dimens.gapS else 0.dp, end = Dimens.gapXS),
             contentAlignment = Alignment.CenterStart,
         ) {
             title()
         }
-        Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+        BarButtonGroup(content = actions)
     }
 }
 

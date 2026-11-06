@@ -148,6 +148,12 @@ object Dimens {
      * 大标题顶栏收起后就是这个高度，搜索页 / 书架这类窄栏与它一致，页面之间切过去顶栏不跳。
      */
     val toolbarHeight = 52.dp
+    /**
+     * 顶栏玻璃按钮看得见的那一枚圆的直径，几个动作合成的胶囊也是这个高（[BarButtonGroup]）。
+     * 可点区仍是 [touchTarget]：圆外四周各让出 4dp 透明的触控余量，同 [chipHeight] 的做法。
+     * 与搜索框同高，搜索页的「‹ 圆 + 输入框 + 圆」一行顶边底边对齐
+     */
+    val barButton = 40.dp
     /** 按钮里的转圈。比默认的 40dp 小 —— 默认值会把按钮撑大 */
     val buttonSpinner = 18.dp
     /**

@@ -11,14 +11,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Density
 import com.radium.inkwell.ui.theme.AppShapes
 import com.radium.inkwell.ui.theme.AppThemes
 import java.util.function.Consumer
@@ -27,6 +28,8 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.blur.Backdrop
+import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -41,7 +44,8 @@ import top.yukonga.miuix.kmp.window.WindowListPopup
  * - **卡片半透明**：卡片底（Miuix 在 `ListPopupContent` 里写死读 `surfaceContainer`）只在这一小块换成
  *   [POPUP_GLASS_ALPHA_LIGHT] / [POPUP_GLASS_ALPHA_DARK] 的卡片色，各行的底（`DropdownColors.containerColor`，默认也是实心卡片色）
  *   换成透明 —— 透出来的是底下那片已经糊开的页面，一层雾，而不是贴上去的一块白。
- * - **一圈细高光**：卡片边缘描一道浅色的线（玻璃的边，同 Small Container 那档高光的意思），深色下尤其分得出卡片的轮廓。
+ * - **边缘高光**：和顶栏的玻璃圆按钮、底部悬浮胶囊同一种（miuix-blur 的 Small Container 那档，[smallGlassHighlight]），
+ *   深色下尤其靠它分出卡片的轮廓。从前是自己描的一道白细线，顶栏换成玻璃圆以后从圆里弹出来一张描线的卡，两种边并排着，被要求统一。
  *
  * 字读不读得清按**最坏的页面**算（同 CoverGlassTest 里的玻璃卡）：浅色主题卡片下面一片纯黑、深色主题一片纯白。
  * 叠色厚度保证正文够 4.5:1；说明小字和选中项的强调色在这块最坏的底上现推（[AppThemes.readableOn]），
@@ -115,20 +119,36 @@ internal fun GlassDropdownPopup(
 }
 
 /**
- * 玻璃卡片的边：一道浅色细线，形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle）。
- * 画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。线一半落在裁切外面，粗档画出来是一道细线
+ * 玻璃卡片的边：miuix-blur 的边缘高光，形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle —— 高光只从
+ * CornerBasedShape 读圆角，所以是 [squircleShape]）。画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。
+ *
+ * 卡片的玻璃是系统跨窗口模糊糊的，用不着 miuix-blur 取样；借 `drawBackdrop` 只为它最后那一步画高光（画高光的函数是 internal 的）：
+ * 取样源给 [NoBackdrop]、效果给空，它录一张空层、什么都不糊，然后照常画高光。
  */
 @Composable
 private fun GlassRim(dark: Boolean, modifier: Modifier) {
-    val color = Color.White.copy(alpha = if (dark) POPUP_RIM_ALPHA_DARK else POPUP_RIM_ALPHA_LIGHT)
     val shape = remember { squircleShape(AppShapes.radiusLarge) }
+    val highlight = smallGlassHighlight(dark)
     Box(
-        modifier.drawWithCache {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            val stroke = Stroke(width = Dimens.strokeThick.toPx())
-            onDrawBehind { drawOutline(outline, color, style = stroke) }
-        },
+        modifier.drawBackdrop(
+            backdrop = NoBackdrop,
+            shape = { shape },
+            effects = {},
+            highlight = { highlight },
+        ),
     )
+}
+
+/** 什么都不画的取样源，见 [GlassRim] */
+private object NoBackdrop : Backdrop {
+    override val isCoordinatesDependent: Boolean = false
+
+    override fun DrawScope.drawBackdrop(
+        density: Density,
+        coordinates: LayoutCoordinates?,
+        layerBlock: (GraphicsLayerScope.() -> Unit)?,
+        downscaleFactor: Int,
+    ) = Unit
 }
 
 /**
@@ -187,7 +207,3 @@ internal fun popupGlassFloor(container: Color, dark: Boolean): Color {
 // 再薄的话说明小字、选中项要推得太狠，和正文分不出层级
 internal const val POPUP_GLASS_ALPHA_LIGHT = 0.85f
 internal const val POPUP_GLASS_ALPHA_DARK = 0.85f
-
-/** 卡片边那道线：浅色下卡片本身就白，线只是把边磨亮一点；深色下靠它分出卡片的轮廓 */
-private const val POPUP_RIM_ALPHA_LIGHT = 0.6f
-private const val POPUP_RIM_ALPHA_DARK = 0.14f
