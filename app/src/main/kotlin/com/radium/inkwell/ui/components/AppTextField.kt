@@ -172,6 +172,10 @@ fun SearchField(
 /**
  * 紧凑单行输入框：默认 40dp 高、body2 字号，对话框/表单行内使用（坐在卡片或弹窗上，底色取输入框那档）。
  * 高度同 [SearchField] 是下限，大字号下随字号长高。
+ *
+ * @param label 框里左边的一个小标签（选字替换的「原文」「换成」）：两个框摞在一起时分清谁是谁，又不另占一行。
+ *   几个框挨着用时标签取一样的字数 —— 中文字等宽，输入起点就天然对齐，不必给标签定宽（定宽的话大字号下会被切）
+ * @param onDone 给了就是键盘右下角「完成」的动作（弹窗里等于点主按钮）；不给时「完成」只收键盘
  */
 @Composable
 fun CompactTextField(
@@ -179,6 +183,8 @@ fun CompactTextField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    label: String? = null,
+    onDone: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val style = rememberFieldStyle(interactionSource)
@@ -190,19 +196,32 @@ fun CompactTextField(
         textStyle = textStyle,
         cursorBrush = SolidColor(style.cursor),
         interactionSource = interactionSource,
+        keyboardOptions = if (onDone != null) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
+        keyboardActions = if (onDone != null) KeyboardActions(onDone = { onDone() }) else KeyboardActions.Default,
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = Dimens.compactFieldHeight)
             .fieldChrome(style, AppShapes.radiusMedium),
         decorationBox = { innerTextField ->
-            Box(
+            Row(
                 Modifier.padding(horizontal = Dimens.gapM, vertical = Dimens.gapXS),
-                contentAlignment = Alignment.CenterStart,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (value.isEmpty()) {
-                    Text(placeholder, style = textStyle, color = style.placeholder, maxLines = 1)
+                if (label != null) {
+                    Text(
+                        label,
+                        style = textStyle,
+                        color = style.placeholder,
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = Dimens.gapM),
+                    )
                 }
-                innerTextField()
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, style = textStyle, color = style.placeholder, maxLines = 1)
+                    }
+                    innerTextField()
+                }
             }
         },
     )

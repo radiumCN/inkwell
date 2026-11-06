@@ -856,7 +856,7 @@ class ReaderViewModel(
         viewModelScope.launch { appPrefs.setTextSelectionEnabled(on) }
     }
 
-    /** 用选中的文字建一条只对本书生效的净化规则 */
+    /** 用选中的文字建一条只对本书生效的净化规则；[replacement] 为空就是删掉 */
     fun purifySelection(selected: String, replacement: String = "") {
         val text = selected.trim()
         if (text.isEmpty()) return
@@ -867,6 +867,19 @@ class ReaderViewModel(
                 if (replacement.isEmpty()) "已删除「${text.take(12)}」" else "已替换「${text.take(12)}」",
             )
         }
+    }
+
+    /**
+     * 当前章各段的正文，下标同排版元素（= `TextSelection.elementIndex`）；章标题、图片、空段是空串。
+     * 选字「替换」弹窗拿它数「本章 N 处」、截预览（[replacePreview]）。
+     *
+     * 读的是分页缓存里的测量结果 —— 就是屏幕上那一份字（已按现有规则净化过），不另读章节文件。
+     * 章标题（第 0 个元素）不算：净化只跑正文里的段落和小标题，标题里命中了也换不到。还没排好时是空表。
+     */
+    fun currentChapterParagraphs(): List<String> {
+        val measured = paginated[_state.value.chapterIndex]?.measured ?: return emptyList()
+        val last = measured.keys.maxOrNull() ?: return emptyList()
+        return List(last + 1) { i -> if (i == 0) "" else measured[i]?.text.orEmpty() }
     }
 
     // ---------- 换源 ----------
