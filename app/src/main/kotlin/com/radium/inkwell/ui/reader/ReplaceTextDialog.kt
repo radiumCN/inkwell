@@ -22,6 +22,7 @@ import androidx.compose.ui.text.withStyle
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.LocalDialogConfirm
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -34,6 +35,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * - **原文是能改的框**，预填选中的那段：选区多一个字、少一个标点，删掉就行。选区松手后没有把手可调，不能改就只能取消重来。
  * - **「换成」一打开就聚焦**，键盘直接起来；键盘上的「完成」等于点主按钮。
+ * - **收起时键盘和弹窗一起落**：取消、点外面、返回键、点「删除 / 替换」都一样（[AppAlertDialog] 的 closeOnConfirm）——
+ *   确认也是先收下去、动画播完才建规则，不然弹窗一下没了、键盘后脚才落。
  * - **主按钮说清会发生什么**：「换成」空着是「删除」，填了是「替换」。
  * - **本章几处 + 改完的样子**（删的划线、换上的强调色）：正文被键盘和弹窗挡住了，上下文只能在这里给。
  *   原文太短、命中太多时那行变红（[isRiskyReplace]），照样能点。
@@ -43,7 +46,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 两个框的标签都是两个字（「原文」「换成」）：中文字等宽，输入起点天然对齐。
  *
  * @param preview 原文 → 本章的命中数与预览（[replacePreview]）；原文每改一个字算一遍，一章的字数算起来是毫秒级
- * @param onConfirm (原文, 换成)
+ * @param onConfirm (原文, 换成)；收起动画播完才回调
  * @param onDismiss 取消 / 点外面 / 返回键，退场动画播完才回调（回到选字药丸，选区还在）
  */
 @Composable
@@ -57,14 +60,14 @@ internal fun ReplaceTextDialog(
     var replacement by remember { mutableStateOf("") }
     val target = find.trim()
     val result = remember(target) { preview(target) }
-    val confirm = { if (target.isNotEmpty()) onConfirm(target, replacement) }
 
     AppAlertDialog(
         onDismissRequest = onDismiss,
         title = "替换文字",
         confirmText = if (replacement.isEmpty()) "删除" else "替换",
-        onConfirm = confirm,
+        onConfirm = { onConfirm(target, replacement) },
         confirmEnabled = target.isNotEmpty(),
+        closeOnConfirm = true,
     ) {
         val focus = remember { FocusRequester() }
         // 放在弹窗内容里、等一帧再要焦点：弹窗是独立窗口，内容是它自己的一份组合，
@@ -85,7 +88,8 @@ internal fun ReplaceTextDialog(
                 onValueChange = { replacement = it },
                 placeholder = "留空即删除",
                 label = "换成",
-                onDone = confirm,
+                // 和点主按钮同一条路：原文空着时不响应，先收弹窗再建规则
+                onDone = LocalDialogConfirm.current,
                 modifier = Modifier.focusRequester(focus),
             )
         }
