@@ -677,12 +677,20 @@ fun ReaderScreen(
                     viewModel.purifySelection(sel.text)
                     selection = null; anchor = null
                 },
-                onReplace = { to ->
-                    viewModel.purifySelection(sel.text, to)
+                onReplace = { find, to ->
+                    viewModel.purifySelection(find, to)
                     selection = null; anchor = null
                 },
-                onDismiss = { selection = null; anchor = null },
-                modifier = Modifier.align(Alignment.BottomCenter),
+                // 原文每改一个字算一遍：本章各段从分页缓存现取（一串引用），数一遍是毫秒级。
+                // 锚点是选区所在，预览优先给用户选的那一处
+                replacePreview = { find ->
+                    replacePreview(viewModel.currentChapterParagraphs(), find, anchor = sel.elementIndex to sel.start)
+                },
+                // 同自动换源的提示胶囊：落在页脚那行正上方，页码 · 进度 · 时间照样露着。
+                // 选字时一定是沉浸态（菜单收着才能选），系统栏是藏起来的，不用再让导航栏
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = hintBottom + Dimens.gapS),
                 pageBackdrop = pageBackdrop,
             )
         }
