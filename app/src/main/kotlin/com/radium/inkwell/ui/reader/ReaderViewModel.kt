@@ -135,7 +135,7 @@ data class ReaderUiState(
     val autoChangeDone: Int = 0,
     val autoChangeTotal: Int = 0,
     /**
-     * 刚自动换过源 → 顶部提示条 + 撤销。非空 = 新源的名字。
+     * 刚自动换过源 → 底部提示胶囊 + 撤销（AutoChangedSourceHint）。非空 = 新源的名字。
      *
      * 必须告诉用户：自动换源可能换到删减版/盗版，正文和原来不是一回事。
      * 静默换掉的话，用户只会觉得"这书怎么突然变了"，根本想不到是 App 干的。
@@ -1322,7 +1322,7 @@ class ReaderViewModel(
         }
     }
 
-    /** 用户看到了提示条、不想撤销 */
+    /** 提示胶囊到点收起、用户没撤销：撤销窗口就此关上 */
     fun dismissAutoChanged() {
         undoSnapshot = null
         _state.value = _state.value.copy(autoChangedTo = null)

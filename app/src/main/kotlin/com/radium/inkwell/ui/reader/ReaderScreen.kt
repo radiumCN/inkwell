@@ -1,6 +1,5 @@
 package com.radium.inkwell.ui.reader
 
-import com.radium.inkwell.ui.components.blockTouchesBelow
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
@@ -55,6 +54,8 @@ import androidx.compose.runtime.snapshotFlow
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.Motion
 import com.radium.inkwell.ui.components.animationsEnabled
+import com.radium.inkwell.ui.components.bottomBarEnter
+import com.radium.inkwell.ui.components.bottomBarExit
 import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -94,13 +95,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
-import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.graphics.luminance
-import com.radium.inkwell.ui.components.AppSurface
 
-/** 自动换源提示条的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
+/** 自动换源提示胶囊的停留时长：够看清并有机会撤销，又不至于长期挡住正文 */
 private const val AUTO_CHANGED_HINT_MS = 8_000L
 
 /** 纸面上一次性提示的停留时长 */
@@ -293,8 +292,9 @@ fun ReaderScreen(
     }
     // 录图层要把整页再画一遍：滚动模式下每一帧都是一整页字。所以只在有毛玻璃露着时录（菜单、选字工具条），
     // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
-    // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明
-    val needsGlass = overlay.menuVisible || selection != null
+    // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明。
+    // 自动换源的提示胶囊也是这块玻璃：它只亮 8 秒（AUTO_CHANGED_HINT_MS），这几秒录着不值一提
+    val needsGlass = overlay.menuVisible || selection != null || overlay.autoChangedTo != null
     var glassLingering by remember { mutableStateOf(false) }
     LaunchedEffect(needsGlass) {
         if (needsGlass) {
@@ -586,10 +586,9 @@ fun ReaderScreen(
             }
         }
 
-        // 自动换源之后的提示条。换到的可能是删减版/另一个译本，正文跟原来不是一回事 ——
+        // 自动换源之后的提示胶囊。换到的可能是删减版/另一个译本，正文跟原来不是一回事 ——
         // 不说的话用户只会觉得"这书怎么突然变了"，压根想不到是 App 换的源。
-        // 停留一段时间给用户留出撤销窗口，随后自动消失，不长期挡视线（撤销/知道了 仍可手动触发）。
-        // 提示条淡入淡出，跟阅读菜单浮层同一套动效（scrimEnter/Exit，均尊重系统"关闭动画"）。
+        // 停留一段时间给用户留出撤销窗口，随后自动消失，不长期挡视线。
         // 留住最后一次的源名：退场动画播放期间 state 已清空，也得有内容可显示。
         val lastAutoChanged = remember { mutableStateOf("") }
         overlay.autoChangedTo?.let { sourceName ->
@@ -599,40 +598,27 @@ fun ReaderScreen(
                 viewModel.dismissAutoChanged()
             }
         }
+        // 落在页脚那行（页码 · 进度 · 时间）正上方：页脚照样露着，盖住的只是本页末尾一两行，糊在玻璃底下。
+        // 排版还没出来（layout 为 null）时先按一个触控高度垫着
+        val hintBottom = layout?.let { with(density) { (it.marginBottomPx + it.footerHeightPx).toDp() } }
+            ?: Dimens.touchTarget
         AnimatedVisibility(
-            visible = overlay.autoChangedTo != null,
-            enter = scrimEnter(),
-            exit = scrimExit(),
-            modifier = Modifier.align(Alignment.TopCenter),
+            // 阅读菜单、选字工具条也在底部：它们亮着时胶囊先让开（倒计时照走），免得两层玻璃叠在一起
+            visible = overlay.autoChangedTo != null && !overlay.menuVisible && selection == null,
+            // 和别的底部悬浮胶囊同一套：从底下升起、降下去（均尊重系统"移除动画"）
+            enter = bottomBarEnter(),
+            exit = bottomBarExit(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = hintBottom + Dimens.gapS)
+                .padding(horizontal = Dimens.screenPadding),
         ) {
             ReaderThemeScope(session.settings.theme) {
-                AppSurface(
-                    cornerRadius = AppShapes.radiusMedium,
-                    // 点到「已自动换到…」那行字上别漏给纸面（翻页、唤出菜单）
-                    modifier = Modifier
-                        .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.listVertical)
-                        .blockTouchesBelow(),
-                    // 纸面上的小提示条：比纸面深/亮一档（surfaceContainerHigh），不投影 —— 同色纸上的阴影是脏灰线
-                    color = MiuixTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    Row(
-                        Modifier.padding(
-                            start = Dimens.gapM,
-                            end = Dimens.gapXS,
-                            top = Dimens.gapXS,
-                            bottom = Dimens.gapXS,
-                        ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "已自动换到「${lastAutoChanged.value}」",
-                            style = MiuixTheme.textStyles.footnote1,
-                            color = MiuixTheme.colorScheme.onSurface,
-                        )
-                        AppTextButton("撤销", onClick = { viewModel.undoAutoChange() })
-                        AppTextButton("知道了", onClick = { viewModel.dismissAutoChanged() })
-                    }
-                }
+                AutoChangedSourceHint(
+                    sourceName = lastAutoChanged.value,
+                    onUndo = { viewModel.undoAutoChange() },
+                    pageBackdrop = pageBackdrop,
+                )
             }
         }
 
