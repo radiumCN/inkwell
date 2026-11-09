@@ -86,7 +86,7 @@ fun ReplaceRuleScreen(
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("净化替换规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = { AppTopBar("净化替换", topBarScroll, onBack = onBack, containerColor = pageColor) },
         floatingActionButton = {
             FloatingActionButton(onClick = viewModel::newRule) {
                 // Miuix 的悬浮按钮不替内容设前景色，图标色自己给

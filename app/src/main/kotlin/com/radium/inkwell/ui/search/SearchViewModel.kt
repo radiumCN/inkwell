@@ -374,8 +374,8 @@ class SearchViewModel(
                         enabled.isEmpty() -> "没有启用的书源，请先导入并启用书源"
                         enabled.any { it.rule.explore.isNotEmpty() } ->
                             "已启用的 ${enabled.size} 个书源都不支持搜索（仅发现页可用），" +
-                                "请到发现页浏览，或导入带搜索规则的书源"
-                        else -> "已启用的 ${enabled.size} 个书源都不支持搜索，请导入带搜索规则的书源"
+                                "请到发现页浏览，或导入支持搜索的书源"
+                        else -> "已启用的 ${enabled.size} 个书源都不支持搜索，请导入支持搜索的书源"
                     },
                 )
                 return@launch

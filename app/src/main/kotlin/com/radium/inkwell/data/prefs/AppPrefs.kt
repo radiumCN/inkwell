@@ -5,6 +5,7 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -71,6 +72,22 @@ class AppPrefs(private val context: Context) {
         val CACHE_AUTO_PRUNE_DAYS = intPreferencesKey("cache_auto_prune_days")
         val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
         val LOG_RECORDING = booleanPreferencesKey("log_recording")
+        /** 书架上提示「有重复的书」。进备份（同「显示发现入口」，是一项设置） */
+        val DUPLICATE_HINT = booleanPreferencesKey("duplicate_hint_enabled")
+        /** 提示卡上点了 ✕ 的那批书的 id，换行分隔。只属于这台设备：不进备份、不盖 UPDATED_AT */
+        val DUPLICATE_DISMISSED = stringPreferencesKey("duplicate_dismissed_ids")
+        /** 整理面板里点了「都保留」的那几组书的 id，换行分隔。同上，只属于这台设备 */
+        val DUPLICATE_KEPT = stringPreferencesKey("duplicate_kept_ids")
+        /** 启动时在后台查一次更新。进备份（同更新渠道） */
+        val AUTO_CHECK_UPDATE = booleanPreferencesKey("auto_check_update")
+        /**
+         * 后台查到的最新版本、查的是哪个「更新源/渠道」、看过哪一版的更新弹窗、上次查成的时间。
+         * 都只属于这台设备：两台设备装的版本可能不一样，同步过去红点就乱了。不进备份、不盖 UPDATED_AT
+         */
+        val UPDATE_KNOWN_LATEST = stringPreferencesKey("update_known_latest")
+        val UPDATE_KNOWN_FOR = stringPreferencesKey("update_known_for")
+        val UPDATE_SEEN = stringPreferencesKey("update_seen_version")
+        val UPDATE_CHECKED_AT = longPreferencesKey("update_checked_at")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
     }
@@ -106,6 +123,8 @@ class AppPrefs(private val context: Context) {
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
+                "duplicate_hint_enabled" to (p[Keys.DUPLICATE_HINT] ?: true).toString(),
+                "auto_check_update" to (p[Keys.AUTO_CHECK_UPDATE] ?: true).toString(),
                 "search_history_enabled" to (p[Keys.SEARCH_HISTORY_ENABLED] ?: true).toString(),
                 "bookshelf_layout" to (p[Keys.BOOKSHELF_LAYOUT] ?: BookshelfLayout.GRID.name),
                 "cache_auto_prune_days" to (p[Keys.CACHE_AUTO_PRUNE_DAYS] ?: DEFAULT_CACHE_AUTO_PRUNE_DAYS).toString(),
@@ -138,6 +157,10 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
+            v["duplicate_hint_enabled"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.DUPLICATE_HINT] = it }
+            v["auto_check_update"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.AUTO_CHECK_UPDATE] = it }
             v["search_history_enabled"]?.toBooleanStrictOrNull()?.let { on ->
                 p[Keys.SEARCH_HISTORY_ENABLED] = on
                 // 与本机关掉开关同一个语义：关 = 不留记录。别让别的设备关了、这台还攒着一串旧词
@@ -232,6 +255,55 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setExploreEnabled(on: Boolean) {
         editTouched { it[Keys.EXPLORE_ENABLED] = on }
+    }
+
+    /**
+     * 书架上提示「有重复的书」（「继续阅读」下面那张玻璃卡）。默认开。
+     * 关掉只是不提示：「设置 → 同步与存储 → 整理重复的书」照样能手动进去整理。
+     */
+    val duplicateHintEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.DUPLICATE_HINT] ?: true
+    }.distinctUntilChanged()
+
+    suspend fun setDuplicateHintEnabled(on: Boolean) {
+        editTouched { it[Keys.DUPLICATE_HINT] = on }
+    }
+
+    /** 提示卡上点了 ✕ 的书（见 BookshelfViewModel.dismissDuplicateHint） */
+    val duplicateDismissedIds: Flow<Set<String>> = context.appDataStore.data
+        .map { it[Keys.DUPLICATE_DISMISSED] }
+        .distinctUntilChanged()
+        .map(::decodeIdSet)
+
+    /** 整理面板里「都保留」的组里的书：再打开面板，这几组照旧是跳过的 */
+    val duplicateKeptIds: Flow<Set<String>> = context.appDataStore.data
+        .map { it[Keys.DUPLICATE_KEPT] }
+        .distinctUntilChanged()
+        .map(::decodeIdSet)
+
+    /**
+     * 往「✕ 过 / 都保留过」里记一批书。已经不在书架上的 id（[shelfIds] 之外的）顺手清掉：
+     * 删过的书不会再回来（回来也是新 id），留着只会越攒越多。不进备份、不刷时间戳（同搜索历史）。
+     */
+    suspend fun addDuplicateDismissed(ids: Collection<String>, shelfIds: Set<String>) =
+        addIds(Keys.DUPLICATE_DISMISSED, ids, shelfIds)
+
+    suspend fun addDuplicateKept(ids: Collection<String>, shelfIds: Set<String>) =
+        addIds(Keys.DUPLICATE_KEPT, ids, shelfIds)
+
+    /** 面板里点「整理这组」撤回「都保留」 */
+    suspend fun removeDuplicateKept(ids: Collection<String>) {
+        context.appDataStore.edit { p ->
+            val next = decodeIdSet(p[Keys.DUPLICATE_KEPT]) - ids.toSet()
+            if (next.isEmpty()) p.remove(Keys.DUPLICATE_KEPT) else p[Keys.DUPLICATE_KEPT] = next.joinToString("\n")
+        }
+    }
+
+    private suspend fun addIds(key: Preferences.Key<String>, ids: Collection<String>, shelfIds: Set<String>) {
+        context.appDataStore.edit { p ->
+            val next = decodeIdSet(p[key]).filterTo(LinkedHashSet()) { it in shelfIds }.apply { addAll(ids) }
+            if (next.isEmpty()) p.remove(key) else p[key] = next.joinToString("\n")
+        }
     }
 
     /**
@@ -394,6 +466,42 @@ class AppPrefs(private val context: Context) {
         editTouched { it[Keys.UPDATE_SOURCE] = source.name }
     }
 
+    /**
+     * 启动时在后台查一次更新，有新版本就在书架的设置齿轮、设置页「检查更新」上亮红点（见 UpdateNotifier）。默认开。
+     * 关掉就不在启动时联网、不亮红点；设置里手动「检查更新」照旧。
+     */
+    val autoCheckUpdate: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.AUTO_CHECK_UPDATE] ?: true
+    }.distinctUntilChanged()
+
+    suspend fun setAutoCheckUpdate(on: Boolean) {
+        editTouched { it[Keys.AUTO_CHECK_UPDATE] = on }
+    }
+
+    /** 后台 / 手动查到的更新状态（见 [KnownUpdate]）。只属于这台设备 */
+    val knownUpdate: Flow<KnownUpdate> = context.appDataStore.data.map { p ->
+        KnownUpdate(
+            latest = p[Keys.UPDATE_KNOWN_LATEST],
+            checkedFor = p[Keys.UPDATE_KNOWN_FOR],
+            seen = p[Keys.UPDATE_SEEN],
+            checkedAt = p[Keys.UPDATE_CHECKED_AT] ?: 0L,
+        )
+    }.distinctUntilChanged()
+
+    /** 记下一次查成的结果：[latest] 为 null = 已是最新。查失败不调它（上次查到的照旧算数） */
+    suspend fun recordUpdateCheck(latest: String?, checkedFor: String, at: Long) {
+        context.appDataStore.edit { p ->
+            if (latest == null) p.remove(Keys.UPDATE_KNOWN_LATEST) else p[Keys.UPDATE_KNOWN_LATEST] = latest
+            p[Keys.UPDATE_KNOWN_FOR] = checkedFor
+            p[Keys.UPDATE_CHECKED_AT] = at
+        }
+    }
+
+    /** 看过 [version] 的更新弹窗：红点收起，直到出了比它更新的版本 */
+    suspend fun markUpdateSeen(version: String) {
+        context.appDataStore.edit { it[Keys.UPDATE_SEEN] = version }
+    }
+
     val themeConfig: Flow<ThemeConfig> = context.appDataStore.data.map { p ->
         val default = ThemeConfig()
         ThemeConfig(
@@ -446,6 +554,8 @@ class AppPrefs(private val context: Context) {
     val changeSourceCheckAuthorState: StateFlow<Boolean?> = changeSourceCheckAuthor.warm()
     val autoChangeSourceState: StateFlow<Boolean?> = autoChangeSource.warm()
     val exploreEnabledState: StateFlow<Boolean?> = exploreEnabled.warm()
+    val duplicateHintEnabledState: StateFlow<Boolean?> = duplicateHintEnabled.warm()
+    val autoCheckUpdateState: StateFlow<Boolean?> = autoCheckUpdate.warm()
     val searchHistoryEnabledState: StateFlow<Boolean?> = searchHistoryEnabled.warm()
     val bookshelfLayoutState: StateFlow<BookshelfLayout?> = bookshelfLayout.warm()
     val cacheAutoPruneDaysState: StateFlow<Int?> = cacheAutoPruneDays.warm()
@@ -466,6 +576,29 @@ class AppPrefs(private val context: Context) {
 
 private fun decodeSearchHistory(raw: String?): List<String> =
     raw?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+
+/** 换行分隔的一串书 id（书的 id 是 UUID 或书源地址的摘要，不会自带换行） */
+private fun decodeIdSet(raw: String?): Set<String> =
+    raw?.split('\n')?.filterTo(LinkedHashSet()) { it.isNotBlank() }.orEmpty()
+
+/**
+ * 记在本机的更新状态。
+ *
+ * @param latest 上次查到的、比当时装的版本新的那一版（不带 v）；null = 上次查的结果是已是最新、或从没查成过
+ * @param checkedFor 上次查的是哪个「更新源/渠道」（[updateCheckTarget]）。换了渠道，上次的结果就不作数了 ——
+ *   测试版渠道查到的 0.6.0-beta.1，切回稳定版不该还亮着红点
+ * @param seen 看过哪一版的更新弹窗
+ * @param checkedAt 上次查成的时间，启动时节流用
+ */
+data class KnownUpdate(
+    val latest: String? = null,
+    val checkedFor: String? = null,
+    val seen: String? = null,
+    val checkedAt: Long = 0L,
+)
+
+/** 「更新源/渠道」的一个记号，见 [KnownUpdate.checkedFor] */
+fun updateCheckTarget(source: UpdateSource, channel: UpdateChannel): String = "${source.name}/${channel.name}"
 
 /**
  * 搜索关键词的规范形：去首尾空白，中间连续空白（含粘贴进来的换行）压成一个空格。

@@ -263,8 +263,8 @@ fun SearchScreen(
                     // 历史还没读到时什么都不画：读到后要么是历史列表、要么才是这块空态，别先闪一下它
                     EmptyState(
                         icon = MiuixIcons.Search,
-                        title = "按已启用的规则搜索",
-                        hint = "输入书名或作者；未导入规则时无结果",
+                        title = "按已启用的书源搜索",
+                        hint = "输入书名或作者；还没导入书源时搜不到结果",
                         modifier = Modifier.padding(padding),
                     )
                 }

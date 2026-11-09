@@ -1,5 +1,10 @@
 package com.radium.inkwell.ui.settings
 
+import com.radium.inkwell.ui.bookshelf.rememberVisibleDuplicateCount
+import com.radium.inkwell.ui.bookshelf.StandaloneDuplicateBooksSheet
+import com.radium.inkwell.ui.components.SwitchRow
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.icon.extended.Copy
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -144,6 +149,9 @@ fun SettingsScreen(
     var clearingCache by remember { mutableStateOf(false) }
     val pruneDays = appPrefs.cacheAutoPruneDaysState.collectAsStateWithLifecycle().value
         ?: AppPrefs.DEFAULT_CACHE_AUTO_PRUNE_DAYS
+    val autoCheckUpdate = appPrefs.autoCheckUpdateState.collectAsStateWithLifecycle().value ?: true
+    val duplicateCount = rememberVisibleDuplicateCount()
+    var showDuplicates by remember { mutableStateOf(false) }
 
     suspend fun refreshCacheSize() {
         cacheBytes = withContext(Dispatchers.IO) { cache.sizeBytes() }
@@ -190,7 +198,7 @@ fun SettingsScreen(
                 SectionHeader("阅读与外观")
                 SettingGroup {
                     SettingRow(
-                        title = "阅读与规则",
+                        title = "书源与净化",
                         icon = MiuixIcons.Notes,
                         onClick = onOpenReading,
                         position = SettingGroupPosition.First,
@@ -241,18 +249,45 @@ fun SettingsScreen(
                         },
                         // 没东西可清、或正在清时不给点：从前「暂无缓存」照样能点，点了什么都不发生
                         onClick = if (cacheBytes > 0 && !clearingCache) ({ confirmClearCache = true }) else null,
+                        position = SettingGroupPosition.Middle,
+                    )
+                    // 书架上那张提示卡点了 ✕、或在外观里关了提示之后，从这里还能进去整理。
+                    // 设置页一个字不提隐藏：只数、只整理没隐藏的书（见 rememberVisibleDuplicateCount）
+                    SettingRow(
+                        title = "整理重复的书",
+                        icon = MiuixIcons.Copy,
+                        value = when (duplicateCount) {
+                            null -> null
+                            0 -> "没有重复"
+                            else -> "$duplicateCount 组"
+                        },
+                        onClick = if ((duplicateCount ?: 0) > 0) ({ showDuplicates = true }) else null,
                         position = SettingGroupPosition.Last,
                     )
                 }
 
                 SectionHeader("更新")
                 SettingGroup {
+                    // 启动时在后台查到了新版：写「0.5.5 可更新」，没看过那一版的弹窗时再亮一个红点（同书架齿轮上那个）。
+                    // 点一下直接弹那一版，不再转一圈重查（见 UpdateCheckState）
                     SettingRow(
                         title = "检查更新",
                         icon = MiuixIcons.Update,
-                        value = if (updateCheck.checking) "正在检查…" else null,
+                        value = when {
+                            updateCheck.checking -> "正在检查…"
+                            updateCheck.available != null -> "${updateCheck.available} 可更新"
+                            else -> null
+                        },
+                        badge = updateCheck.dot && !updateCheck.checking,
                         onClick = updateCheck.check,
                         position = SettingGroupPosition.First,
+                    )
+                    SwitchRow(
+                        title = "启动时检查更新",
+                        icon = MiuixIcons.Refresh,
+                        checked = autoCheckUpdate,
+                        onCheckedChange = { on -> scope.launch { appPrefs.setAutoCheckUpdate(on) } },
+                        position = SettingGroupPosition.Middle,
                     )
                     // 更新源 / 渠道从前单独占一个二级页（整页就这两行），现在直接摆在这里，点了从行上弹出选项
                     UpdateSourceRow(
@@ -298,6 +333,10 @@ fun SettingsScreen(
     }
 
     updateCheck.UpdateDialog()
+
+    if (showDuplicates) {
+        StandaloneDuplicateBooksSheet(messages = messages, onDismiss = { showDuplicates = false })
+    }
 
     if (confirmClearCache) {
         AppAlertDialog(

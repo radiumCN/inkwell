@@ -206,6 +206,8 @@ fun SettingRow(
      */
     icon: ImageVector? = null,
     destructive: Boolean = false,
+    /** 值后面、› 前面亮一个红点（[BadgeDot]）：「检查更新」那一行有没看过的新版本时 */
+    badge: Boolean = false,
 ) {
     val chrome = if (position != null) Modifier else Modifier.standaloneRowCard()
     val startAction: (@Composable () -> Unit)? = icon?.let { { SettingIcon(it) } }
@@ -213,7 +215,12 @@ fun SettingRow(
     val valueText = value?.takeIf { it.isNotBlank() }
     val endActions: (@Composable RowScope.() -> Unit)? = when {
         trailing != null -> { { trailing() } }
-        valueText != null -> { { RowValue(valueText) } }
+        valueText != null || badge -> {
+            {
+                valueText?.let { RowValue(it) }
+                if (badge) BadgeDot(Modifier.padding(start = Dimens.gapS))
+            }
+        }
         else -> null
     }
     if (onClick != null && trailing == null && !destructive) {
@@ -437,12 +444,15 @@ fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
     position: SettingGroupPosition? = null,
+    /** 行首图标，同 [SettingRow] 的 icon：只给设置主页那一列入口里夹着的开关用（「启动时检查更新」） */
+    icon: ImageVector? = null,
 ) {
     val chrome = if (position != null) Modifier else Modifier.standaloneRowCard()
     BasicComponent(
         modifier = chrome.semantics { toggleableState = ToggleableState(checked) },
         title = title,
         summary = subtitle?.takeIf { it.isNotBlank() },
+        startAction = icon?.let { { SettingIcon(it) } },
         endActions = { Switch(checked = checked, enabled = enabled, onCheckedChange = null) },
         onClick = { onCheckedChange(!checked) },
         role = Role.Switch,

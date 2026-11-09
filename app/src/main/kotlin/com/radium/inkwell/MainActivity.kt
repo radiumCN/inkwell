@@ -20,6 +20,7 @@ import com.radium.inkwell.ui.nav.InkwellNavDisplay
 import com.radium.inkwell.ui.theme.InkwellTheme
 import com.radium.inkwell.ui.theme.rememberResolvedScheme
 import com.radium.inkwell.ui.theme.ThemeConfig
+import com.radium.inkwell.update.UpdateNotifier
 import com.radium.inkwell.util.KeyEventBus
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -33,6 +34,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private val keyEventBus: KeyEventBus by inject()
     private val appPrefs: AppPrefs by inject()
+    private val updateNotifier: UpdateNotifier by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -44,6 +46,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             }
         }
         holdFirstFrameUntilThemed()
+        // 启动时在后台查一次更新，有新版只亮红点（见 UpdateNotifier）。生成 Baseline Profile 的变体不查：
+        // 那几轮冷启动是在量启动，模拟器上平白多一个联网请求只会添噪声
+        if (!ProfileSeed.enabled(this)) updateNotifier.scheduleLaunchCheck()
         setContent {
             val loadedTheme by appPrefs.themeState.collectAsStateWithLifecycle()
             val themeConfig = loadedTheme ?: ThemeConfig()

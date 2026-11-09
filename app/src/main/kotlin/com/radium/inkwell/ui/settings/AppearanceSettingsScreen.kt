@@ -55,6 +55,7 @@ fun AppearanceSettingsScreen(
     CollectMessages(messages, snackbar)
     // 读预热好的那份，第一帧就是真值（见 AppPrefs 的「设置页读的预热版」）
     val exploreEnabled = appPrefs.exploreEnabledState.collectAsStateWithLifecycle().value ?: true
+    val duplicateHint = appPrefs.duplicateHintEnabledState.collectAsStateWithLifecycle().value ?: true
     val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
@@ -118,6 +119,14 @@ fun AppearanceSettingsScreen(
                     title = "显示「发现」入口",
                     checked = exploreEnabled,
                     onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
+                    position = SettingGroupPosition.Middle,
+                )
+                // 关掉只是书架上不再出那张提示卡；「设置 → 同步与存储 → 整理重复的书」照样能进去
+                SwitchRow(
+                    title = "提示重复的书",
+                    subtitle = "同一本书在书架上有好几份时，书架顶上提示整理",
+                    checked = duplicateHint,
+                    onCheckedChange = { on -> scope.launch { appPrefs.setDuplicateHintEnabled(on) } },
                     position = SettingGroupPosition.Last,
                 )
             }

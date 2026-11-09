@@ -14,6 +14,7 @@ import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.ui.bookshelf.DuplicateMerge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -291,18 +292,56 @@ class BookRepository(
         // 书还在书架里但点进去是空目录，而且再删一次也修不好（文件早没了）。
         val now = System.currentTimeMillis()
         db.withWriteTransaction {
-            for (book in books) {
-                val id = book.id
-                chapterDao.deleteByBook(id)
-                // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
-                hitDao.deleteByBook(id)
-                // 本书专属净化规则同样挂 bookId；软删打墓碑，WebDAV 合并才能把删除同步出去
-                replaceRuleDao.softDeleteByBook(id, now)
-                // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
-                // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
-                bookDao.softDelete(id, now)
+            for (book in books) softDeleteRows(book.id, now)
+        }
+    }
+
+    /** 删一本书在库里的几样东西。只在写事务里调（见 [deleteBooks]） */
+    private suspend fun softDeleteRows(id: String, now: Long) {
+        chapterDao.deleteByBook(id)
+        // 换源记忆是按 bookId 存的，书没了就是孤儿行，越攒越多
+        hitDao.deleteByBook(id)
+        // 本书专属净化规则同样挂 bookId；软删打墓碑，WebDAV 合并才能把删除同步出去
+        replaceRuleDao.softDeleteByBook(id, now)
+        // 软删除：留下墓碑，否则 WebDAV 同步会把这本书从远端又拉回来。
+        // 章节、缓存、封面这些本地附属物照旧真删 —— 它们不参与同步，留着只占地方
+        bookDao.softDelete(id, now)
+    }
+
+    /**
+     * 整理重复的书：每组留 [DuplicateMerge.keepId]、删其余（书架「整理重复的书」面板）。返回删了几本。
+     *
+     * 删的走 [deleteBooks] 同一套（文件在事务外删、库里的几步成组提交、打墓碑同步出去），另外两件事和删除同一个事务：
+     * - **分组**：留下的那份自己没分组、被删的那份有，就接过来 —— 用户给其中一份分过组，整理完那本书不该掉回「未分组」；
+     * - **隐藏**：组里有隐藏的书，留下的那份也隐藏。宁可多藏一本：最常见的重复正是「藏着一本、上锁时又加了一本」，
+     *   留下看得见的那份而不藏，整理完藏着的书就摆回了书架上。
+     *
+     * 留下的那份**在事务里重读**再改：面板开着的时候，进度、分组可能已经被别处改过（同步、另一个页面），
+     * 拿打开面板时的快照判断会把新改的分组盖掉。已经不在架上的（别处删了）整组跳过。
+     */
+    suspend fun mergeDuplicates(merges: List<DuplicateMerge>): Int = withContext(Dispatchers.IO) {
+        val plan = merges.mapNotNull { m ->
+            val remove = m.removeIds.mapNotNull { bookDao.getById(it) }.filter { !it.deleted && it.inShelf }
+            if (remove.isEmpty()) null else m.keepId to remove
+        }
+        if (plan.isEmpty()) return@withContext 0
+        // 先确认留下的那份还在：它若已经被删了，这一组一本都别动，否则整组就没了
+        val live = plan.filter { (keepId, _) -> bookDao.getById(keepId)?.let { !it.deleted && it.inShelf } == true }
+        live.forEach { (_, remove) -> remove.forEach(::deleteLocalFiles) }
+        val now = System.currentTimeMillis()
+        var removed = 0
+        db.withWriteTransaction {
+            for ((keepId, remove) in live) {
+                val keep = bookDao.getById(keepId)?.takeIf { !it.deleted && it.inShelf } ?: continue
+                if (keep.groupName.isBlank()) {
+                    remove.firstOrNull { it.groupName.isNotBlank() }?.let { bookDao.setGroup(keep.id, it.groupName, now) }
+                }
+                if (!keep.hidden && remove.any { it.hidden }) bookDao.setHidden(keep.id, true, now)
+                for (book in remove) softDeleteRows(book.id, now)
+                removed += remove.size
             }
         }
+        removed
     }
 
     /**

@@ -3,6 +3,8 @@ package com.radium.inkwell.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -126,6 +128,66 @@ fun CoverGlassCard(
 }
 
 /**
+ * 几本书的封面并排铺底的毛玻璃卡：书架上「发现 N 组重复的书」那张提示卡。
+ *
+ * 做法与 [CoverGlassCard] 同一家（封面录进卡自己的图层 → 整片糊 [CARD_BLUR_RADIUS] + Colored Thick 混色 + 边缘高光 → 一层卡片色薄底），
+ * 只是底下铺的是 [covers] 几张封面并排、糊开成几块颜色 —— 一眼认得出是哪几本书重复了。
+ *
+ * 为什么底下要铺封面：这张卡在列表里、跟着书一起滚，下面从来没有东西经过。只给一块对页面取样的玻璃，
+ * 底下就是一片页面底色，看上去就是一张白卡加一圈高光，看不出是玻璃。
+ *
+ * 薄底比「继续阅读」那张厚（[MOSAIC_VEIL_LIGHT] / [MOSAIC_VEIL_DARK]）：书架上一页只该有一块显眼的颜色，那是「继续阅读」；
+ * 这张是提示，颜色淡得多，不和它抢。字色同 [CoverGlassCard]：onSurface 经 [LocalContentColor] 给下去，卡里的字统一一种颜色，
+ * 对比度按最坏的封面在 CoverGlassTest 里钉住。
+ *
+ * @param covers 书名 + 封面（[BookCover] 的两个参数）。空的话就是一块没铺封面的玻璃
+ */
+@Composable
+fun CoverMosaicGlassCard(
+    covers: List<Pair<String, Any?>>,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val card = scheme.surfaceContainer
+    val dark = scheme.surface.luminance() < 0.5f
+    val backdrop = rememberLayerBackdrop {
+        drawRect(card)
+        drawContent()
+    }
+    val colors = BlurDefaults.blurColors(blendColors = if (dark) ColoredThickDark else ColoredThickLight)
+    val shape = remember { squircleShape(AppShapes.radiusLarge) }
+    Box(modifier.squircleClip(AppShapes.radiusLarge)) {
+        Box(Modifier.matchParentSize().layerBackdrop(backdrop)) {
+            Row(Modifier.fillMaxSize()) {
+                covers.forEach { (title, model) ->
+                    BookCover(
+                        title = title,
+                        coverModel = model,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        placeholderChars = 0,
+                        contentDescription = null,
+                    )
+                }
+            }
+        }
+        Box(
+            Modifier
+                .matchParentSize()
+                .textureBlur(
+                    backdrop = backdrop,
+                    shape = shape,
+                    blurRadius = CARD_BLUR_RADIUS,
+                    colors = colors,
+                    highlight = smallGlassHighlight(dark),
+                )
+                .background(card.copy(alpha = if (dark) MOSAIC_VEIL_DARK else MOSAIC_VEIL_LIGHT)),
+        )
+        CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
+    }
+}
+
+/**
  * 书籍详情页头部的底：封面放大铺满，渐进模糊（顶上最糊、往下渐清 —— 示例 App「Progressive Blur」那一节的
  * Top、半径 20、不混色），
  * 再盖一道从 [coverHeaderVeil] 到页面底色的竖向渐变：封面的颜色从顶栏底下流下来，到目录开始的地方化进页面底，
@@ -221,6 +283,9 @@ private const val HEADER_BLUR_RADIUS = 20f
 internal const val CARD_VEIL_LIGHT = 0.55f
 internal const val CARD_VEIL_DARK = 0.75f
 internal const val HEADER_VEIL_LIGHT = 0.8f
+// 重复提示卡（CoverMosaicGlassCard）：比「继续阅读」厚一截，颜色淡下去、不和它抢（够不够读由 CoverGlassTest 钉）
+internal const val MOSAIC_VEIL_LIGHT = 0.7f
+internal const val MOSAIC_VEIL_DARK = 0.82f
 internal const val HEADER_VEIL_DARK = 0.85f
 
 // Miuix 示例 App 的 Colored Thick 混色（example/.../component/blend/ColorBlendToken.kt，Apache-2.0）。

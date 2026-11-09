@@ -1,5 +1,9 @@
 package com.radium.inkwell.ui.bookshelf
 
+import androidx.compose.ui.semantics.stateDescription
+import org.koin.compose.koinInject
+import com.radium.inkwell.update.UpdateNotifier
+import com.radium.inkwell.ui.components.BadgeDot
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.groupedCardItem
@@ -145,6 +149,7 @@ import com.radium.inkwell.ui.components.sinkOnPress
  */
 /** 「继续阅读」卡片在 Lazy 列表里的 key。书的 key 是 UUID，撞不上 */
 private const val CONTINUE_READING_KEY = "continue-reading"
+private const val DUPLICATE_HINT_KEY = "duplicate-hint"
 
 internal class CoverAnchor {
     var coordinates: LayoutCoordinates? = null
@@ -224,6 +229,11 @@ fun BookshelfScreen(
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
+    val duplicateHint by viewModel.duplicateHint.collectAsStateWithLifecycle()
+    /** 整理重复的书的面板开着 */
+    var showDedup by remember { mutableStateOf(false) }
+    // 有没看过的新版本：设置齿轮上亮红点（见 UpdateNotifier）
+    val updateBadge by koinInject<UpdateNotifier>().badge.collectAsStateWithLifecycle()
     val refreshProgress by viewModel.refreshProgress.collectAsStateWithLifecycle()
     val activity = LocalActivity.current as? androidx.fragment.app.FragmentActivity
     val scope = rememberCoroutineScope()
@@ -326,6 +336,8 @@ fun BookshelfScreen(
                 groupInput = ""
             }
             if (deleteTarget?.hidden == true) deleteTarget = null
+            // 整理面板开着时可能正摊着隐藏的书（「包含隐藏的书」）：同菜单、弹窗一起收
+            showDedup = false
             currentOnHiddenCollapsed(allBooks.filter { it.hidden }.mapTo(HashSet()) { it.id })
         }
         wasShowingHidden = showHidden
@@ -543,7 +555,20 @@ fun BookshelfScreen(
                         // 而书源管理在设置里本来就有一份，等于让用户多点一下去到同一个地方。
                         // 删掉重复的那条之后，菜单只剩一条，那就不该还是菜单：直接给齿轮。
                         AppIconButton(onClick = onOpenSettings) {
-                            Icon(MiuixIcons.Settings, contentDescription = "设置")
+                            // 红点贴在齿轮图标的右上角、不贴胶囊边：几个按钮合成一条胶囊，点挂在边上分不清是哪一格的。
+                            // 描一圈卡片色，把点和齿轮的齿隔开。读屏念「设置，有新版本」：名字保持「设置」不变
+                            // （Baseline Profile 生成器、启动基准都按 desc「设置」找这个按钮），「有新版本」走状态描述
+                            Box {
+                                Icon(MiuixIcons.Settings, contentDescription = "设置")
+                                if (updateBadge.dot) {
+                                    BadgeDot(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .semantics { stateDescription = "有新版本" },
+                                        ring = MiuixTheme.colorScheme.surfaceContainer,
+                                    )
+                                }
+                            }
                         }
                     },
                     bottomContent = shelfHeader,
@@ -604,7 +629,7 @@ fun BookshelfScreen(
             EmptyState(
                 icon = MiuixIcons.Notes,
                 title = "书架空空如也",
-                hint = "导入本地 txt / EPUB / MOBI，或搜索已导入的规则",
+                hint = "导入本地 txt / EPUB / MOBI，或用书源搜索书籍",
                 actionLabel = "导入本地书",
                 onAction = ::launchImport,
                 modifier = Modifier.padding(padding),
@@ -647,6 +672,16 @@ fun BookshelfScreen(
                 // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
                 // 卡片收起（多选）时它回到网格里，照样能选
                 val hero = continueReading?.takeIf { !selectionMode }
+                // 「发现 N 组重复的书」：同「继续阅读」，只在「全部」里出现、多选时收起 —— 提示说的是整个书架，
+                // 筛到某个分组时人在找书；多选时人在挑书，提示只是挡路
+                val dupHint = duplicateHint.takeIf { it.isNotEmpty() && !selectionMode && group == null }
+                val dupCard: @Composable () -> Unit = {
+                    DuplicateHintCard(
+                        groups = duplicateHint,
+                        onOpen = { showDedup = true },
+                        onDismiss = viewModel::dismissDuplicateHint,
+                    )
+                }
                 val shelfItems = if (hero == null) books else books.filter { it.id != hero.book.id }
                 // 平时长按 = 单本操作菜单；已在多选里则长按继续勾选切换。
                 // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
@@ -712,6 +747,21 @@ fun BookshelfScreen(
                                 }
                             }
                         }
+                        if (dupHint != null) {
+                            item(
+                                key = DUPLICATE_HINT_KEY,
+                                span = { GridItemSpan(maxLineSpan) },
+                                contentType = DUPLICATE_HINT_KEY,
+                            ) {
+                                Box(
+                                    Modifier.animateItem(
+                                        fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                        placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                        fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                    ),
+                                ) { dupCard() }
+                            }
+                        }
                         items(shelfItems, key = { it.id }) { book ->
                             Box(
                                 Modifier.animateItem(
@@ -766,6 +816,21 @@ fun BookshelfScreen(
                                 }
                             }
                         }
+                        if (dupHint != null) {
+                            item(key = DUPLICATE_HINT_KEY, contentType = DUPLICATE_HINT_KEY) {
+                                // 与「继续阅读」同宽、下面同样空一档
+                                Box(
+                                    Modifier
+                                        .animateItem(
+                                            fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
+                                            placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
+                                            fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
+                                        )
+                                        .padding(horizontal = Dimens.listHorizontal)
+                                        .padding(bottom = Dimens.gapM),
+                                ) { dupCard() }
+                            }
+                        }
                         itemsIndexed(shelfItems, key = { _, book -> book.id }) { index, book ->
                             Box(
                                 Modifier
@@ -791,6 +856,24 @@ fun BookshelfScreen(
                 }
             }
         }
+    }
+
+    if (showDedup) {
+        val groups by viewModel.duplicateGroups.collectAsStateWithLifecycle()
+        val keptIds by viewModel.duplicateKeptIds.collectAsStateWithLifecycle()
+        val sourceNames by viewModel.sourceNames.collectAsStateWithLifecycle()
+        val includeHidden by viewModel.dedupIncludeHidden.collectAsStateWithLifecycle()
+        DuplicateBooksSheet(
+            groups = groups,
+            keptIds = keptIds,
+            sourceNames = sourceNames,
+            // 「包含隐藏的书」只在隐藏区展开时出现：平时这里一个字不提隐藏
+            includeHidden = if (showHidden) includeHidden else null,
+            onIncludeHiddenChange = viewModel::setDedupIncludeHidden,
+            onKeepBoth = viewModel::setDuplicatesKept,
+            onApply = viewModel::mergeDuplicates,
+            onDismiss = { showDedup = false },
+        )
     }
 
     groupTarget?.takeIf { it.stillVisible() }?.let { book ->
