@@ -90,6 +90,14 @@ class CoverGlassTest {
     }
 
     @Test
+    fun `重复提示卡上的字压在最坏的封面上也够 4点5 比 1`() {
+        // 几张封面并排糊开，最坏同单张封面：浅色主题一片纯黑、深色一片纯白。卡里只有 onSurface 一种字色
+        assertVeil("重复提示卡", MOSAIC_VEIL_LIGHT, MOSAIC_VEIL_DARK) { s, dark ->
+            minAlpha(s.surfaceContainer, listOf(s.onSurface), dark)
+        }
+    }
+
+    @Test
     fun `详情页头部最淡的小字压在最坏的封面上也够 4点5 比 1`() {
         // 书名 onSurface、作者与章数 onSurfaceVariantSummary、简介 onSurfaceSecondary
         assertVeil("详情页头部", HEADER_VEIL_LIGHT, HEADER_VEIL_DARK) { s, dark ->

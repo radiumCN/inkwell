@@ -149,8 +149,8 @@ fun ExploreScreen(
             EmptyState(
                 icon = MiuixIcons.SearchDevice,
                 title = "没有可用的发现来源",
-                hint = "导入带发现页规则后，可在此浏览分类列表",
-                actionLabel = "去导入规则",
+                hint = "导入支持发现页的书源后，可在此浏览分类列表",
+                actionLabel = "去导入书源",
                 onAction = onOpenSourceManage,
                 modifier = Modifier.padding(padding),
             )

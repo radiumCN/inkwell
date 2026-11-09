@@ -21,6 +21,7 @@ import com.radium.inkwell.update.CheckResult
 import com.radium.inkwell.update.UpdateChannel
 import com.radium.inkwell.update.UpdateInfo
 import com.radium.inkwell.update.UpdateManager
+import com.radium.inkwell.update.UpdateNotifier
 import com.radium.inkwell.update.UpdateSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,6 +34,10 @@ internal class UpdateCheckState(
     val channel: UpdateChannel,
     val source: UpdateSource,
     val checking: Boolean,
+    /** 已经查到、比装着的新的那一版（启动时后台查的、或刚才手动查的），见 [UpdateNotifier.badge] */
+    val available: String?,
+    /** 「检查更新」那一行亮不亮红点 */
+    val dot: Boolean,
     val check: () -> Unit,
     val UpdateDialog: @Composable () -> Unit,
 )
@@ -46,14 +51,12 @@ internal class UpdateCheckState(
 internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
     val context = LocalContext.current
     val updateManager = koinInject<UpdateManager>()
+    val notifier = koinInject<UpdateNotifier>()
     val appPrefs = koinInject<AppPrefs>()
     val scope = rememberCoroutineScope()
 
-    val currentVersion = remember {
-        runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "?"
-    }
+    val currentVersion = notifier.currentVersion
+    val badge by notifier.badge.collectAsStateWithLifecycle()
     val channel = appPrefs.updateChannelState.collectAsStateWithLifecycle().value ?: UpdateChannel.STABLE
     val source = appPrefs.updateSourceState.collectAsStateWithLifecycle().value ?: UpdateSource.GITHUB
 
@@ -69,8 +72,20 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
      */
     var downloadError by remember { mutableStateOf<String?>(null) }
 
+    /** 弹出 [info] 的更新弹窗；看过了，两处红点一起收（见 UpdateNotifier.markSeen） */
+    fun showUpdate(info: UpdateInfo) {
+        downloadError = null
+        update = info
+        scope.launch { notifier.markSeen(info.latestVersion) }
+    }
+
     fun checkUpdate() {
         if (checking) return
+        // 启动时在后台已经查到了（行上写着「可更新」、亮着红点）：直接弹那一版，不再转一圈重查
+        notifier.cachedInfo(source, channel)?.let {
+            showUpdate(it)
+            return
+        }
         checking = true
         scope.launch {
             // 先收「正在检查…」再发提示：提示与它无关，不该陪着挂
@@ -79,11 +94,10 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
             } finally {
                 checking = false
             }
+            // 手动查到的也记一笔：书架齿轮上的红点、这一行的「可更新」跟着对上
+            notifier.record(result, source, channel)
             when (result) {
-                is CheckResult.Available -> {
-                    downloadError = null
-                    update = result.info
-                }
+                is CheckResult.Available -> showUpdate(result.info)
                 CheckResult.UpToDate -> messages.emit("已是最新版本")
                 is CheckResult.Failed -> messages.emit("检查失败: ${result.message}")
             }
@@ -165,6 +179,8 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
         channel = channel,
         source = source,
         checking = checking,
+        available = badge.latest,
+        dot = badge.dot,
         check = ::checkUpdate,
         UpdateDialog = dialog,
     )

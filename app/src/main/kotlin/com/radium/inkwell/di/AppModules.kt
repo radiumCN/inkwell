@@ -142,6 +142,8 @@ val appModule = module {
         )
     }
     single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
+    // 启动时查更新、书架齿轮与设置页的红点读它（见 UpdateNotifier）
+    single { com.radium.inkwell.update.UpdateNotifier(androidContext(), get(), get()) }
 
     single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get(), get()) }
     single { BookSourceRepository(get(), get()) }

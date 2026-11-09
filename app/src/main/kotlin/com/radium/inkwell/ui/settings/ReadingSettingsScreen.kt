@@ -47,7 +47,7 @@ fun ReadingSettingsScreen(
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("阅读与规则", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = { AppTopBar("书源与净化", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier
@@ -58,32 +58,35 @@ fun ReadingSettingsScreen(
                 .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(top = padding.calculateTopPadding() + Dimens.gapS, bottom = padding.calculateBottomPadding()),
         ) {
-            SectionHeader("规则")
+            // 从前第一组叫「规则」（书源管理 + 净化替换规则），页面叫「阅读与规则」：「规则」是书源格式里的词，
+            // 用户不认它；排版这些「阅读」设置又都在阅读页的面板里，标题里有「阅读」反倒让人进来找字号。
+            // 换源本来就是书源的事，和书源管理合成一组；净化单独一组
+            SectionHeader("书源")
             SettingGroup {
                 SettingRow(
                     title = "书源管理",
                     onClick = onOpenSources,
                     position = SettingGroupPosition.First,
                 )
-                SettingRow(
-                    title = "净化替换规则",
-                    onClick = onOpenReplaceRules,
-                    position = SettingGroupPosition.Last,
-                )
-            }
-            SectionHeader("换源")
-            SettingGroup {
                 SwitchRow(
                     title = "自动换源",
                     checked = autoChangeSource,
                     onCheckedChange = { on -> scope.launch { appPrefs.setAutoChangeSource(on) } },
-                    position = SettingGroupPosition.First,
+                    position = SettingGroupPosition.Middle,
                 )
                 SwitchRow(
                     title = "换源时匹配作者",
                     checked = checkAuthor,
                     onCheckedChange = { on -> scope.launch { appPrefs.setChangeSourceCheckAuthor(on) } },
                     position = SettingGroupPosition.Last,
+                )
+            }
+            SectionHeader("正文")
+            SettingGroup {
+                SettingRow(
+                    title = "净化替换",
+                    onClick = onOpenReplaceRules,
+                    position = SettingGroupPosition.Alone,
                 )
             }
             SectionHeader("搜索")

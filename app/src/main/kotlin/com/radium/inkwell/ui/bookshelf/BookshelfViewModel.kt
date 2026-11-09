@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.data.db.entity.BookType
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -347,11 +349,87 @@ class BookshelfViewModel(
     /** 退出隐藏区：胶囊收起，隐藏的书也藏回去 */
     fun collapseHiddenAll() {
         _showHidden.value = false
+        _dedupIncludeHidden.value = true
     }
 
     val hiddenCount: StateFlow<Int> = allBooks
         .map { list -> list.count { it.hidden } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // ---- 重复的书 ----
+
+    /**
+     * 整理面板里「包含隐藏的书」。只在隐藏区展开时才有这个开关、才起作用（见 [duplicateGroups]）；
+     * 默认开：进得了隐藏区，就是要连隐藏的一起整理 —— 最常见的重复正是「藏着一本、上锁时又加了一本」。
+     * 隐藏区一收起就复位，下回进来还是开着的。
+     */
+    private val _dedupIncludeHidden = MutableStateFlow(true)
+    val dedupIncludeHidden: StateFlow<Boolean> = _dedupIncludeHidden.asStateFlow()
+
+    fun setDedupIncludeHidden(on: Boolean) {
+        _dedupIncludeHidden.value = on
+    }
+
+    /**
+     * 书架上的重复（见 [findDuplicates]）。隐藏区收着时隐藏的书**一本都不进来**：一本看得见的和一本藏着的重复，
+     * 提示「有 1 组重复」就等于替旁人说「这儿还藏着一本」（[shelfDuplicates]）。
+     * 整个书架两两比，挪到 Default 上算，别占主线程。
+     */
+    val duplicateGroups: StateFlow<List<DuplicateGroup>> =
+        combine(allBooks, _showHidden, _dedupIncludeHidden) { list, showHidden, include ->
+            shelfDuplicates(list, includeHidden = showHidden && include)
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 「都保留」过的书，见 [setDuplicatesKept] */
+    val duplicateKeptIds: StateFlow<Set<String>> = appPrefs.duplicateKeptIds
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /**
+     * 「继续阅读」下面那张提示卡要提的组；空 = 不出卡。
+     *
+     * 「都保留」过的组不提（那是用户认过的）；其余的组里，只要有一本书不在 ✕ 过的那批里就出卡 ——
+     * ✕ 掉的是「这一批」，以后再多出一份才又冒出来（[hasFreshDuplicates]）。设置里关了提示就一直空着。
+     */
+    val duplicateHint: StateFlow<List<DuplicateGroup>> =
+        combine(duplicateGroups, duplicateKeptIds, appPrefs.duplicateDismissedIds, appPrefs.duplicateHintEnabled) {
+                groups, kept, dismissed, enabled ->
+            if (!enabled) return@combine emptyList()
+            val open = groups.filter { g -> !g.books.all { it.id in kept } }
+            if (hasFreshDuplicates(open, dismissed)) open else emptyList()
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 书源 id → 名称：整理面板里网络书的主行 */
+    val sourceNames: StateFlow<Map<String, String>> = sourceRepo.sources
+        .map { list -> list.associate { it.id to it.name } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** 提示卡上的 ✕：这一批不再提示 */
+    fun dismissDuplicateHint() {
+        val ids = duplicateHint.value.flatMap { g -> g.books.map { it.id } }
+        if (ids.isEmpty()) return
+        viewModelScope.launch { appPrefs.addDuplicateDismissed(ids, shelfIds()) }
+    }
+
+    /** 整理面板里的「都保留」/「整理这组」 */
+    fun setDuplicatesKept(group: DuplicateGroup, kept: Boolean) {
+        val ids = group.books.map { it.id }
+        viewModelScope.launch {
+            if (kept) appPrefs.addDuplicateKept(ids, shelfIds()) else appPrefs.removeDuplicateKept(ids)
+        }
+    }
+
+    /** 整理面板里的「删除 N 本」 */
+    fun mergeDuplicates(merges: List<DuplicateMerge>) {
+        if (merges.isEmpty()) return
+        viewModelScope.launch {
+            val n = bookRepo.mergeDuplicates(merges)
+            messages.emit(if (n > 0) "已删除 $n 本重复的书" else "这些书已经不在书架上了")
+        }
+    }
+
+    private fun shelfIds(): Set<String> = allBooks.value.mapTo(HashSet()) { it.id }
 
     /**
      * 开书那一刻的书架顺序；非 null 时 [books] 照它摆。

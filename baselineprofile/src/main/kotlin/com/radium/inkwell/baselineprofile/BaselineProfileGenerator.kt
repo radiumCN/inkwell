@@ -26,7 +26,7 @@ import java.util.regex.Pattern
  * ### 这段旅程覆盖了什么、没覆盖什么
  *
  * 覆盖：冷启动（Application/Koin/Room/DataStore）、Compose 起步与首帧、书架、导航转场、
- * 设置（含关于）、阅读与规则 → 书源管理、搜索页、**阅读器进书与翻页**（夹具 txt，见 [ProfileSeed]）。
+ * 设置（含关于）、书源与净化 → 书源管理、搜索页、**阅读器进书与翻页**（夹具 txt，见 [ProfileSeed]）。
  * 生成出来的规则量里 compose/ui 仍是大头，进书时占住主线程的也是组合与绘制。
  *
  * 阅读器靠启动 extra 把 `assets/benchmark/seed.txt` 导入书架再点进去，不碰文件选择器、
@@ -96,7 +96,7 @@ class BaselineProfileGenerator {
         // 等顶栏的齿轮出来就说明顶栏已经组合完毕，两条都到位了。
         awaitBookshelf()
 
-        // 设置树：一级页 → 关于；一级页 → 阅读与规则 → 书源管理。
+        // 设置树：一级页 → 关于；一级页 → 书源与净化 → 书源管理。
         // 书架上从前是个三点「更多」菜单，2026-07 换成了齿轮。生成器没跟着改，又是 `?.click()`
         // 找不到就静默跳过 —— 可后面那句 pressBack 照按不误，在书架根页上按返回**直接退出了
         // App**，之后的搜索、进书、翻页全对着桌面点了个空。生成出来的 profile 于是只剩冷启动
@@ -106,8 +106,8 @@ class BaselineProfileGenerator {
         // 「关于」在设置页最底下：顶上加了概览卡、各组加了标题之后，矮一点的模拟器一屏装不下，得先滚到它
         tap(By.text("关于"), "设置 → 关于", scrollToFind = true)
         back()
-        tap(By.text("阅读与规则"), "设置 → 阅读与规则")
-        tap(By.text("书源管理"), "阅读与规则 → 书源管理")
+        tap(By.text("书源与净化"), "设置 → 书源与净化")
+        tap(By.text("书源管理"), "书源与净化 → 书源管理")
         back()
         back()
         back()
