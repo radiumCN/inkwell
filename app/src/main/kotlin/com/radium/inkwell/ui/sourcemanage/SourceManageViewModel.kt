@@ -125,7 +125,7 @@ class SourceManageViewModel(
         viewModelScope.launch {
             sourceRepo.deleteAll(ids)
             clearSelection()
-            messages.emit("已删除 ${ids.size} 个书源")
+            messages.emit("已删除 ${ids.size} 个来源")
         }
     }
 
@@ -134,7 +134,7 @@ class SourceManageViewModel(
         if (ids.isEmpty()) return
         viewModelScope.launch {
             sourceRepo.setEnabledAll(ids, enabled)
-            messages.emit("${if (enabled) "已启用" else "已禁用"} ${ids.size} 个书源")
+            messages.emit("${if (enabled) "已启用" else "已禁用"} ${ids.size} 个来源")
         }
     }
 
@@ -178,7 +178,7 @@ class SourceManageViewModel(
         viewModelScope.launch {
             sourceRepo.setEnabledAll(ids, false)
             clearSelection()
-            messages.emit("已禁用 ${ids.size} 个失效书源")
+            messages.emit("已禁用 ${ids.size} 个失效来源")
         }
     }
 
@@ -188,7 +188,7 @@ class SourceManageViewModel(
         viewModelScope.launch {
             sourceRepo.deleteAll(ids)
             clearSelection()
-            messages.emit("已删除 ${ids.size} 个失效书源")
+            messages.emit("已删除 ${ids.size} 个失效来源")
         }
     }
 

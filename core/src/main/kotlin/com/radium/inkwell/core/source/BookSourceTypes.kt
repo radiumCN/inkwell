@@ -25,7 +25,7 @@ object BookSourceTypes {
         IMAGE -> "漫画源不支持"
         FILE -> "文件源不支持"
         VIDEO -> "视频源不支持"
-        else -> "非小说书源（type=$type）不支持"
+        else -> "非小说来源（type=$type）不支持"
     }
 
     /**

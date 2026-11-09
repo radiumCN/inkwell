@@ -371,11 +371,11 @@ class SearchViewModel(
                 // 「新建书源」没设置搜索的源连发现页也没有：别叫人去发现页里找它
                 messages.emit(
                     when {
-                        enabled.isEmpty() -> "没有启用的书源，请先导入并启用书源"
+                        enabled.isEmpty() -> "没有启用的来源，请先导入并启用来源"
                         enabled.any { it.rule.explore.isNotEmpty() } ->
-                            "已启用的 ${enabled.size} 个书源都不支持搜索（仅发现页可用），" +
-                                "请到发现页浏览，或导入支持搜索的书源"
-                        else -> "已启用的 ${enabled.size} 个书源都不支持搜索，请导入支持搜索的书源"
+                            "已启用的 ${enabled.size} 个来源都不支持搜索（仅发现页可用），" +
+                                "请到发现页浏览，或导入支持搜索的来源"
+                        else -> "已启用的 ${enabled.size} 个来源都不支持搜索，请导入支持搜索的来源"
                     },
                 )
                 return@launch
@@ -723,7 +723,7 @@ class SearchViewModel(
             throw e
         } catch (e: Exception) {
             // 界面上照旧静默（几十个源里挂几个是常态），但日志里得留下是哪个源、为什么
-            Log.w(TAG, "搜索失败：书源「${rule.name}」第 $page 页", e)
+            Log.w(TAG, "搜索失败：来源「${rule.name}」第 $page 页", e)
             record(rule.id, SearchOutcome.Failed)
             null
         }
@@ -838,7 +838,7 @@ class SearchViewModel(
                 for (r in ranked.take(MAX_ADD_TRIES)) {
                     val rule = sourceRepo.getRule(r.sourceId)
                     if (rule == null) {
-                        lastMsg = "书源不存在"
+                        lastMsg = "来源不存在"
                         continue
                     }
                     val outcome = try {
@@ -851,7 +851,7 @@ class SearchViewModel(
                     val cancelled = outcome?.exceptionOrNull() as? CancellationException
                     if (cancelled != null) throw cancelled
                     when {
-                        outcome == null -> lastMsg = "书源响应超时"
+                        outcome == null -> lastMsg = "来源响应超时"
                         outcome.isSuccess -> {
                             messages.emit("已加入书架")
                             return@launch
@@ -859,7 +859,7 @@ class SearchViewModel(
                         else -> lastMsg = outcome.exceptionOrNull()?.message
                     }
                 }
-                messages.emit("加入失败: ${lastMsg?.take(80) ?: "没有能用的书源"}")
+                messages.emit("加入失败: ${lastMsg?.take(80) ?: "没有能用的来源"}")
             } finally {
                 _state.update { it.copy(addingUrls = it.addingUrls - rowUrl) }
             }

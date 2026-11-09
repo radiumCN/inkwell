@@ -414,7 +414,7 @@ class BookSourceImportTest {
         val second = repo.addCreated(created("https://a.com"))
         assertEquals("https://a.com#自建2", second.id)
 
-        assertTrue(repo.getRule("https://a.com")!!.search != null, "导入的书源被覆盖了")
+        assertTrue(repo.getRule("https://a.com")!!.search != null, "导入的来源被覆盖了")
         assertEquals("自建", dao.store.getValue("https://a.com#自建").groupName)
         // 后缀不进请求地址
         assertEquals("https://a.com", first.baseUrl)

@@ -237,7 +237,7 @@ class ExploreViewModel(
                     // loading 抹成 false —— 新一轮明明在转圈，转圈却没了。
                     if (e is CancellationException) throw e
                     // 抓取层已记下地址与异常链（SourceHttp），这里补上是哪个源、哪个分类、第几页
-                    Log.w(TAG, "发现页加载失败：书源「${source.name}」分类「${s.categories.getOrNull(s.categoryIndex)}」第 $page 页", e)
+                    Log.w(TAG, "发现页加载失败：来源「${source.name}」分类「${s.categories.getOrNull(s.categoryIndex)}」第 $page 页", e)
                     val reason = e.message?.take(80) ?: e.javaClass.simpleName
                     _state.value = _state.value.copy(
                         loading = false,
@@ -261,14 +261,14 @@ class ExploreViewModel(
             try {
                 val rule = ruleCache[result.sourceId] ?: sourceRepo.getRule(result.sourceId)
                 if (rule == null) {
-                    messages.emit("书源不存在")
+                    messages.emit("来源不存在")
                     return@launch
                 }
                 // 同搜索页：书源卡住时别让这一行一直转圈。用 withTimeoutOrNull 而不是 withTimeout ——
                 // 后者抛的是 CancellationException，会和「离开页面」的取消混在一起
                 val outcome = withTimeoutOrNull(ADD_TIMEOUT_MS) { netBookRepo.addToShelf(result, rule) }
                 if (outcome == null) {
-                    messages.emit("加入失败：书源响应超时")
+                    messages.emit("加入失败：来源响应超时")
                     return@launch
                 }
                 outcome

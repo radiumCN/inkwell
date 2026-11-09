@@ -47,7 +47,7 @@ fun ReadingSettingsScreen(
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("书源与净化", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = { AppTopBar("来源与净化", topBarScroll, onBack = onBack, containerColor = pageColor) },
     ) { padding ->
         Column(
             Modifier
@@ -61,10 +61,10 @@ fun ReadingSettingsScreen(
             // 从前第一组叫「规则」（书源管理 + 净化替换规则），页面叫「阅读与规则」：「规则」是书源格式里的词，
             // 用户不认它；排版这些「阅读」设置又都在阅读页的面板里，标题里有「阅读」反倒让人进来找字号。
             // 换源本来就是书源的事，和书源管理合成一组；净化单独一组
-            SectionHeader("书源")
+            SectionHeader("来源")
             SettingGroup {
                 SettingRow(
-                    title = "书源管理",
+                    title = "来源管理",
                     onClick = onOpenSources,
                     position = SettingGroupPosition.First,
                 )

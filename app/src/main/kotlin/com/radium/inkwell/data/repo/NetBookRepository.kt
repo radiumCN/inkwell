@@ -331,7 +331,7 @@ class NetBookRepository(
         alignFrom: ReadAnchor? = null,
     ): Result<Unit> = try {
         val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl)
-        check(toc.isNotEmpty()) { "新书源目录为空" }
+        check(toc.isNotEmpty()) { "新来源目录为空" }
 
         withContext(Dispatchers.IO) { cache.clear(book.id) } // 旧源的正文缓存整本作废（成千个文件）
         val entities = buildToc(book.id, toc)

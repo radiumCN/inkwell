@@ -91,10 +91,10 @@ class CheckMessagesTest {
     @Test
     fun `脚本与规则报错算书源规则出错`() {
         assertEquals(
-            "书源规则出错（目录）",
+            "来源规则出错（目录）",
             CheckMessages.failure(CheckStep.TOC, IllegalStateException("ReferenceError: \"java\" is not defined. (#3)")),
         )
-        assertEquals("书源规则出错", CheckMessages.display("脚本执行超出指令数限制"))
+        assertEquals("来源规则出错", CheckMessages.display("脚本执行超出指令数限制"))
     }
 
     @Test
@@ -103,7 +103,7 @@ class CheckMessagesTest {
             "正文出错：正文规则未匹配到内容",
             CheckMessages.failure(CheckStep.CONTENT, IllegalStateException("正文规则未匹配到内容: https://a.com/1.html")),
         )
-        assertEquals("目录出错：未配置目录规则", CheckMessages.failure(CheckStep.TOC, IllegalStateException("书源「笔趣阁」未配置目录规则")))
+        assertEquals("目录出错：未配置目录规则", CheckMessages.failure(CheckStep.TOC, IllegalStateException("来源「笔趣阁」未配置目录规则")))
         assertEquals("搜索失败", CheckMessages.failure(CheckStep.SEARCH, IllegalStateException()))
         assertEquals("正文规则未匹配到内容", CheckMessages.display("正文规则未匹配到内容: https://a.com/1.html"))
     }
@@ -111,7 +111,7 @@ class CheckMessagesTest {
     /** 本来就是人话的原样留着；新存的文案再显示一遍不能被改写（尤其别把「（HTTP 403）」前面的步骤吃掉） */
     @Test
     fun `显示新文案是原样`() {
-        listOf("搜索无结果", "目录为空", "正文为空", "书源规则损坏", "失败").forEach {
+        listOf("搜索无结果", "目录为空", "正文为空", "来源规则损坏", "失败").forEach {
             assertEquals(it, CheckMessages.display(it))
         }
         listOf(
@@ -121,5 +121,17 @@ class CheckMessagesTest {
             CheckMessages.failure(CheckStep.CONTENT, SocketTimeoutException("timeout")),
             CheckMessages.failure(CheckStep.CONTENT, IllegalStateException("正文规则未匹配到内容: https://a.com/1")),
         ).forEach { assertEquals(it, CheckMessages.display(it)) }
+    }
+
+    /**
+     * 界面上不写「书源」二字，统一叫「来源」。0.5.5 及以前存进库的文案还带着它 —— 显示时换掉，
+     * 引擎报错里旧写法的「书源「某某」」照样把名字去掉。
+     */
+    @Test
+    fun `库里的旧文案显示时不出现「书源」`() {
+        assertEquals("来源规则损坏", CheckMessages.display("书源规则损坏"))
+        assertEquals("来源规则出错（目录）", CheckMessages.display("书源规则出错（目录）"))
+        assertEquals("未配置目录规则", CheckMessages.display("书源「笔趣阁」未配置目录规则"))
+        assertEquals("目录出错：未配置目录规则", CheckMessages.display("目录出错：书源「笔趣阁」未配置目录规则"))
     }
 }

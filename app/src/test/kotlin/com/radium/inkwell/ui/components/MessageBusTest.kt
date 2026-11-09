@@ -19,13 +19,13 @@ class MessageBusTest {
         val job = launch { bus.messages.collect { received += it } }
         runCurrent()
 
-        bus.emit("新增 1 个书源")
-        bus.emit("新增 1 个书源")
-        bus.emit("新增 1 个书源")
+        bus.emit("新增 1 个来源")
+        bus.emit("新增 1 个来源")
+        bus.emit("新增 1 个来源")
         runCurrent()
         job.cancel()
 
         assertEquals(3, received.size)
-        assertEquals(listOf("新增 1 个书源", "新增 1 个书源", "新增 1 个书源"), received)
+        assertEquals(listOf("新增 1 个来源", "新增 1 个来源", "新增 1 个来源"), received)
     }
 }

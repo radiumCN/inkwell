@@ -85,7 +85,7 @@ class SourceDetailViewModel(
         }
         val input = _state.value.testKeyword.trim()
         if (rule.search == null && input.isEmpty()) {
-            messages.emit("这个书源不能搜索，请填一本书的网址")
+            messages.emit("这个来源不能搜索，请填一本书的网址")
             return
         }
         viewModelScope.launch {

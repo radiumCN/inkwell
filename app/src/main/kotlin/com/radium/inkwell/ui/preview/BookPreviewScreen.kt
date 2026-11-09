@@ -212,7 +212,7 @@ private fun SwitchSourceButton(
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
-        AppTextButton("换个书源试试（共 ${state.sources.size} 个）", onClick = { open = true })
+        AppTextButton("换个来源试试（共 ${state.sources.size} 个）", onClick = { open = true })
         SourceMenu(expanded = open, onDismiss = { open = false }, state = state, onSwitch = onSwitch)
     }
 }
@@ -270,7 +270,7 @@ private fun Header(
                     Box {
                         AppTextButton(onClick = { sourceMenuOpen = true }, contentPadding = PaddingValues(0.dp)) {
                             Text(
-                                "换源（${state.sources.size} 个书源）",
+                                "换源（${state.sources.size} 个来源）",
                                 style = MiuixTheme.textStyles.footnote1,
                                 fontWeight = FontWeight.Medium,
                             )

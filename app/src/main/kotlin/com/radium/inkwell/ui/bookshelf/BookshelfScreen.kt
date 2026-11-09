@@ -629,7 +629,7 @@ fun BookshelfScreen(
             EmptyState(
                 icon = MiuixIcons.Notes,
                 title = "书架空空如也",
-                hint = "导入本地 txt / EPUB / MOBI，或用书源搜索书籍",
+                hint = "导入本地 txt / EPUB / MOBI，或用来源搜索书籍",
                 actionLabel = "导入本地书",
                 onAction = ::launchImport,
                 modifier = Modifier.padding(padding),

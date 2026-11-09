@@ -434,7 +434,7 @@ object SourceDraftBuilder {
             bookSourceName = name,
             bookSourceGroup = group,
             bookSourceType = BookSourceTypes.TEXT,
-            bookSourceComment = "由「新建书源」根据 ${book.bookUrl} 自动识别生成",
+            bookSourceComment = "由「新建来源」根据 ${book.bookUrl} 自动识别生成",
             searchUrl = search?.searchUrl,
             ruleSearch = search?.rules,
             ruleBookInfo = bookInfo,

@@ -101,7 +101,7 @@ fun DeveloperSettingsScreen(
                             )
                             append("\n")
                         }
-                        append("可能包含书源地址、书名等信息，请只发给信任的人")
+                        append("可能包含来源地址、书名等信息，请只发给信任的人")
                     },
                     onClick = viewModel::export,
                     trailing = if (exporting) {

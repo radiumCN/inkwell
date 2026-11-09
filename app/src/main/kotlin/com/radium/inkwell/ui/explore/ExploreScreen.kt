@@ -149,8 +149,8 @@ fun ExploreScreen(
             EmptyState(
                 icon = MiuixIcons.SearchDevice,
                 title = "没有可用的发现来源",
-                hint = "导入支持发现页的书源后，可在此浏览分类列表",
-                actionLabel = "去导入书源",
+                hint = "导入支持发现页的来源后，可在此浏览分类列表",
+                actionLabel = "去导入来源",
                 onAction = onOpenSourceManage,
                 modifier = Modifier.padding(padding),
             )
@@ -272,7 +272,7 @@ private fun SourceCapsule(
                 modifier = Modifier.size(Dimens.iconSm),
             )
             Text(
-                sourceName.ifBlank { "选择书源" },
+                sourceName.ifBlank { "选择来源" },
                 style = MiuixTheme.textStyles.body2,
                 fontWeight = FontWeight.Medium,
                 color = scheme.onSurface,
@@ -288,7 +288,7 @@ private fun SourceCapsule(
                     .height(Dimens.iconSm),
             )
             Text(
-                "切换书源",
+                "切换来源",
                 style = MiuixTheme.textStyles.body2,
                 color = scheme.onSurface,
                 maxLines = 1,

@@ -86,8 +86,8 @@ fun SourceWizardScreen(
     state.existing?.let { existing ->
         AppAlertDialog(
             onDismissRequest = viewModel::dismissExisting,
-            title = "这个网站已有书源",
-            text = "书源「${existing.name}」就是这个网站的。直接用它打开这本书，还是重新识别、另建一个书源？",
+            title = "这个网站已有来源",
+            text = "来源「${existing.name}」就是这个网站的。直接用它打开这本书，还是重新识别、另建一个来源？",
             confirmText = "直接打开",
             onConfirm = viewModel::openWithExisting,
             confirmLoading = state.openingExisting,
@@ -109,7 +109,7 @@ private fun FormStep(state: SourceWizardUiState, viewModel: SourceWizardViewMode
         containerColor = pageColor,
         topBar = {
             AppTopBar(
-                if (state.step == WizardStep.Advanced) "逐项修改规则" else "新建书源",
+                if (state.step == WizardStep.Advanced) "逐项修改规则" else "新建来源",
                 topBarScroll,
                 onBack = goBack,
                 containerColor = pageColor,
@@ -232,7 +232,7 @@ private fun InputStep(state: SourceWizardUiState, viewModel: SourceWizardViewMod
     state.inputError?.let { SettingFootnote(it, color = MiuixTheme.colorScheme.error) }
     SettingFootnote(
         "在浏览器里打开这本书的目录页（列出全部章节的那一页）或详情页，复制地址粘贴到这里；" +
-            "正在读的某一章的地址也行。应用会认出目录和正文在页面上的位置，生成一个书源。",
+            "正在读的某一章的地址也行。应用会认出目录和正文在页面上的位置，生成一个来源。",
     )
     SettingFootnote("识别只看这一本书的页面，不会搜索整个网站。需要登录、有人机验证的网站认不出来。")
 }
@@ -315,10 +315,10 @@ private fun ReviewStep(state: SourceWizardUiState, viewModel: SourceWizardViewMo
             CompactTextField(
                 value = state.sourceName,
                 onValueChange = viewModel::setSourceName,
-                placeholder = "书源名称",
+                placeholder = "来源名称",
             )
             PrimaryButton(
-                text = "保存书源并打开这本书",
+                text = "保存来源并打开这本书",
                 onClick = viewModel::save,
                 enabled = state.canSave,
                 loading = state.saving,
@@ -331,9 +331,9 @@ private fun ReviewStep(state: SourceWizardUiState, viewModel: SourceWizardViewMo
     val group = BookSourceRepository.CREATED_GROUP
     SettingFootnote(
         if (state.search != null) {
-            "书源保存在分组「$group」里，可以在应用里搜这个网站的书。"
+            "来源保存在分组「$group」里，可以在应用里搜这个网站的书。"
         } else {
-            "书源保存在分组「$group」里。没设置搜索的话它不能用来搜索；" +
+            "来源保存在分组「$group」里。没设置搜索的话它不能用来搜索；" +
                 "以后要读这个网站的其他书，在这里输入那本书的网址，会直接用它打开。"
         },
     )

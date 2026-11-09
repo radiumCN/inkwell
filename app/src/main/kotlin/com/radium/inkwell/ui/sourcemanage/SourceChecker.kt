@@ -140,7 +140,7 @@ class SourceChecker(
      *    现在只要**非空**就算通过，偏短则照常可用、附带提示。
      */
     private suspend fun checkOne(id: String, opts: CheckOptions): SourceCheck {
-        val rule = sourceRepo.getRule(id) ?: return SourceCheck(false, "书源规则损坏")
+        val rule = sourceRepo.getRule(id) ?: return SourceCheck(false, "来源规则损坏")
         if (rule.search == null) {
             // 「新建书源」生成的源连发现页也没有：说「仅发现页」就是错的，用户会去发现页里找它
             val what = if (rule.explore.isEmpty()) "无搜索规则，按网址加书" else "仅发现页"
