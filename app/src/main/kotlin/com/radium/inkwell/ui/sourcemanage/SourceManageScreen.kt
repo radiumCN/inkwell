@@ -131,7 +131,7 @@ fun SourceManageScreen(
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(android.content.Intent.createChooser(intent, "导出书源"))
+            context.startActivity(android.content.Intent.createChooser(intent, "导出来源"))
         }
     }
     val selectionMode = selected.isNotEmpty()
@@ -203,7 +203,7 @@ fun SourceManageScreen(
                 actions = {
                     if (sources.isNotEmpty() && checkProgress == null) {
                         AppIconButton(onClick = { showCheckOptions = true }) {
-                            Icon(MiuixIcons.Tasks, contentDescription = "校验书源")
+                            Icon(MiuixIcons.Tasks, contentDescription = "校验来源")
                         }
                     }
                     Box {
@@ -227,7 +227,7 @@ fun SourceManageScreen(
                     }
                     Box {
                         AppIconButton(onClick = { showImportMenu = true }) {
-                            Icon(MiuixIcons.Add, contentDescription = "添加书源")
+                            Icon(MiuixIcons.Add, contentDescription = "添加来源")
                         }
                         AppDropdownMenu(
                             expanded = showImportMenu,
@@ -254,7 +254,7 @@ fun SourceManageScreen(
                 },
                 bottomContent = listHeader,
             ) {
-                ToolbarTitle("书源管理")
+                ToolbarTitle("来源管理")
             }
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
@@ -291,13 +291,13 @@ fun SourceManageScreen(
             // 库还没读回来：先空着，别闪一下「还没有书源」
         } else if (sources.isEmpty() && importing) {
             // 从空态点了导入：别还对着「还没有书源」干等，几 MB 的合集要解析好几秒
-            LoadingState(Modifier.padding(padding), label = "正在导入书源…")
+            LoadingState(Modifier.padding(padding), label = "正在导入来源…")
         } else if (sources.isEmpty()) {
             EmptyState(
                 icon = MiuixIcons.Import,
-                title = "还没有书源",
-                hint = "支持导入 Inkwell 与 Legado（阅读）格式的书源；" +
-                    "没有现成书源的网站，可以点右上角「＋」按书的网址新建",
+                title = "还没有来源",
+                hint = "支持导入 Inkwell 与 Legado（阅读）格式的来源；" +
+                    "没有现成来源的网站，可以点右上角「＋」按书的网址新建",
                 actionLabel = "从文件导入",
                 onAction = {
                     fileImportLauncher.launch(
@@ -313,7 +313,7 @@ fun SourceManageScreen(
             if (visible.isEmpty() && narrowed) {
                 EmptyState(
                     icon = MiuixIcons.Search,
-                    title = "没有符合条件的书源",
+                    title = "没有符合条件的来源",
                     hint = "换个关键词，或放宽筛选条件",
                     actionLabel = "清除筛选",
                     onAction = viewModel::clearFilters,
@@ -376,7 +376,7 @@ fun SourceManageScreen(
         val target = if (selected.isEmpty()) sources.size else selected.size
         AppAlertDialog(
             onDismissRequest = { showCheckOptions = false },
-            title = "校验 $target 个书源",
+            title = "校验 $target 个来源",
             confirmText = "开始校验",
             onConfirm = {
                 viewModel.setOptions(draft)
@@ -439,8 +439,8 @@ fun SourceManageScreen(
     if (confirmBatchDelete) {
         AppAlertDialog(
             onDismissRequest = { confirmBatchDelete = false },
-            title = "删除书源",
-            text = "确定删除选中的 ${selected.size} 个书源吗？",
+            title = "删除来源",
+            text = "确定删除选中的 ${selected.size} 个来源吗？",
             confirmText = "删除",
             onConfirm = {
                 confirmBatchDelete = false
@@ -452,8 +452,8 @@ fun SourceManageScreen(
     if (confirmDeleteInvalid) {
         AppAlertDialog(
             onDismissRequest = { confirmDeleteInvalid = false },
-            title = "删除失效书源",
-            text = "确定删除全部 $failedCount 个失效书源吗？此操作不可撤销。",
+            title = "删除失效来源",
+            text = "确定删除全部 $failedCount 个失效来源吗？此操作不可撤销。",
             confirmText = "删除",
             onConfirm = {
                 confirmDeleteInvalid = false
@@ -470,8 +470,8 @@ fun SourceManageScreen(
         }
         AppAlertDialog(
             onDismissRequest = { dismissUrlImport() },
-            title = "从 URL 导入书源",
-            text = "支持 Inkwell 与 Legado（阅读）格式的书源 JSON 链接",
+            title = "从 URL 导入来源",
+            text = "支持 Inkwell 与 Legado（阅读）格式的来源 JSON 链接",
             confirmText = "导入",
             confirmEnabled = importUrl.isNotBlank(),
             onConfirm = {
@@ -514,7 +514,7 @@ private fun SourceListHeader(
         SearchField(
             value = query,
             onValueChange = onQueryChange,
-            placeholder = "搜索书源名称或网址",
+            placeholder = "搜索来源名称或网址",
             modifier = Modifier.fillMaxWidth()
                 .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
         )
@@ -569,7 +569,7 @@ private fun SourceListHeader(
                 horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
             ) {
                 AppLoadingIndicator(size = Dimens.buttonSpinner)
-                Text("正在导入书源…", style = MiuixTheme.textStyles.footnote1)
+                Text("正在导入来源…", style = MiuixTheme.textStyles.footnote1)
             }
         }
         // 校验进度：一次几百个源，得让人看到还剩多少、这一轮已经坏了几个，并且能中断。

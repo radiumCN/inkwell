@@ -51,8 +51,12 @@ internal object CheckMessages {
     /**
      * 存着的失败原因 → 显示的。新文案原样返回（[reasonOf] 只认英文原文与几句引擎报错，认不到自己写出去的中文）；
      * 旧的异常原文认得出的归类 —— 旧文案不知道停在哪步，就不写步骤；认不出的去掉网址与书源名。
+     *
+     * 界面上不写「书源」二字（统一叫「来源」，见 CLAUDE.md）。0.5.5 及以前存进库的文案里还有它
+     * （「书源规则损坏」「书源规则出错（目录）」），显示时一并换掉 —— 不必为了改个词迁移数据库。
      */
-    fun display(saved: String): String = reasonOf(saved)?.text(step = null) ?: clean(saved)
+    fun display(saved: String): String =
+        (reasonOf(saved)?.text(step = null) ?: clean(saved)).replace(LEGACY_WORD, "来源")
 
     private sealed interface Reason {
         fun text(step: CheckStep?): String
@@ -91,7 +95,7 @@ internal object CheckMessages {
     }
 
     private data object RuleError : Reason {
-        override fun text(step: CheckStep?) = "书源规则出错" + (step?.let { "（${it.label}）" } ?: "")
+        override fun text(step: CheckStep?) = "来源规则出错" + (step?.let { "（${it.label}）" } ?: "")
     }
 
     /**
@@ -129,7 +133,11 @@ internal object CheckMessages {
 
     private val URL = Regex("""https?://\S*""")
     private val URL_TAIL = Regex("""\s*[:：]\s*https?://\S*""")
-    private val SOURCE_NAME = Regex("""书源「[^」]*」""")
+    /** 引擎报错里带的名字：「来源「某某」」；0.5.5 及以前的引擎写的是「书源「某某」」，库里还存着 */
+    private val SOURCE_NAME = Regex("""(?:来源|$LEGACY_WORD)「[^」]*」""")
+
+    /** 0.5.5 及以前界面上的叫法，见 [display] */
+    private const val LEGACY_WORD = "书源"
     private val WHITESPACE = Regex("""\s+""")
 
     /** withTimeout 到点：整源的时间预算用完了 */

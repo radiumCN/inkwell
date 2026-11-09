@@ -66,7 +66,7 @@ fun ExploreSourceSheet(
     AppBottomSheet(
         onDismissRequest = onDismiss,
         modifier = Modifier.heightIn(max = maxSheetHeight),
-        title = "切换书源",
+        title = "切换来源",
         // 列表会滚到手势条下面：导航栏高度垫进列表末尾，别让面板在外面垫（见 AppBottomSheet）
         padNavigationBar = false,
         endAction = {
@@ -80,7 +80,7 @@ fun ExploreSourceSheet(
             SearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = "搜索书源名称或网址",
+                placeholder = "搜索来源名称或网址",
                 modifier = Modifier
                     .padding(horizontal = cardMargin())
                     .padding(vertical = Dimens.gapS),
@@ -111,7 +111,7 @@ fun ExploreSourceSheet(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     Text(
-                                        "没有匹配「$trimmed」的书源",
+                                        "没有匹配「$trimmed」的来源",
                                         style = MiuixTheme.textStyles.body2,
                                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                     )
@@ -144,7 +144,7 @@ fun ExploreSourceSheet(
                             }
                         }
                         if (rest.isNotEmpty()) {
-                            item(key = "all-header") { SectionHeader("全部书源") }
+                            item(key = "all-header") { SectionHeader("全部来源") }
                             itemsIndexed(rest, key = { _, s -> s.id }) { i, s ->
                                 val index = sources.indexOfFirst { it.id == s.id }
                                 SourceRow(

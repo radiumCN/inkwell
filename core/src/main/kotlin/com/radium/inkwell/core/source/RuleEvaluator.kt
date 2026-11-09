@@ -523,7 +523,7 @@ class RuleEvaluator(
      */
     private fun runJs(script: String, ctx: EvalContext, input: String): String? {
         val runtime = scriptRuntime
-            ?: throw UnsupportedRuleException("该书源需要 JS 引擎，当前版本不支持")
+            ?: throw UnsupportedRuleException("该来源需要 JS 引擎，当前版本不支持")
         val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
         val java = com.radium.inkwell.core.source.js.JavaBridge(
             jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx),

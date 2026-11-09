@@ -198,7 +198,7 @@ fun SettingsScreen(
                 SectionHeader("阅读与外观")
                 SettingGroup {
                     SettingRow(
-                        title = "书源与净化",
+                        title = "来源与净化",
                         icon = MiuixIcons.Notes,
                         onClick = onOpenReading,
                         position = SettingGroupPosition.First,
@@ -343,7 +343,7 @@ fun SettingsScreen(
             onDismissRequest = { confirmClearCache = false },
             title = "清除正文缓存",
             text = "将删除已下载的 ${formatSize(cacheBytes)} 章节正文。" +
-                "书架、阅读进度和书源都不受影响，下次阅读时如需正文会重新加载。",
+                "书架、阅读进度和来源都不受影响，下次阅读时如需正文会重新加载。",
             confirmText = "清除",
             onConfirm = {
                 confirmClearCache = false

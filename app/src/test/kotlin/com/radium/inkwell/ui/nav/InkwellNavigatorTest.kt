@@ -64,7 +64,7 @@ class InkwellNavigatorTest {
     fun `新建书源存好后向导换成预览页`() {
         val s = stack(BookshelfRoute, SettingsRoute, ReadingSettingsRoute, SourceManageRoute)
         s.navigateTo(SourceWizardRoute)
-        assertEquals(SourceWizardRoute, s.last(), "向导应叠在书源管理之上")
+        assertEquals(SourceWizardRoute, s.last(), "向导应叠在来源管理之上")
         assertEquals(SourceManageRoute, s[s.lastIndex - 1])
 
         val preview = BookPreviewRoute("arg")

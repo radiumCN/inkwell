@@ -141,7 +141,7 @@ class BookDetailViewModel(
     private suspend fun refreshMessage(): String {
         // 取最新行：从进页到点刷新之间，换源可能已经改了 sourceId
         val book = bookRepo.getBook(bookId) ?: return "书不存在"
-        val rule = book.sourceId?.let { sourceRepo.getRule(it) } ?: return "书源不存在，先换源"
+        val rule = book.sourceId?.let { sourceRepo.getRule(it) } ?: return "来源不存在，先换源"
         return netBookRepo.refreshToc(book, rule).fold(
             onSuccess = { added -> if (added > 0) "更新了 $added 章" else "已经是最新的了" },
             onFailure = { e ->

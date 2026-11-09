@@ -344,7 +344,7 @@ private fun Editor(
             onValueChange = { onChange(draft.copy(scope = it)) },
             label = "作用范围",
             modifier = field,
-            placeholder = "留空 = 所有书源；否则填书源名或域名，逗号分隔",
+            placeholder = "留空 = 所有来源；否则填来源名或域名，逗号分隔",
             singleLine = true,
         )
 

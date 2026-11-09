@@ -158,8 +158,8 @@ class BookSourceEngine(
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
         engineIo {
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
-                ?: throw SourceException("书源「${source.name}」未配置搜索规则")
-            val rule = source.ruleSearch ?: throw SourceException("书源「${source.name}」未配置搜索规则")
+                ?: throw SourceException("来源「${source.name}」未配置搜索规则")
+            val rule = source.ruleSearch ?: throw SourceException("来源「${source.name}」未配置搜索规则")
             val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
             val fetched = fetchByRequest(source, searchUrl, vars, "search")
             parseListPage(
@@ -176,7 +176,7 @@ class BookSourceEngine(
     suspend fun fetchSearchPage(source: BookSourceRule, keyword: String, page: Int = 1): FetchedPage =
         engineIo {
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
-                ?: throw SourceException("书源「${source.name}」未配置搜索地址")
+                ?: throw SourceException("来源「${source.name}」未配置搜索地址")
             val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
             fetchByRequest(source, searchUrl, vars, "search")
         }
@@ -191,14 +191,14 @@ class BookSourceEngine(
     suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage =
         engineIo {
             val item = source.explore.getOrNull(exploreIndex)
-                ?: throw SourceException("书源「${source.name}」发现页下标越界: $exploreIndex")
+                ?: throw SourceException("来源「${source.name}」发现页下标越界: $exploreIndex")
             // Legado：发现页列表规则缺省时复用搜索规则。「缺省」看的是 bookList 空不空，不是
             // ruleExplore 这个对象在不在 —— Legado 编辑器每次保存都写一个 `"ruleExplore":{}`，
             // 只按对象判的话，这类书源的发现页永远是空列表。
             val rule = source.ruleExplore?.takeUnless { it.bookList.isNullOrBlank() }
                 ?: source.ruleSearch
                 ?: source.ruleExplore
-                ?: throw SourceException("书源「${source.name}」未配置发现规则")
+                ?: throw SourceException("来源「${source.name}」未配置发现规则")
             val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
             val fetched = fetchByRequest(source, item.url, vars, "explore")
             parseListPage(
@@ -298,7 +298,7 @@ class BookSourceEngine(
         variables: Map<String, String> = emptyMap(),
     ): List<RemoteChapter> =
         engineIo {
-            val rule = source.ruleToc ?: throw SourceException("书源「${source.name}」未配置目录规则")
+            val rule = source.ruleToc ?: throw SourceException("来源「${source.name}」未配置目录规则")
             withRenderFallback(source, "toc") { render ->
                 collectToc(source, rule, tocUrl, render, bookUrl, bookTitle, bookAuthor, variables)
             } ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
@@ -431,7 +431,7 @@ class BookSourceEngine(
         bookTitle: String = "",
         variables: Map<String, String> = emptyMap(),
     ): RemoteChapterContent = engineIo {
-        val rule = source.ruleContent ?: throw SourceException("书源「${source.name}」未配置正文规则")
+        val rule = source.ruleContent ?: throw SourceException("来源「${source.name}」未配置正文规则")
         val result = if (allowJsRender) {
             withRenderFallback(source, "content") { render ->
                 collectContent(

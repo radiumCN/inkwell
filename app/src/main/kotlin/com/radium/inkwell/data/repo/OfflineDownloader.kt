@@ -85,7 +85,7 @@ class OfflineDownloader(
         val book = bookRepo.getBook(bookId)
         if (book == null || book.type != BookType.NET) return
         val rule = book.sourceId?.let { sourceRepo.getRule(it) }
-            ?: return stopEarly(bookId, "书源不存在，先换源")
+            ?: return stopEarly(bookId, "来源不存在，先换源")
         val chapters = chapterDao.getByBook(bookId)
         if (chapters.isEmpty()) return stopEarly(bookId, "目录还没加载，先刷新目录")
 
@@ -115,7 +115,7 @@ class OfflineDownloader(
                             variables = variables,
                         )
                         if (!cache.writeIfEpoch(bookId, url, ChapterContent(remote.elements), epoch)) {
-                            stoppedBecause = "书源换了或缓存被清空，已停止"
+                            stoppedBecause = "来源换了或缓存被清空，已停止"
                             break
                         }
                         chapterDao.markCachedByUrl(bookId, url, true)
@@ -132,7 +132,7 @@ class OfflineDownloader(
                     all + (bookId to d.copy(done = d.done + 1, failed = d.failed + if (ok) 0 else 1))
                 }
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                    stoppedBecause = "连续 $MAX_CONSECUTIVE_FAILURES 章没抓到，已停止（网络或书源出了问题）"
+                    stoppedBecause = "连续 $MAX_CONSECUTIVE_FAILURES 章没抓到，已停止（网络或来源出了问题）"
                     break
                 }
             }

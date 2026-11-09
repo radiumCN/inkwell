@@ -194,14 +194,14 @@ class BookPreviewViewModel(
                     sources = sourceOptions(),
                     currentSource = current,
                     loadingLabel = if (index != tryIndices.first()) {
-                        "正在尝试其他书源…"
+                        "正在尝试其他来源…"
                     } else {
                         "正在获取详情与目录…"
                     },
                 )
                 val rule = sourceRepo.getRule(r.sourceId)
                 if (rule == null) {
-                    lastError = "书源不存在或已被删除"
+                    lastError = "来源不存在或已被删除"
                     lastRuleName = r.sourceName
                     continue
                 }
@@ -225,7 +225,7 @@ class BookPreviewViewModel(
                 val outcome = withTimeoutOrNull(DETAIL_TIMEOUT_MS) { deferred.await() }
                 if (outcome == null) {
                     deferred.cancel()
-                    lastError = "书源响应超时"
+                    lastError = "来源响应超时"
                     continue
                 }
                 val fetched = outcome.getOrElse { e ->

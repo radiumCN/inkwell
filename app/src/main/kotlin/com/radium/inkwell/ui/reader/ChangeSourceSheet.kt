@@ -160,7 +160,7 @@ private fun CurrentSourceCard(name: String, latestChapter: String?) {
         },
     ) {
         Text(
-            name.ifBlank { "当前书源" },
+            name.ifBlank { "当前来源" },
             style = ContentListDefaults.titleStyle,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -180,9 +180,9 @@ private fun StatusRow(overlay: ReaderOverlayUi, found: Int, onToggleCheckAuthor:
     val total = overlay.sourcesTotal
     val text = when {
         overlay.searchingSources -> "正在搜索 $done / $total · 找到 $found 个"
-        total == 0 -> "没有其他启用的书源"
+        total == 0 -> "没有其他启用的来源"
         done < total -> "上次搜到 $done / $total 就停了 · 找到 $found 个"
-        else -> "搜了 $total 个书源 · 找到 $found 个"
+        else -> "搜了 $total 个来源 · 找到 $found 个"
     }
     Row(
         Modifier
@@ -273,7 +273,7 @@ private fun CandidateList(
                         leadingContent = { AppLoadingIndicator(size = Dimens.buttonSpinner) },
                     ) {
                         Text(
-                            "还在找其他书源…",
+                            "还在找其他来源…",
                             style = ContentListDefaults.supportingStyle,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
@@ -292,7 +292,7 @@ private fun CandidateList(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "另有 $hidden 个书源找到同名书，作者对不上",
+                            "另有 $hidden 个来源找到同名书，作者对不上",
                             Modifier.weight(1f),
                             style = MiuixTheme.textStyles.footnote1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -320,8 +320,8 @@ private fun NoCandidates(
         // 作者对不上的放前面：结果其实有，只是被开关挡着 —— 「显示」一下比「重新搜索」近得多
         hidden > 0 -> EmptyState(
             icon = MiuixIcons.Search,
-            title = "没有作者一致的书源",
-            hint = "另有 $hidden 个书源找到了同名的书，但作者对不上。不少书源的作者字段是空的，或者带了前缀",
+            title = "没有作者一致的来源",
+            hint = "另有 $hidden 个来源找到了同名的书，但作者对不上。不少来源的作者字段是空的，或者带了前缀",
             actionLabel = "显示这 $hidden 个",
             onAction = onShowMismatched,
             modifier = modifier,
@@ -330,21 +330,21 @@ private fun NoCandidates(
         total > 0 && done < total -> EmptyState(
             icon = MiuixIcons.Search,
             title = "上次没搜完",
-            hint = "查了 $done / $total 个书源，还没找到这本书",
+            hint = "查了 $done / $total 个来源，还没找到这本书",
             actionLabel = "重新搜索",
             onAction = onRefresh,
             modifier = modifier,
         )
         total == 0 -> EmptyState(
             icon = MiuixIcons.Search,
-            title = "没有其他启用的书源",
-            hint = "在书源管理里导入或启用书源后再来换",
+            title = "没有其他启用的来源",
+            hint = "在来源管理里导入或启用来源后再来换",
             modifier = modifier,
         )
         else -> EmptyState(
             icon = MiuixIcons.Search,
             title = "没有找到这本书",
-            hint = "其他 $total 个书源都没有找到这本书",
+            hint = "其他 $total 个来源都没有找到这本书",
             actionLabel = "重新搜索",
             onAction = onRefresh,
             modifier = modifier,

@@ -59,10 +59,10 @@ class BookSourceRepository(
         val summary: String
             get() = buildString {
                 when {
-                    added > 0 && updated > 0 -> append("新增 $added 个、更新 $updated 个书源")
-                    added > 0 -> append("新增 $added 个书源")
-                    updated > 0 -> append("更新 $updated 个已有书源")
-                    else -> append("没有可用书源")
+                    added > 0 && updated > 0 -> append("新增 $added 个、更新 $updated 个来源")
+                    added > 0 -> append("新增 $added 个来源")
+                    updated > 0 -> append("更新 $updated 个已有来源")
+                    else -> append("没有可用来源")
                 }
                 if (failed.isNotEmpty()) append("；${failed.size} 个入库失败")
                 if (skipped.isNotEmpty()) {

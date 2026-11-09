@@ -406,7 +406,7 @@ fun ReaderScreen(
                     if (overlay.autoChangeTotal > 0) {
                         Spacer(Modifier.height(Dimens.gapS))
                         Text(
-                            "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个书源",
+                            "已试 ${overlay.autoChangeDone}/${overlay.autoChangeTotal} 个来源",
                             color = Color(session.settings.theme.footerColor),
                             style = MiuixTheme.textStyles.footnote1,
                         )

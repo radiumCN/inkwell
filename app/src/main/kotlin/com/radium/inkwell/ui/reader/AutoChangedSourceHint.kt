@@ -93,7 +93,7 @@ internal fun AutoChangedSourceHint(
                     .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("已换到书源「", style = MiuixTheme.textStyles.body2, color = ink, maxLines = 1)
+                Text("已换到来源「", style = MiuixTheme.textStyles.body2, color = ink, maxLines = 1)
                 Text(
                     sourceName,
                     style = MiuixTheme.textStyles.body2,

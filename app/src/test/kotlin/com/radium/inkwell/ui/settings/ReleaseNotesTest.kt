@@ -12,14 +12,14 @@ class ReleaseNotesTest {
         val notes = """
             更新内容
 
-            feat：没有现成书源的网站也能读了
+            feat：没有现成来源的网站也能读了
             feat：顶栏换成毛玻璃
             fix：状态栏不再是白字看不清
             优化：阅读时的强调色跟着纸张走
         """.trimIndent()
         assertEquals(
             listOf(
-                NoteSection("新功能", listOf("没有现成书源的网站也能读了", "顶栏换成毛玻璃")),
+                NoteSection("新功能", listOf("没有现成来源的网站也能读了", "顶栏换成毛玻璃")),
                 NoteSection("修复", listOf("状态栏不再是白字看不清")),
                 NoteSection("优化", listOf("阅读时的强调色跟着纸张走")),
             ),

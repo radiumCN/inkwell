@@ -37,7 +37,7 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 
 **同步与维护**
 - WebDAV 单文件（`inkwell/backup.json.gz`）增量同步，字段级 Last-Write-Wins 合并（进度按 `readAt`、元数据按 `updatedAt`）；凭据经系统密钥库加密存放。
-- [网页版](https://book.skylark.run)（需登录注册）：书架、书源与阅读；与 App 共用同一套 WebDAV，读写同一份备份文件。
+- [网页版](https://book.skylark.run)（需登录注册）：书架、来源与阅读；与 App 共用同一套 WebDAV，读写同一份备份文件。
 - 设置页直接显示上次同步时间；自动同步失败时写明原因。
 - 应用内更新检查，稳定 / 测试双通道。
 - 一键清理正文缓存（不影响书架与阅读进度）。
@@ -103,7 +103,7 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 }
 ```
 
-在「设置 → 书源管理」可通过剪贴板或网址导入（单个对象或数组均可）；详情页支持校验与格式化。
+在「设置 → 来源与净化 → 来源管理」可通过剪贴板或网址导入（单个对象或数组均可）；详情页支持校验与格式化。
 
 也可以在同一处选「按书的网址新建」：给一本书的目录页（或详情页）网址，应用识别出章节列表、正文块与书名作者，生成 Legado 原生格式的规则（`@css:` 选择器，可导出、可同步）。识别只看用户给的这一本书的页面，不扫描站点。搜索是可选的：用户在内置网页里用站点自己的搜索框搜一次，应用从那次请求（GET 或 POST 表单，含 GBK 编码）生成 `searchUrl`、认出结果列表。自动识别不准时，可以在网页上点一下目录里的一章或一段正文，应用围绕点中的元素重新识别；也可以逐项改规则，每项显示按它试抓到的结果。保存前会按最终规则完整抓一遍目录与正文（带搜索的再搜一次），抓不出来不保存。
 
@@ -124,7 +124,7 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 ## 📦 下载与发布
 
 - **下载**：前往 [Releases](https://github.com/radiumCN/inkwell/releases) 获取签名 APK。应用内「设置 → 检查更新」也可直接拉取。
-- **网页版**：打开 [book.skylark.run](https://book.skylark.run)。官网可直接浏览；使用书架与阅读需登录注册。与 App 填同一套 WebDAV 即可同步进度、书源与设置。
+- **网页版**：打开 [book.skylark.run](https://book.skylark.run)。官网可直接浏览；使用书架与阅读需登录注册。与 App 填同一套 WebDAV 即可同步进度、来源与设置。
 - **发版流程**：改 `gradle/libs.versions.toml` 的 `inkwell` 版本号 → 提交 → 打**带注解**的 tag（`git tag -a vX.Y.Z`）→ 推送 tag。CI 校验 tag 与版本号一致后自动构建签名 APK 并发布 Release。
 - **Release 正文取自 tag 注解本身**，且应用内更新弹窗按**纯文本**渲染 —— tag 注解请写纯文本、不要用 Markdown。
 - 带 `-` 后缀的 tag（如 `v0.1.9-beta.7`）会标为预发布，只推测试渠道。

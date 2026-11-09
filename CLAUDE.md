@@ -84,6 +84,10 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 - 正文性小字用 `onSurfaceVariantSummary`（对比度在 `AppThemesTest` 里钉住 ≥ 4.5:1，页面底和卡片上都测），**不要**用 `outline` / `dividerLine`（那是给边框/分隔线的）。
 - **唯一例外**：阅读器**内容区**颜色（纸色/字色）走 `ReaderTheme` / `ReaderThemeScope`（`app/.../ui/reader/ReaderThemeScope.kt`），这是有意的独立主题；但阅读器 UI 的尺寸/动效仍走上面的令牌。阅读器里的浮层用 `ReaderThemeScope` 包裹，让开关/滑块/分隔线自动协调，别挨个传色。浮层底用 `readerOverlayColor()`、浮层里的卡用 `readerCardColor()`。浮层的强调色**跟纸走**（`paperAccent`）：有色的纸取纸的色相（米色一族统一是褐），无色的纸才用 App 主色 —— HyperOS 蓝压在米色纸上不协调。
 
+### 界面用词：不出现「书源」
+
+界面上（含提示、报错、更新说明、推广图）**不写「书源」二字，统一叫「来源」**：来源管理、导入来源、切换来源、当前来源、新建来源、「来源与净化」页。「换源」「订阅源」「更新源」本来就不含这两个字，照旧。只管给人看的字：代码、注释、类名（`BookSource…`、`sourceId`）照旧。`core` 抛出、会显示到界面上的报错同样写「来源」（「来源「某某」未配置目录规则」）。0.5.5 及以前存进库的校验文案还带着旧词，显示时经 `CheckMessages.display` 换掉，别为改个词迁移数据库。新加文案、改文案时顺手搜一下 `书源`。
+
 ### 排版 → `MiuixTheme.textStyles`
 
 用角色（`title1~4` / `headline1~2` / `subtitle` / `body1~2` / `footnote1~2` / `main` / `button`），别裸写 `fontSize = 14.sp`；要加粗用 `Text(fontWeight = …)`。正文 ≥ `footnote1`(13sp)；`footnote2`(11sp) 只给角标、标签这种非正文。注意 Miuix `Text` 的默认样式是 `main`(17sp)，比 M3 默认大一号 —— 字号要紧的地方显式给 style。
@@ -103,7 +107,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 | 有标题的内容页顶栏 | `AppTopBar` + `rememberAppTopBarScroll()` + `Modifier.topBarScroll(...)`（`AppTopBar.kt`，Miuix 大标题 `TopAppBar`）。**三样必须配齐**：只换组件不接滚动＝白送一条永久变高的顶栏 |
 | 窄顶栏（标题位放控件 / 多选态 / 书架首页 / 标题就是内容的页） | `AppToolbar { … }` + 纯文字标题 `ToolbarTitle`（同文件）：52dp、自己让开状态栏。搜索页的标题位是交互控件，书架与书源管理有多选态（多选时栏里只留 × · 已选 N 项 · 全选，批量动作在底部的 `BatchActionBar`），书架首页压着隐藏区与下拉刷新，关于页的流动头部本身就是标题（栏停在顶部时透明、头部滚上去才叠色出标题：`containerColor` 的透明度会乘进玻璃的叠色）；文章、书籍详情、书籍预览的标题就是内容本身（文章标题、书名），**别再给它们大标题「文章」「书籍详情」**（两行标题、大的那行没信息量），栏里的标题用 `rememberToolbarTitleReveal(listState)` 等页面上的真标题滚到栏底下再淡出 —— 理由写在 `AppTopBar` 的 KDoc 里 |
 | 弹出列表（⋮、导入方式、长按菜单、按钮触发的单选） | `AppDropdownMenu` + `AppMenuItem`（`AppMenu.kt`；弹层是 `GlassDropdownPopup`，Miuix `WindowListPopup` 的毛玻璃版：背后整页糊开、卡片与各行半透明、边上一道上亮下淡的白色细线（学顶栏玻璃圆、底部胶囊高光的顶光）。**弹层里别用 miuix-blur 的边缘高光**：它按 Plus 混合、前提是底下不透明，弹层是透明窗口、卡片只有 85% 厚，Plus 把那一圈的透明度也加满、透出黑底（0.5.2-beta.5 一圈纯黑、beta.6 灰框套亮块，两回），系统关了跨窗口模糊时退回实色）：和锚点放进同一个 `Box`（长按一本书就把菜单放进那本书的格子）。从几项里选一个（排序方式）给当前项标 `selected`，弹出来带勾。**不要**再为单选或长按弹底部面板（书源数量无上限的除外 —— 发现页切书源走底部「书源胶囊」+ `AppBottomSheet` 的书源面板） |
-| 多选态的批量动作 | `BatchActionBar`（`BatchActionBar.kt`，Miuix `FloatingToolbar`）放进 `AppScaffold(floatingToolbar = …)`，在里面是毛玻璃胶囊（对页面图层取样、糊 25 + 边缘高光 + 卡片色薄底，不混色 —— 照 Miuix 示例 App 的悬浮导航栏；从前糊 100 + Colored Thick，56dp 的胶囊底下被平均成一片浅灰，被指出「没有透明的效果」。不投影、不描实心边 —— 那两样会从半透明的玻璃里透出来）：HyperOS 编辑模式，顶栏只留 × · 已选 N 项 · 全选，动作沉到底部一条悬浮胶囊里、图标在上字在下（`IconLabelButton`，阅读菜单的操作条也是它），低频的给 `more`。Miuix Scaffold **不**把它算进内容 padding：`onHeightChange` 报的高度在多选态垫到列表末尾。网格里的书多选时不缩、不描边，勾选框在封面右上角。底部别的悬浮状态（书架隐藏区展开后的「🔓 隐藏区 ｜ 展开需验证 ✕」胶囊、发现页的书源胶囊「⟳ 书源名 ｜ 切换书源 ⇅」—— 整条可点开书源面板，切源入口别再挂回顶栏标题）用同一个玻璃壳 `FloatingGlassBar`（同文件），和操作条放进同一个 `floatingToolbar` 槽、同一时刻只亮一个；胶囊里不是 onSurface 的字拿它给的 `floor` 现推对比度。**别**再往顶栏 `bottomContent` 里塞实心卡：顶栏是渐进模糊的玻璃，嵌一块实心卡，书滚过去被切成「糊 / 实心 / 清楚」三层（被指出「滑动书架割裂」）|
+| 多选态的批量动作 | `BatchActionBar`（`BatchActionBar.kt`，Miuix `FloatingToolbar`）放进 `AppScaffold(floatingToolbar = …)`，在里面是毛玻璃胶囊（对页面图层取样、糊 25 + 边缘高光 + 卡片色薄底，不混色 —— 照 Miuix 示例 App 的悬浮导航栏；从前糊 100 + Colored Thick，56dp 的胶囊底下被平均成一片浅灰，被指出「没有透明的效果」。不投影、不描实心边 —— 那两样会从半透明的玻璃里透出来）：HyperOS 编辑模式，顶栏只留 × · 已选 N 项 · 全选，动作沉到底部一条悬浮胶囊里、图标在上字在下（`IconLabelButton`，阅读菜单的操作条也是它），低频的给 `more`。Miuix Scaffold **不**把它算进内容 padding：`onHeightChange` 报的高度在多选态垫到列表末尾。网格里的书多选时不缩、不描边，勾选框在封面右上角。底部别的悬浮状态（书架隐藏区展开后的「🔓 隐藏区 ｜ 展开需验证 ✕」胶囊、发现页的书源胶囊「⟳ 来源名 ｜ 切换来源 ⇅」—— 整条可点开书源面板，切源入口别再挂回顶栏标题）用同一个玻璃壳 `FloatingGlassBar`（同文件），和操作条放进同一个 `floatingToolbar` 槽、同一时刻只亮一个；胶囊里不是 onSurface 的字拿它给的 `floor` 现推对比度。**别**再往顶栏 `bottomContent` 里塞实心卡：顶栏是渐进模糊的玻璃，嵌一块实心卡，书滚过去被切成「糊 / 实心 / 清楚」三层（被指出「滑动书架割裂」）|
 | 顶栏/工具条搜索框 | `SearchField`；对话框/表单行内 `CompactTextField`（`AppTextField.kt`）。两者是手搓 `BasicTextField`（Miuix `TextField` 带浮动 label、最矮五十多 dp 塞不下），但底色/占位色/聚焦描边取 Miuix 输入框读的槽位，别自己发明 |
 | 多行文本输入 | `CompactTextArea`（同文件）：同一套底色，高度 `textAreaMinHeight`，圆角 `radiusLarge`。**不要**用胶囊圆角 —— 160dp 高的框会变成两头大圆 |
 | 带 label 的整页表单输入 | `AppFormField`（同文件，Miuix `TextField` 的浮动 label；报错时描边换 error 色、`supportingText` 在框外）。意见反馈这类无 label 的整页输入走 `CompactTextArea` / `CompactTextField` |
@@ -188,7 +192,7 @@ Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)
 
 ## 书源规则
 
-自研 JSON Schema + Legado（阅读）书源兼容，详见 `README.md` §书源规则 / §Legado 书源兼容。当前正从自研 DSL 迁移到运行时原生 Legado 规则（文本源），引擎在 `core/.../source/`。改规则解析时先看 `core/src/test` 的既有测试了解预期，再动。
+自研 JSON Schema + Legado（阅读）书源兼容，详见 `README.md` §高级：规则说明 / §Legado 文本规则兼容。当前正从自研 DSL 迁移到运行时原生 Legado 规则（文本源），引擎在 `core/.../source/`。改规则解析时先看 `core/src/test` 的既有测试了解预期，再动。
 
 ---
 

@@ -188,7 +188,7 @@ fun SearchScreen(
                             if (state.searchPaused) {
                                 SearchPauseBar(
                                     // 提前结束要说清楚是「找到了」而不是「卡住了」，还剩多少源没搜
-                                    label = if (state.earlyStopped) "已找到这本书，还有 ${state.pausedRemaining} 个书源没搜"
+                                    label = if (state.earlyStopped) "已找到这本书，还有 ${state.pausedRemaining} 个来源没搜"
                                     else "搜索已暂停",
                                     onResume = viewModel::resumeSearch,
                                 )
@@ -245,8 +245,8 @@ fun SearchScreen(
                 if (state.searchId > 0 && !cleared && state.allFailed) {
                     // 每个源都超时或报错：多半是网络问题，不是书源里没这本。说「没找到」会让人换词白搜
                     ErrorState(
-                        title = "书源都没有响应",
-                        message = "搜索的书源全部超时或出错，请检查网络后重试",
+                        title = "来源都没有响应",
+                        message = "搜索的来源全部超时或出错，请检查网络后重试",
                         onRetry = viewModel::retrySearch,
                         modifier = Modifier.padding(padding),
                     )
@@ -256,15 +256,15 @@ fun SearchScreen(
                     EmptyState(
                         icon = MiuixIcons.Search,
                         title = "没有找到相关的书",
-                        hint = "换个关键词试试，或到书源管理里检查书源是否已启用、是否还能用",
+                        hint = "换个关键词试试，或到来源管理里检查来源是否已启用、是否还能用",
                         modifier = Modifier.padding(padding),
                     )
                 } else if (state.historyLoaded) {
                     // 历史还没读到时什么都不画：读到后要么是历史列表、要么才是这块空态，别先闪一下它
                     EmptyState(
                         icon = MiuixIcons.Search,
-                        title = "按已启用的书源搜索",
-                        hint = "输入书名或作者；还没导入书源时搜不到结果",
+                        title = "按已启用的来源搜索",
+                        hint = "输入书名或作者；还没导入来源时搜不到结果",
                         modifier = Modifier.padding(padding),
                     )
                 }
@@ -298,7 +298,7 @@ fun SearchScreen(
                             ).joinToString(" · "),
                             // 同名同作者的书跨书源合并成一行；书源越多越可能就是要找的那本
                             caption = buildString {
-                                if (hit.origins.size > 1) append("${hit.origins.size} 个书源 · ")
+                                if (hit.origins.size > 1) append("${hit.origins.size} 个来源 · ")
                                 else append("来源: ")
                                 append(hit.preferred.sourceId)
                                 result.kind?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }

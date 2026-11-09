@@ -106,8 +106,8 @@ class BaselineProfileGenerator {
         // 「关于」在设置页最底下：顶上加了概览卡、各组加了标题之后，矮一点的模拟器一屏装不下，得先滚到它
         tap(By.text("关于"), "设置 → 关于", scrollToFind = true)
         back()
-        tap(By.text("书源与净化"), "设置 → 书源与净化")
-        tap(By.text("书源管理"), "书源与净化 → 书源管理")
+        tap(By.text("来源与净化"), "设置 → 来源与净化")
+        tap(By.text("来源管理"), "来源与净化 → 来源管理")
         back()
         back()
         back()

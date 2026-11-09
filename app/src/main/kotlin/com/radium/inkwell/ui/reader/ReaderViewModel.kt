@@ -479,7 +479,7 @@ class ReaderViewModel(
             var currentSourceName = ""
             val src = if (b.type == BookType.NET) {
                 val rule = b.sourceId?.let { sourceRepo.getRule(it) }
-                    ?: error("书源不存在，请换源后阅读")
+                    ?: error("来源不存在，请换源后阅读")
                 currentSourceName = rule.name
                 // WebDAV 同步下来的网络书只有书行、没有目录行（目录不进备份）。此时不补抓的话
                 // 章节数为 0，ensurePaginated 静默返回 null，页面永远转圈。先拉一次目录落库。
@@ -511,7 +511,7 @@ class ReaderViewModel(
             // 任何检查：某个 txt/epub 解析出 0 章就直接卡死在转圈上。这里统一拦一道。
             if (src.chapterCount == 0) {
                 error(
-                    if (b.type == BookType.NET) "这本书没有任何章节，换个书源试试"
+                    if (b.type == BookType.NET) "这本书没有任何章节，换个来源试试"
                     else "这本书解析不出任何章节，可能文件已损坏或格式不支持"
                 )
             }
@@ -1102,7 +1102,7 @@ class ReaderViewModel(
                     // 提示而不是 error：error 会把整个阅读区换成报错页，可旧源明明还读得好好的 ——
                     // 换源没成，眼前这一页不该跟着没了
                     _state.value = _state.value.copy(changingSource = false, changingTo = null)
-                    messageBus.emit("书源不存在")
+                    messageBus.emit("来源不存在")
                     return@launch
                 }
                 // 换源前记下旧源：会话缓存要把它塞回候选，否则再开换源面板只能在「新源之外」挑，
@@ -1234,7 +1234,7 @@ class ReaderViewModel(
                 _state.value = _state.value.copy(
                     autoChanging = false,
                     loading = false,
-                    error = "$cause\n自动换源失败：其他书源也读不出这一章",
+                    error = "$cause\n自动换源失败：其他来源也读不出这一章",
                 )
                 return@launch
             }
@@ -1298,7 +1298,7 @@ class ReaderViewModel(
             if (rule == null) {
                 undoSnapshot = null
                 _state.value = _state.value.copy(autoChangedTo = null)
-                messageBus.emit("原书源已不存在，无法退回")
+                messageBus.emit("原来源已不存在，无法退回")
                 return@launch
             }
             _state.value = _state.value.copy(changingSource = true)

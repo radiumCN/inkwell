@@ -63,7 +63,7 @@ fun SourceDetailScreen(
         containerColor = pageColor,
         topBar = {
             AppTopBar(
-                state.name.ifBlank { "书源详情" },
+                state.name.ifBlank { "来源详情" },
                 topBarScroll,
                 onBack = onBack,
                 containerColor = pageColor,
@@ -78,7 +78,7 @@ fun SourceDetailScreen(
         if (state.missing) {
             EmptyState(
                 icon = MiuixIcons.Report,
-                title = "书源不存在",
+                title = "来源不存在",
                 hint = "它可能已被删除",
                 actionLabel = "返回",
                 onAction = onBack,
