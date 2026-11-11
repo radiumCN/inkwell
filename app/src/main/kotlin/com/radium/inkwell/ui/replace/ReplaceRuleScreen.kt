@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.replace
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -40,6 +42,7 @@ import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
+import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
@@ -65,7 +68,9 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Clear
 import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -78,15 +83,69 @@ fun ReplaceRuleScreen(
     var pendingDelete by remember { mutableStateOf<ReplaceRuleEntity?>(null) }
     // 长按哪条，就从哪条上弹出它的菜单（同书架长按一本书）
     var menuTarget by remember { mutableStateOf<String?>(null) }
+    var showImportMenu by remember { mutableStateOf(false) }
+    var showUrlImport by remember { mutableStateOf(false) }
+    var importUrl by remember { mutableStateOf("") }
 
     CollectMessages(viewModel.messages, snackbar)
+
+    val fileImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.importFromFile(it) } }
+
+    // 阅读导出的是 .json；有人存成 .txt，也有文件管理器报不出类型（octet-stream）
+    fun launchFileImport() =
+        fileImportLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("净化替换", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = {
+            AppTopBar("净化替换", topBarScroll, onBack = onBack, containerColor = pageColor) {
+                // 导入（同来源管理的「＋」：一个玻璃圆，点开选从哪儿导）。新建仍是右下角的悬浮按钮
+                Box {
+                    AppIconButton(onClick = { showImportMenu = true }, enabled = !state.importLoading) {
+                        if (state.importLoading) {
+                            AppLoadingIndicator(color = LocalContentColor.current, size = Dimens.buttonSpinner)
+                        } else {
+                            Icon(MiuixIcons.Import, contentDescription = "导入规则")
+                        }
+                    }
+                    AppDropdownMenu(
+                        expanded = showImportMenu,
+                        onDismissRequest = { showImportMenu = false },
+                        items = listOf(
+                            AppMenuItem(
+                                "从文件导入",
+                                onClick = {
+                                    showImportMenu = false
+                                    launchFileImport()
+                                },
+                                summary = ".json / .txt，Inkwell 与阅读的格式",
+                            ),
+                            AppMenuItem(
+                                "从网络链接导入",
+                                onClick = {
+                                    showImportMenu = false
+                                    showUrlImport = true
+                                },
+                                summary = "粘贴规则的地址",
+                            ),
+                            AppMenuItem(
+                                "从剪贴板导入",
+                                onClick = {
+                                    showImportMenu = false
+                                    viewModel.importFromClipboard()
+                                },
+                                summary = "复制好的规则或链接",
+                            ),
+                        ),
+                    )
+                }
+            }
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = viewModel::newRule) {
                 // Miuix 的悬浮按钮不替内容设前景色，图标色自己给
@@ -102,7 +161,10 @@ fun ReplaceRuleScreen(
                 EmptyState(
                     icon = MiuixIcons.Clear,
                     title = "还没有净化规则",
-                    hint = "用来删掉正文里的广告、水印和防盗段落",
+                    hint = "用来删掉正文里的广告、水印和防盗段落。" +
+                        "支持导入阅读（Legado）格式的净化规则，链接和剪贴板在右上角",
+                    actionLabel = "从文件导入",
+                    onAction = ::launchFileImport,
                 )
             }
         } else {
@@ -210,6 +272,43 @@ fun ReplaceRuleScreen(
                 )
             }
         }
+    }
+
+    state.importItems?.let { items ->
+        ReplaceRuleImportSheet(
+            items = items,
+            selected = state.importSelected,
+            onToggle = viewModel::toggleImport,
+            onSelectAll = viewModel::setAllImport,
+            onConfirm = viewModel::confirmImport,
+            onDismiss = viewModel::dismissImport,
+        )
+    }
+
+    if (showUrlImport) {
+        // 关掉时顺手清空：否则下次再开还躺着上次的链接，像「改不动」（同来源管理）
+        fun dismissUrlImport() {
+            showUrlImport = false
+            importUrl = ""
+        }
+        AppAlertDialog(
+            onDismissRequest = { dismissUrlImport() },
+            title = "从网络链接导入",
+            text = "支持 Inkwell 与阅读（Legado）格式的净化规则链接，阅读分享出来的链接也行",
+            confirmText = "导入",
+            confirmEnabled = importUrl.isNotBlank(),
+            onConfirm = {
+                viewModel.importFromUrl(importUrl)
+                dismissUrlImport()
+            },
+            content = {
+                CompactTextField(
+                    value = importUrl,
+                    onValueChange = { importUrl = it },
+                    placeholder = "https://…/replaceRule.json",
+                )
+            },
+        )
     }
 
     pendingDelete?.let { rule ->

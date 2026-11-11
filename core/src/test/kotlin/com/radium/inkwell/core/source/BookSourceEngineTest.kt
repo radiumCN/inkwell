@@ -40,7 +40,7 @@ class BookSourceEngineTest {
         BookSourceEngine(
             // MockWebServer 在 127.0.0.1 上，得放行 SSRF 防护
             SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
-            { globalPurify },
+            { _, _ -> globalPurify },
             trace,
             scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
         )
@@ -302,7 +302,7 @@ class BookSourceEngineTest {
         var rules = emptyList<PurifyRule>()
         val eng = BookSourceEngine(
             SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
-            { rules },
+            { _, _ -> rules },
         )
         val before = eng.getContent(source(), "$base/chap/1")
             .elements.filterIsInstance<ContentElement.Paragraph>().map { it.text }
@@ -749,7 +749,7 @@ class BookSourceEngineTest {
 
     private fun renderEngine(renderer: PageRenderer) = BookSourceEngine(
         SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
-        { emptyList() },
+        { _, _ -> emptyList() },
         scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
         renderer = renderer,
     )

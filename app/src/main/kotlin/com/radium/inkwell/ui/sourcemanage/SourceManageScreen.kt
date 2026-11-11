@@ -3,7 +3,6 @@ package com.radium.inkwell.ui.sourcemanage
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +35,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -65,6 +63,7 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.InlineTag
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.ToolbarTitle
@@ -72,7 +71,6 @@ import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.settingsPageColor
-import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
@@ -691,23 +689,7 @@ private fun SourceListRow(
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (tag != null) {
-                // 淡强调底 + 强调色字（tertiaryContainer 一对），与选中的 chip 同一种「标签」语汇
-                Text(
-                    tag,
-                    style = MiuixTheme.textStyles.footnote2,
-                    fontWeight = FontWeight.Medium,
-                    color = MiuixTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier
-                        .padding(start = Dimens.gapS)
-                        .background(
-                            MiuixTheme.colorScheme.tertiaryContainer,
-                            AppShapes.extraSmall,
-                        )
-                        // 只留左右：上下贴着 footnote2 的行高，标签和标题行一样矮
-                        .padding(horizontal = Dimens.gapS),
-                )
-            }
+            if (tag != null) InlineTag(tag)
         }
     }
 

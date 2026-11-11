@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.bookshelf
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +42,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 @Composable
 internal fun WelcomeState(
     onImport: () -> Unit,
+    /** 点「导入本地书」弹出的菜单（选文件 / 选文件夹，见 ImportBooksMenu），从这一行上弹出来 */
+    importMenu: @Composable () -> Unit,
     onRestore: () -> Unit,
     onSkip: () -> Unit,
     onOpenDisclaimer: () -> Unit,
@@ -81,12 +84,15 @@ internal fun WelcomeState(
             )
         }
         SettingGroup {
-            SettingRow(
-                title = "导入本地书",
-                subtitle = "txt / EPUB / MOBI，书只存在这台设备上",
-                onClick = onImport,
-                position = SettingGroupPosition.First,
-            )
+            Box {
+                SettingRow(
+                    title = "导入本地书",
+                    subtitle = "txt / EPUB / MOBI，书只存在这台设备上",
+                    onClick = onImport,
+                    position = SettingGroupPosition.First,
+                )
+                importMenu()
+            }
             SettingRow(
                 title = "从 WebDAV 恢复",
                 subtitle = "在别的设备上用过墨水？把书架、进度和设置接过来",

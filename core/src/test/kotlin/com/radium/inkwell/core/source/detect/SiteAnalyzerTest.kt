@@ -47,7 +47,7 @@ class SiteAnalyzerTest {
 
     private val http get() = SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true)
 
-    private fun engine() = BookSourceEngine(http, { emptyList() })
+    private fun engine() = BookSourceEngine(http, { _, _ -> emptyList() })
 
     /** 假渲染器：/js/1234/ 渲染后才是完整的目录页 */
     private val renderer = object : com.radium.inkwell.core.source.PageRenderer {
@@ -215,7 +215,7 @@ class SiteAnalyzerTest {
         val analyzer = SiteAnalyzer(
             http,
             scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
-            globalPurify = { listOf(com.radium.inkwell.core.source.PurifyRule("正文", "内容", isRegex = false)) },
+            globalPurify = { _, _ -> listOf(com.radium.inkwell.core.source.PurifyRule("正文", "内容", isRegex = false)) },
         )
         val run = analyzer.dryRun(scripted, book.bookUrl, keyword = null)
         assertEquals("脚本书名", run.samples[RuleField.BookName]?.output)

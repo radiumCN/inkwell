@@ -112,9 +112,10 @@ class BookSourceEngine(
     private val http: SourceHttpClient,
     /**
      * 用户自定义的全局净化规则。取的是**函数**不是列表：引擎是单例，规则随时可改，
-     * 拿一份构造期的快照就永远读不到用户新加的规则。入参是当前书源，供按作用域筛选。
+     * 拿一份构造期的快照就永远读不到用户新加的规则。入参是当前书源和书名，供按作用范围筛选
+     * （阅读的规则常在作用范围里写书名，见 [PurifyScope]）。
      */
-    private val globalPurify: (BookSourceRule) -> List<PurifyRule> = { emptyList() },
+    private val globalPurify: (source: BookSourceRule, bookTitle: String) -> List<PurifyRule> = { _, _ -> emptyList() },
     private val trace: RuleTraceCollector? = null,
     scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
     /** JS 渲染回退；未注入时行为与从前完全一致 */
@@ -470,7 +471,7 @@ class BookSourceEngine(
         // 净化：源级(replaceRegex) 在前、用户的通用规则在后；正则预编译。
         // 源级规则按 Legado 的容错来：一条写坏的正则退回字面替换，而不是让每一章都打不开（见 [Purifier.legado]）
         val sourcePurifier = Purifier.legado(parseReplaceRegex(rule.replaceRegex))
-        val userPurifier = Purifier.lenient(globalPurify(source))
+        val userPurifier = Purifier.lenient(globalPurify(source, bookTitle))
         val elements = mutableListOf<ContentElement>()
         val firstUrl = resolveUrl(source.baseUrl, chapterUrl)
         // 用到才建：绝大多数章节只有一页，根本走不到「下一页是不是别的章」那一步。从前每章（含每次预取）

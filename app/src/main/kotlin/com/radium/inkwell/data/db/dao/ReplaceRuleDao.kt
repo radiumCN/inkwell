@@ -26,6 +26,10 @@ interface ReplaceRuleDao {
     @Upsert
     suspend fun upsert(rule: ReplaceRuleEntity)
 
+    /** 批量写（导入）：Room 把整组放进一个事务，中途被杀不留半套 */
+    @Upsert
+    suspend fun upsertAll(rules: List<ReplaceRuleEntity>)
+
     /**
      * 软删除：打标记而不是删行，并**同时更新 updatedAt** —— 合并靠它做 LWW 裁决，
      * 不更新的话远端那份旧副本会比墓碑还"新"，删除又被覆盖回来。

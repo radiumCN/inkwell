@@ -105,7 +105,7 @@ val appModule = module {
             http = get(),
             scriptRuntime = get(),
             renderer = get(),
-            globalPurify = { source -> replaceRules.purifyFor(source) },
+            globalPurify = { source, bookTitle -> replaceRules.purifyFor(source, bookTitle) },
         )
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
@@ -117,7 +117,7 @@ val appModule = module {
             http = get(),
             renderer = get(),
             scriptRuntime = get(),
-            globalPurify = { source -> replaceRules.purifyFor(source) },
+            globalPurify = { source, bookTitle -> replaceRules.purifyFor(source, bookTitle) },
         )
     }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
@@ -148,6 +148,7 @@ val appModule = module {
     single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get(), get()) }
     single { BookSourceRepository(get(), get()) }
     single { ReplaceRuleRepository(get()) }
+    single { com.radium.inkwell.data.repo.LocalFolderScanner(androidContext()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
@@ -155,7 +156,7 @@ val appModule = module {
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
-    viewModel { BookshelfViewModel(get(), get(), get(), get(), get()) }
+    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
@@ -176,7 +177,7 @@ val appModule = module {
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }
-    viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(get()) }
+    viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }
     viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->

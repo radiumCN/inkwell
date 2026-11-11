@@ -59,6 +59,11 @@ fun EmptyState(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /**
+     * 点动作按钮弹出的菜单（[AppDropdownMenu]）：和按钮放进同一个 Box，从按钮上弹出来。
+     * 一个按钮背后有几条路时用（空书架的「导入本地书」：选文件 / 选文件夹）
+     */
+    actionMenu: (@Composable () -> Unit)? = null,
 ) {
     Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -89,7 +94,10 @@ fun EmptyState(
                 )
             }
             if (actionLabel != null && onAction != null) {
-                AppTextButton(actionLabel, onClick = onAction, modifier = Modifier.padding(top = Dimens.gapS))
+                Box(Modifier.padding(top = Dimens.gapS)) {
+                    AppTextButton(actionLabel, onClick = onAction)
+                    actionMenu?.invoke()
+                }
             }
         }
     }
