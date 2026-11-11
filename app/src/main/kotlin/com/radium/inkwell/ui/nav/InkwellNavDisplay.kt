@@ -53,8 +53,8 @@ import com.radium.inkwell.ui.replace.ReplaceRuleScreen
 import com.radium.inkwell.ui.replace.ReplaceRuleViewModel
 import com.radium.inkwell.ui.rss.RssArticleScreen
 import com.radium.inkwell.ui.rss.RssArticleViewModel
-import com.radium.inkwell.ui.rss.RssArticlesScreen
-import com.radium.inkwell.ui.rss.RssArticlesViewModel
+import com.radium.inkwell.ui.rss.RssTimelineScreen
+import com.radium.inkwell.ui.rss.RssTimelineViewModel
 import com.radium.inkwell.ui.rss.RssSourceScreen
 import com.radium.inkwell.ui.rss.RssSourceViewModel
 import com.radium.inkwell.ui.search.SearchScreen
@@ -201,7 +201,7 @@ fun InkwellNavDisplay() {
                     onOpenDetail = { nav.go(BookDetailRoute(it)) },
                     onOpenSearch = { nav.go(SearchRoute()) },
                     onOpenExplore = { nav.go(ExploreRoute) },
-                    onOpenRss = { nav.go(RssSourceRoute) },
+                    onOpenRss = { nav.go(RssTimelineRoute()) },
                     onOpenSettings = { nav.go(SettingsRoute) },
                     onOpenWebDav = { nav.go(WebDavSettingsRoute) },
                     onOpenDisclaimer = { nav.go(DisclaimerRoute) },
@@ -349,7 +349,8 @@ fun InkwellNavDisplay() {
                 val vm = koinViewModel<RssSourceViewModel>()
                 RssSourceScreen(
                     onBack = { nav.back() },
-                    onOpenSource = { nav.go(RssArticlesRoute(it)) },
+                    // 点一个源 = 只看它的订阅页（同一个页，chip 停在这个源上）
+                    onOpenSource = { nav.go(RssTimelineRoute(it)) },
                     onOpenWebSource = { nav.go(RssWebRoute(it)) },
                     viewModel = vm,
                 )
@@ -361,39 +362,25 @@ fun InkwellNavDisplay() {
                 val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> { parametersOf(route.sourceId, "", "") }
                 com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
             }
-            entry<RssArticleWebRoute>(
-                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
+            // 订阅自己一组（NavPaneGroup.RSS）：宽屏下订阅页在左、文章在右，原网页再叠一栏。
+            // 不挂在设置树里 —— 书架顶栏直接进，手机上返回回书架，不经过设置页
+            entry<RssTimelineRoute>(
+                metadata = ListDetailSceneStrategy.listPane(
+                    sceneKey = NavPaneGroup.RSS,
+                    detailPlaceholder = { PanePlaceholder("选一篇文章") },
+                ),
             ) { route ->
-                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> {
-                    parametersOf(route.sourceId, route.url, route.title)
-                }
-                com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
-            }
-            entry<RssArticlesRoute>(
-                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
-            ) { route ->
-                val vm = koinViewModel<RssArticlesViewModel> { parametersOf(route.sourceId) }
-                RssArticlesScreen(
-                    sourceId = route.sourceId,
+                val vm = koinViewModel<RssTimelineViewModel> { parametersOf(route.sourceId) }
+                RssTimelineScreen(
                     onBack = { nav.back() },
-                    onOpenArticle = { article ->
-                        nav.go(
-                            RssArticleRoute.of(
-                                com.radium.inkwell.ui.rss.RssArticleArgs(
-                                    sourceId = article.sourceId,
-                                    title = article.title,
-                                    link = article.link,
-                                    description = article.description,
-                                    pubDate = article.pubDate,
-                                ),
-                            ),
-                        )
-                    },
+                    // 从订阅源页点进来的，再点「订阅源」是回去，不是再叠一层
+                    onOpenSources = { nav.goOrPop(RssSourceRoute) },
+                    onOpenArticle = { nav.go(RssArticleRoute.of(it)) },
                     viewModel = vm,
                 )
             }
             entry<RssArticleRoute>(
-                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
+                metadata = ListDetailSceneStrategy.detailPane(sceneKey = NavPaneGroup.RSS),
             ) { route ->
                 val vm = koinViewModel<RssArticleViewModel> { parametersOf(route.args) }
                 val args = route.args
@@ -403,6 +390,14 @@ fun InkwellNavDisplay() {
                     onOpenWebPage = { url, title -> nav.go(RssArticleWebRoute(args.sourceId, url, title)) },
                     viewModel = vm,
                 )
+            }
+            entry<RssArticleWebRoute>(
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.RSS),
+            ) { route ->
+                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> {
+                    parametersOf(route.sourceId, route.url, route.title)
+                }
+                com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<ReplaceRuleRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),

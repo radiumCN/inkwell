@@ -17,7 +17,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,8 +54,10 @@ import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.pageScroll
+import com.radium.inkwell.ui.components.referer
 import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
 import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.ui.components.siteOrigin
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
@@ -127,6 +131,8 @@ fun RssArticleScreen(
         // 懒加载：长文、多图的文章从前一次把全部段落和图片组合完才出第一屏。
         // 列表也让「上面的图加载出来、高度变了」不再把正在读的那段往下推 —— 位置锚在可见的那一项上
         val imageSizes = remember { mutableStateMapOf<String, Size>() }
+        // 防盗链的图床取不到时，带上文章网站的来源再取一次（见 referer）
+        val imageReferer = remember(state.link) { siteOrigin(state.link) }
         // 正文的行高：Miuix 的字体样式不设行高，按字体默认的行距排，长篇中文挤成一片。只在文章正文里放宽，不动全局
         val paragraphStyle = MiuixTheme.textStyles.body1.copy(lineHeight = ARTICLE_LINE_HEIGHT)
         LazyColumn(
@@ -193,8 +199,11 @@ fun RssArticleScreen(
                         Modifier.padding(vertical = Dimens.gapS),
                         style = paragraphStyle,
                     )
-                    is ContentElement.Image -> ArticleImage(el, imageSizes)
+                    is ContentElement.Image -> ArticleImage(el, imageSizes, imageReferer)
                     ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
+                    is ContentElement.Code -> ArticleCodeBlock(el)
+                    is ContentElement.ListItem -> ArticleListItem(el, paragraphStyle)
+                    is ContentElement.Quote -> ArticleQuote(el, paragraphStyle)
                 }
             }
 
@@ -269,17 +278,20 @@ fun RssArticleScreen(
  * 量出来的就不是原图了。大图照旧按布局缩着解，不会把几 MB 的原图整个解进内存。
  *
  * 尺寸记进 [sizes]（页面级），这一项滑出视口再滑回来时直接按真实大小排，不再先占位再跳一下。
+ * 先不带 Referer 取，取不到再带上 [retryReferer] 取一次（防盗链的图床，见 [referer]）；两次都不行才算失败。
  * 加载失败就不占地方 —— 留一块永远不会有图的灰框只会让人以为还在加载。
  */
 @Composable
-private fun ArticleImage(el: ContentElement.Image, sizes: MutableMap<String, Size>) {
+private fun ArticleImage(el: ContentElement.Image, sizes: MutableMap<String, Size>, retryReferer: String?) {
     val size = sizes[el.resourceId]
     if (size == FAILED_IMAGE) return
     val context = LocalPlatformContext.current
-    val request = remember(el.resourceId, context) {
+    var withReferer by remember(el.resourceId) { mutableStateOf(false) }
+    val request = remember(el.resourceId, context, withReferer) {
         ImageRequest.Builder(context)
             .data(el.resourceId)
             .precision(Precision.INEXACT)
+            .referer(if (withReferer) retryReferer else null)
             .build()
     }
     AsyncImage(
@@ -292,7 +304,9 @@ private fun ArticleImage(el: ContentElement.Image, sizes: MutableMap<String, Siz
                 sizes[el.resourceId] = intrinsic
             }
         },
-        onError = { sizes[el.resourceId] = FAILED_IMAGE },
+        onError = {
+            if (!withReferer && retryReferer != null) withReferer = true else sizes[el.resourceId] = FAILED_IMAGE
+        },
         modifier = Modifier
             .padding(vertical = Dimens.gapS)
             // 先收窄到原图宽、再铺满：宽 = min(原图宽, 正文宽)

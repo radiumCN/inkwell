@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.data.db.entity.RssSourceEntity
+import com.radium.inkwell.data.repo.RssFeedRepository
 import com.radium.inkwell.data.repo.RssImportReport
 import com.radium.inkwell.data.repo.RssRepository
 import com.radium.inkwell.ui.components.MessageBus
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withContext
 class RssSourceViewModel(
     private val context: Context,
     private val repo: RssRepository,
+    private val feeds: RssFeedRepository,
 ) : ViewModel() {
 
     /**
@@ -114,6 +116,10 @@ class RssSourceViewModel(
     }
 
     fun delete(id: String) {
-        viewModelScope.launch { repo.delete(id) }
+        viewModelScope.launch {
+            repo.delete(id)
+            // 它在订阅页缓存的文章一起清；漏了也只是占地方（冷启动的清理会扫掉孤儿），但删了又加回来时那批旧的会冒出来
+            feeds.deleteBySource(id)
+        }
     }
 }

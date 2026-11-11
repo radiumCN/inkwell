@@ -39,7 +39,7 @@ App 的 UI 库是 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（Hyper
 
 ### 尺寸 → `app/.../ui/components/Dimens.kt`
 
-全部落在 **4dp 栅格**（Miuix 自己的尺寸也都在栅格上）。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；内容列表行 `listHorizontal`(16)、行最小高 `listItemMinHeight`(56，对齐 Miuix `BasicComponent`)、紧凑状态行 `listVertical`(4，列表行本身不用)；`sectionHeaderTop`(16)、`chipSpacing`(4)/`chipHeight`(32)、`buttonMinHeight`(40)；窄顶栏 `toolbarHeight`(52，对齐 Miuix 收起后的顶栏)、顶栏玻璃圆 `barButton`(40)；图标 `iconSm`(18)/`iconMd`(24)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)/`loadingIndicator`(32)；封面 `coverThumbWidth/Height`、详情 `coverDetailWidth/Height`、书架网格 `bookshelfGridMin`；输入高 `searchFieldHeight`/`compactFieldHeight`（均为 40）。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
+全部落在 **4dp 栅格**（Miuix 自己的尺寸也都在栅格上）。常用：`gapXS`(4)/`gapS`(8)/`gapM`(12)/`gapL`(16)/`gapXL`(24)/`gapXXL`(32)；页面 `screenPadding`(20)；内容列表行 `listHorizontal`(16)、行最小高 `listItemMinHeight`(56，对齐 Miuix `BasicComponent`)、紧凑状态行 `listVertical`(4，列表行本身不用)；`sectionHeaderTop`(16)、`chipSpacing`(4)/`chipHeight`(32)、`buttonMinHeight`(40)；窄顶栏 `toolbarHeight`(52，对齐 Miuix 收起后的顶栏)、顶栏玻璃圆 `barButton`(40)；图标 `iconSm`(18)/`iconMd`(24)/`iconXL`(48)；`touchTarget`(48)；`buttonSpinner`(18)/`loadingIndicator`(32)；封面 `coverThumbWidth/Height`、详情 `coverDetailWidth/Height`、订阅文章配图 `articleThumbWidth/Height`（4:3 横的，文章配图多是横图）、书架网格 `bookshelfGridMin`；输入高 `searchFieldHeight`/`compactFieldHeight`（均为 40）。**禁止**在页面里写 `16.dp`、`10.dp` 之类；同类元素跨页面尺寸必须一致。
 
 默认行内边距用 `ContentListDefaults.DefaultPadding`（四周 16dp，就是 Miuix `BasicComponent` 的内边距，同一张卡里和设置行一个密度），行里有比文字高的东西（书封、大图标、48dp 图标按钮）才显式 `MediaPadding`（上下 8dp）。别在外层另搓 `Surface` 冒充列表行。
 

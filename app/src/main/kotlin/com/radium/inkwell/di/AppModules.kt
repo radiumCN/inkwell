@@ -51,6 +51,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_17_18,
                 InkwellDb.MIGRATION_18_19,
                 InkwellDb.MIGRATION_19_20,
+                InkwellDb.MIGRATION_20_21,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
@@ -64,6 +65,7 @@ val appModule = module {
     single { get<InkwellDb>().replaceRuleDao() }
     single { get<InkwellDb>().rssSourceDao() }
     single { get<InkwellDb>().readingStatDao() }
+    single { get<InkwellDb>().rssArticleDao() }
     single { com.radium.inkwell.data.repo.ReadingStatsRepository(get(), get(), get()) }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
@@ -121,6 +123,7 @@ val appModule = module {
         )
     }
     single { com.radium.inkwell.data.repo.RssRepository(get(), get()) }
+    single { com.radium.inkwell.data.repo.RssFeedRepository(get(), get(), get()) }
     // 更新用的通用 HTTP 客户端（检查 + 下载安装包 + 反馈上报）
     single {
         okhttp3.OkHttpClient.Builder()
@@ -178,8 +181,9 @@ val appModule = module {
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get()) }
-    viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
-    viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }
+    viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get(), get()) }
+    // 空串 = 看「全部」（Koin 的参数别传 null）
+    viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssTimelineViewModel(sourceId.ifBlank { null }, get(), get()) }
     // 后两个：文章的原网页才有的地址、标题；单网页源传空串（参数按位置解构，两个入口都得传满三个）
     viewModel { (sourceId: String, url: String, title: String) ->
         com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get(), url.ifBlank { null }, title.ifBlank { null })

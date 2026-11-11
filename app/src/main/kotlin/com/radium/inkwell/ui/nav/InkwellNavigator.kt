@@ -33,6 +33,11 @@ class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
         if (dualPane) backStack.ensureSettingsList()
     }
 
+    /** 下面紧挨着的就是 [key] 时退回去，否则前进（见 [popIfBelow]） */
+    fun goOrPop(key: NavKey) {
+        if (!backStack.popIfBelow(key)) go(key)
+    }
+
     fun openBook(bookId: String, origin: TransformOrigin) {
         // 阅读页已在栈顶时整个忽略：入场动画那 200ms 里四周还露着书架，能点中第二本。
         // 放行的话会改写 origin 却不换书 —— 看着 A 进来、返回却缩向 B。
@@ -54,6 +59,18 @@ class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
 internal fun MutableList<NavKey>.closeBookDetail(bookIds: Set<String>) {
     val top = lastOrNull()
     if (top is BookDetailRoute && top.bookId in bookIds) removeLastOrNull()
+}
+
+/**
+ * 栈顶下面紧挨着的就是 [key]：弹掉栈顶、回到它，返回 true；不是就什么都不动，返回 false。
+ *
+ * 订阅页和订阅源页能互相进：订阅源页点一个源进订阅页，订阅页右上角再点「订阅源」。照常前进的话两页轮流叠，
+ * 来回几次返回键要按一串；下面就是订阅源页时，这一下就是回去。
+ */
+internal fun MutableList<NavKey>.popIfBelow(key: NavKey): Boolean {
+    if (size < 2 || this[size - 2] != key) return false
+    removeLastOrNull()
+    return true
 }
 
 /**

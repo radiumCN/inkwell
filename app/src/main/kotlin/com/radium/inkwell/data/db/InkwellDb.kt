@@ -10,6 +10,7 @@ import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
+import com.radium.inkwell.data.db.dao.RssArticleDao
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.dao.ReadingStatDao
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -17,6 +18,7 @@ import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.data.db.entity.RssArticleEntity
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.data.db.entity.ReadingStatEntity
 
@@ -29,8 +31,9 @@ import com.radium.inkwell.data.db.entity.ReadingStatEntity
         ReplaceRuleEntity::class,
         RssSourceEntity::class,
         ReadingStatEntity::class,
+        RssArticleEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -41,6 +44,7 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun replaceRuleDao(): ReplaceRuleDao
     abstract fun rssSourceDao(): RssSourceDao
     abstract fun readingStatDao(): ReadingStatDao
+    abstract fun rssArticleDao(): RssArticleDao
 
     companion object {
         /**
@@ -226,6 +230,25 @@ abstract class InkwellDb : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
+            }
+        }
+
+        /**
+         * 订阅文章的本机缓存（订阅页先显示上次的、读过的变灰，见 [RssArticleEntity]）。纯新增表，老数据一行不动。
+         *
+         * 语句**逐字照抄** Room 按实体生成的建表代码（列、顺序、可空、主键、索引名），理由同 [MIGRATION_18_19]：
+         * 差一个字 Room 就拒绝开库。改实体必须同步改这里。
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `rss_article` (`feed` TEXT NOT NULL, `articleKey` TEXT NOT NULL, " +
+                        "`sourceId` TEXT NOT NULL, `title` TEXT NOT NULL, `link` TEXT NOT NULL, `description` TEXT, " +
+                        "`image` TEXT, `pubDate` TEXT, `pubTime` INTEGER NOT NULL, `firstSeenAt` INTEGER NOT NULL, " +
+                        "`lastSeenAt` INTEGER NOT NULL, `position` INTEGER NOT NULL, `readAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`feed`, `articleKey`))",
+                )
+                connection.execSQL("CREATE INDEX IF NOT EXISTS `idx_rss_article_source` ON `rss_article` (`sourceId`)")
             }
         }
 

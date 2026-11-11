@@ -52,10 +52,13 @@ class RssRepository(
      */
     suspend fun getRule(id: String): RssSourceRule? {
         val e = dao.getById(id) ?: return null
+        return withContext(Dispatchers.Default) { ruleOf(e) }
+    }
+
+    /** 同 [getRule]，手里已经有库里那一行（订阅页一次拿全部订阅源）。解析 JSON，别在主线程调 */
+    fun ruleOf(e: RssSourceEntity): RssSourceRule? {
         if (e.converterVersion < LegadoRssConverter.VERSION && e.sourceJson.isNotBlank()) {
-            val fresh = withContext(Dispatchers.Default) {
-                runCatching { LegadoRssConverter.convert(e.sourceJson).converted.singleOrNull()?.rule }.getOrNull()
-            }
+            val fresh = runCatching { LegadoRssConverter.convert(e.sourceJson).converted.singleOrNull()?.rule }.getOrNull()
             if (fresh != null) return fresh.copy(enabled = e.enabled)
         }
         return runCatching { RssSourceRule.fromJson(e.json) }.getOrNull()

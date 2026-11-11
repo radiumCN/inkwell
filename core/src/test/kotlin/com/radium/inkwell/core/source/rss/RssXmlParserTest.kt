@@ -147,4 +147,18 @@ class RssXmlParserTest {
         val a = assertNotNull(RssXmlParser.parse("s", xml)).single()
         assertEquals("https://e.com/p.jpg", a.image)
     }
+
+    /** 爱范儿早报：摘要里头一张图是条目前面的 🚨 表情，后面才是配图 */
+    @Test
+    fun `封面跳过表情图`() {
+        val xml = """
+        <?xml version="1.0"?>
+        <rss version="2.0"><channel><item>
+          <title>早报</title><link>https://e.com/2</link>
+          <description>&lt;p&gt;&lt;img src="https://s.w.org/images/core/emoji/17.0.2/72x72/1f6a8.png" alt="🚨" class="wp-smiley"/&gt;头条&lt;/p&gt;&lt;img src="https://e.com/huawei.jpg"/&gt;</description>
+        </item></channel></rss>
+        """.trimIndent()
+        val a = assertNotNull(RssXmlParser.parse("s", xml)).single()
+        assertEquals("https://e.com/huawei.jpg", a.image)
+    }
 }

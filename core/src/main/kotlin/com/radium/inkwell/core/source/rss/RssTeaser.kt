@@ -1,6 +1,7 @@
 package com.radium.inkwell.core.source.rss
 
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.model.textOrNull
 
 /**
  * feed 给的是全文，还是只给了摘要。
@@ -35,22 +36,14 @@ internal object RssTeaser {
         }
     }
 
-    /** 正文的字数（段落 + 小标题；图不算） */
-    fun textLength(elements: List<ContentElement>): Int = elements.sumOf {
-        when (it) {
-            is ContentElement.Paragraph -> it.text.length
-            is ContentElement.Heading -> it.text.length
-            else -> 0
-        }
-    }
+    /**
+     * 正文的字数（段落、小标题、代码、列表、引用；图不算）。代码和列表也得算上：技术文章大半是代码块，
+     * 只数段落的话整理出来的全文会被当成「太短、多半认错了块」扔掉。
+     */
+    fun textLength(elements: List<ContentElement>): Int = elements.sumOf { it.textOrNull?.length ?: 0 }
 
-    private fun plainText(elements: List<ContentElement>): String = elements.mapNotNull {
-        when (it) {
-            is ContentElement.Paragraph -> it.text
-            is ContentElement.Heading -> it.text
-            else -> null
-        }
-    }.joinToString("\n").trim()
+    private fun plainText(elements: List<ContentElement>): String =
+        elements.mapNotNull { it.textOrNull }.joinToString("\n").trim()
 
     /** 一两句话的长度：比这短的不当全文 */
     private const val SHORT_CHARS = 200

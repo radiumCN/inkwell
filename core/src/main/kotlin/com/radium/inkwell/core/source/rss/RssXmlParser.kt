@@ -1,5 +1,6 @@
 package com.radium.inkwell.core.source.rss
 
+import com.radium.inkwell.core.parser.html.isEmojiImage
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
@@ -91,9 +92,9 @@ object RssXmlParser {
             ?.takeIf { it.isNotBlank() }?.let { return it }
         item.selectFirst("media|thumbnail, media|content")?.attr("url")
             ?.takeIf { it.isNotBlank() }?.let { return it }
-        // 摘要里的头一张图，聊胜于无
+        // 摘要里的头一张图，聊胜于无。表情图不算：爱范儿早报的头一张图是条目前面那个 🚨，当缩略图就是一枚放大的表情
         return description
-            ?.let { Jsoup.parse(it).selectFirst("img")?.attr("src") }
+            ?.let { html -> Jsoup.parse(html).select("img").firstOrNull { !isEmojiImage(it) }?.attr("src") }
             ?.takeIf { it.isNotBlank() }
     }
 }

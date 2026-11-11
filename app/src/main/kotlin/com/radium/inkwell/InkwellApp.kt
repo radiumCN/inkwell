@@ -8,6 +8,7 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.repo.BookSourceRepository
+import com.radium.inkwell.data.repo.RssFeedRepository
 import com.radium.inkwell.data.repo.RssRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.di.appModule
@@ -101,6 +102,8 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
             runCatching {
                 val days = koin.get<AppPrefs>().cacheAutoPruneDays.first()
                 koin.get<BookRepository>().sweepContentCache(days)
+                // 订阅页缓存的文章跟同一个天数走：订阅源里撤下、这么多天没再取到的清掉（见 RssFeedRepository.prune）
+                koin.get<RssFeedRepository>().prune(days)
             }.onFailure { if (it is CancellationException) throw it }
         }
 

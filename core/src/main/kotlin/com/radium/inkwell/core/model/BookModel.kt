@@ -37,6 +37,18 @@ sealed interface ContentElement {
     /** resourceId 对本地书是解析器内部标识，对网络书是图片绝对 URL */
     data class Image(val resourceId: String, val alt: String? = null) : ContentElement
     data object Divider : ContentElement
+
+    // 下面三种只有订阅文章有（HtmlToElements 的 keepBlocks）。书（EPUB、书源正文）不产出它们，
+    // 阅读器分页、章节缓存这些只认段落的地方经 [asParagraph] 退成一段字兜底，不至于整块丢掉。
+
+    /** 代码块：原样的换行与缩进。[language] 是网页上标的语言（bash、kotlin），没标为 null */
+    data class Code(val text: String, val language: String? = null) : ContentElement
+
+    /** 列表的一项。[marker] 是「•」或「3.」；[depth] 是嵌套层数，0 起 */
+    data class ListItem(val text: String, val marker: String, val depth: Int = 0) : ContentElement
+
+    /** 引用。原文分了几段的，段与段之间是换行 */
+    data class Quote(val text: String) : ContentElement
 }
 
 val ContentElement.charLength: Int
@@ -45,7 +57,34 @@ val ContentElement.charLength: Int
         is ContentElement.Heading -> text.length
         is ContentElement.Image -> 1
         ContentElement.Divider -> 1
+        is ContentElement.Code -> text.length
+        is ContentElement.ListItem -> text.length
+        is ContentElement.Quote -> text.length
     }
+
+/** 这一块的字（算字数、找摘要用）；图、分隔线没有字，为 null */
+val ContentElement.textOrNull: String?
+    get() = when (this) {
+        is ContentElement.Paragraph -> text
+        is ContentElement.Heading -> text
+        is ContentElement.Code -> text
+        is ContentElement.ListItem -> text
+        is ContentElement.Quote -> text
+        is ContentElement.Image, ContentElement.Divider -> null
+    }
+
+/**
+ * 只认「段落、小标题、图、分隔线」的地方用：订阅文章才有的三种块退成一个普通段落（列表项带上圆点），其余原样。
+ * 段落里不该有换行（阅读器按段排、章节缓存一行一段），一并换成空格。
+ */
+fun ContentElement.asParagraph(): ContentElement = when (this) {
+    is ContentElement.Code -> ContentElement.Paragraph(text.replace(LINE_BREAKS, " ").trim())
+    is ContentElement.ListItem -> ContentElement.Paragraph("$marker $text")
+    is ContentElement.Quote -> ContentElement.Paragraph(text.replace(LINE_BREAKS, " ").trim())
+    else -> this
+}
+
+private val LINE_BREAKS = Regex("\\s*\\n\\s*")
 
 data class ChapterContent(
     val elements: List<ContentElement>,

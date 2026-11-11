@@ -2,6 +2,7 @@ package com.radium.inkwell.reader.paginate
 
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.model.asParagraph
 import com.radium.inkwell.reader.measure.MeasuredParagraph
 import com.radium.inkwell.reader.measure.ResolvedTextStyle
 import com.radium.inkwell.reader.measure.TextMeasureFacade
@@ -45,7 +46,9 @@ class Paginator(private val measurer: TextMeasureFacade) {
     ): Result {
         val elements = buildList {
             add(TitleElement(title))
-            addAll(content.elements)
+            // 代码、列表、引用只有订阅文章有，书里不会出现；万一出现也排成段落，别在下面的 when 里悄悄漏掉。
+            // 一对一换，下标不变（PageItem.elementIndex 指的还是同一块）
+            addAll(content.elements.map { it.asParagraph() })
         }
         val measured = HashMap<Int, MeasuredParagraph>()
         val pages = mutableListOf<PageSpec>()

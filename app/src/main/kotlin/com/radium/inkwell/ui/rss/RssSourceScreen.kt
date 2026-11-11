@@ -34,6 +34,7 @@ import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.groupedCardItem
@@ -84,7 +85,7 @@ fun RssSourceScreen(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
         topBar = {
-            AppTopBar("订阅", topBarScroll, onBack = onBack, containerColor = pageColor, actions = {
+            AppTopBar("订阅源", topBarScroll, onBack = onBack, containerColor = pageColor, actions = {
                 Box {
                     // 导入进行中（粘地址要联网抓 feed）换成转圈：从前这个状态 VM 里有、页面从没读过，点了像没点上
                     if (importing) {
@@ -204,6 +205,13 @@ fun RssSourceScreen(
                             ),
                         )
                     }
+                }
+                // 开关管的是「订阅」页里出不出现它的文章：说一句，不然关掉一个源，人不知道关了是什么效果
+                item(key = "footnote", contentType = "footnote") {
+                    SettingFootnote(
+                        "关掉的订阅源不出现在「订阅」里。网页类订阅源没有文章列表，在这里点开。长按一个源可以删除。",
+                        Modifier.padding(top = Dimens.gapXS),
+                    )
                 }
             }
         }
