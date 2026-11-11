@@ -7,10 +7,12 @@ import java.util.Base64
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** ListDetailSceneStrategy.sceneKey：书架与设置各用一组，避免宽屏下互相抢 pane。 */
+/** ListDetailSceneStrategy.sceneKey：书架、设置、订阅各用一组，避免宽屏下互相抢 pane。 */
 internal object NavPaneGroup {
     const val BOOKSHELF = "bookshelf"
     const val SETTINGS = "settings"
+    /** 订阅页 | 文章 | 文章的原网页：宽屏下左边文章列表、右边正文 */
+    const val RSS = "rss"
 }
 
 @Serializable
@@ -63,11 +65,27 @@ data class SearchRoute(val initialQuery: String? = null) : NavKey
 @Serializable
 data object ExploreRoute : NavKey
 
+/** 订阅源管理（添加、开关、删除）。订阅页右上角、「设置 → 订阅源」进来 */
 @Serializable
 data object RssSourceRoute : NavKey
 
+/**
+ * 订阅页：所有开着的订阅源的文章排成一条（书架顶栏的「订阅」）。[sourceId] 非空 = 进来就只看这个源
+ * （订阅源页点一个源）；空串 = 全部。不是设置树里的页：书架、订阅源页都能进，进来就是它自己一组（[NavPaneGroup.RSS]）。
+ */
 @Serializable
-data class RssArticlesRoute(val sourceId: String) : NavKey
+data class RssTimelineRoute(val sourceId: String = "") : NavKey
+
+/** 单网页源的网页页（阅读的 singleUrl：点开就是一个网页，没有文章列表）。在订阅源页里点开 */
+@Serializable
+data class RssWebRoute(val sourceId: String) : NavKey
+
+/**
+ * 文章的原网页（应用内打开）：feed 只给了摘要、原网页又整理不出正文时在应用里看原文。
+ * 和单网页源同一个网页页，地址换成文章链接。叠在文章页上面，返回回到文章。
+ */
+@Serializable
+data class RssArticleWebRoute(val sourceId: String, val url: String, val title: String) : NavKey
 
 /**
  * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
@@ -158,7 +176,7 @@ data object DeveloperSettingsRoute : NavKey
  * ├─ 阅读 (2) ─┬ 书源管理 (3) ─┬ 书源详情 (4)
  * │            │               └ 新建书源 (4)
  * │            └ 替换规则 (3)
- * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4)
+ * ├─ 订阅源 (2) ── 单网页源的网页 (3)
  * ├─ WebDAV (2)
  * └─ 关于 (2) ─┬ 意见反馈 (3)
  *              ├ 免责声明 (3)
@@ -186,13 +204,13 @@ internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is DeveloperSettingsRoute,
     is ReplaceRuleRoute,
     is SourceManageRoute,
-    is RssArticlesRoute,
+    is RssWebRoute,
     -> 3
 
     is SourceDetailRoute,
     is SourceWizardRoute,
-    is RssArticleRoute,
     -> 4
 
+    // 订阅页、文章、文章的原网页不在设置树里：它们是订阅自己的一组（NavPaneGroup.RSS），书架顶栏直接进
     else -> null
 }

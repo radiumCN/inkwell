@@ -2,6 +2,7 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.model.asParagraph
 import com.radium.inkwell.core.util.toHex
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import java.io.File
@@ -140,6 +141,9 @@ class ChapterContentCache(private val root: File) {
                 is ContentElement.Heading -> "$HEAD_PREFIX${el.level}:${el.text.replace('\n', ' ')}"
                 is ContentElement.Image -> IMG_PREFIX + el.resourceId
                 ContentElement.Divider -> DIVIDER
+                // 只有订阅文章有，书的章节里不会出现；兜底存成一段，缓存格式不用为它升级
+                is ContentElement.Code, is ContentElement.ListItem, is ContentElement.Quote ->
+                    escapeIfAmbiguous((el.asParagraph() as ContentElement.Paragraph).text)
             }
         }
         // 文件名不变（仍是 MD5(url)），所以重抓时是**覆盖**同名文件 —— 旧版本的内容

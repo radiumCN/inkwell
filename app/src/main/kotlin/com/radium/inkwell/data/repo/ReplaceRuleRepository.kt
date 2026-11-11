@@ -1,7 +1,9 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.ImportedPurifyRule
 import com.radium.inkwell.core.source.PurifyRule
+import com.radium.inkwell.core.source.PurifyScope
 import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import java.util.UUID
@@ -13,6 +15,16 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+
+/** 导入面板上一条规则的状态（见 [ReplaceRuleRepository.classifyImport]） */
+enum class RuleImportStatus { NEW, UPDATE, SAME, UNSUPPORTED }
+
+data class RuleImportItem(val rule: ImportedPurifyRule, val status: RuleImportStatus) {
+    /** 「已有」导了也没变化、「不支持」导不了：这两种勾不上 */
+    val selectable: Boolean get() = status == RuleImportStatus.NEW || status == RuleImportStatus.UPDATE
+}
+
+data class RuleImportResult(val added: Int, val updated: Int)
 
 /**
  * 净化替换规则。
@@ -37,13 +49,27 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
      * 引擎的取规则钩子（抓取时应用，结果进缓存）。只给**通用规则** ——
      * 书内规则挂在具体某本书上，而引擎不知道自己在给哪本书抓正文。
      *
-     * 作用域为空 = 对所有书源生效；否则逗号分隔，命中书源 id 或书源名的任一片段即应用。
+     * 作用范围见 [PurifyScope]：空 = 所有来源；否则命中来源地址 / 名字的任一片段，或者就是这本书的书名。
      */
-    fun purifyFor(source: BookSourceRule): List<PurifyRule> =
+    fun purifyFor(source: BookSourceRule, bookTitle: String): List<PurifyRule> =
         snapshot.get()
             .filter {
                 it.enabled && it.pattern.isNotEmpty() && it.bookId.isEmpty() &&
-                    matchesScope(it.scope, source)
+                    PurifyScope.matches(it.scope, source.id, source.name, bookTitle)
+            }
+            .map { it.toPurify() }
+
+    /**
+     * 本地书（txt / EPUB / MOBI）该跑的通用规则（**渲染时**应用，同 [purifyForBook]）。
+     *
+     * 本地书不经过引擎，从前通用规则对它一条都不跑 —— 从阅读导进来一批去广告的规则，本地书毫无反应。
+     * 本地书没有来源：作用范围空着的、或者写的就是这本书书名的才算（写来源的那些管的是网上抓的正文）。
+     */
+    fun purifyForLocalBook(bookTitle: String): List<PurifyRule> =
+        snapshot.get()
+            .filter {
+                it.enabled && it.pattern.isNotEmpty() && it.bookId.isEmpty() &&
+                    PurifyScope.matches(it.scope, sourceId = null, sourceName = null, bookTitle = bookTitle)
             }
             .map { it.toPurify() }
 
@@ -64,14 +90,6 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
 
     private fun ReplaceRuleEntity.toPurify() =
         PurifyRule(pattern = pattern, replacement = replacement, isRegex = isRegex)
-
-    private fun matchesScope(scope: String, source: BookSourceRule): Boolean {
-        if (scope.isBlank()) return true
-        return scope.split(',', '，')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .any { source.id.contains(it, true) || source.name.contains(it, true) }
-    }
 
     suspend fun save(rule: ReplaceRuleEntity) {
         dao.upsert(rule.copy(updatedAt = System.currentTimeMillis()))
@@ -159,9 +177,93 @@ class ReplaceRuleRepository(private val dao: ReplaceRuleDao) {
         rules.forEach { dao.upsert(it) }
     }
 
-    private companion object {
+    // ---- 从文件 / 链接 / 剪贴板导入（阅读的净化规则） ----
+
+    /** 读出来的规则和库里比一比，供导入面板逐条标「新增 / 更新 / 已有 / 不支持」 */
+    suspend fun previewImport(rules: List<ImportedPurifyRule>): List<RuleImportItem> =
+        classifyImport(rules, dao.getAll())
+
+    /**
+     * 把勾上的规则写进库，一条语句批量写（中途被杀不留半套）。
+     *
+     * 写之前重读一遍库：预览面板开着的这段时间里，同步可能拉下来了新规则、别处可能刚改过，
+     * 拿开面板那一刻的快照去覆盖会把那些改动冲掉。
+     * - 库里没有这个 id（或者是删掉的墓碑）→ 新增，开关照文件里的，排在最后；
+     * - 有、内容不同 → 更新内容，**开关和排序留用户自己的**：关掉的那条，重导一次订阅不该又被打开；
+     * - 有、内容一样 → 不写（不白盖一个 updatedAt，免得同步时拿它去覆盖别的设备）。
+     */
+    suspend fun importRules(rules: List<ImportedPurifyRule>): RuleImportResult {
+        val byId = dao.getAll().associateBy { it.id }
+        val now = System.currentTimeMillis()
+        var order = dao.maxSortOrder() + 1
+        var added = 0
+        var updated = 0
+        val rows = rules.filter { it.unsupported == null }.mapNotNull { r ->
+            val existing = byId[r.id]?.takeUnless { it.deleted }
+            when {
+                existing == null -> {
+                    added++
+                    ReplaceRuleEntity(
+                        id = r.id,
+                        name = r.name,
+                        pattern = r.pattern,
+                        replacement = r.replacement,
+                        isRegex = r.isRegex,
+                        scope = r.scope,
+                        enabled = r.enabled,
+                        sortOrder = order++,
+                        updatedAt = now,
+                    )
+                }
+                existing.sameAs(r, compareName = true) -> null
+                else -> {
+                    updated++
+                    existing.copy(
+                        name = r.name,
+                        pattern = r.pattern,
+                        replacement = r.replacement,
+                        isRegex = r.isRegex,
+                        scope = r.scope,
+                        updatedAt = now,
+                    )
+                }
+            }
+        }
+        if (rows.isNotEmpty()) dao.upsertAll(rows)
+        return RuleImportResult(added = added, updated = updated)
+    }
+
+    companion object {
+        /**
+         * 逐条定状态：
+         * - 同一个 id 的规则库里有：内容一样是「已有」，不一样是「更新」；
+         * - 没有这个 id，但有一条通用规则和它**内容**一样（名字不算）—— 手建过同一条、或者预置规则就是它：「已有」，
+         *   不然导进来就是两条一模一样的规则，各替换一遍；
+         * - 其余「新增」。删掉的规则（墓碑）不算有：重新导进来就是新增。
+         */
+        internal fun classifyImport(rules: List<ImportedPurifyRule>, existing: List<ReplaceRuleEntity>): List<RuleImportItem> {
+            val live = existing.filterNot { it.deleted }
+            val byId = live.associateBy { it.id }
+            val globals = live.filter { it.bookId.isEmpty() }
+            return rules.map { r ->
+                val same = byId[r.id]
+                val status = when {
+                    r.unsupported != null -> RuleImportStatus.UNSUPPORTED
+                    same != null ->
+                        if (same.sameAs(r, compareName = true)) RuleImportStatus.SAME else RuleImportStatus.UPDATE
+                    globals.any { it.sameAs(r, compareName = false) } -> RuleImportStatus.SAME
+                    else -> RuleImportStatus.NEW
+                }
+                RuleImportItem(r, status)
+            }
+        }
+
+        private fun ReplaceRuleEntity.sameAs(r: ImportedPurifyRule, compareName: Boolean): Boolean =
+            pattern == r.pattern && replacement == r.replacement && isRegex == r.isRegex &&
+                scope.trim() == r.scope && (!compareName || name == r.name)
+
         /** 都是各站最常见的植入语。默认关闭，用户自己决定开哪条 */
-        val DEFAULTS = listOf(
+        private val DEFAULTS = listOf(
             "去掉「请记住本站域名」" to "请记住本[站书]域名[^\\n]*",
             "去掉「最新章节请到…」" to "(最新章节|全文阅读|无弹窗)(请|尽在|上)[^\\n]*",
             "去掉「手机阅读」提示" to "(手机(用户)?请?(访问|阅读|观看)|M版首页)[^\\n]*",

@@ -1,11 +1,18 @@
 package com.radium.inkwell.ui.replace
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
+import com.radium.inkwell.data.repo.RuleImportItem
 import com.radium.inkwell.ui.components.MessageBus
+import com.radium.inkwell.core.source.ImportedPurifyRule
+import com.radium.inkwell.core.source.PurifyImportException
 import com.radium.inkwell.core.source.PurifyRule
+import com.radium.inkwell.core.source.PurifyRuleImport
 import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.source.Purifier
 import kotlinx.coroutines.CancellationException
@@ -16,6 +23,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 data class ReplaceRuleUiState(
     val rules: List<ReplaceRuleEntity> = emptyList(),
@@ -37,13 +46,22 @@ data class ReplaceRuleUiState(
     val patternError: String? = null,
     /** 保存中：按钮转圈、不再接受第二下 */
     val saving: Boolean = false,
+    /** 正在读文件 / 下载链接 / 解析（顶栏「导入」转圈） */
+    val importLoading: Boolean = false,
+    /** 导入面板：读出来的规则，逐条带状态；null = 面板没开 */
+    val importItems: List<RuleImportItem>? = null,
+    /** 导入面板里勾上的（规则 id） */
+    val importSelected: Set<String> = emptySet(),
 ) {
     /** 编辑面板里有没保存的改动（只看规则本身；样例文本不存，不算） */
     val editorDirty: Boolean get() = editing != null && editing != editingOriginal
 }
 
 class ReplaceRuleViewModel(
+    private val context: Context,
     private val repo: ReplaceRuleRepository,
+    /** 「从网络链接导入」用注入的那个客户端：它配了超时（裸 OkHttpClient() 没有总闸） */
+    private val http: OkHttpClient,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReplaceRuleUiState())
@@ -193,5 +211,154 @@ class ReplaceRuleViewModel(
                 _state.value = _state.value.copy(saving = false)
             }
         }
+    }
+
+    // ---- 导入（阅读的净化规则） ----
+
+    private var importJob: Job? = null
+
+    /**
+     * 读进来先不入库：解析、和库里比一遍，开导入面板让人勾（见 ReplaceRuleImportSheet）。
+     * 一次只读一份 —— 读个大链接要几秒，用户以为没点上又点一次，两份读出来的面板会互相顶掉。
+     *
+     * @param failPrefix 读不到时提示的开头（「读取失败」「下载失败」）；读到了但不是规则，统一「导入失败」
+     */
+    private fun startImport(failPrefix: String, read: suspend () -> String) {
+        if (importJob?.isActive == true) {
+            messages.emit("上一次导入还没完成")
+            return
+        }
+        importJob = viewModelScope.launch {
+            _state.value = _state.value.copy(importLoading = true)
+            try {
+                val text = try {
+                    read()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    messages.emit("$failPrefix: ${e.message?.take(80) ?: "未知错误"}")
+                    return@launch
+                }
+                // 每条正则都要编译一遍看写没写坏：几百条的合集放在主线程上会卡一下
+                val rules = withContext(Dispatchers.Default) { PurifyRuleImport.parse(text) }
+                val items = repo.previewImport(rules)
+                _state.value = _state.value.copy(
+                    importItems = items,
+                    // 能导的默认全勾；「已有」「不支持」勾不上
+                    importSelected = items.filter { it.selectable }.mapTo(HashSet()) { it.rule.id },
+                )
+            } catch (e: PurifyImportException) {
+                messages.emit("导入失败: ${e.message}")
+            } finally {
+                _state.value = _state.value.copy(importLoading = false)
+            }
+        }
+    }
+
+    fun importFromFile(uri: Uri) = startImport("读取失败") {
+        withContext(Dispatchers.IO) {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                // 边读边数，超了就停：误选一个几百 MB 的文件，别整个读进内存
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    check(out.size() <= MAX_IMPORT_BYTES) { "文件太大（超过 ${MAX_IMPORT_BYTES shr 20}MB），不像是净化规则" }
+                }
+                out.toByteArray().toString(Charsets.UTF_8)
+            } ?: error("无法读取文件")
+        }
+    }
+
+    /** 也认阅读的分享链接（legado://import/replaceRule?src=…），见 [PurifyRuleImport.unwrapAppLink] */
+    fun importFromUrl(url: String) {
+        val target = PurifyRuleImport.unwrapAppLink(url)
+        if (target.isEmpty()) return
+        startImport("下载失败") {
+            withContext(Dispatchers.IO) {
+                http.newCall(Request.Builder().url(target).build()).execute().use { resp ->
+                    check(resp.isSuccessful) { "HTTP ${resp.code}" }
+                    // 同来源导入：先预读确认没超上限（request 只往缓冲里填、不消费），再交给 body.string() 按 BOM / 字符集解
+                    val body = resp.body
+                    check(!body.source().request(MAX_IMPORT_BYTES + 1L)) {
+                        "文件太大（超过 ${MAX_IMPORT_BYTES shr 20}MB），不像是净化规则"
+                    }
+                    body.string()
+                }
+            }
+        }
+    }
+
+    fun importFromClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (text.isNullOrBlank()) {
+            messages.emit("剪贴板是空的")
+            return
+        }
+        // 复制的可能是一条链接而不是规则本身（阅读里「分享」出来的就是链接）：是链接就去下载
+        val trimmed = text.trim()
+        if (trimmed.none { it == '\n' } && LINK_SCHEMES.any { trimmed.startsWith(it, ignoreCase = true) }) {
+            importFromUrl(trimmed)
+        } else {
+            startImport("读取失败") { text }
+        }
+    }
+
+    fun toggleImport(id: String) {
+        val s = _state.value
+        val item = s.importItems?.firstOrNull { it.rule.id == id } ?: return
+        if (!item.selectable) return
+        _state.value = s.copy(
+            importSelected = if (id in s.importSelected) s.importSelected - id else s.importSelected + id,
+        )
+    }
+
+    /** 全选 / 全不选：只动勾得上的那些 */
+    fun setAllImport(selected: Boolean) {
+        val s = _state.value
+        val items = s.importItems ?: return
+        _state.value = s.copy(
+            importSelected = if (selected) items.filter { it.selectable }.mapTo(HashSet()) { it.rule.id } else emptySet(),
+        )
+    }
+
+    /** 面板退场动画播完才清（同编辑面板：先清的话面板当场从组合树摘掉，动画被掐断） */
+    fun dismissImport() {
+        _state.value = _state.value.copy(importItems = null, importSelected = emptySet())
+    }
+
+    /**
+     * 写进库。[rules] 由面板在收起之前取好 —— 面板收起时先回调 [dismissImport]、再办事，
+     * 到这里 state 里的勾选已经清掉了。
+     */
+    fun confirmImport(rules: List<ImportedPurifyRule>) {
+        if (rules.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val r = repo.importRules(rules)
+                messages.emit(
+                    when {
+                        r.added > 0 && r.updated > 0 -> "已导入 ${r.added} 条，更新 ${r.updated} 条"
+                        r.added > 0 -> "已导入 ${r.added} 条"
+                        r.updated > 0 -> "已更新 ${r.updated} 条"
+                        else -> "这些规则都已经有了"
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit("导入失败: ${e.message?.take(80)}")
+            }
+        }
+    }
+
+    private companion object {
+        /** 净化规则文件的大小上限：几百条规则也就几百 KB，再大就不是规则了，别整个读进内存 */
+        const val MAX_IMPORT_BYTES = 8 shl 20
+        /** 剪贴板里是这几种开头的一行字：当链接去下载，不当规则解析 */
+        val LINK_SCHEMES = listOf("http://", "https://", "legado://", "yuedu://")
     }
 }

@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.repo.BookRepository
+import com.radium.inkwell.data.repo.FolderBook
+import com.radium.inkwell.data.repo.FolderBooks
+import com.radium.inkwell.data.repo.LocalFolderScanner
 import com.radium.inkwell.data.repo.LocalImportResult
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +55,8 @@ class BookshelfViewModel(
     private val netBookRepo: com.radium.inkwell.data.repo.NetBookRepository,
     private val sourceRepo: com.radium.inkwell.data.repo.BookSourceRepository,
     private val chapterDao: com.radium.inkwell.data.db.dao.ChapterDao,
+    private val folderScanner: LocalFolderScanner,
+    private val rssRepo: com.radium.inkwell.data.repo.RssRepository,
 ) : ViewModel() {
 
     // ---------- 追更 ----------
@@ -204,6 +209,21 @@ class BookshelfViewModel(
     val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabledState
         .map { it ?: true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), appPrefs.exploreEnabledState.value ?: true)
+
+    /**
+     * 书架顶栏是否显示「订阅」入口：设置里开着（默认开），**且**至少有一个开着的订阅源 ——
+     * 没订阅、或订阅源全关了的人，顶栏照旧四个按钮。两样都取预热版、初值用此刻的值，理由同 [exploreEnabled]；
+     * 订阅源还没从库里读回来（null）先当没有，宁可晚出现，也别先画出来再消失。
+     */
+    val rssEntryVisible: StateFlow<Boolean> = combine(
+        appPrefs.rssEntryEnabledState,
+        rssRepo.hasEnabledSourceState,
+    ) { on, has -> (on ?: true) && has == true }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            (appPrefs.rssEntryEnabledState.value ?: true) && rssRepo.hasEnabledSourceState.value == true,
+        )
 
     /** 书架展示：网格或列表。初值同上，别让列表用户先看一帧网格 */
     val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayoutState
@@ -619,4 +639,84 @@ class BookshelfViewModel(
         }
     }
 
+    // ---------- 选文件夹导入 ----------
+
+    private val _folderImport = MutableStateFlow<FolderImportState?>(null)
+    /** 文件夹导入面板；null = 没开 */
+    val folderImport: StateFlow<FolderImportState?> = _folderImport.asStateFlow()
+    private var folderScanJob: Job? = null
+
+    /**
+     * 选好文件夹：先开面板转圈（「正在查找… 已找到 N 本」），找完列出来让人勾。
+     *
+     * 「已在书架」按文件名和书架上本地书的书名比（[FolderBooks.titleKey]），比上的默认不勾。只是预判：
+     * EPUB 的书名在文件里、比不出来也不要紧，真正导入时照旧按「书名 + 作者」再挡一次（见 BookRepository.importLocalBook）。
+     * **隐藏的书不拿来比**：面板上标一个「已在书架」等于说出了「这本藏起来了」（同书架别处，平时一个字不提隐藏）。
+     */
+    fun scanFolder(treeUri: Uri) {
+        folderScanJob?.cancel()
+        _folderImport.value = FolderImportState.Scanning(found = 0)
+        folderScanJob = viewModelScope.launch {
+            try {
+                val scan = folderScanner.scan(treeUri) { found ->
+                    // 在 IO 线程上回调；面板已经关了（值不再是 Scanning）就别再把它开回来
+                    _folderImport.update { if (it is FolderImportState.Scanning) FolderImportState.Scanning(found) else it }
+                }
+                val shelfKeys = allBooks.value
+                    .filter { it.type != BookType.NET && !it.hidden }
+                    .mapTo(HashSet()) { FolderBooks.titleKey(it.title) }
+                val onShelf = scan.books.filter { FolderBooks.titleKey(it.name) in shelfKeys }.mapTo(HashSet()) { it.uri }
+                _folderImport.value = FolderImportState.Ready(
+                    folderName = scan.folderName,
+                    books = scan.books,
+                    onShelf = onShelf,
+                    selected = scan.books.mapTo(HashSet()) { it.uri } - onShelf,
+                    truncated = scan.truncated,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _folderImport.value = null
+                messages.emit("读取文件夹失败: ${e.message?.take(80) ?: "未知错误"}")
+            }
+        }
+    }
+
+    fun toggleFolderBook(uri: Uri) {
+        val s = _folderImport.value as? FolderImportState.Ready ?: return
+        _folderImport.value = s.copy(selected = if (uri in s.selected) s.selected - uri else s.selected + uri)
+    }
+
+    /** 全选 / 全不选：管的是没在书架上的那些；已在书架的要导得一本本勾 */
+    fun setAllFolderBooks(selected: Boolean) {
+        val s = _folderImport.value as? FolderImportState.Ready ?: return
+        val notOnShelf = s.books.mapTo(HashSet()) { it.uri } - s.onShelf
+        _folderImport.value = s.copy(
+            selected = if (selected) s.selected + notOnShelf else s.selected - notOnShelf,
+        )
+    }
+
+    /** 面板收起（退场动画播完）：还在找就别找了 */
+    fun dismissFolderImport() {
+        folderScanJob?.cancel()
+        _folderImport.value = null
+    }
+}
+
+/** 文件夹导入面板的两种样子 */
+sealed interface FolderImportState {
+    /** 还在找；[found] 是已经找到几本 */
+    data class Scanning(val found: Int) : FolderImportState
+
+    /**
+     * @param onShelf 文件名和书架上的书对得上的（默认不勾）
+     * @param truncated 书太多，只列了前 [LocalFolderScanner.MAX_BOOKS] 本
+     */
+    data class Ready(
+        val folderName: String,
+        val books: List<FolderBook>,
+        val onShelf: Set<Uri>,
+        val selected: Set<Uri>,
+        val truncated: Boolean,
+    ) : FolderImportState
 }

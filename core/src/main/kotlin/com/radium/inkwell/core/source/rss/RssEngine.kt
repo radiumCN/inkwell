@@ -10,8 +10,10 @@ import com.radium.inkwell.core.source.LegadoRuleAnalyzer
 import com.radium.inkwell.core.source.RuleEvaluator
 import com.radium.inkwell.core.source.SourceException
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.UrlOptions
 import com.radium.inkwell.core.source.js.ScriptRuntime
 import com.radium.inkwell.core.source.resolveUrl
+import com.radium.inkwell.core.source.splitUrlOptions
 import org.jsoup.Jsoup
 
 /**
@@ -23,7 +25,8 @@ class RssEngine(
     scriptRuntime: ScriptRuntime? = null,
 ) {
     private val evaluator = RuleEvaluator(scriptRuntime = scriptRuntime)
-    private val htmlToElements = HtmlToElements()
+    // 订阅文章留着图：文章页是滚动着看的，不分页（小说、本地书那几处照旧不收图）
+    private val htmlToElements = HtmlToElements(keepImages = true)
 
     /**
      * 公开入口一律在 IO 线程自我确权（同 BookSourceEngine）：调用方是 viewModelScope，
@@ -33,12 +36,10 @@ class RssEngine(
         withContext(Dispatchers.IO) { articlesOnIo(rule, sortUrl, page) }
 
     private suspend fun articlesOnIo(rule: RssSourceRule, sortUrl: String, page: Int): RssArticlePage {
-        val url = resolveUrl(rule.id, expandPage(sortUrl, page))
-        val fetched = http.fetch(
-            url,
-            headers = rule.headers,
-            charsetOverride = rule.charset,
-        )
+        val vars = mapOf("baseUrl" to rule.id, "page" to page.toString())
+        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+        val fetched = fetch(rule, sortUrl, vars, js)
+        val url = fetched.finalUrl
 
         // 没配列表规则 = 标准 XML feed。这是常态，不是错误
         if (rule.articles.isNullOrBlank()) {
@@ -52,8 +53,8 @@ class RssEngine(
             element = doc,
             json = fetched.bodyText,
             baseUrl = fetched.finalUrl,
-            vars = mapOf("baseUrl" to rule.id, "page" to page.toString()),
-            js = JsContext(sourceKey = rule.id),
+            vars = vars,
+            js = js,
         )
         val nodes = evaluator.evalToNodes(LegadoRuleAnalyzer.analyze(rule.articles), root)
         val items = nodes.mapNotNull { item ->
@@ -77,32 +78,55 @@ class RssEngine(
     /**
      * 文章正文。
      *
-     * 三级回落：配了正文规则就抓原文页解析；没配就用列表里带的 description（多数 feed
-     * 的 content:encoded 本来就是全文）；两者都没有则返回 null —— 调用方该拿浏览器打开
-     * 原链接，而不是给用户看一个空白页。
+     * 配了正文规则就抓原文页解析；没配（或没解析出东西）就用列表里带的 description（多数 feed
+     * 的 content:encoded 本来就是全文）。description 只是一两句摘要、或者什么都没有的，标上
+     * [RssContent.teaser]：调用方先把摘要亮出来，再拿 [fullText] 去原网页整理全文。
      */
-    suspend fun content(rule: RssSourceRule, article: RssArticle): List<ContentElement>? =
+    suspend fun content(rule: RssSourceRule, article: RssArticle): RssContent =
         withContext(Dispatchers.IO) { contentOnIo(rule, article) }
 
-    private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): List<ContentElement>? {
+    /**
+     * 去原网页把全文整理出来（feed 只给了摘要时，见 [RssContent.teaser]）。请求头、编码照订阅源里写的。
+     *
+     * 整理不出来返回 null：页面要跑脚本才出内容、认出来的块还没摘要长、字数不到 [MIN_FULL_TEXT]
+     * （一两句话不值得替掉摘要，多半是认错了块）。网络错误照常抛出，调用方说原因。
+     */
+    suspend fun fullText(
+        rule: RssSourceRule,
+        article: RssArticle,
+        summary: List<ContentElement> = emptyList(),
+    ): List<ContentElement>? = withContext(Dispatchers.IO) {
+        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+        val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
+        val elements = ArticleExtractor.extract(Jsoup.parse(fetched.bodyText, fetched.finalUrl), article.title)
+        val length = RssTeaser.textLength(elements)
+        elements.takeIf { length >= MIN_FULL_TEXT && length > RssTeaser.textLength(summary) }
+    }
+
+    private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): RssContent {
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {
-            val url = resolveUrl(rule.id, article.link)
-            val fetched = http.fetch(url, headers = rule.headers, charsetOverride = rule.charset)
+            val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+            val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
             val ctx = EvalContext(
                 element = Jsoup.parse(fetched.bodyText, fetched.finalUrl),
                 json = fetched.bodyText,
                 baseUrl = fetched.finalUrl,
-                js = JsContext(sourceKey = rule.id),
+                js = js,
             )
             val html = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule.content), ctx)
             if (!html.isNullOrBlank()) {
                 val body = Jsoup.parseBodyFragment(html, fetched.finalUrl).body()
-                return htmlToElements.convert(body).takeIf { it.isNotEmpty() }
+                val elements = htmlToElements.convert(body)
+                if (elements.isNotEmpty()) return RssContent(elements, teaser = false)
             }
         }
-        val desc = article.description?.takeIf { it.isNotBlank() } ?: return null
-        val body = Jsoup.parseBodyFragment(desc, article.link).body()
-        return htmlToElements.convert(body).takeIf { it.isNotEmpty() }
+        val elements = article.description
+            ?.takeIf { it.isNotBlank() }
+            ?.let { htmlToElements.convert(Jsoup.parseBodyFragment(it, article.link).body()) }
+            .orEmpty()
+        // 原网页得是个网页才去整理：脚本地址、data: 地址没有「原网页」可言
+        val teaser = article.link.isHttpUrl() && RssTeaser.isTeaser(elements)
+        return RssContent(if (teaser) RssTeaser.stripReadMore(elements) else elements, teaser)
     }
 
     private fun field(rule: String?, ctx: EvalContext): String? {
@@ -110,12 +134,65 @@ class RssEngine(
         return runCatching { evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule), ctx) }.getOrNull()
     }
 
-    private fun expandPage(url: String, page: Int): String =
-        url.replace("{{page}}", page.toString())
+    /**
+     * 分类地址、文章链接 → 一次抓取，照阅读的 AnalyzeUrl：先跑地址里的 `@js:` / `<js>`，再展开 `{{…}}`
+     * （`{{page}}`、算术、脚本，jsLib 里的函数也调得到），再拆出 `,{…}` 选项（请求方式、请求体、请求头、编码）。
+     *
+     * 从前只替换 `{{page}}`：`must_xx={{getMust()}}` 这类调用 jsLib 的地址原样发出去，`,{"method":"POST"}` 也一直挂在地址上。
+     * `data:` 地址不发请求，由 [SourceHttpClient] 直接答（十六进制的内容，见 dataUriPage）。
+     */
+    private suspend fun fetch(
+        rule: RssSourceRule,
+        raw: String,
+        vars: Map<String, String>,
+        js: JsContext,
+    ): com.radium.inkwell.core.source.FetchedPage {
+        val ctx = EvalContext(element = null, json = null, baseUrl = rule.id, vars = vars, js = js)
+        val scripted = evaluator.evalUrlJs(raw, ctx) ?: raw
+        val expanded = evaluator.expandTemplate(scripted, ctx)
+        val (bare, options) = splitUrlOptions(expanded) ?: (expanded to UrlOptions())
+        val url = if (bare.startsWith("data:", ignoreCase = true)) bare else resolveUrl(rule.id, bare)
+        return http.fetch(
+            url,
+            method = options.method?.uppercase() ?: "GET",
+            body = options.body,
+            headers = rule.headers + options.headers,
+            charsetOverride = options.charset ?: rule.charset,
+        )
+    }
 
-    /** 相对链接补成绝对的 —— 否则点开文章就是一串打不开的路径 */
+    /**
+     * 相对链接补成绝对的 —— 否则点开文章就是一串打不开的路径。
+     * 图片地址后面常跟着阅读的请求选项（`…jpg,{"headers":{"referer":…}}`，晋江书单就这么写）：
+     * 选项丢掉、地址留着，带着 `,{…}` 去加载只会是一张裂图
+     */
     private fun RssArticle.absolutize(base: String): RssArticle = copy(
-        link = link.takeIf { it.isBlank() } ?: resolveUrl(base, link),
-        image = image?.takeIf { it.isNotBlank() }?.let { resolveUrl(base, it) },
+        // 脚本地址、data: 地址原样留着：它们要到抓正文时才算（见 [fetch]），补成「站点/@js:…」就废了
+        link = link.takeIf { it.isBlank() || it.isScriptOrDataUrl() } ?: resolveUrl(base, link),
+        image = image?.takeIf { it.isNotBlank() }?.let { resolveUrl(base, splitUrlOptions(it)?.first ?: it) },
     )
+}
+
+/**
+ * 一篇文章的正文。
+ *
+ * @param elements 可能是空的：订阅源只给了标题和链接
+ * @param teaser feed 只给了摘要（或什么都没给），全文在原网页上：值得拿 [RssEngine.fullText] 去整理一次
+ */
+data class RssContent(
+    val elements: List<ContentElement>,
+    val teaser: Boolean,
+)
+
+/** 原网页整理出来的全文至少这么多字，才替掉摘要 */
+private const val MIN_FULL_TEXT = 200
+
+private fun String.isHttpUrl(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
+
+private fun String.isScriptOrDataUrl(): Boolean {
+    val t = trimStart()
+    return t.startsWith("data:", ignoreCase = true) ||
+        t.contains("@js:", ignoreCase = true) ||
+        t.contains("<js>", ignoreCase = true)
 }

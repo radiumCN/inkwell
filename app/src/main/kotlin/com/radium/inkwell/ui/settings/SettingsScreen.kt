@@ -367,21 +367,21 @@ private val PRUNE_OPTIONS = listOf(
     PickerOption(
         id = "0",
         label = "关闭",
-        subtitle = "已读章节正文一直保留，直到手动清除",
+        subtitle = "已读章节正文和订阅文章一直保留，章节可手动清除",
     ),
     PickerOption(
         id = "7",
         label = "7 天",
-        subtitle = "进度之前且超过 7 天未回看的章节会删掉缓存",
+        subtitle = "进度之前且超过 7 天未回看的章节、订阅里 7 天没再出现的文章会删掉缓存",
     ),
     PickerOption(
         id = "14",
         label = "14 天",
-        subtitle = "进度之前且超过 14 天未回看的章节会删掉缓存",
+        subtitle = "进度之前且超过 14 天未回看的章节、订阅里 14 天没再出现的文章会删掉缓存",
     ),
     PickerOption(
         id = "30",
         label = "30 天",
-        subtitle = "进度之前且超过 30 天未回看的章节会删掉缓存",
+        subtitle = "进度之前且超过 30 天未回看的章节、订阅里 30 天没再出现的文章会删掉缓存",
     ),
 )

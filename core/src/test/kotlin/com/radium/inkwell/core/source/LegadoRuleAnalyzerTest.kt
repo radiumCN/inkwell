@@ -220,4 +220,57 @@ class LegadoRuleAnalyzerTest {
         // 取整个对象：拿到的是 JSON，不是 {id=1, title=甲}
         assertEquals("""{"id":1,"title":"甲"}""", ev.evalToString(LegadoRuleAnalyzer.analyze("$.data.list[0]"), page))
     }
+
+    // ---- %% 交替合并（JSONPath / 混写）----
+
+    private val twoLists = """{"data":{"recommend":[{"t":"r1"},{"t":"r2"},{"t":"r3"}],"find":[{"t":"f1"}]}}"""
+
+    @Test fun `JSONPath 的 %% 交替合并，短的取完就跳过`() {
+        assertEquals(listOf("r1", "f1", "r2", "r3"), strs("$.data.recommend[*].t%%$.data.find[*].t", jsonCtx(twoLists)))
+        val nodes = ev.evalToNodes(LegadoRuleAnalyzer.analyze("$.data.recommend[*]%%$.data.find[*]"), jsonCtx(twoLists))
+        assertEquals(
+            listOf("r1", "f1", "r2", "r3"),
+            nodes.map { ev.evalToString(LegadoRuleAnalyzer.analyze("$.t"), it) },
+        )
+    }
+
+    @Test fun `晋江书单那种写法：前几个分支空，落到 %% 那一支`() {
+        val rule = "$.data.data[*]||$.data.list[*]||$.data.a[*]&&$.data.b[*]||$.data.recommend[*]%%$.data.find[*]"
+        assertEquals(4, ev.evalToNodes(LegadoRuleAnalyzer.analyze(rule), jsonCtx(twoLists)).size)
+    }
+
+    @Test fun `&& 和 %% 混写按先出现的那个切（同 Legado）`() {
+        val json = """{"a":["a1"],"b":["b1","b2"],"c":["c1","c2"]}"""
+        // a && (b %% c)
+        assertEquals(listOf("a1", "b1", "c1", "b2", "c2"), strs("$.a[*]&&$.b[*]%%$.c[*]", jsonCtx(json)))
+        // %% 先出现：b %% (c && a) —— b 与「c 接着 a」轮流取
+        assertEquals(listOf("b1", "c1", "b2", "c2", "a1"), strs("$.b[*]%%$.c[*]&&$.a[*]", jsonCtx(json)))
+    }
+
+    // ---- 晋江书单那类订阅源：模板、脚本、整组管道 ----
+
+    private val item = """{"listid":356320,"recommend_count":"","booknum":12,"fav_count":345,"tags":[{"t":"言情"},{"t":"古代"}]}"""
+
+    @Test fun `模板里的 || 不把整条规则切开，是模板里那条规则的回退`() {
+        assertEquals("【12 本】", str("【{{$.recommend_count||$.booknum}} 本】", jsonCtx(item)))
+    }
+
+    @Test fun `模板里的 ## 作用在连好的整串上`() {
+        // 规则原文里是反斜杠加 n 两个字（正则的换行），不是真的换行
+        assertEquals("言情•古代", str("{{\$.tags[*].t##\\n##•}}", jsonCtx(item)))
+    }
+
+    @Test fun `脚本里的 {{}} 先按当前这一条展开再跑`() {
+        assertEquals(
+            "https://a.com/getDetail?listid=356320&p=1",
+            str("<js>\"https://a.com/getDetail?listid={{$.listid}}\"+\"&p=1\"</js>", jsonCtx(item)),
+        )
+    }
+
+    @Test fun `JSON 列表接脚本：脚本拿到整组，后面的 $ 点 星 再展开回逐条`() {
+        val page = """{"data":{"recommend":[{"t":"r1"},{"t":"r2"}],"find":[{"t":"f1"}]}}"""
+        val rule = "\$.data.recommend[*]%%\$.data.find[*]\n<js>\nif(result ==\"[]\"){ result = '[{\"t\":\"空\"}]' }\nresult\n</js>\n\$.[*]"
+        val nodes = ev.evalToNodes(LegadoRuleAnalyzer.analyze(rule), jsonCtx(page))
+        assertEquals(listOf("r1", "f1", "r2"), nodes.map { ev.evalToString(LegadoRuleAnalyzer.analyze("\$.t"), it) })
+    }
 }

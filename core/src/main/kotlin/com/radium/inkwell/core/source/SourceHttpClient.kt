@@ -26,6 +26,7 @@ import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
+import com.radium.inkwell.core.util.toHex
 
 /**
  * 抓取日志出口。core 是纯 JVM，碰不到 android.util.Log，由 app 注入（见 AppModules）。
@@ -41,6 +42,29 @@ fun interface SourceHttpLogger {
         val NONE = SourceHttpLogger { _, _, _ -> }
     }
 }
+
+/**
+ * 阅读（Legado）的 `data:` 地址：不发请求，「响应体」是解码后字节的**十六进制**（AnalyzeUrl.getStrResponseAwait 就这么做），
+ * 源里用 `java.hexDecodeToString(result)` 还原。订阅源常拿它当分类、当翻页参数：
+ * `路线列表::data:;base64,MA==,{"type":0}`、`data:;base64,{{java.base64Encode("/zh/list/"+page)}},{"type":"x"}`。
+ *
+ * 从前当网址去请求，一律「非法 URL: data:;base64,…」。只认 base64 形式（Legado 同样只认它）；
+ * 地址后面的 `,{…}` 选项调用方通常已经剥掉，没剥的这里也只取到逗号为止。不是 data: 地址返回 null。
+ */
+internal fun dataUriPage(url: String): FetchedPage? {
+    if (!url.startsWith("data:", ignoreCase = true)) return null
+    val payload = DATA_URI.find(url)?.groupValues?.get(1) ?: return null
+    // MIME 解码器：跳过换行、空格这类非 base64 字符（源里拼出来的常带换行）
+    val bytes = runCatching { java.util.Base64.getMimeDecoder().decode(payload) }.getOrNull() ?: return null
+    return FetchedPage(
+        finalUrl = url,
+        statusCode = 200,
+        bodyText = bytes.toHex(),
+        detectedCharset = Charsets.UTF_8.name(),
+    )
+}
+
+private val DATA_URI = Regex("^data:[^,]*?;base64,([^,]*)", RegexOption.IGNORE_CASE)
 
 /** 抓取结果；bodyText 已按探测到的字符集解码。不再同时握一份 bodyBytes —— 解码后那份字节只是峰值翻倍。 */
 class FetchedPage(
@@ -117,6 +141,7 @@ class SourceHttpClient(
          */
         throwOnHttpError: Boolean = true,
     ): FetchedPage {
+        dataUriPage(url)?.let { return it }
         val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
         if (rateLimit != null && rateLimit.intervalMs > 0) {
             buckets.computeIfAbsent(httpUrl.host) { TokenBucket(rateLimit) }.acquire()

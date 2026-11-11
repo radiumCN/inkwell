@@ -59,6 +59,11 @@ fun EmptyState(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /**
+     * 点动作按钮弹出的菜单（[AppDropdownMenu]）：和按钮放进同一个 Box，从按钮上弹出来。
+     * 一个按钮背后有几条路时用（空书架的「导入本地书」：选文件 / 选文件夹）
+     */
+    actionMenu: (@Composable () -> Unit)? = null,
 ) {
     Box(modifier.fillMaxSize().padding(Dimens.gapXXL), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -89,7 +94,10 @@ fun EmptyState(
                 )
             }
             if (actionLabel != null && onAction != null) {
-                AppTextButton(actionLabel, onClick = onAction, modifier = Modifier.padding(top = Dimens.gapS))
+                Box(Modifier.padding(top = Dimens.gapS)) {
+                    AppTextButton(actionLabel, onClick = onAction)
+                    actionMenu?.invoke()
+                }
             }
         }
     }
@@ -207,6 +215,8 @@ fun ReadingProgressMeter(
  * @param contentDescription 读屏念的名字。书名就印在旁边（列表行标题、书架卡片下的书名、详情页抬头）
  *   时传 null —— 封面整块不进读屏，否则同一个书名连念两遍（默认封面上那行字还会再念一遍截断的）。
  *   默认仍是书名，给「只有一张封面、旁边没字」的地方用（进书 splash）。
+ * @param retryReferer 取不到时带上这个 Referer 再取一次（防盗链的图床，见 [referer]）。订阅文章的配图给文章网站的来源；
+ *   书封不给 —— 书源的图床另有书源自己的请求头那一套
  */
 @Composable
 fun BookCover(
@@ -215,6 +225,7 @@ fun BookCover(
     modifier: Modifier = Modifier,
     placeholderChars: Int = 4,
     contentDescription: String? = title,
+    retryReferer: String? = null,
 ) {
     Box(
         (if (contentDescription == null) modifier.clearAndSetSemantics {} else modifier)
@@ -240,9 +251,12 @@ fun BookCover(
         if (!covered) DefaultCover(title, placeholderChars)
         if (coverModel != null) {
             val context = LocalPlatformContext.current
-            val request = remember(coverModel, context) {
+            // 先不带 Referer；取不到、又给了 retryReferer 的，带上它再来一次
+            var withReferer by remember(coverModel) { mutableStateOf(false) }
+            val request = remember(coverModel, context, withReferer) {
                 ImageRequest.Builder(context)
                     .data(coverModel)
+                    .referer(if (withReferer) retryReferer else null)
                     // 不设 size：AsyncImage 按布局约束定解码尺寸 —— 列表封面 48×64dp，不会把 1000px 原图解进内存。
                     // 从前为了拿约束在外面套了 BoxWithConstraints，每个列表项都多一次子组合，书架一滑就是一屏。
                     // 各调用点的尺寸都是有界的（定宽高，或网格格子里 fillMaxSize）；无界时 Coil 会按原图解，新调用点别给无界约束。
@@ -261,7 +275,10 @@ fun BookCover(
                         s.result.dataSource == DataSource.MEMORY
                     loaded = true
                 },
-                onError = { loaded = false },
+                onError = {
+                    loaded = false
+                    if (!withReferer && retryReferer != null) withReferer = true
+                },
             )
         }
     }

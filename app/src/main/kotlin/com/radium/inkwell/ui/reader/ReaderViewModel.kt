@@ -76,6 +76,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import com.radium.inkwell.core.source.Purifier
 import com.radium.inkwell.core.source.PurifyTimeoutException
+import com.radium.inkwell.core.util.RepeatedTitle
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -839,7 +840,7 @@ class ReaderViewModel(
         _state.value = _state.value.copy(atBookEnd = false)
     }
 
-    /** 书内净化规则变了 → 已分好的页全部作废，重排当前章 */
+    /** 本书的规则、通用规则变了 → 已分好的页全部作废，重排当前章（本地书的通用规则也是渲染时跑的，见 loadPurified） */
     private fun observeBookRules() {
         viewModelScope.launch {
             var first = true
@@ -1393,10 +1394,11 @@ class ReaderViewModel(
     }
 
     /**
-     * 取正文并应用书内净化。
+     * 取正文并应用书内净化（本地书连同通用规则）。
      *
      * 书内净化在这里做、而不是抓取时：用户在阅读页长按选中一句话建规则，指望的是眼前
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
+     * 本地书没有「抓取时」，通用规则也只能在这里跑。
      */
     private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int): ChapterContent {
         // 慢到这个份上的源基本没救（正常源 1-3 秒）。用 withTimeoutOrNull 而不是 withTimeout：
@@ -1404,7 +1406,14 @@ class ReaderViewModel(
         // 取消"混为一谈 —— 翻页时取消上一次加载也会被当成超时，进而触发自动换源。
         val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
             ?: throw ContentTimeoutException()
-        val rules = replaceRules.purifyForBook(bookId)
+        // 本地书不经过引擎，通用规则从前一条都不跑（从阅读导进来一批去广告的规则，本地书毫无反应），在这里和书内规则一起跑。
+        // 网上的书不加：通用规则在抓取时已经跑过、结果进了缓存，这里再跑一遍，「a → ab」这种规则会替换两次
+        val b = book
+        val rules = if (b != null && b.type != BookType.NET) {
+            replaceRules.purifyForLocalBook(b.title) + replaceRules.purifyForBook(bookId)
+        } else {
+            replaceRules.purifyForBook(bookId)
+        }
         if (rules.isEmpty()) {
             purifySkipped.remove(chapterIndex)
             return raw
@@ -1548,8 +1557,13 @@ class ReaderViewModel(
         // 不随它取消 —— 这一跳已经被下一次取代的话，别再把人拽回被放弃的那一章
         val caller = currentCoroutineContext()[Job]
         return try {
-            val content = loadPurified(src, chapterIndex)
             val title = src.chapterTitle(chapterIndex) ?: ""
+            // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
+            // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
+            // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
+            val content = loadPurified(src, chapterIndex).let { c ->
+                c.copy(elements = RepeatedTitle.strip(c.elements, title, book?.title.orEmpty()))
+            }
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
             fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
             val result = measureMutex.withLock {

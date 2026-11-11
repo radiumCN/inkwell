@@ -43,6 +43,12 @@ data class BookSourceRule(
     val ruleBookInfo: BookInfoRuleSet? = null,
     val ruleToc: TocRuleSet? = null,
     val ruleContent: ContentRuleSet? = null,
+    /**
+     * 公共脚本库（Legado 的 jsLib）：规则、模板、地址里的脚本都能调它定义的函数。
+     * 阅读的远程库写法（`{"名字":"地址"}`）不下载，当没有库。
+     * 这个字段之前导入的书源没存它：重新导入一次才有
+     */
+    val jsLib: String? = null,
 ) {
     /** 书源唯一标识 = 站点地址（含 Legado 的 `#后缀`，同站多源靠它区分） */
     val id: String get() = bookSourceUrl

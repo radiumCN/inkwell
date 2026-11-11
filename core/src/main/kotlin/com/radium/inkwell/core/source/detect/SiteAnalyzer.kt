@@ -96,7 +96,7 @@ class SiteAnalyzer(
     private val http: SourceHttpClient,
     private val renderer: PageRenderer? = null,
     private val scriptRuntime: ScriptRuntime? = null,
-    private val globalPurify: (BookSourceRule) -> List<PurifyRule> = { emptyList() },
+    private val globalPurify: (source: BookSourceRule, bookTitle: String) -> List<PurifyRule> = { _, _ -> emptyList() },
 ) {
 
     /**

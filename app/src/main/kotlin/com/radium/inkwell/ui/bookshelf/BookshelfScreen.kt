@@ -15,6 +15,8 @@ import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -171,6 +173,8 @@ fun BookshelfScreen(
     onOpenDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
+    /** 顶栏的「订阅」：进订阅源列表（同「设置 → 订阅源」） */
+    onOpenRss: () -> Unit,
     onOpenSettings: () -> Unit,
     /** 欢迎页的「从 WebDAV 恢复」与「用户协议」 */
     onOpenWebDav: () -> Unit,
@@ -221,9 +225,11 @@ fun BookshelfScreen(
     var groupInput by remember { mutableStateOf("") }
     var confirmBatchDelete by remember { mutableStateOf(false) }
     val importing by viewModel.importing.collectAsStateWithLifecycle()
+    val folderImport by viewModel.folderImport.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
+    val rssEntryVisible by viewModel.rssEntryVisible.collectAsStateWithLifecycle()
     val layout by viewModel.layout.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
@@ -346,6 +352,9 @@ fun BookshelfScreen(
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> viewModel.importBooks(uris) }
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri -> uri?.let(viewModel::scanFolder) }
 
     fun launchImport() {
         importLauncher.launch(
@@ -355,6 +364,18 @@ fun BookshelfScreen(
             )
         )
     }
+
+    // 「导入本地书」弹出的「选文件 / 选文件夹」挂在哪个按钮上：顶栏「＋」、空书架的按钮、欢迎页那一行。
+    // 记一个位置而不是一个开关 —— 空书架时顶栏的「＋」也在，一个开关会让两处同时弹出来
+    var importMenuAt by remember { mutableStateOf<ImportMenuAnchor?>(null) }
+
+    @Composable
+    fun importMenu(anchor: ImportMenuAnchor) = ImportBooksMenu(
+        expanded = importMenuAt == anchor,
+        onDismiss = { importMenuAt = null },
+        onPickFiles = ::launchImport,
+        onPickFolder = { folderLauncher.launch(null) },
+    )
 
     // 指着隐藏书的菜单/弹窗，在隐藏区收起的那一帧就别画了（状态由上面的 LaunchedEffect 清，它晚一帧）
     fun BookEntity.stillVisible() = showHidden || !hidden
@@ -527,19 +548,31 @@ fun BookshelfScreen(
                                 Icon(MiuixIcons.SearchDevice, contentDescription = "发现")
                             }
                         }
-                        // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书
-                        AppIconButton(
-                            onClick = ::launchImport,
-                            enabled = !importing,
-                        ) {
-                            if (importing) {
-                                AppLoadingIndicator(
-                                    color = LocalContentColor.current,
-                                    size = Dimens.buttonSpinner,
-                                )
-                            } else {
-                                Icon(MiuixIcons.Add, contentDescription = "导入本地书")
+                        // 订阅紧跟发现：搜索 · 发现 · 订阅是「去看东西」，导入、设置是「管东西」。
+                        // 只在有开着的订阅源时出现（见 BookshelfViewModel.rssEntryVisible），设置里也能关。
+                        // Miuix 图标里没有 RSS，用 Material 的线条版（和设置页「订阅源」那一行同一个）
+                        if (rssEntryVisible) {
+                            AppIconButton(onClick = onOpenRss) {
+                                Icon(Icons.Outlined.RssFeed, contentDescription = "订阅")
                             }
+                        }
+                        // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书。
+                        // 点了先弹「选文件 / 选文件夹」（同来源管理的「＋」），菜单和按钮放在同一个 Box 里、从按钮上弹出来
+                        Box {
+                            AppIconButton(
+                                onClick = { importMenuAt = ImportMenuAnchor.TOOLBAR },
+                                enabled = !importing,
+                            ) {
+                                if (importing) {
+                                    AppLoadingIndicator(
+                                        color = LocalContentColor.current,
+                                        size = Dimens.buttonSpinner,
+                                    )
+                                } else {
+                                    Icon(MiuixIcons.Add, contentDescription = "导入本地书")
+                                }
+                            }
+                            importMenu(ImportMenuAnchor.TOOLBAR)
                         }
                         // 这里**没有**「显示隐藏的书」。
                         //
@@ -616,7 +649,8 @@ fun BookshelfScreen(
         if (showWelcome) {
             if (onboarded == false) {
                 WelcomeState(
-                    onImport = ::launchImport,
+                    onImport = { importMenuAt = ImportMenuAnchor.WELCOME },
+                    importMenu = { importMenu(ImportMenuAnchor.WELCOME) },
                     onRestore = onOpenWebDav,
                     onSkip = viewModel::finishOnboarding,
                     onOpenDisclaimer = onOpenDisclaimer,
@@ -631,8 +665,9 @@ fun BookshelfScreen(
                 title = "书架空空如也",
                 hint = "导入本地 txt / EPUB / MOBI，或用来源搜索书籍",
                 actionLabel = "导入本地书",
-                onAction = ::launchImport,
+                onAction = { importMenuAt = ImportMenuAnchor.EMPTY },
                 modifier = Modifier.padding(padding),
+                actionMenu = { importMenu(ImportMenuAnchor.EMPTY) },
             )
         } else {
             // 书铺满整屏、滚到玻璃顶栏下面：外层只让开两侧；顶栏（连同钉在它下面的筛选条）的高度
@@ -856,6 +891,16 @@ fun BookshelfScreen(
                 }
             }
         }
+    }
+
+    folderImport?.let { state ->
+        FolderImportSheet(
+            state = state,
+            onToggle = viewModel::toggleFolderBook,
+            onSelectAll = viewModel::setAllFolderBooks,
+            onConfirm = viewModel::importBooks,
+            onDismiss = viewModel::dismissFolderImport,
+        )
     }
 
     if (showDedup) {
@@ -1343,3 +1388,6 @@ private const val GROUP_SWITCH_WAIT_MS = 500L
 
 /** 下拉刷新的四段状态字：下拉中 / 过了阈值 / 刷新中 / 完成（顺序是 Miuix PullToRefresh 规定的） */
 private val REFRESH_TEXTS = listOf("下拉检查更新", "松开检查更新", "正在检查更新…", "检查完成")
+
+/** 「导入本地书」菜单挂在哪个按钮上（见 BookshelfScreen 里的 importMenuAt） */
+private enum class ImportMenuAnchor { TOOLBAR, EMPTY, WELCOME }

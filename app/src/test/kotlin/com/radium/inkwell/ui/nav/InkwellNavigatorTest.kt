@@ -2,6 +2,8 @@ package com.radium.inkwell.ui.nav
 
 import androidx.navigation3.runtime.NavKey
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.Test
 
 /**
@@ -54,6 +56,40 @@ class InkwellNavigatorTest {
             ),
             s,
         )
+    }
+
+    /** 订阅页 → 文章 → 应用内的原网页：一路叠上去，返回一层层回到订阅页 */
+    @Test
+    fun `订阅页打开文章再打开原网页一路叠上去`() {
+        val s = stack(BookshelfRoute, RssTimelineRoute())
+        val article = RssArticleRoute("arg")
+        val web = RssArticleWebRoute("feed", "https://sspai.com/post/1", "扫雷")
+        s.navigateTo(article)
+        s.navigateTo(web)
+        assertEquals(listOf(BookshelfRoute, RssTimelineRoute(), article, web), s)
+    }
+
+    /** 宽屏左边列表里点另一篇：右栏那篇换掉，不叠栈（同书籍详情） */
+    @Test
+    fun `换一篇文章时替换而不叠栈`() {
+        val s = stack(BookshelfRoute, RssTimelineRoute(), RssArticleRoute("a"))
+        s.navigateTo(RssArticleRoute("b"))
+        assertEquals(listOf(BookshelfRoute, RssTimelineRoute(), RssArticleRoute("b")), s)
+    }
+
+    /** 订阅源页点一个源进订阅页，订阅页再点「订阅源」：回去，不是再叠一层 */
+    @Test
+    fun `下面紧挨着的就是目标页时退回去`() {
+        val s = stack(BookshelfRoute, SettingsRoute, RssSourceRoute, RssTimelineRoute("feed"))
+        assertTrue(s.popIfBelow(RssSourceRoute))
+        assertEquals(listOf(BookshelfRoute, SettingsRoute, RssSourceRoute), s)
+    }
+
+    @Test
+    fun `下面不是目标页时不动`() {
+        val s = stack(BookshelfRoute, RssTimelineRoute())
+        assertFalse(s.popIfBelow(RssSourceRoute))
+        assertEquals(listOf(BookshelfRoute, RssTimelineRoute()), s)
     }
 
     /**
@@ -125,12 +161,13 @@ class InkwellNavigatorTest {
         )
     }
 
-    // ---------- 设置详情需要同组的 list pane ----------
+    // ---------- 设置详情需要同组的 list pane（只在宽屏） ----------
 
     @Test
-    fun `从探索进书源管理会补上设置列表`() {
+    fun `宽屏从探索进书源管理会补上设置列表`() {
         val s = stack(BookshelfRoute, ExploreRoute)
         s.navigateTo(SourceManageRoute)
+        s.ensureSettingsList()
         assertEquals(listOf(BookshelfRoute, ExploreRoute, SettingsRoute, SourceManageRoute), s)
     }
 
@@ -138,7 +175,34 @@ class InkwellNavigatorTest {
     fun `栈里已有设置列表时不会再补一条`() {
         val s = stack(BookshelfRoute, SettingsRoute, AboutSettingsRoute)
         s.navigateTo(FeedbackRoute)
+        s.ensureSettingsList()
         assertEquals(1, s.count { it is SettingsRoute })
+    }
+
+    @Test
+    fun `窄屏从订阅页进订阅源不垫设置列表，返回回到订阅页`() {
+        // 手机上设置列表是一整页：垫上的话从订阅源按返回先落到设置页，人明明是从订阅页来的
+        val s = stack(BookshelfRoute, RssTimelineRoute())
+        s.navigateTo(RssSourceRoute)
+        s.navigateTo(RssWebRoute("web"))
+        assertEquals(listOf(BookshelfRoute, RssTimelineRoute(), RssSourceRoute, RssWebRoute("web")), s)
+    }
+
+    @Test
+    fun `窄屏的栈展开成宽屏时补在第一张设置页前面`() {
+        val s = stack(BookshelfRoute, RssTimelineRoute(), RssSourceRoute, RssWebRoute("web"))
+        s.ensureSettingsList()
+        assertEquals(
+            listOf(BookshelfRoute, RssTimelineRoute(), SettingsRoute, RssSourceRoute, RssWebRoute("web")),
+            s,
+        )
+    }
+
+    @Test
+    fun `栈里没有设置页时不补`() {
+        val s = stack(BookshelfRoute, BookDetailRoute("a"))
+        s.ensureSettingsList()
+        assertEquals(listOf(BookshelfRoute, BookDetailRoute("a")), s)
     }
 
     // ---------- 书架 detail ----------

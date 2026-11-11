@@ -129,6 +129,12 @@ object Dimens {
     /** 列表里的书封缩略图 */
     val coverThumbWidth = 48.dp
     val coverThumbHeight = 64.dp
+    /**
+     * 订阅页文章行的配图缩略图（4:3 横的）。书封那一对是竖的 3:4：文章配图大多是横图，塞进竖框裁掉大半，
+     * 只剩中间一条看不出是什么。高度对齐两行标题 + 一行来源的高度
+     */
+    val articleThumbWidth = 80.dp
+    val articleThumbHeight = 60.dp
     /** 「有新东西」的小红点（书架「继续阅读」卡上的「● 3 章更新」）：只是个点，不是数字角标 */
     val newDot = 8.dp
     /** 详情 / 预览页书封（3:4） */

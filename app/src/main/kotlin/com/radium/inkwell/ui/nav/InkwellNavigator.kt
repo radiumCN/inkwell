@@ -13,13 +13,29 @@ class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
     /** 进书放大动画原点；旋屏后由 InkwellNavDisplay 清回 Center。 */
     val openOrigin = mutableStateOf(TransformOrigin.Center)
 
+    /**
+     * 现在是不是宽屏双栏，InkwellNavDisplay 按窗口写进来。只决定进设置树时垫不垫设置列表（见 [ensureSettingsList]）；
+     * 变成宽屏的那一刻顺手给已经在栈里的设置页补上左栏。
+     */
+    var dualPane: Boolean = false
+        set(value) {
+            field = value
+            if (value) backStack.ensureSettingsList()
+        }
+
     fun back() {
         backStack.removeLastOrNull()
     }
 
-    /** 前进。规则全在 [navigateTo] 里 —— 那边能脱开 Compose 单测。 */
+    /** 前进。规则全在 [navigateTo] / [ensureSettingsList] 里 —— 那边能脱开 Compose 单测。 */
     fun go(key: NavKey) {
         backStack.navigateTo(key)
+        if (dualPane) backStack.ensureSettingsList()
+    }
+
+    /** 下面紧挨着的就是 [key] 时退回去，否则前进（见 [popIfBelow]） */
+    fun goOrPop(key: NavKey) {
+        if (!backStack.popIfBelow(key)) go(key)
     }
 
     fun openBook(bookId: String, origin: TransformOrigin) {
@@ -43,6 +59,34 @@ class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
 internal fun MutableList<NavKey>.closeBookDetail(bookIds: Set<String>) {
     val top = lastOrNull()
     if (top is BookDetailRoute && top.bookId in bookIds) removeLastOrNull()
+}
+
+/**
+ * 栈顶下面紧挨着的就是 [key]：弹掉栈顶、回到它，返回 true；不是就什么都不动，返回 false。
+ *
+ * 订阅页和订阅源页能互相进：订阅源页点一个源进订阅页，订阅页右上角再点「订阅源」。照常前进的话两页轮流叠，
+ * 来回几次返回键要按一串；下面就是订阅源页时，这一下就是回去。
+ */
+internal fun MutableList<NavKey>.popIfBelow(key: NavKey): Boolean {
+    if (size < 2 || this[size - 2] != key) return false
+    removeLastOrNull()
+    return true
+}
+
+/**
+ * 宽屏专用：栈里有设置树的页、却没有设置列表时，在第一张设置页前面垫一层 [SettingsRoute]。
+ *
+ * 宽屏 list-detail 要求同组里有个 list pane，否则右栏没有左栏可依附 —— 从别处直接跳进设置树
+ * （探索 → 书源管理、书架顶栏 → 订阅、欢迎页 → WebDAV / 用户协议）就是这种情况。
+ *
+ * **窄屏不垫**：那一层在手机上是一整页真页面，垫上的话从书架点「订阅」再按返回，先落到设置页、
+ * 再按一次才回书架 —— 人是从书架来的。窄屏攒下的栈展开成宽屏（折叠屏打开、平板转屏）时再补，
+ * 见 [InkwellNavigator.dualPane]。
+ */
+internal fun MutableList<NavKey>.ensureSettingsList() {
+    if (any { it is SettingsRoute }) return
+    val first = indexOfFirst { it.settingsDetailDepth() != null }
+    if (first >= 0) add(first, SettingsRoute)
 }
 
 /**
@@ -72,9 +116,7 @@ internal fun MutableList<NavKey>.navigateTo(key: NavKey) {
                 if (topDepth < settingsDepth) break
                 removeLastOrNull()
             }
-            // 宽屏 list-detail 要求同组里有个 list pane，否则右栏没有左栏可依附
-            // （从「探索」直接进书源管理就是这种情况）
-            if (none { it is SettingsRoute }) add(SettingsRoute)
+            // 宽屏还要垫一层设置列表当左栏，那一步不在这里 —— 见 [ensureSettingsList]
             add(key)
         }
 
