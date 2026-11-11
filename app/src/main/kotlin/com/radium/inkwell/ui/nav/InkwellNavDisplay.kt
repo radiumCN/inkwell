@@ -84,7 +84,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * - 宽屏：书架|详情、设置|二级 用 [ListDetailSceneStrategy]；阅读器全屏
  * - 转场：常规页共享轴 X，位移由 [rememberPageSlideDecorator] 自己做（不回弹的 spring，被打断也不变形）；
  *   侧滑返回同几何、线性（按手势进度 seek，spring 不跟手）；
- *   进阅读 shared-axis Z（从书封原点缩放）
+ *   进阅读 shared-axis Z（从书封原点缩放；缩放期间整页裁成屏幕圆角，见 [ReaderOpenCorners]）
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -222,7 +222,10 @@ fun InkwellNavDisplay() {
             }
             entry<ReaderRoute>(metadata = readerMeta) { route ->
                 val vm = koinViewModel<ReaderViewModel> { parametersOf(route.bookId) }
-                ReaderScreen(bookId = route.bookId, onExit = { nav.back() }, viewModel = vm)
+                // 开合缩放时整页裁成屏幕的圆角，不然缩着的那一下是个直角矩形
+                ReaderOpenCorners {
+                    ReaderScreen(bookId = route.bookId, onExit = { nav.back() }, viewModel = vm)
+                }
             }
             entry<SearchRoute> {
                 val vm = koinViewModel<SearchViewModel>()
