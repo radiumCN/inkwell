@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.data.repo.RssImportReport
 import com.radium.inkwell.data.repo.RssRepository
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,6 +33,18 @@ class RssSourceViewModel(
      */
     val sources: StateFlow<List<RssSourceEntity>?> = repo.sources
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * 单网页源的 id（行上挂「网页」、点开进网页页而不是文章列表）。
+     * 要解析每个源的规则 JSON：放在列表之外、Default 上算一次，别让每一行在组合时各解析一遍
+     */
+    val webSourceIds: StateFlow<Set<String>> = repo.sources
+        .map { list ->
+            list.filterTo(HashSet()) { e -> runCatching { RssSourceRule.fromJson(e.json).singleUrl }.getOrDefault(false) }
+                .mapTo(HashSet()) { it.id }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val messages = MessageBus()
 

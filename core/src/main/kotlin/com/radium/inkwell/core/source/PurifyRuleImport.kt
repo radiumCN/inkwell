@@ -1,8 +1,8 @@
 package com.radium.inkwell.core.source
 
+import com.radium.inkwell.core.util.LegadoLinks
 import com.radium.inkwell.core.util.RepeatedTitle
 import com.radium.inkwell.core.util.toHex
-import java.net.URLDecoder
 import java.security.MessageDigest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -87,19 +87,9 @@ object PurifyRuleImport {
 
     /**
      * 阅读的分享链接（`legado://import/replaceRule?src=…`、更早的 `yuedu://replace/importonline?src=…`）
-     * 换成里面真正的规则地址；普通网址原样返回（去掉首尾空白）。
+     * 换成里面真正的规则地址；普通网址原样返回（去掉首尾空白）。见 [LegadoLinks]
      */
-    fun unwrapAppLink(url: String): String {
-        val trimmed = url.trim()
-        val scheme = trimmed.substringBefore("://", "").lowercase()
-        if (scheme != "legado" && scheme != "yuedu") return trimmed
-        val src = trimmed.substringAfter('?', "")
-            .split('&')
-            .firstOrNull { it.startsWith("src=") }
-            ?.removePrefix("src=")
-            ?: return trimmed
-        return runCatching { URLDecoder.decode(src, Charsets.UTF_8) }.getOrDefault(src).trim()
-    }
+    fun unwrapAppLink(url: String): String = LegadoLinks.unwrap(url)
 
     private fun fromJson(obj: JsonObject): ImportedPurifyRule? {
         // Inkwell 备份里的墓碑：删掉的规则别从备份里复活

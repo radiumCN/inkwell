@@ -180,6 +180,7 @@ val appModule = module {
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }
+    viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get()) }
     viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->
         com.radium.inkwell.ui.rss.RssArticleViewModel(args, get())
     }

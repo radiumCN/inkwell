@@ -49,14 +49,20 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
+import com.radium.inkwell.ui.components.InlineTag
 
 @Composable
 fun RssSourceScreen(
     onBack: () -> Unit,
     onOpenSource: (String) -> Unit,
+    /** 单网页源（阅读的 singleUrl）：点开是网页页，不是文章列表 */
+    onOpenWebSource: (String) -> Unit,
     viewModel: RssSourceViewModel,
 ) {
     val sources by viewModel.sources.collectAsStateWithLifecycle()
+    val webSourceIds by viewModel.webSourceIds.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
@@ -149,9 +155,10 @@ fun RssSourceScreen(
                 // 「删除图标 + 开关」，48dp 的垃圾桶紧挨着开关，挤，也容易手滑点到
                 itemsIndexed(list, key = { _, it -> it.id }) { index, source ->
                     // 菜单和行放进同一个 Box，从这一行上弹出来（见 AppDropdownMenu）
+                    val isWeb = source.id in webSourceIds
                     Box(Modifier.groupedCardItem(index, list.size)) {
                         ContentListItem(
-                            onClick = { onOpenSource(source.id) },
+                            onClick = { if (isWeb) onOpenWebSource(source.id) else onOpenSource(source.id) },
                             onLongClick = { menuTarget = source.id },
                             enabled = source.enabled,
                             trailingContent = {
@@ -173,12 +180,17 @@ fun RssSourceScreen(
                                 )
                             },
                             content = {
-                                Text(
-                                    source.name,
-                                    style = ContentListDefaults.titleStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        source.name,
+                                        style = ContentListDefaults.titleStyle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    // 点开是网页、不是文章列表：灰标签，和来源管理的「仅发现」一个样子
+                                    if (isWeb) InlineTag("网页", neutral = true)
+                                }
                             },
                         )
                         AppDropdownMenu(
@@ -219,7 +231,7 @@ fun RssSourceScreen(
                     placeholder = "地址或订阅源 JSON",
                 )
                 Text(
-                    "直接粘一个 RSS/Atom 地址即可 —— 不必先去找一份 Legado 格式的订阅源。",
+                    "RSS/Atom 地址、源仓库里订阅源合集的地址、阅读的一键导入链接，或者整段订阅源 JSON 都行。",
                     style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

@@ -4,8 +4,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.rss.LegadoRssConverter
+import com.radium.inkwell.core.source.rss.RssPayload
 import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.core.source.rss.RssXmlParser
+import com.radium.inkwell.core.util.LegadoLinks
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import kotlinx.coroutines.CancellationException
@@ -33,25 +35,55 @@ class RssRepository(
 
     suspend fun delete(id: String) = dao.softDeleteById(id, System.currentTimeMillis())
 
-    suspend fun importFromUrl(url: String): RssImportReport {
-        val text = http.fetch(url).bodyText
-        return import(text)
-    }
-
     /**
-     * 导入。
+     * 导入：粘进来的、剪贴板里的、文件里的，三个入口都走这里。
      *
-     * 允许直接粘一个 feed 地址进来（而不是一份 JSON）—— 用户手里最常有的就是一个
-     * `https://…/rss.xml`，逼他先去找一份 legado 格式的订阅源 JSON 毫无道理。
+     * 允许直接粘一个地址进来（而不是一份 JSON）—— 用户手里最常有的就是一个 `https://…/rss.xml`，
+     * 或者源仓库里一个订阅源合集的地址，逼他先把 JSON 下载下来毫无道理。地址见 [importFromAddress]。
      */
     suspend fun import(text: String): RssImportReport {
         val trimmed = text.trim()
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            return importPlainFeed(trimmed)
-        }
+        if (isAddress(trimmed)) return importFromAddress(LegadoLinks.unwrap(trimmed))
         if (!LegadoRssConverter.looksLikeLegadoRss(trimmed)) {
-            return RssImportReport(0, 0, listOf("不是订阅源：既不是 legado 订阅源 JSON，也不是一个 feed 地址"))
+            return RssImportReport(0, 0, listOf("不是订阅源：既不是阅读的订阅源 JSON，也不是一个地址"))
         }
+        return importSources(trimmed)
+    }
+
+    /** 一行网址，或者阅读的一键导入链接（legado://import/rssSource?src=…） */
+    private fun isAddress(text: String): Boolean =
+        text.none { it == '\n' } &&
+            (text.startsWith("http://", ignoreCase = true) || text.startsWith("https://", ignoreCase = true) ||
+                LegadoLinks.isAppLink(text))
+
+    /**
+     * 一个地址：先下载，按里面装的是什么分（[RssPayload]）。
+     *
+     * 从前只要是 `http(s)://` 开头就当 feed 地址，不看内容：源仓库的订阅源合集地址被建成一个名字是域名、
+     * 没有任何规则的订阅源，导入时还说「新增 1」，点开才报「既不是 RSS/Atom feed」（被指出过）。
+     */
+    private suspend fun importFromAddress(url: String): RssImportReport {
+        val fetched = try {
+            http.fetch(url)
+        } catch (e: CancellationException) {
+            // 用户离开页面是取消：吞掉的话会接着往下写库，还报一句「打不开」
+            throw e
+        } catch (e: Exception) {
+            return RssImportReport(0, 0, listOf("$url: 打不开（${e.message?.take(40)}）"))
+        }
+        val body = fetched.bodyText
+        return when (RssPayload.of(body)) {
+            RssPayload.LEGADO_SOURCES -> importSources(body.trim())
+            RssPayload.FEED -> addFeed(url, body)
+            RssPayload.BOOK_SOURCES ->
+                RssImportReport(0, 0, listOf("这是来源合集，不是订阅源：请到「来源管理」导入"))
+            RssPayload.UNKNOWN ->
+                RssImportReport(0, 0, listOf("这个地址既不是 RSS/Atom feed，也不是订阅源合集"))
+        }
+    }
+
+    /** 阅读的订阅源 JSON（单条或合集） */
+    private suspend fun importSources(trimmed: String): RssImportReport {
         // 转换整份订阅源合集是纯 CPU 活，调用方在主线程上
         val result = withContext(Dispatchers.Default) { LegadoRssConverter.convert(trimmed) }
         val existing = dao.getAll().associateBy { it.id }
@@ -81,17 +113,9 @@ class RssRepository(
         )
     }
 
-    /** 一个裸 feed 地址 → 一个订阅源。名字取 feed 自己的标题，取不到就用域名 */
-    private suspend fun importPlainFeed(url: String): RssImportReport {
-        val fetched = try {
-            http.fetch(url)
-        } catch (e: CancellationException) {
-            // 用户离开页面是取消：吞掉的话会接着往下写库，还报一句「打不开」
-            throw e
-        } catch (e: Exception) {
-            return RssImportReport(0, 0, listOf("$url: 打不开（${e.message?.take(40)}）"))
-        }
-        val title = RssXmlParser.feedTitle(fetched.bodyText)
+    /** 一个 feed 地址 → 一个订阅源。名字取 feed 自己的标题，取不到就用域名 */
+    private suspend fun addFeed(url: String, body: String): RssImportReport {
+        val title = RssXmlParser.feedTitle(body)
             ?: url.substringAfter("://").substringBefore("/")
         val existing = dao.getById(url)
         val rule = RssSourceRule(id = url, name = title)

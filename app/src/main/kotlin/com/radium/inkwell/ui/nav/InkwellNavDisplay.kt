@@ -344,8 +344,15 @@ fun InkwellNavDisplay() {
                 RssSourceScreen(
                     onBack = { nav.back() },
                     onOpenSource = { nav.go(RssArticlesRoute(it)) },
+                    onOpenWebSource = { nav.go(RssWebRoute(it)) },
                     viewModel = vm,
                 )
+            }
+            entry<RssWebRoute>(
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
+            ) { route ->
+                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> { parametersOf(route.sourceId) }
+                com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<RssArticlesRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),

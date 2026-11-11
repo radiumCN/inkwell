@@ -69,6 +69,10 @@ data object RssSourceRoute : NavKey
 @Serializable
 data class RssArticlesRoute(val sourceId: String) : NavKey
 
+/** 单网页源的网页页（阅读的 singleUrl：点开就是一个网页，没有文章列表）。和文章列表同一级 */
+@Serializable
+data class RssWebRoute(val sourceId: String) : NavKey
+
 /**
  * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
  * 而且不少源的摘要（description）本来就是全文，重抓反而丢了它。
@@ -187,6 +191,7 @@ internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is ReplaceRuleRoute,
     is SourceManageRoute,
     is RssArticlesRoute,
+    is RssWebRoute,
     -> 3
 
     is SourceDetailRoute,

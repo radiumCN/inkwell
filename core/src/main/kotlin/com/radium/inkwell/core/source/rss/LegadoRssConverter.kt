@@ -17,8 +17,12 @@ import kotlinx.serialization.json.jsonObject
  */
 object LegadoRssConverter {
 
-    /** v2：sortUrl 与 Legado 一样按 `&&` 拆分（v1 只按换行）。目前只写入、尚无按它重转的逻辑 */
-    const val VERSION = 2
+    /**
+     * v2：sortUrl 与 Legado 一样按 `&&` 拆分（v1 只按换行）。
+     * v3：单网页源（singleUrl）不再跳过，转成 [RssSourceRule.singleUrl]。
+     * 目前只写入、尚无按它重转的逻辑
+     */
+    const val VERSION = 3
 
     data class Converted(val rule: RssSourceRule, val sourceJson: String)
     data class Skipped(val name: String, val url: String, val reason: String)
@@ -57,13 +61,7 @@ object LegadoRssConverter {
             ?: throw IllegalArgumentException("缺少 sourceUrl")
         require(url.isNotBlank()) { "sourceUrl 为空" }
 
-        // singleUrl 的源只是"用内置浏览器打开一个网页"，没有任何可解析的东西。
-        // 硬转进来只会在订阅列表里躺一个永远加载失败的条目 —— 不如说清楚跳过。
-        if (src.bool("singleUrl") == true) {
-            throw IllegalArgumentException("单网页订阅源（singleUrl），无文章列表可解析")
-        }
-
-        return RssSourceRule(
+        val rule = RssSourceRule(
             id = url,
             name = src.str("sourceName")?.trim().orEmpty().ifBlank { url },
             icon = src.str("sourceIcon")?.trim().orEmpty(),
@@ -79,7 +77,15 @@ object LegadoRssConverter {
             link = src.str("ruleLink"),
             pubDate = src.str("rulePubDate"),
             content = src.str("ruleContent"),
+            // 单网页源：没有文章列表，点开就是用应用内网页打开（同阅读）。从前整条跳过，源仓库的合集导进来少一大半
+            singleUrl = src.bool("singleUrl") == true,
+            enableJs = src.bool("enableJs") ?: true,
         )
+        // 地址要跑脚本才算得出来的单网页源（`http@js:…`、分类地址是 `@js:`）：列进来也是一个永远打不开的网页
+        if (rule.singleUrl && rule.pageUrl() == null) {
+            throw IllegalArgumentException("单网页订阅源的地址要跑脚本才算得出来，暂不支持")
+        }
+        return rule
     }
 
     /**

@@ -17,17 +17,17 @@ object RssXmlParser {
 
     /** 看着像 XML feed 就当 feed 解析。返回 null 表示"这不是 feed，走规则那条路" */
     fun parse(sourceId: String, xml: String): List<RssArticle>? {
-        val head = xml.trimStart().take(600)
-        if (!head.contains("<rss", true) &&
-            !head.contains("<feed", true) &&
-            !head.contains("<rdf:RDF", true)
-        ) {
-            return null
-        }
+        if (!looksLikeFeed(xml)) return null
         val doc = Jsoup.parse(xml, "", Parser.xmlParser())
         val items = doc.select("item, entry")
         if (items.isEmpty()) return null
         return items.mapNotNull { item -> article(sourceId, item) }
+    }
+
+    /** 开头几百字里有 `<rss` / `<feed` / `<rdf:RDF`：是 RSS 2.0 / Atom / RSS 1.0 */
+    fun looksLikeFeed(text: String): Boolean {
+        val head = text.trimStart().take(600)
+        return head.contains("<rss", true) || head.contains("<feed", true) || head.contains("<rdf:RDF", true)
     }
 
     /** feed 自己的标题。用户粘一个裸地址进来时拿它当订阅源的名字 */
