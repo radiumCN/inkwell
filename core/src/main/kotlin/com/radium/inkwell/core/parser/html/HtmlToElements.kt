@@ -14,6 +14,8 @@ import org.jsoup.nodes.TextNode
  *
  * [keepImages] 只给订阅文章开：文章页是滚动着看的（不分页），图是文章的一部分。
  * 从前订阅也共用不收图的这一版，文章页写好的显示图片那段代码一张图都没等到过。
+ *
+ * 表情图（WordPress 的 wp-smiley 之类）不管收不收图，一律换回它的 alt 那个字、留在段落里（见 [emojiText]）。
  */
 class HtmlToElements(private val keepImages: Boolean = false) {
 
@@ -42,12 +44,18 @@ class HtmlToElements(private val keepImages: Boolean = false) {
                     "h1", "h2", "h3", "h4", "h5", "h6" -> {
                         flushText()
                         val level = node.tagName()[1].digitToInt()
-                        val text = node.text().trim()
+                        val text = headingText(node)
                         if (text.isNotEmpty()) out += ContentElement.Heading(level, text)
                     }
                     "img", "image" -> {
-                        flushText()
-                        if (keepImages) imageOf(node)?.let { out += it }
+                        // 表情图就是一个字：接回这一段里，不切段、不当插图（见 emojiText）
+                        val emoji = emojiText(node)
+                        if (emoji != null) {
+                            textBuf.append(emoji)
+                        } else {
+                            flushText()
+                            if (keepImages) imageOf(node)?.let { out += it }
+                        }
                     }
                     "hr" -> {
                         flushText()
@@ -100,6 +108,34 @@ class HtmlToElements(private val keepImages: Boolean = false) {
         return ContentElement.Image(url, img.attr("alt").trim().ifEmpty { null })
     }
 
+    /**
+     * 表情图换回的那个字；不是表情图返回 null，是表情图但没写 alt 返回空串（丢掉，不切段）。
+     *
+     * WordPress 在 feed 和页面里把正文的 emoji 换成一张 72×72 的小图（`class="wp-smiley"`，
+     * 地址在 s.w.org 的表情图库），网页上靠 `height: 1em` 缩成字高；Twemoji、GitHub、Discourse 同理。
+     * 我们不读 CSS，当插图收进来就是按正文宽度铺满 —— 爱范儿的「图｜官方博客🔗 链接」那个 🔗
+     * 被放大成整屏宽的一团糊，早报每条新闻前的 🚨💻🧠 一篇二十几个（用户截图反馈）。
+     * 不收图的小说正文也有一半毛病：图当段落边界，一句话从表情那儿断成两段。
+     *
+     * alt 就是那个 emoji 本身，换回文字和原网页看到的一样；alt 太长的（不像一个字）不要，免得把一句描述塞进正文。
+     */
+    private fun emojiText(img: Element): String? {
+        val isEmoji = EMOJI_CLASS.containsMatchIn(img.className()) ||
+            EMOJI_SRC.containsMatchIn(img.attr("src"))
+        if (!isEmoji) return null
+        return img.attr("alt").trim().takeIf { it.length <= MAX_EMOJI_ALT } ?: ""
+    }
+
+    /** 小标题的字。`text()` 不念图，标题里的表情图得先换成文字，不然就丢了 */
+    private fun headingText(heading: Element): String {
+        val emojis = heading.select("img").filter { emojiText(it) != null }
+        if (emojis.isEmpty()) return heading.text().trim()
+        // 在副本上换：别改调用方传进来的文档
+        val copy = heading.clone()
+        copy.select("img").forEach { img -> emojiText(img)?.let { img.replaceWith(TextNode(it)) } }
+        return copy.text().trim()
+    }
+
     /** 折叠空白；全角空格开头的缩进交给排版层，不保留 */
     private fun normalize(text: String): String =
         text
@@ -120,6 +156,15 @@ class HtmlToElements(private val keepImages: Boolean = false) {
 
         /** 宽或高不到这么多像素的是统计像素，不是插图 */
         const val TRACKING_PIXEL = 2
+
+        /** 表情图的 class：WordPress 的 wp-smiley，Twemoji / Discourse 的 emoji，emojione 之类 */
+        val EMOJI_CLASS = Regex("(?i)smiley|emoji|emoticon")
+
+        /** 表情图库的地址：WordPress（s.w.org/images/core/emoji/）、Twemoji、GitHub、Discourse 都带 emoji 一段路径 */
+        val EMOJI_SRC = Regex("(?i)/emoji/|twemoji|emojione|joypixels")
+
+        /** 表情的 alt 最长这么多个 UTF-16 单元：带 ZWJ 的组合（一家四口）十一个，Discourse 的 `:link:` 这类短码也在内 */
+        const val MAX_EMOJI_ALT = 16
 
         /**
          * 段首信号：换行 + 全角空格 / `&nbsp;` 缩进。

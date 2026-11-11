@@ -28,6 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.dp
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import coil3.size.Precision
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
@@ -120,7 +126,7 @@ fun RssArticleScreen(
 
         // 懒加载：长文、多图的文章从前一次把全部段落和图片组合完才出第一屏。
         // 列表也让「上面的图加载出来、高度变了」不再把正在读的那段往下推 —— 位置锚在可见的那一项上
-        val imageRatios = remember { mutableStateMapOf<String, Float>() }
+        val imageSizes = remember { mutableStateMapOf<String, Size>() }
         // 正文的行高：Miuix 的字体样式不设行高，按字体默认的行距排，长篇中文挤成一片。只在文章正文里放宽，不动全局
         val paragraphStyle = MiuixTheme.textStyles.body1.copy(lineHeight = ARTICLE_LINE_HEIGHT)
         LazyColumn(
@@ -187,7 +193,7 @@ fun RssArticleScreen(
                         Modifier.padding(vertical = Dimens.gapS),
                         style = paragraphStyle,
                     )
-                    is ContentElement.Image -> ArticleImage(el, imageRatios)
+                    is ContentElement.Image -> ArticleImage(el, imageSizes)
                     ContentElement.Divider -> Spacer(Modifier.height(Dimens.gapM))
                 }
             }
@@ -254,32 +260,48 @@ fun RssArticleScreen(
 }
 
 /**
- * 正文里的一张图。没加载出来之前先按 4:3 占位，加载出来按真实宽高比铺满宽度；
- * 比例记进 [ratios]（页面级），这一项滑出视口再滑回来时直接按真实比例排，不再先占位再跳一下。
+ * 正文里的一张图。没加载出来之前先按 4:3 占位、铺满宽度；加载出来按原图的宽高显示：
+ * **原图一像素算 1dp，比正文宽才缩到正文宽**（浏览器的 `max-width: 100%` 同一个意思）。
+ * 配图本来就比手机屏宽，照旧铺满；徽章、按钮图这类几十像素的小图按原大小，不再放大成整屏宽的一团糊
+ * （爱范儿那个 🔗 表情图就是这么被反馈上来的；表情图本身在解析时已经换回文字，这里兜别的小图）。
+ *
+ * 要拿到原图尺寸，解码用 [Precision.INEXACT]：只缩不放。EXACT 会把 72px 的图按布局放大解码，
+ * 量出来的就不是原图了。大图照旧按布局缩着解，不会把几 MB 的原图整个解进内存。
+ *
+ * 尺寸记进 [sizes]（页面级），这一项滑出视口再滑回来时直接按真实大小排，不再先占位再跳一下。
  * 加载失败就不占地方 —— 留一块永远不会有图的灰框只会让人以为还在加载。
  */
 @Composable
-private fun ArticleImage(el: ContentElement.Image, ratios: MutableMap<String, Float>) {
-    val ratio = ratios[el.resourceId]
-    if (ratio == FAILED_IMAGE) return
+private fun ArticleImage(el: ContentElement.Image, sizes: MutableMap<String, Size>) {
+    val size = sizes[el.resourceId]
+    if (size == FAILED_IMAGE) return
+    val context = LocalPlatformContext.current
+    val request = remember(el.resourceId, context) {
+        ImageRequest.Builder(context)
+            .data(el.resourceId)
+            .precision(Precision.INEXACT)
+            .build()
+    }
     AsyncImage(
-        model = el.resourceId,
+        model = request,
         contentDescription = el.alt,
         contentScale = ContentScale.FillWidth,
         onSuccess = { s ->
-            val size = s.painter.intrinsicSize
-            if (size.isSpecified && size.width > 0f && size.height > 0f) {
-                ratios[el.resourceId] = size.width / size.height
+            val intrinsic = s.painter.intrinsicSize
+            if (intrinsic.isSpecified && intrinsic.width > 0f && intrinsic.height > 0f) {
+                sizes[el.resourceId] = intrinsic
             }
         },
-        onError = { ratios[el.resourceId] = FAILED_IMAGE },
+        onError = { sizes[el.resourceId] = FAILED_IMAGE },
         modifier = Modifier
             .padding(vertical = Dimens.gapS)
+            // 先收窄到原图宽、再铺满：宽 = min(原图宽, 正文宽)
+            .then(if (size != null) Modifier.widthIn(max = size.width.dp) else Modifier)
             .fillMaxWidth()
-            .aspectRatio(ratio ?: PLACEHOLDER_RATIO)
+            .aspectRatio(size?.let { it.width / it.height } ?: PLACEHOLDER_RATIO)
             .clip(AppShapes.small)
             .then(
-                if (ratio == null) Modifier.background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                if (size == null) Modifier.background(MiuixTheme.colorScheme.surfaceContainerHigh)
                 else Modifier
             ),
     )
@@ -290,5 +312,5 @@ private const val PLACEHOLDER_RATIO = 4f / 3f
 /** 文章正文的行高（字号的倍数）：中文长文常用 1.5~1.8，取中 */
 private val ARTICLE_LINE_HEIGHT = 1.6.em
 
-/** [ArticleImage] 的比例表里「这张加载失败」的标记 */
-private const val FAILED_IMAGE = -1f
+/** [ArticleImage] 的尺寸表里「这张加载失败」的标记 */
+private val FAILED_IMAGE = Size(-1f, -1f)

@@ -145,4 +145,68 @@ class HtmlToElementsTest {
         )
         assertEquals(listOf(ContentElement.Paragraph("正文")), els)
     }
+
+    // ---- 表情图：换回那个字，不当插图、不切段 ----
+
+    /** WordPress 的表情图，原样取自爱范儿的 feed */
+    private fun wpSmiley(code: String, emoji: String) =
+        "<img src=\"https://s.w.org/images/core/emoji/17.0.2/72x72/$code.png\" alt=\"$emoji\" " +
+            "class=\"wp-smiley\" style=\"height: 1em; max-height: 1em;\" />"
+
+    /** 从前 🔗 被当成插图按正文宽铺满（72px 的图放大成一整屏的一团糊），后面的链接另起一段 */
+    @Test
+    fun `WordPress 表情图换回文字，留在原来那一段里`() {
+        val els = withImages(
+            "<div class=\"editor-image-source\">图｜官方博客${wpSmiley("1f517", "🔗")} https://blog.google/a/</div>",
+        )
+        assertEquals(listOf(ContentElement.Paragraph("图｜官方博客🔗 https://blog.google/a/")), els)
+    }
+
+    /** 爱范儿早报：每条新闻前一个表情，放在一个定宽的 span 里 */
+    @Test
+    fun `段首的表情图成为这一段的第一个字`() {
+        val els = withImages(
+            "<p><span style=\"display: inline-block; width: 30px;\">${wpSmiley("1f6a8", "🚨")}</span>" +
+                "Anthropic 启动上市路演</p><p>${wpSmiley("1f4bb", "💻")}华为小折叠电脑亮相</p>",
+        )
+        assertEquals(
+            listOf(ContentElement.Paragraph("🚨Anthropic 启动上市路演"), ContentElement.Paragraph("💻华为小折叠电脑亮相")),
+            els,
+        )
+    }
+
+    /** 不收图的正文（小说、本地书）同理：从前表情图当段落边界，一句话断成两段 */
+    @Test
+    fun `不收图时表情图也不切段`() {
+        assertEquals(listOf("他笑了😀然后走了"), paragraphs("<p>他笑了${wpSmiley("1f600", "😀")}然后走了</p>"))
+    }
+
+    @Test
+    fun `其他站点的表情图同样认得，没写 alt 的直接去掉`() {
+        val els = withImages(
+            "<p>赞<img class=\"emoji\" draggable=\"false\" alt=\"👍\" src=\"https://twemoji.maxcdn.com/v/latest/72x72/1f44d.png\"/>" +
+                "好<img src=\"https://github.githubassets.com/images/icons/emoji/unicode/1f389.png\"/>的</p>",
+        )
+        assertEquals(listOf(ContentElement.Paragraph("赞👍好的")), els)
+    }
+
+    @Test
+    fun `小标题里的表情图保留成文字`() {
+        val els = withImages("<h3>${wpSmiley("1f4a1", "💡")} 今日看点</h3>")
+        assertEquals(listOf(ContentElement.Heading(3, "💡 今日看点")), els)
+    }
+
+    /** 普通插图照旧：alt 是一句描述、地址不在表情图库里 */
+    @Test
+    fun `普通插图不受表情规则影响`() {
+        val els = withImages("<p>前文<img src=\"https://cdn.com/smile.jpg\" alt=\"一张笑脸照片\"/>后文</p>")
+        assertEquals(
+            listOf(
+                ContentElement.Paragraph("前文"),
+                ContentElement.Image("https://cdn.com/smile.jpg", "一张笑脸照片"),
+                ContentElement.Paragraph("后文"),
+            ),
+            els,
+        )
+    }
 }
