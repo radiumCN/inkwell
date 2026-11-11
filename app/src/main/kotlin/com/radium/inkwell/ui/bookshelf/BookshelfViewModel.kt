@@ -56,6 +56,7 @@ class BookshelfViewModel(
     private val sourceRepo: com.radium.inkwell.data.repo.BookSourceRepository,
     private val chapterDao: com.radium.inkwell.data.db.dao.ChapterDao,
     private val folderScanner: LocalFolderScanner,
+    private val rssRepo: com.radium.inkwell.data.repo.RssRepository,
 ) : ViewModel() {
 
     // ---------- 追更 ----------
@@ -208,6 +209,21 @@ class BookshelfViewModel(
     val exploreEnabled: StateFlow<Boolean> = appPrefs.exploreEnabledState
         .map { it ?: true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), appPrefs.exploreEnabledState.value ?: true)
+
+    /**
+     * 书架顶栏是否显示「订阅」入口：设置里开着（默认开），**且**至少有一个开着的订阅源 ——
+     * 没订阅、或订阅源全关了的人，顶栏照旧四个按钮。两样都取预热版、初值用此刻的值，理由同 [exploreEnabled]；
+     * 订阅源还没从库里读回来（null）先当没有，宁可晚出现，也别先画出来再消失。
+     */
+    val rssEntryVisible: StateFlow<Boolean> = combine(
+        appPrefs.rssEntryEnabledState,
+        rssRepo.hasEnabledSourceState,
+    ) { on, has -> (on ?: true) && has == true }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            (appPrefs.rssEntryEnabledState.value ?: true) && rssRepo.hasEnabledSourceState.value == true,
+        )
 
     /** 书架展示：网格或列表。初值同上，别让列表用户先看一帧网格 */
     val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayoutState

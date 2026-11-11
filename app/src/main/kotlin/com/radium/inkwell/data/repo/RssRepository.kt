@@ -11,7 +11,12 @@ import com.radium.inkwell.core.util.LegadoLinks
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 
 /** 导入结果；与书源导入同样的口径：说清新增了几个、跳过了几个、为什么 */
 data class RssImportReport(
@@ -26,7 +31,19 @@ class RssRepository(
     private val dao: RssSourceDao,
     private val http: SourceHttpClient,
 ) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     val sources: Flow<List<RssSourceEntity>> = dao.observeAll()
+
+    /**
+     * 有没有开着的订阅源（没删、开关开着）；还没从库里读回来是 null。书架顶栏的「订阅」按钮只在 true 时出现。
+     *
+     * 预热版（Eagerly，冷启动时由 InkwellApp 在后台拉起）：订阅源在库里、比 DataStore 里的偏好晚到，
+     * 书架自己去订的话，按钮要在首帧之后才冒出来，把搜索、发现两个按钮往左挤一下 ——
+     * 「发现」开关从前就因为初值不对闪过一回（见 BookshelfViewModel.exploreEnabled）。
+     */
+    val hasEnabledSourceState: StateFlow<Boolean?> =
+        dao.observeHasEnabled().stateIn(scope, SharingStarted.Eagerly, null)
 
     /**
      * 订阅源的规则。存着的转换结果比现在的转换器旧（见 [LegadoRssConverter.VERSION]）、又留着阅读的原始 JSON 的，

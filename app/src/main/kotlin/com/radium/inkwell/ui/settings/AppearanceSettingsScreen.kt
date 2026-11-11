@@ -55,6 +55,7 @@ fun AppearanceSettingsScreen(
     CollectMessages(messages, snackbar)
     // 读预热好的那份，第一帧就是真值（见 AppPrefs 的「设置页读的预热版」）
     val exploreEnabled = appPrefs.exploreEnabledState.collectAsStateWithLifecycle().value ?: true
+    val rssEntryEnabled = appPrefs.rssEntryEnabledState.collectAsStateWithLifecycle().value ?: true
     val duplicateHint = appPrefs.duplicateHintEnabledState.collectAsStateWithLifecycle().value ?: true
     val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
@@ -119,6 +120,14 @@ fun AppearanceSettingsScreen(
                     title = "显示「发现」入口",
                     checked = exploreEnabled,
                     onCheckedChange = { on -> scope.launch { appPrefs.setExploreEnabled(on) } },
+                    position = SettingGroupPosition.Middle,
+                )
+                // 开着也要有开着的订阅源才出现：说明里写清楚，不然开了开关书架上没有，像是坏了
+                SwitchRow(
+                    title = "显示「订阅」入口",
+                    subtitle = "有开启的订阅源时，书架顶栏出现订阅按钮",
+                    checked = rssEntryEnabled,
+                    onCheckedChange = { on -> scope.launch { appPrefs.setRssEntryEnabled(on) } },
                     position = SettingGroupPosition.Middle,
                 )
                 // 关掉只是书架上不再出那张提示卡；「设置 → 同步与存储 → 整理重复的书」照样能进去

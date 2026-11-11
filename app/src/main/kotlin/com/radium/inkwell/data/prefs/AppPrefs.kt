@@ -54,6 +54,7 @@ class AppPrefs(private val context: Context) {
         val TEXT_SELECTION = booleanPreferencesKey("text_selection_enabled")
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
+        val RSS_ENTRY_ENABLED = booleanPreferencesKey("rss_entry_enabled")
         /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
         val ONBOARDED = booleanPreferencesKey("onboarded")
         /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
@@ -123,6 +124,7 @@ class AppPrefs(private val context: Context) {
                 "text_selection_enabled" to (p[Keys.TEXT_SELECTION] ?: true).toString(),
                 "auto_change_source" to (p[Keys.AUTO_CHANGE_SOURCE] ?: true).toString(),
                 "explore_enabled" to (p[Keys.EXPLORE_ENABLED] ?: true).toString(),
+                "rss_entry_enabled" to (p[Keys.RSS_ENTRY_ENABLED] ?: true).toString(),
                 "duplicate_hint_enabled" to (p[Keys.DUPLICATE_HINT] ?: true).toString(),
                 "auto_check_update" to (p[Keys.AUTO_CHECK_UPDATE] ?: true).toString(),
                 "search_history_enabled" to (p[Keys.SEARCH_HISTORY_ENABLED] ?: true).toString(),
@@ -157,6 +159,8 @@ class AppPrefs(private val context: Context) {
                 ?.let { p[Keys.AUTO_CHANGE_SOURCE] = it }
             v["explore_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.EXPLORE_ENABLED] = it }
+            v["rss_entry_enabled"]?.toBooleanStrictOrNull()
+                ?.let { p[Keys.RSS_ENTRY_ENABLED] = it }
             v["duplicate_hint_enabled"]?.toBooleanStrictOrNull()
                 ?.let { p[Keys.DUPLICATE_HINT] = it }
             v["auto_check_update"]?.toBooleanStrictOrNull()
@@ -255,6 +259,18 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setExploreEnabled(on: Boolean) {
         editTouched { it[Keys.EXPLORE_ENABLED] = on }
+    }
+
+    /**
+     * 书架顶栏是否显示「订阅」入口。默认开；开着也只在有开着的订阅源时出现（见 RssRepository.hasEnabledSourceState），
+     * 不用订阅的人顶栏不多一格。关了照样能从「设置 → 订阅源」进。
+     */
+    val rssEntryEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
+        p[Keys.RSS_ENTRY_ENABLED] ?: true
+    }
+
+    suspend fun setRssEntryEnabled(on: Boolean) {
+        editTouched { it[Keys.RSS_ENTRY_ENABLED] = on }
     }
 
     /**
@@ -554,6 +570,7 @@ class AppPrefs(private val context: Context) {
     val changeSourceCheckAuthorState: StateFlow<Boolean?> = changeSourceCheckAuthor.warm()
     val autoChangeSourceState: StateFlow<Boolean?> = autoChangeSource.warm()
     val exploreEnabledState: StateFlow<Boolean?> = exploreEnabled.warm()
+    val rssEntryEnabledState: StateFlow<Boolean?> = rssEntryEnabled.warm()
     val duplicateHintEnabledState: StateFlow<Boolean?> = duplicateHintEnabled.warm()
     val autoCheckUpdateState: StateFlow<Boolean?> = autoCheckUpdate.warm()
     val searchHistoryEnabledState: StateFlow<Boolean?> = searchHistoryEnabled.warm()

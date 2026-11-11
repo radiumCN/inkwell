@@ -141,12 +141,13 @@ class InkwellNavigatorTest {
         )
     }
 
-    // ---------- 设置详情需要同组的 list pane ----------
+    // ---------- 设置详情需要同组的 list pane（只在宽屏） ----------
 
     @Test
-    fun `从探索进书源管理会补上设置列表`() {
+    fun `宽屏从探索进书源管理会补上设置列表`() {
         val s = stack(BookshelfRoute, ExploreRoute)
         s.navigateTo(SourceManageRoute)
+        s.ensureSettingsList()
         assertEquals(listOf(BookshelfRoute, ExploreRoute, SettingsRoute, SourceManageRoute), s)
     }
 
@@ -154,7 +155,34 @@ class InkwellNavigatorTest {
     fun `栈里已有设置列表时不会再补一条`() {
         val s = stack(BookshelfRoute, SettingsRoute, AboutSettingsRoute)
         s.navigateTo(FeedbackRoute)
+        s.ensureSettingsList()
         assertEquals(1, s.count { it is SettingsRoute })
+    }
+
+    @Test
+    fun `窄屏从书架进订阅不垫设置列表，一路下钻返回都回到书架`() {
+        // 手机上设置列表是一整页：垫上的话从订阅按返回先落到设置页，人明明是从书架来的
+        val s = stack(BookshelfRoute)
+        s.navigateTo(RssSourceRoute)
+        s.navigateTo(RssArticlesRoute("feed"))
+        assertEquals(listOf(BookshelfRoute, RssSourceRoute, RssArticlesRoute("feed")), s)
+    }
+
+    @Test
+    fun `窄屏的栈展开成宽屏时补在第一张设置页前面`() {
+        val s = stack(BookshelfRoute, RssSourceRoute, RssArticlesRoute("feed"))
+        s.ensureSettingsList()
+        assertEquals(
+            listOf(BookshelfRoute, SettingsRoute, RssSourceRoute, RssArticlesRoute("feed")),
+            s,
+        )
+    }
+
+    @Test
+    fun `栈里没有设置页时不补`() {
+        val s = stack(BookshelfRoute, BookDetailRoute("a"))
+        s.ensureSettingsList()
+        assertEquals(listOf(BookshelfRoute, BookDetailRoute("a")), s)
     }
 
     // ---------- 书架 detail ----------

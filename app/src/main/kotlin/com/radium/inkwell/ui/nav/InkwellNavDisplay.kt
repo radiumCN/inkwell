@@ -110,6 +110,8 @@ fun InkwellNavDisplay() {
         backNavigationBehavior = BackNavigationBehavior.PopLatest,
     )
     val dualPane = directive.maxHorizontalPartitions > 1
+    // 进设置树时垫不垫设置列表看它（见 ensureSettingsList）：窄屏不垫，返回直接回到来的那页
+    LaunchedEffect(nav, dualPane) { nav.dualPane = dualPane }
 
     // 整页横滑：NavDisplay 只拿到「没有内置效果」的转场，位移在页面装饰器里做（见 PageSlide.kt）。
     // 各个 transitionSpec 只负责记下这次是哪种转场。
@@ -199,6 +201,7 @@ fun InkwellNavDisplay() {
                     onOpenDetail = { nav.go(BookDetailRoute(it)) },
                     onOpenSearch = { nav.go(SearchRoute()) },
                     onOpenExplore = { nav.go(ExploreRoute) },
+                    onOpenRss = { nav.go(RssSourceRoute) },
                     onOpenSettings = { nav.go(SettingsRoute) },
                     onOpenWebDav = { nav.go(WebDavSettingsRoute) },
                     onOpenDisclaimer = { nav.go(DisclaimerRoute) },

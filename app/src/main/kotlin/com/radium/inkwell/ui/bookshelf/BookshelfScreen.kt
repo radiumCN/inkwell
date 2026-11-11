@@ -15,6 +15,8 @@ import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.RssFeed
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -171,6 +173,8 @@ fun BookshelfScreen(
     onOpenDetail: (String) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenExplore: () -> Unit,
+    /** 顶栏的「订阅」：进订阅源列表（同「设置 → 订阅源」） */
+    onOpenRss: () -> Unit,
     onOpenSettings: () -> Unit,
     /** 欢迎页的「从 WebDAV 恢复」与「用户协议」 */
     onOpenWebDav: () -> Unit,
@@ -225,6 +229,7 @@ fun BookshelfScreen(
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
+    val rssEntryVisible by viewModel.rssEntryVisible.collectAsStateWithLifecycle()
     val layout by viewModel.layout.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
@@ -541,6 +546,14 @@ fun BookshelfScreen(
                             AppIconButton(onClick = onOpenExplore) {
                                 // Miuix 图标里没有罗盘，用 Material 的线条版，与 Miuix 的线条图标一个笔触
                                 Icon(MiuixIcons.SearchDevice, contentDescription = "发现")
+                            }
+                        }
+                        // 订阅紧跟发现：搜索 · 发现 · 订阅是「去看东西」，导入、设置是「管东西」。
+                        // 只在有开着的订阅源时出现（见 BookshelfViewModel.rssEntryVisible），设置里也能关。
+                        // Miuix 图标里没有 RSS，用 Material 的线条版（和设置页「订阅源」那一行同一个）
+                        if (rssEntryVisible) {
+                            AppIconButton(onClick = onOpenRss) {
+                                Icon(Icons.Outlined.RssFeed, contentDescription = "订阅")
                             }
                         }
                         // 导入从右下角的 FAB 挪上来：书架是个网格，FAB 会盖住右下角那本书。

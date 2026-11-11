@@ -8,6 +8,7 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.repo.BookSourceRepository
+import com.radium.inkwell.data.repo.RssRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.di.appModule
 import com.radium.inkwell.util.RunLogRecorder
@@ -57,6 +58,10 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
         koin.get<ReaderPrefs>()
         // App 主题同理（AppPrefs.themeState）：MainActivity 要等它到了才放首帧，越早开读越不用等
         koin.get<AppPrefs>()
+        // 有没有开着的订阅源（RssRepository.hasEnabledSourceState）：书架顶栏的「订阅」按钮跟着它。
+        // 在库里，比偏好晚到，提前拉起来，免得按钮在首帧之后才冒出来、把旁边的按钮挤一下。
+        // 放后台：构造它要连带建网络客户端，别占 onCreate 的主线程
+        appScope.launch { runCatching { koin.get<RssRepository>() } }
 
         // 开发者模式下的运行日志：开关跟着偏好走，设置页拨开关、关开发者模式都在这里生效。
         // 放得靠前 —— 越早起 logcat，越不用担心启动那段被系统缓冲区挤掉

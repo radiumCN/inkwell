@@ -156,7 +156,7 @@ val appModule = module {
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
-    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get()) }
+    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
