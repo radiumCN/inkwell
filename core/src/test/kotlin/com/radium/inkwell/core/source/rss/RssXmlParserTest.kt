@@ -83,6 +83,53 @@ class RssXmlParserTest {
         assertTrue(a.description!!.contains("这是全文"), "拿到的是摘要而不是全文: ${a.description}")
     }
 
+    /**
+     * Atom 两样都给的（不少博客）：summary 是摘要、content 是全文。从前 summary 排在前面，点进去只有摘要，
+     * 改了「只给摘要就去原网页整理」之后还会平白多抓一次原网页
+     */
+    @Test
+    fun `Atom 的 content 优先于 summary，空标签跳过`() {
+        val xml = """
+        <?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <title>A</title>
+            <link href="https://e.com/a"/>
+            <summary>只是摘要</summary>
+            <content type="html">&lt;p&gt;这是全文&lt;/p&gt;</content>
+          </entry>
+          <entry>
+            <title>B</title>
+            <link href="https://e.com/b"/>
+            <content type="html"></content>
+            <summary>只有摘要可用</summary>
+          </entry>
+        </feed>
+        """.trimIndent()
+
+        val (a, b) = assertNotNull(RssXmlParser.parse("s", xml))
+        assertEquals("<p>这是全文</p>", a.description)
+        assertEquals("只有摘要可用", b.description)
+    }
+
+    /** `type="xhtml"` 直接嵌元素：取里面的 HTML，段落和图都还在（取 text() 会压成一行字） */
+    @Test
+    fun `Atom 的 xhtml 正文保留标签`() {
+        val xml = """
+        <?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <title>X</title>
+            <link href="https://e.com/x"/>
+            <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>第一段</p><img src="https://e.com/1.png"/><p>第二段</p></div></content>
+          </entry>
+        </feed>
+        """.trimIndent()
+
+        val d = assertNotNull(RssXmlParser.parse("s", xml)).single().description!!
+        assertTrue("<p>第一段</p>" in d && "<img" in d && "<p>第二段</p>" in d, d)
+    }
+
     @Test
     fun `不是 feed 就返回 null，交给规则那条路`() {
         assertNull(RssXmlParser.parse("s", "<html><body><div>普通网页</div></body></html>"))

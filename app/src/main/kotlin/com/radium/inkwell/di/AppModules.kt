@@ -180,7 +180,10 @@ val appModule = module {
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get()) }
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssArticlesViewModel(sourceId, get()) }
-    viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get()) }
+    // 后两个：文章的原网页才有的地址、标题；单网页源传空串（参数按位置解构，两个入口都得传满三个）
+    viewModel { (sourceId: String, url: String, title: String) ->
+        com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get(), url.ifBlank { null }, title.ifBlank { null })
+    }
     viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->
         com.radium.inkwell.ui.rss.RssArticleViewModel(args, get())
     }

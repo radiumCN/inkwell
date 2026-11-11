@@ -11,8 +11,11 @@ import org.jsoup.nodes.TextNode
  *
  * `<img>` / `<image>` / svg 内嵌图直接抹掉：产品只排文本，收进来会让分页按
  * 整栏宽 4:3 留空框，滚动时半页空白。封面走元数据，不走正文元素。
+ *
+ * [keepImages] 只给订阅文章开：文章页是滚动着看的（不分页），图是文章的一部分。
+ * 从前订阅也共用不收图的这一版，文章页写好的显示图片那段代码一张图都没等到过。
  */
-class HtmlToElements {
+class HtmlToElements(private val keepImages: Boolean = false) {
 
     fun convert(body: Element): List<ContentElement> {
         val out = mutableListOf<ContentElement>()
@@ -42,13 +45,17 @@ class HtmlToElements {
                         val text = node.text().trim()
                         if (text.isNotEmpty()) out += ContentElement.Heading(level, text)
                     }
-                    "img", "image" -> flushText()
+                    "img", "image" -> {
+                        flushText()
+                        if (keepImages) imageOf(node)?.let { out += it }
+                    }
                     "hr" -> {
                         flushText()
                         out += ContentElement.Divider
                     }
                     "br" -> flushText()
-                    "p", "div", "li", "blockquote", "td", "section", "article", "dd", "dt" -> {
+                    // figure / figcaption：图注自成一段，不和图后面的正文粘在一起
+                    "p", "div", "li", "blockquote", "td", "section", "article", "dd", "dt", "figure", "figcaption" -> {
                         flushText()
                         node.childNodes().forEach(::walk)
                         flushText()
@@ -72,6 +79,27 @@ class HtmlToElements {
         return out
     }
 
+    /**
+     * 一张图的地址。懒加载的站 `src` 常是占位（一像素的 data: 图、loading.gif），真地址在
+     * `data-src` / `data-original` 这类属性上；`src` 像真图就用它（少数派的 `src` 是按手机宽度缩过的版本，
+     * `data-original` 是原图，动辄几 MB）。相对地址按页面地址补全，补不全的不要。
+     * 一两像素的统计像素（feed 里常夹一个）也不要。
+     */
+    private fun imageOf(img: Element): ContentElement.Image? {
+        val tiny = sequenceOf("width", "height").any { img.attr(it).trim().toIntOrNull()?.let { n -> n <= TRACKING_PIXEL } == true }
+        if (tiny) return null
+        fun usable(name: String) = img.attr(name).trim().let { it.isNotEmpty() && !it.startsWith("data:", ignoreCase = true) }
+        val lazy = LAZY_SRC_ATTRS.firstOrNull(::usable)
+        // 有懒加载属性、src 又像占位图时才换：占位图的判断只看名字，没有别的地址可换时宁可信 src
+        val attr = when {
+            usable("src") && (lazy == null || !PLACEHOLDER.containsMatchIn(img.attr("src"))) -> "src"
+            else -> lazy
+        } ?: return null
+        // absUrl：按页面地址补全相对地址；没有页面地址时相对地址补不出来，返回空串
+        val url = img.absUrl(attr).takeIf { it.startsWith("http", ignoreCase = true) } ?: return null
+        return ContentElement.Image(url, img.attr("alt").trim().ifEmpty { null })
+    }
+
     /** 折叠空白；全角空格开头的缩进交给排版层，不保留 */
     private fun normalize(text: String): String =
         text
@@ -83,6 +111,15 @@ class HtmlToElements {
 
     private companion object {
         val WHITESPACE = Regex("[ \\t\\r\\n]+")
+
+        /** 懒加载放真地址的属性，常见的几种 */
+        val LAZY_SRC_ATTRS = arrayOf("data-src", "data-original", "data-lazy-src", "data-actualsrc", "data-url")
+
+        /** `src` 是这种的，当它是懒加载的占位图 */
+        val PLACEHOLDER = Regex("(?i)blank\\.(gif|png)|placeholder|loading\\.(gif|svg|png)|lazy|spacer\\.|pixel\\.(gif|png)")
+
+        /** 宽或高不到这么多像素的是统计像素，不是插图 */
+        const val TRACKING_PIXEL = 2
 
         /**
          * 段首信号：换行 + 全角空格 / `&nbsp;` 缩进。

@@ -57,6 +57,22 @@ class InkwellNavigatorTest {
     }
 
     /**
+     * 文章 → 应用内的原网页：返回要回到文章。原网页若用单网页源那条路由（和文章列表同级），
+     * 文章和文章列表会被当成兄弟一起弹掉，一按返回落回订阅源列表
+     */
+    @Test
+    fun `文章打开原网页时保留文章和文章列表`() {
+        val article = RssArticleRoute("arg")
+        val s = stack(BookshelfRoute, SettingsRoute, RssSourceRoute, RssArticlesRoute("feed"), article)
+        val web = RssArticleWebRoute("feed", "https://sspai.com/post/1", "扫雷")
+        s.navigateTo(web)
+        assertEquals(
+            listOf(BookshelfRoute, SettingsRoute, RssSourceRoute, RssArticlesRoute("feed"), article, web),
+            s,
+        )
+    }
+
+    /**
      * 新建书源：从书源管理下钻进向导；存好后向导换成预览页（导航入口里先 back 再 go）。
      * 从预览返回要落在书源管理 —— 落回向导的话再点一次保存，就是第二份重复书源。
      */

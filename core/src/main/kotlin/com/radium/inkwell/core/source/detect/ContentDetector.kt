@@ -32,15 +32,7 @@ data class ContentCandidate(
 object ContentDetector {
 
     fun detect(doc: Document, limit: Int = 3): List<ContentCandidate> {
-        val body = doc.body() ?: return emptyList()
-        val scored = ArrayList<Pair<Element, Scored>>()
-        for (el in body.allElements) {
-            if (el.normalName() in SKIP_TAGS) continue
-            val s = scoreOf(el) ?: continue
-            scored += el to s
-        }
-        // 同分取深的：外层包装和正文块打平时，要的是正文块本身
-        scored.sortWith(compareByDescending<Pair<Element, Scored>> { it.second.score }.thenByDescending { it.first.parents().size })
+        val scored = ranked(doc)
         val picked = mutableListOf<Pair<Element, Scored>>()
         for (pair in scored) {
             val el = pair.first
@@ -69,6 +61,27 @@ object ContentDetector {
             .mapNotNull { el -> scoreOf(el)?.let { el to it } }
             .maxByOrNull { it.second.score }
             ?.let { (el, s) -> candidateOf(el, s) }
+    }
+
+    /** 得分最高的正文块和它的分（订阅文章去原网页整理全文用，见 rss.ArticleExtractor） */
+    internal fun best(doc: Document): Pair<Element, Double>? =
+        ranked(doc).firstOrNull()?.let { (el, s) -> el to s.score }
+
+    /** 单个元素的得分；不像正文块（字太少、全是链接）为 null */
+    internal fun score(el: Element): Double? =
+        if (el.normalName() in SKIP_TAGS) null else scoreOf(el)?.score
+
+    private fun ranked(doc: Document): List<Pair<Element, Scored>> {
+        val body = doc.body() ?: return emptyList()
+        val scored = ArrayList<Pair<Element, Scored>>()
+        for (el in body.allElements) {
+            if (el.normalName() in SKIP_TAGS) continue
+            val s = scoreOf(el) ?: continue
+            scored += el to s
+        }
+        // 同分取深的：外层包装和正文块打平时，要的是正文块本身
+        scored.sortWith(compareByDescending<Pair<Element, Scored>> { it.second.score }.thenByDescending { it.first.parents().size })
+        return scored
     }
 
     private fun candidateOf(el: Element, s: Scored) = ContentCandidate(

@@ -1,8 +1,10 @@
 package com.radium.inkwell.ui.rss
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.isSpecified
@@ -27,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppToolbar
@@ -56,11 +60,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * 不走小说的分页阅读器：文章是短的、带图的、结构化的，硬塞进翻页排版里只会难看。
  * 直接滚动着看就好。
+ *
+ * feed 只给了摘要的（少数派这类）：摘要先亮着，文末一行「正在取全文…」，原网页整理出全文就整个换掉，
+ * 日期下面注明「正文取自原网页」。整理不出来的，原网页在应用内打开（[onOpenWebPage]，阅读的做法）——
+ * 从前只有「在浏览器中打开原文」，看全文就得离开应用。
  */
 @Composable
 fun RssArticleScreen(
     args: RssArticleArgs,
     onBack: () -> Unit,
+    onOpenWebPage: (url: String, title: String) -> Unit,
     viewModel: RssArticleViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -72,6 +81,7 @@ fun RssArticleScreen(
     // 原文链接来自订阅源，先把地址亮出来问一句再跳（见 rememberExternalLinkOpener）
     val links = rememberExternalLinkOpener { messages.emit(NO_BROWSER_MESSAGE) }
     fun openInBrowser() = links.open(state.link)
+    fun openWebPage() = onOpenWebPage(state.link, state.title)
 
     val pageColor = settingsPageColor()
     // 窄栏，不用大标题栏：这一页的标题就是文章标题。从前停在顶部时是大标题「文章」压在文章标题上面 ——
@@ -88,7 +98,8 @@ fun RssArticleScreen(
                 navigationIcon = { BackButton(onClick = onBack) },
                 containerColor = pageColor,
                 actions = {
-                    if (state.link.isNotBlank()) {
+                    // 脚本地址、data: 地址浏览器打不开，不给
+                    if (state.hasWebPage) {
                         AppIconButton(onClick = ::openInBrowser) {
                             Icon(
                                 MiuixIcons.Forward,
@@ -143,6 +154,15 @@ fun RssArticleScreen(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
+                    // 说清这不是 feed 里的内容：是去原网页整理出来的，个别网站可能挑错了块（文末有「查看原网页」）
+                    state.fullTextHost?.let { host ->
+                        Text(
+                            "正文取自原网页 · $host",
+                            Modifier.padding(top = Dimens.gapS),
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                     Spacer(Modifier.height(Dimens.gapL))
                 }
             }
@@ -174,36 +194,57 @@ fun RssArticleScreen(
 
             item(key = "footer", contentType = "footer") {
                 Column {
-                    // 抓取失败一律说出来、并给重试：从前错误只在「有原文链接」时才显示，
-                    // 订阅源不存在、或没有链接时抓失败，页面就只剩一个标题
                     val error = state.error
-                    if (error != null) {
-                        Text(
-                            "正文没能取到：$error",
+                    val failure = state.fullTextFailure
+                    when {
+                        // 抓取失败一律说出来、并给重试：从前错误只在「有原文链接」时才显示，
+                        // 订阅源不存在、或没有链接时抓失败，页面就只剩一个标题
+                        error != null -> {
+                            Text(
+                                "正文没能取到：$error",
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                            Spacer(Modifier.height(Dimens.gapM))
+                            SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
+                        }
+                        // 摘要已经亮着，只在文末转一行，不整页转圈
+                        state.fetchingFullText -> Row(
+                            Modifier.padding(top = Dimens.gapS),
+                            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AppLoadingIndicator(size = Dimens.buttonSpinner)
+                            Text(
+                                "正在取全文…",
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        // 整理不出来不是错误（要跑脚本才出内容的网页多的是）：说一句，原网页在下面
+                        failure != null -> Text(
+                            if (state.hasWebPage) "$failure，可以在应用内打开原网页看。" else "$failure。",
                             style = MiuixTheme.textStyles.body2,
-                            color = MiuixTheme.colorScheme.error,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
-                        Spacer(Modifier.height(Dimens.gapM))
-                        SecondaryButton(text = "重试", onClick = viewModel::load, modifier = Modifier.fillMaxWidth())
-                    } else if (state.needsBrowser) {
                         // 解析不出正文不是错误：很多源本来就只给标题+链接
-                        Text(
+                        state.elements.isEmpty() -> Text(
                             "这篇文章没有可解析的正文（订阅源只给了标题和链接）",
                             style = MiuixTheme.textStyles.body2,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
 
-                    // 「看原文」永远给出口，而不是只在正文解析失败时才给。
-                    // 拿真实 feed 试过：BBC、少数派、HN 的摘要就是**一句话**，不是全文 ——
-                    // 正文"解析成功"了，用户却只看到孤零零一行，然后无处可去。
-                    if (state.link.isNotBlank()) {
+                    // 原网页永远给出口，在应用内打开。这里看不到正文时它是主按钮；正文已经在这儿了
+                    // （feed 给的全文、从原网页整理出来的全文）降成灰色的次要按钮 —— 个别网站可能挑错了块，留条退路。
+                    // 外部浏览器只留在顶栏，先把地址亮出来问一句。
+                    if (state.hasWebPage) {
                         Spacer(Modifier.height(Dimens.gapXL))
-                        PrimaryButton(
-                            text = "在浏览器中打开原文",
-                            onClick = ::openInBrowser,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        if (state.webPageIsPrimary) {
+                            PrimaryButton(text = "在应用内打开原网页", onClick = ::openWebPage, modifier = Modifier.fillMaxWidth())
+                        } else {
+                            SecondaryButton(text = "查看原网页", onClick = ::openWebPage, modifier = Modifier.fillMaxWidth())
+                        }
                     }
                     Spacer(Modifier.height(Dimens.touchTarget))
                 }

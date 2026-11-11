@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class RssWebUiState(
-    /** 顶栏标题：订阅源的名字 */
+    /** 顶栏标题：订阅源的名字（文章的原网页是文章标题） */
     val title: String = "",
     /** 要打开的地址；null = 还在读订阅源（或读失败了，见 [error]） */
     val url: String? = null,
@@ -21,14 +21,18 @@ data class RssWebUiState(
 )
 
 /**
- * 单网页源的网页页（阅读的 singleUrl：点开就是用内置浏览器打开一个网页）。
+ * 应用内的网页页，两种用法：
+ * - 单网页源（阅读的 singleUrl：点开就是用内置浏览器打开一个网页），地址从订阅源里算；
+ * - 文章的原网页（[articleUrl] 给了）：feed 只给了摘要、原网页又整理不出正文时，在应用里看原文。
  *
- * 这里只管从订阅源里读出地址、请求头和脚本开关；网页自己的状态（进度、能不能后退、打没打开）
+ * 这里只管读出地址、请求头和脚本开关；网页自己的状态（进度、能不能后退、打没打开）
  * 跟着 WebView 走，放在页面里（见 RssWebScreen）。
  */
 class RssWebViewModel(
     private val sourceId: String,
     private val repo: RssRepository,
+    private val articleUrl: String? = null,
+    private val articleTitle: String? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RssWebUiState())
@@ -42,6 +46,17 @@ class RssWebViewModel(
         _state.value = _state.value.copy(error = null)
         viewModelScope.launch {
             val rule = repo.getRule(sourceId)
+            if (articleUrl != null) {
+                // 文章的原网页：地址就是文章链接，请求头、脚本开关照订阅源（同阅读）。
+                // 订阅源被删了也照样能看，按默认的来 —— 地址已经在手上了
+                _state.value = RssWebUiState(
+                    title = articleTitle ?: rule?.name.orEmpty(),
+                    url = articleUrl,
+                    headers = rule?.headers.orEmpty(),
+                    enableJs = rule?.enableJs ?: true,
+                )
+                return@launch
+            }
             if (rule == null) {
                 _state.value = _state.value.copy(error = "订阅源不存在")
                 return@launch

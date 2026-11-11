@@ -99,4 +99,50 @@ class HtmlToElementsTest {
         val paras = paragraphs("<div>　　第一段<br /><br />　　第二段<br /></div>")
         assertEquals(listOf("第一段", "第二段"), paras)
     }
+
+    // ---- keepImages：只给订阅文章开 ----
+
+    private fun withImages(html: String, base: String = "https://site.com/post/1") =
+        HtmlToElements(keepImages = true).convert(Jsoup.parse(html, base).body())
+
+    @Test
+    fun `订阅文章留图，相对地址按页面补全，图注自成一段`() {
+        val els = withImages(
+            "<p>前文</p><figure><img src=\"/img/a.png\" alt=\"示意\"/><figcaption>图注</figcaption></figure>后文",
+        )
+        assertEquals(
+            listOf(
+                ContentElement.Paragraph("前文"),
+                ContentElement.Image("https://site.com/img/a.png", "示意"),
+                ContentElement.Paragraph("图注"),
+                ContentElement.Paragraph("后文"),
+            ),
+            els,
+        )
+    }
+
+    /** 懒加载：src 是占位（data: 图、loading.gif），真地址在 data-src / data-original 上 */
+    @Test
+    fun `懒加载的图取真地址，src 是真图时用 src`() {
+        val els = withImages(
+            "<img src=\"data:image/gif;base64,R0lGOD\" data-src=\"https://cdn.com/1.jpg\"/>" +
+                "<img src=\"/static/loading.gif\" data-original=\"https://cdn.com/2.jpg\"/>" +
+                // 少数派：src 是按手机宽度缩过的，data-original 是几 MB 的原图 —— 用 src
+                "<img src=\"https://cdn.com/3.png?w=1120\" data-original=\"https://cdn.com/3.png\"/>" +
+                // 名字像占位图、但没有别的地址可换：信 src
+                "<img src=\"https://cdn.com/lazy-cat.jpg\"/>",
+        )
+        assertEquals(
+            listOf("https://cdn.com/1.jpg", "https://cdn.com/2.jpg", "https://cdn.com/3.png?w=1120", "https://cdn.com/lazy-cat.jpg"),
+            els.filterIsInstance<ContentElement.Image>().map { it.resourceId },
+        )
+    }
+
+    @Test
+    fun `统计像素和只有占位的图不要`() {
+        val els = withImages(
+            "<p>正文</p><img src=\"https://feeds.example.com/~r/x\" width=\"1\" height=\"1\"/><img src=\"data:image/png;base64,AAAA\"/>",
+        )
+        assertEquals(listOf(ContentElement.Paragraph("正文")), els)
+    }
 }

@@ -25,7 +25,8 @@ class RssEngine(
     scriptRuntime: ScriptRuntime? = null,
 ) {
     private val evaluator = RuleEvaluator(scriptRuntime = scriptRuntime)
-    private val htmlToElements = HtmlToElements()
+    // 订阅文章留着图：文章页是滚动着看的，不分页（小说、本地书那几处照旧不收图）
+    private val htmlToElements = HtmlToElements(keepImages = true)
 
     /**
      * 公开入口一律在 IO 线程自我确权（同 BookSourceEngine）：调用方是 viewModelScope，
@@ -77,14 +78,32 @@ class RssEngine(
     /**
      * 文章正文。
      *
-     * 三级回落：配了正文规则就抓原文页解析；没配就用列表里带的 description（多数 feed
-     * 的 content:encoded 本来就是全文）；两者都没有则返回 null —— 调用方该拿浏览器打开
-     * 原链接，而不是给用户看一个空白页。
+     * 配了正文规则就抓原文页解析；没配（或没解析出东西）就用列表里带的 description（多数 feed
+     * 的 content:encoded 本来就是全文）。description 只是一两句摘要、或者什么都没有的，标上
+     * [RssContent.teaser]：调用方先把摘要亮出来，再拿 [fullText] 去原网页整理全文。
      */
-    suspend fun content(rule: RssSourceRule, article: RssArticle): List<ContentElement>? =
+    suspend fun content(rule: RssSourceRule, article: RssArticle): RssContent =
         withContext(Dispatchers.IO) { contentOnIo(rule, article) }
 
-    private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): List<ContentElement>? {
+    /**
+     * 去原网页把全文整理出来（feed 只给了摘要时，见 [RssContent.teaser]）。请求头、编码照订阅源里写的。
+     *
+     * 整理不出来返回 null：页面要跑脚本才出内容、认出来的块还没摘要长、字数不到 [MIN_FULL_TEXT]
+     * （一两句话不值得替掉摘要，多半是认错了块）。网络错误照常抛出，调用方说原因。
+     */
+    suspend fun fullText(
+        rule: RssSourceRule,
+        article: RssArticle,
+        summary: List<ContentElement> = emptyList(),
+    ): List<ContentElement>? = withContext(Dispatchers.IO) {
+        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+        val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
+        val elements = ArticleExtractor.extract(Jsoup.parse(fetched.bodyText, fetched.finalUrl), article.title)
+        val length = RssTeaser.textLength(elements)
+        elements.takeIf { length >= MIN_FULL_TEXT && length > RssTeaser.textLength(summary) }
+    }
+
+    private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): RssContent {
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {
             val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
             val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
@@ -97,12 +116,17 @@ class RssEngine(
             val html = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule.content), ctx)
             if (!html.isNullOrBlank()) {
                 val body = Jsoup.parseBodyFragment(html, fetched.finalUrl).body()
-                return htmlToElements.convert(body).takeIf { it.isNotEmpty() }
+                val elements = htmlToElements.convert(body)
+                if (elements.isNotEmpty()) return RssContent(elements, teaser = false)
             }
         }
-        val desc = article.description?.takeIf { it.isNotBlank() } ?: return null
-        val body = Jsoup.parseBodyFragment(desc, article.link).body()
-        return htmlToElements.convert(body).takeIf { it.isNotEmpty() }
+        val elements = article.description
+            ?.takeIf { it.isNotBlank() }
+            ?.let { htmlToElements.convert(Jsoup.parseBodyFragment(it, article.link).body()) }
+            .orEmpty()
+        // 原网页得是个网页才去整理：脚本地址、data: 地址没有「原网页」可言
+        val teaser = article.link.isHttpUrl() && RssTeaser.isTeaser(elements)
+        return RssContent(if (teaser) RssTeaser.stripReadMore(elements) else elements, teaser)
     }
 
     private fun field(rule: String?, ctx: EvalContext): String? {
@@ -148,6 +172,23 @@ class RssEngine(
         image = image?.takeIf { it.isNotBlank() }?.let { resolveUrl(base, splitUrlOptions(it)?.first ?: it) },
     )
 }
+
+/**
+ * 一篇文章的正文。
+ *
+ * @param elements 可能是空的：订阅源只给了标题和链接
+ * @param teaser feed 只给了摘要（或什么都没给），全文在原网页上：值得拿 [RssEngine.fullText] 去整理一次
+ */
+data class RssContent(
+    val elements: List<ContentElement>,
+    val teaser: Boolean,
+)
+
+/** 原网页整理出来的全文至少这么多字，才替掉摘要 */
+private const val MIN_FULL_TEXT = 200
+
+private fun String.isHttpUrl(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
 
 private fun String.isScriptOrDataUrl(): Boolean {
     val t = trimStart()

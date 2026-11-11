@@ -74,6 +74,14 @@ data class RssArticlesRoute(val sourceId: String) : NavKey
 data class RssWebRoute(val sourceId: String) : NavKey
 
 /**
+ * 文章的原网页（应用内打开）：feed 只给了摘要、原网页又整理不出正文时在应用里看原文。
+ * 和单网页源同一个网页页，地址换成文章链接。叠在文章页上面（层级 5），返回回到文章 ——
+ * 用 [RssWebRoute]（层级 3）的话导航会把它当文章列表的兄弟，文章和文章列表一起被弹掉。
+ */
+@Serializable
+data class RssArticleWebRoute(val sourceId: String, val url: String, val title: String) : NavKey
+
+/**
  * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
  * 而且不少源的摘要（description）本来就是全文，重抓反而丢了它。
  * 内容含 `/ ? &`，作为 path 参数会被切断，故 Base64 传递。
@@ -162,7 +170,7 @@ data object DeveloperSettingsRoute : NavKey
  * ├─ 阅读 (2) ─┬ 书源管理 (3) ─┬ 书源详情 (4)
  * │            │               └ 新建书源 (4)
  * │            └ 替换规则 (3)
- * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4)
+ * ├─ RSS 源 (2) ── 文章列表 (3) ── 文章 (4) ── 原网页 (5)
  * ├─ WebDAV (2)
  * └─ 关于 (2) ─┬ 意见反馈 (3)
  *              ├ 免责声明 (3)
@@ -198,6 +206,8 @@ internal fun NavKey.settingsDetailDepth(): Int? = when (this) {
     is SourceWizardRoute,
     is RssArticleRoute,
     -> 4
+
+    is RssArticleWebRoute -> 5
 
     else -> null
 }

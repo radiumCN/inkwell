@@ -351,7 +351,16 @@ fun InkwellNavDisplay() {
             entry<RssWebRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
-                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> { parametersOf(route.sourceId) }
+                // 后两个参数是文章的原网页才有的地址、标题，单网页源给空（见 AppModules）
+                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> { parametersOf(route.sourceId, "", "") }
+                com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
+            }
+            entry<RssArticleWebRoute>(
+                metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
+            ) { route ->
+                val vm = koinViewModel<com.radium.inkwell.ui.rss.RssWebViewModel> {
+                    parametersOf(route.sourceId, route.url, route.title)
+                }
                 com.radium.inkwell.ui.rss.RssWebScreen(onBack = { nav.back() }, viewModel = vm)
             }
             entry<RssArticlesRoute>(
@@ -381,7 +390,13 @@ fun InkwellNavDisplay() {
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
             ) { route ->
                 val vm = koinViewModel<RssArticleViewModel> { parametersOf(route.args) }
-                RssArticleScreen(args = route.args, onBack = { nav.back() }, viewModel = vm)
+                val args = route.args
+                RssArticleScreen(
+                    args = args,
+                    onBack = { nav.back() },
+                    onOpenWebPage = { url, title -> nav.go(RssArticleWebRoute(args.sourceId, url, title)) },
+                    viewModel = vm,
+                )
             }
             entry<ReplaceRuleRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
