@@ -43,6 +43,8 @@ data class RssSourceRule(
     val singleUrl: Boolean = false,
     /** 网页里的脚本开不开（阅读的 enableJs，缺省开）。只有单网页源的网页页用得上 */
     val enableJs: Boolean = true,
+    /** 公共脚本库（阅读的 jsLib）：分类地址、列表、正文规则里的脚本都能调它定义的函数 */
+    val jsLib: String? = null,
 ) {
     /** 至少有一个分类：没配分类的源，源地址本身就是那个分类 */
     fun sortsOrDefault(): List<RssSort> =

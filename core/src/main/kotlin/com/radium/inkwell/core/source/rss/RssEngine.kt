@@ -10,8 +10,10 @@ import com.radium.inkwell.core.source.LegadoRuleAnalyzer
 import com.radium.inkwell.core.source.RuleEvaluator
 import com.radium.inkwell.core.source.SourceException
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.UrlOptions
 import com.radium.inkwell.core.source.js.ScriptRuntime
 import com.radium.inkwell.core.source.resolveUrl
+import com.radium.inkwell.core.source.splitUrlOptions
 import org.jsoup.Jsoup
 
 /**
@@ -33,12 +35,10 @@ class RssEngine(
         withContext(Dispatchers.IO) { articlesOnIo(rule, sortUrl, page) }
 
     private suspend fun articlesOnIo(rule: RssSourceRule, sortUrl: String, page: Int): RssArticlePage {
-        val url = resolveUrl(rule.id, expandPage(sortUrl, page))
-        val fetched = http.fetch(
-            url,
-            headers = rule.headers,
-            charsetOverride = rule.charset,
-        )
+        val vars = mapOf("baseUrl" to rule.id, "page" to page.toString())
+        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+        val fetched = fetch(rule, sortUrl, vars, js)
+        val url = fetched.finalUrl
 
         // 没配列表规则 = 标准 XML feed。这是常态，不是错误
         if (rule.articles.isNullOrBlank()) {
@@ -52,8 +52,8 @@ class RssEngine(
             element = doc,
             json = fetched.bodyText,
             baseUrl = fetched.finalUrl,
-            vars = mapOf("baseUrl" to rule.id, "page" to page.toString()),
-            js = JsContext(sourceKey = rule.id),
+            vars = vars,
+            js = js,
         )
         val nodes = evaluator.evalToNodes(LegadoRuleAnalyzer.analyze(rule.articles), root)
         val items = nodes.mapNotNull { item ->
@@ -86,13 +86,13 @@ class RssEngine(
 
     private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): List<ContentElement>? {
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {
-            val url = resolveUrl(rule.id, article.link)
-            val fetched = http.fetch(url, headers = rule.headers, charsetOverride = rule.charset)
+            val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+            val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
             val ctx = EvalContext(
                 element = Jsoup.parse(fetched.bodyText, fetched.finalUrl),
                 json = fetched.bodyText,
                 baseUrl = fetched.finalUrl,
-                js = JsContext(sourceKey = rule.id),
+                js = js,
             )
             val html = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule.content), ctx)
             if (!html.isNullOrBlank()) {
@@ -110,12 +110,48 @@ class RssEngine(
         return runCatching { evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule), ctx) }.getOrNull()
     }
 
-    private fun expandPage(url: String, page: Int): String =
-        url.replace("{{page}}", page.toString())
+    /**
+     * 分类地址、文章链接 → 一次抓取，照阅读的 AnalyzeUrl：先跑地址里的 `@js:` / `<js>`，再展开 `{{…}}`
+     * （`{{page}}`、算术、脚本，jsLib 里的函数也调得到），再拆出 `,{…}` 选项（请求方式、请求体、请求头、编码）。
+     *
+     * 从前只替换 `{{page}}`：`must_xx={{getMust()}}` 这类调用 jsLib 的地址原样发出去，`,{"method":"POST"}` 也一直挂在地址上。
+     * `data:` 地址不发请求，由 [SourceHttpClient] 直接答（十六进制的内容，见 dataUriPage）。
+     */
+    private suspend fun fetch(
+        rule: RssSourceRule,
+        raw: String,
+        vars: Map<String, String>,
+        js: JsContext,
+    ): com.radium.inkwell.core.source.FetchedPage {
+        val ctx = EvalContext(element = null, json = null, baseUrl = rule.id, vars = vars, js = js)
+        val scripted = evaluator.evalUrlJs(raw, ctx) ?: raw
+        val expanded = evaluator.expandTemplate(scripted, ctx)
+        val (bare, options) = splitUrlOptions(expanded) ?: (expanded to UrlOptions())
+        val url = if (bare.startsWith("data:", ignoreCase = true)) bare else resolveUrl(rule.id, bare)
+        return http.fetch(
+            url,
+            method = options.method?.uppercase() ?: "GET",
+            body = options.body,
+            headers = rule.headers + options.headers,
+            charsetOverride = options.charset ?: rule.charset,
+        )
+    }
 
-    /** 相对链接补成绝对的 —— 否则点开文章就是一串打不开的路径 */
+    /**
+     * 相对链接补成绝对的 —— 否则点开文章就是一串打不开的路径。
+     * 图片地址后面常跟着阅读的请求选项（`…jpg,{"headers":{"referer":…}}`，晋江书单就这么写）：
+     * 选项丢掉、地址留着，带着 `,{…}` 去加载只会是一张裂图
+     */
     private fun RssArticle.absolutize(base: String): RssArticle = copy(
-        link = link.takeIf { it.isBlank() } ?: resolveUrl(base, link),
-        image = image?.takeIf { it.isNotBlank() }?.let { resolveUrl(base, it) },
+        // 脚本地址、data: 地址原样留着：它们要到抓正文时才算（见 [fetch]），补成「站点/@js:…」就废了
+        link = link.takeIf { it.isBlank() || it.isScriptOrDataUrl() } ?: resolveUrl(base, link),
+        image = image?.takeIf { it.isNotBlank() }?.let { resolveUrl(base, splitUrlOptions(it)?.first ?: it) },
     )
+}
+
+private fun String.isScriptOrDataUrl(): Boolean {
+    val t = trimStart()
+    return t.startsWith("data:", ignoreCase = true) ||
+        t.contains("@js:", ignoreCase = true) ||
+        t.contains("<js>", ignoreCase = true)
 }

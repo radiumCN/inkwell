@@ -34,6 +34,12 @@ sealed interface RuleNode {
 
     /** 拼接：各部分结果顺序合并 */
     data class Concat(val parts: List<RuleNode>) : RuleNode
+
+    /**
+     * 交替合并（Legado 的 `%%`）：各部分结果轮流取一条 —— a1、b1、a2、b2…，短的取完就跳过。
+     * 晋江书单这类源靠它把「推荐」「找书」两组书单穿插着排
+     */
+    data class Interleave(val parts: List<RuleNode>) : RuleNode
 }
 
 sealed interface PipeOp {

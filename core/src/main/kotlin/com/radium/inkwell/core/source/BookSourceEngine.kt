@@ -793,6 +793,7 @@ class BookSourceEngine(
         chapterIndex: Int = 0,
     ) = JsContext(
         sourceKey = source.id,
+        jsLib = source.jsLib,
         book = com.radium.inkwell.core.source.js.BookBridge(
             name = bookName,
             author = bookAuthor,

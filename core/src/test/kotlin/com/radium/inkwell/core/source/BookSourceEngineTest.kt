@@ -47,6 +47,19 @@ class BookSourceEngineTest {
 
     private fun source(): BookSourceRule = BookSourceRule.fromJson(sourceJson(base))
 
+    // ---- jsLib：书源的公共脚本库 ----
+
+    @Test
+    fun `搜索地址调得到 jsLib 里定义的函数`() = runBlocking {
+        val src = source().copy(
+            searchUrl = "/search?q={{key}}&page={{firstPage()}}",
+            jsLib = "function firstPage() { return String(this.page) }",
+        )
+        val result = engine().search(src, "modao", 1)
+        assertEquals("/search?q=modao&page=1", server.takeRequest().path)
+        assertEquals(2, result.items.size)
+    }
+
     // ---- 全链路 ----
 
     @Test

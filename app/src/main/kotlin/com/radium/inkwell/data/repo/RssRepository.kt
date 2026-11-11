@@ -28,8 +28,21 @@ class RssRepository(
 ) {
     val sources: Flow<List<RssSourceEntity>> = dao.observeAll()
 
-    suspend fun getRule(id: String): RssSourceRule? =
-        dao.getById(id)?.let { runCatching { RssSourceRule.fromJson(it.json) }.getOrNull() }
+    /**
+     * 订阅源的规则。存着的转换结果比现在的转换器旧（见 [LegadoRssConverter.VERSION]）、又留着阅读的原始 JSON 的，
+     * 按原始 JSON 重转一次再用 —— 新版能认的东西（公共脚本库 jsLib……）不用用户重新导入就生效。
+     * 只在内存里换，不写回库：写回会盖新的 updatedAt，在 WebDAV 合并里平白赢过别的设备。
+     */
+    suspend fun getRule(id: String): RssSourceRule? {
+        val e = dao.getById(id) ?: return null
+        if (e.converterVersion < LegadoRssConverter.VERSION && e.sourceJson.isNotBlank()) {
+            val fresh = withContext(Dispatchers.Default) {
+                runCatching { LegadoRssConverter.convert(e.sourceJson).converted.singleOrNull()?.rule }.getOrNull()
+            }
+            if (fresh != null) return fresh.copy(enabled = e.enabled)
+        }
+        return runCatching { RssSourceRule.fromJson(e.json) }.getOrNull()
+    }
 
     suspend fun setEnabled(id: String, enabled: Boolean) = dao.setEnabled(id, enabled, System.currentTimeMillis())
 

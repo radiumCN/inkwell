@@ -39,6 +39,8 @@ data class JsContext(
         com.radium.inkwell.core.source.js.ChapterBridge(),
     /** java.put / java.get 的变量表 */
     val scriptVars: MutableMap<String, String> = ConcurrentHashMap(),
+    /** 源的公共脚本库（阅读的 jsLib）：规则、模板、地址里的脚本都能调它定义的函数 */
+    val jsLib: String? = null,
 )
 
 /** 规则求值器；正则按 pattern 缓存预编译；scriptRuntime 为空时 js 规则报不支持 */
@@ -94,10 +96,11 @@ class RuleEvaluator(
 
     /** 求值为节点列表（list 规则用）；每个节点携带原上下文的 baseUrl/vars */
     fun evalToNodes(node: RuleNode, ctx: EvalContext): List<EvalContext> = when (node) {
-        is RuleNode.Legado -> ctx.element
-            ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
-            ?.map { ctx.copy(element = it, json = null) }
-            .orEmpty()
+        is RuleNode.Legado -> bareJsonPath(node.rule, ctx)?.let { evalToNodes(RuleNode.JsonPath(it), ctx) }
+            ?: ctx.element
+                ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
+                ?.map { ctx.copy(element = it, json = null) }
+                .orEmpty()
         is RuleNode.XPath -> xpathNodes(node.path, ctx).map { ctx.copy(element = it, json = null) }
         is RuleNode.JsonPath -> when (val r = readJsonPath(node.path, ctx)) {
             null -> emptyList()
@@ -117,11 +120,30 @@ class RuleEvaluator(
                 evalToNodes(o, ctx).takeIf { it.isNotEmpty() }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToNodes(it, ctx) }
+        is RuleNode.Interleave -> interleave(node.parts.map { evalToNodes(it, ctx) })
         // 列表规则也可能带管道：`div@html<js>过滤</js>`（Js 段）、`<js>…</js>尾规则`（Rule 段）、
         // `##广告##`（正则替换）。从前这里直接 evalToNodes(source) 把 ops 全丢了 —— bookList/
         // chapterList 写成这类形态就得空列表。改为先走字符串管道求值（ops 在里面执行），
         // 再把每个产物按 Js 分支同样的逻辑转回节点（HTML→子元素 / JSON→条目 / 其余→标量）。
-        is RuleNode.Pipe -> evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
+        is RuleNode.Pipe -> wholeJsonPipe(node, ctx) ?: evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
+    }
+
+    /**
+     * JSON 列表后面接脚本的管道（`$.data.list[*]<js>…</js>$.[*]`）：照 Legado 的 getElements，
+     * 脚本拿到的是**整组**结果（这里是一段 JSON 数组），后面的段也作用在脚本的返回值上。
+     *
+     * 从前逐条喂：每一条单独过脚本、再单独跑 `$.[*]`，一个对象的十来个字段各成一条 —— 晋江书单 100 个书单
+     * 变成 1049 条全是空标题的「文章」。HTML 元素列表仍逐条走（[evalToStrings] 那条路），那边的现有来源靠它。
+     * 不是这种形态（没有脚本段、源头不是 JSON、一条都没取到）返回 null，照旧逐条。
+     */
+    private fun wholeJsonPipe(node: RuleNode.Pipe, ctx: EvalContext): List<EvalContext>? {
+        if (node.ops.none { it is PipeOp.Js }) return null
+        val items = evalToNodes(node.source, ctx)
+        if (items.isEmpty() || items.any { it.element != null }) return null
+        val whole = jsonText(items.map { it.json })
+        return node.ops.fold(listOf(whole)) { acc, op -> applyOp(op, acc, ctx) }
+            .filter { it.isNotEmpty() }
+            .flatMap { stringToNodes(it, ctx) }
     }
 
     /**
@@ -159,7 +181,8 @@ class RuleEvaluator(
             if (isBareGetRule(node.rule)) {
                 if (resolved.isEmpty()) emptyList() else listOf(resolved)
             } else {
-                ctx.element?.let { LegadoSelector.strings(it, resolved) }.orEmpty()
+                bareJsonPath(node.rule, ctx)?.let { jsonToStrings(readJsonPath(it, ctx)) }
+                    ?: ctx.element?.let { LegadoSelector.strings(it, resolved) }.orEmpty()
             }
         }
         is RuleNode.XPath -> xpathStrings(node.path, ctx)
@@ -174,9 +197,36 @@ class RuleEvaluator(
                 evalToStrings(o, ctx).takeIf { list -> list.any { it.isNotBlank() } }
             } ?: emptyList()
         is RuleNode.Concat -> node.parts.flatMap { evalToStrings(it, ctx) }
+        is RuleNode.Interleave -> interleave(node.parts.map { evalToStrings(it, ctx) })
         is RuleNode.Pipe ->
             node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
                 .filter { it.isNotEmpty() }
+    }
+
+    /**
+     * 模板里的 JSONPath 规则（`{{$.recommend_count||$.booknum}}`、`{{$.tags[*]##\n##•}}`）：照 Legado 的 getString
+     * 当一条完整规则求值 —— `||` / `&&` / `%%` / `##` 都认；多条结果先用换行连起来，`##` 替换作用在连好的整串上
+     * （所以 `##\n##•` 能把标签连成「言情•古代」）。
+     *
+     * 从前把整段当一条裸 JSONPath：`$.recommend_count||$.booknum` 匹配不到任何东西，晋江书单的「12 本 345 收藏」
+     * 成了「本 收藏」；多条结果也只取第一条。
+     */
+    private fun nestedJsonRule(body: String, ctx: EvalContext): String {
+        val node = LegadoRuleAnalyzer.analyze(body)
+        if (node is RuleNode.Pipe && node.ops.all { it is PipeOp.RegexReplace || it is PipeOp.RegexReplaceFirst }) {
+            val joined = evalToStrings(node.source, ctx).joinToString("\n")
+            if (joined.isEmpty()) return ""
+            return node.ops.fold(listOf(joined)) { acc, op -> applyOp(op, acc, ctx) }.firstOrNull().orEmpty()
+        }
+        return evalToStrings(node, ctx).joinToString("\n")
+    }
+
+    /** `%%`：各段结果轮流取一条（a1、b1、a2、b2…），短的取完就跳过（同 Legado） */
+    private fun <T> interleave(lists: List<List<T>>): List<T> {
+        val out = ArrayList<T>(lists.sumOf { it.size })
+        val longest = lists.maxOfOrNull { it.size } ?: 0
+        for (i in 0 until longest) lists.forEach { l -> l.getOrNull(i)?.let(out::add) }
+        return out
     }
 
     /** 求值为单个字符串；多条结果用换行拼接，空结果返回 null */
@@ -212,6 +262,18 @@ class RuleEvaluator(
         org.seimicrawler.xpath.JXNode.create(el).sel(path)
 
     // ---- json ----
+
+    /**
+     * 纯 JSON 上下文（列表里的一条 JSON、脚本吐出来的对象）上的裸字段名：`title`、`data.list[*]`。
+     * Legado 对 JSON 内容默认按 JSONPath 求值，jayway 自己会补上 `$.`；我们默认交给 Jsoup，上下文里又没有元素，
+     * 从前一律空 —— 订阅源 `"ruleTitle": "title"` 这种写法，标题、链接全空。
+     * 有元素的上下文（HTML 页面）、`@` 开头的、带模板的不动。
+     */
+    private fun bareJsonPath(rule: String, ctx: EvalContext): String? {
+        if (ctx.element != null || ctx.json == null) return null
+        if (rule.isBlank() || rule.startsWith("@") || rule.contains("{{")) return null
+        return "$." + rule.trim()
+    }
 
     private fun readJsonPath(path: String, ctx: EvalContext): Any? {
         val doc = ctx.json ?: return null
@@ -400,9 +462,7 @@ class RuleEvaluator(
             }
         }
         // 嵌套规则（Legado：@ / $. / $[ / // 开头）
-        if (body.startsWith("$.") || body.startsWith("$[")) {
-            return evalToStrings(RuleNode.JsonPath(body), ctx).firstOrNull().orEmpty()
-        }
+        if (body.startsWith("$.") || body.startsWith("$[")) return nestedJsonRule(body, ctx)
         if (body.startsWith("//")) return "" // XPath，暂不支持
         if (body.startsWith("@")) {
             return evalToStrings(RuleNode.Legado(body), ctx).firstOrNull().orEmpty()
@@ -505,14 +565,22 @@ class RuleEvaluator(
                 runCatching { evalToStrings(node, sub) }.getOrDefault(emptyList())
             }
         }
-        is PipeOp.Js -> list.mapNotNull { s -> runJs(op.script, ctx, input = s) }
+        is PipeOp.Js -> list.mapNotNull { s -> runJs(scriptOf(op.script, ctx), ctx, input = s) }
     }
+
+    /**
+     * 脚本里的 `{{…}}` 先在当前内容上展开，再跑脚本（Legado 的 SourceRule 对脚本段一样拆 `{{}}`）：
+     * `<js>"…/getDetail?listid={{$.listid}}"+token</js>` 的 `{{$.listid}}` 是这一条的值。
+     * 从前原样留着，链接里就是一串字面的 `{{$.listid}}`，点开必然打不开。
+     */
+    private fun scriptOf(script: String, ctx: EvalContext): String =
+        if (script.contains("{{")) expandTemplate(script, ctx) else script
 
     // ---- js ----
 
     /** 原子 js：result = 上下文文本（页面/元素/JSON） */
     private fun evalJs(script: String, ctx: EvalContext): String? =
-        runJs(script, ctx, input = contextText(ctx))
+        runJs(scriptOf(script, ctx), ctx, input = contextText(ctx))
 
     /**
      * 绑定书源脚本可见的全部上下文：变量（result/src/baseUrl/key/page）+ 桥对象
@@ -545,6 +613,7 @@ class RuleEvaluator(
                     "book" to ctx.js.book,
                     "chapter" to ctx.js.chapter,
                 ),
+                jsLib = ctx.js.jsLib,
             )
         } catch (e: Exception) {
             // 取消不是「脚本报错」：吞掉的话，被取消的那次调用还会带着空结果把剩下的条目一个个求值完

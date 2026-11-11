@@ -20,9 +20,10 @@ object LegadoRssConverter {
     /**
      * v2：sortUrl 与 Legado 一样按 `&&` 拆分（v1 只按换行）。
      * v3：单网页源（singleUrl）不再跳过，转成 [RssSourceRule.singleUrl]。
-     * 目前只写入、尚无按它重转的逻辑
+     * v4：带上公共脚本库（jsLib）。
+     * 存着的转换结果比这个旧、又留着原始 JSON 的，打开时按原始 JSON 重转一次（见 RssRepository.getRule）
      */
-    const val VERSION = 3
+    const val VERSION = 4
 
     data class Converted(val rule: RssSourceRule, val sourceJson: String)
     data class Skipped(val name: String, val url: String, val reason: String)
@@ -80,6 +81,7 @@ object LegadoRssConverter {
             // 单网页源：没有文章列表，点开就是用应用内网页打开（同阅读）。从前整条跳过，源仓库的合集导进来少一大半
             singleUrl = src.bool("singleUrl") == true,
             enableJs = src.bool("enableJs") ?: true,
+            jsLib = src.str("jsLib"),
         )
         // 地址要跑脚本才算得出来的单网页源（`http@js:…`、分类地址是 `@js:`）：列进来也是一个永远打不开的网页
         if (rule.singleUrl && rule.pageUrl() == null) {

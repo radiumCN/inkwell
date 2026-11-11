@@ -13,9 +13,10 @@ interface ScriptRuntime {
     /**
      * 执行脚本并返回最后一个表达式的字符串值。
      * @param bindings 注入的变量（result/baseUrl/key/page 等）
+     * @param jsLib 源里的公共脚本库（阅读的 jsLib）：里面定义的函数、变量对这段脚本可见
      * @throws Exception 脚本错误由调用方决定如何降级
      */
-    fun eval(script: String, bindings: Map<String, Any?>): String?
+    fun eval(script: String, bindings: Map<String, Any?>, jsLib: String? = null): String?
 }
 
 /**
@@ -74,7 +75,41 @@ class RhinoScriptRuntime(
      */
     private val prototypeByThread = ThreadLocal<org.mozilla.javascript.ScriptableObject>()
 
-    override fun eval(script: String, bindings: Map<String, Any?>): String? {
+    /**
+     * 源的公共脚本库（阅读的 jsLib）：每线程、每份库一个作用域，库代码只在里面跑一次，规则脚本的作用域以它为原型
+     * —— 同 Legado 的 SharedJsScope。库里的函数照 Legado 的写法用 `this.java` / `this.source` 拿当次的绑定
+     * （不带限定地调用库函数时，Rhino 把 `this` 设成脚本自己的作用域，绑定就在那上面）。
+     *
+     * 每线程一份而不是全局一份：作用域对象不是线程安全的，库里的顶层变量会被脚本改写。
+     * 库本身跑不起来（语法错、阅读的远程库写法 `{"名字":"地址"}`）记成 null：当没有库，别让这个源的每条规则都陪着失败，
+     * 也别每次重跑一遍。
+     */
+    private val libScopesByThread = ThreadLocal<LinkedHashMap<String, Scriptable?>>()
+
+    private fun libScope(cx: Context, proto: org.mozilla.javascript.ScriptableObject, lib: String): Scriptable? {
+        val cache = libScopesByThread.get()
+            ?: object : LinkedHashMap<String, Scriptable?>(8, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Scriptable?>?): Boolean =
+                    size > LIB_SCOPES_PER_THREAD
+            }.also { libScopesByThread.set(it) }
+        if (cache.containsKey(lib)) return cache[lib]
+        val scope: Scriptable? = try {
+            cx.newObject(proto).also {
+                it.prototype = proto
+                it.parentScope = null
+                cx.evaluateString(it, lib, "jsLib.js", 1, null)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 取消不是「库坏了」：不记，下次照常加载
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        cache[lib] = scope
+        return scope
+    }
+
+    override fun eval(script: String, bindings: Map<String, Any?>, jsLib: String?): String? {
         // 嵌套求值（脚本里 java.getString("@js:…") 又回到这里）进的是同一个 Context：只在最外层清零
         // 指令计数。每进一层都清零的话，`while(true){ java.getString("@js:1") }` 永远撞不到上限
         val outermost = Context.getCurrentContext() == null
@@ -84,28 +119,45 @@ class RhinoScriptRuntime(
             val proto = prototypeByThread.get() ?: cx.initSafeStandardObjects(null, true).also {
                 prototypeByThread.set(it)
             }
-            val scope: Scriptable = cx.newObject(proto).also {
+            // 绑定挂在 holder 上。有 jsLib 时作用域链是：脚本作用域 → 库作用域 → holder → 标准对象。
+            // holder 垫在库**后面**：库函数里不管怎么调（`this.java`、裸写 `java`、库函数之间不带 this 互相调用），
+            // 往上找都找得到这一次的绑定。只靠「脚本作用域在库前面」的话，库函数之间互相调用时 this 是库作用域，
+            // `this.java` 是 undefined（Legado 就是这样，源作者只好处处写 `this.M(…)`）
+            val holder: Scriptable = cx.newObject(proto).also {
                 it.prototype = proto
                 it.parentScope = null
             }
             bindings.forEach { (name, value) ->
-                scope.put(name, scope, Context.javaToJS(value, scope))
+                holder.put(name, holder, Context.javaToJS(value, holder))
             }
-            // 锁里只查表，编译放在锁外：一段几十 KB 的脚本（内嵌 CryptoJS 的源不少）编译期间，
-            // 从前别的书源的 JS 求值 —— 连缓存命中的 —— 全排在这把锁上。重了也只是多编一次
-            val compiled = synchronized(compiledScripts) { compiledScripts[script] }
-                ?: cx.compileString(script, "rule.js", 1, null).let { fresh ->
-                    synchronized(compiledScripts) { compiledScripts.getOrPut(script) { fresh } }
+            val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it) }
+            val scope: Scriptable = if (lib == null) holder else cx.newObject(proto).also {
+                it.prototype = lib
+                it.parentScope = null
+            }
+            // 库作用域是每线程共用的：这一次的 holder 接上去，用完接回原来的那个 ——
+            // 脚本里 java.getString("@js:…") 会在同一线程上重入这里，内层换掉的得还给外层
+            val outerHolder = lib?.prototype
+            lib?.prototype = holder
+            try {
+                // 锁里只查表，编译放在锁外：一段几十 KB 的脚本（内嵌 CryptoJS 的源不少）编译期间，
+                // 从前别的书源的 JS 求值 —— 连缓存命中的 —— 全排在这把锁上。重了也只是多编一次
+                val compiled = synchronized(compiledScripts) { compiledScripts[script] }
+                    ?: cx.compileString(script, "rule.js", 1, null).let { fresh ->
+                        synchronized(compiledScripts) { compiledScripts.getOrPut(script) { fresh } }
+                    }
+                val result = compiled.exec(cx, scope)
+                return when {
+                    result == null || result === Context.getUndefinedValue() -> null
+                    // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，
+                    // 后续 JSONPath 全落空（JSON API 书源 `<js>JSON.parse(result).list</js>` 就死在这）。
+                    // 用 NativeJSON.stringify 序列化成合法 JSON，求值器再据 `[`/`{` 前缀接上 JSONPath。
+                    result is NativeArray || result is NativeObject ->
+                        stringifyJson(cx, scope, result) ?: Context.toString(result)
+                    else -> Context.toString(result)
                 }
-            val result = compiled.exec(cx, scope)
-            return when {
-                result == null || result === Context.getUndefinedValue() -> null
-                // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，
-                // 后续 JSONPath 全落空（JSON API 书源 `<js>JSON.parse(result).list</js>` 就死在这）。
-                // 用 NativeJSON.stringify 序列化成合法 JSON，求值器再据 `[`/`{` 前缀接上 JSONPath。
-                result is NativeArray || result is NativeObject ->
-                    stringifyJson(cx, scope, result) ?: Context.toString(result)
-                else -> Context.toString(result)
+            } finally {
+                if (lib != null) lib.prototype = outerHolder
             }
         } finally {
             Context.exit()
@@ -120,6 +172,9 @@ class RhinoScriptRuntime(
 
     private companion object {
         val KEY_COUNT = Any()
+
+        /** 每线程留几份库的作用域：同时在用的通常就是正在抓的那一两个源 */
+        const val LIB_SCOPES_PER_THREAD = 8
 
         /**
          * 只有桥对象所在的包对脚本可见，其余 Java 类一律拒绝。

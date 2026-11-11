@@ -159,10 +159,26 @@ object LegadoRuleAnalyzer {
         return if (nodes.size == 1) nodes[0] else RuleNode.Fallback(nodes)
     }
 
+    /**
+     * `&&` 拼接 / `%%` 交替合并。两种混写时照 Legado 的 splitRule：按**先出现**的那种切，各段再递归切另一种
+     * （`a&&b%%c` = 拼接(a, 交替(b, c))）。
+     *
+     * 从前只认 `&&`：JSONPath / XPath 里的 `%%` 原样留在路径里，什么都匹配不到 —— 晋江书单
+     * `$.data.recommend[*]%%$.data.find[*]` 整个分类一条都没有（纯 Jsoup 规则交给 LegadoSelector，它本来就懂 `%%`）。
+     */
     private fun buildConcat(s: String): RuleNode {
-        val parts = splitTop(s, "&&")
-        return if (parts.size == 1) atom(parts[0].trim())
-        else RuleNode.Concat(parts.map { atom(it.trim()) })
+        val and = topLevelIndexOf(s, "&&")
+        val mix = topLevelIndexOf(s, "%%")
+        val delim = when {
+            and < 0 && mix < 0 -> return atom(s.trim())
+            mix < 0 -> "&&"
+            and < 0 -> "%%"
+            else -> if (and < mix) "&&" else "%%"
+        }
+        val parts = splitTop(s, delim)
+        if (parts.size == 1) return buildConcat(parts[0].trim())
+        val nodes = parts.map { buildConcat(it.trim()) }
+        return if (delim == "&&") RuleNode.Concat(nodes) else RuleNode.Interleave(nodes)
     }
 
     // ---------- 原子规则 ----------
@@ -257,7 +273,10 @@ object LegadoRuleAnalyzer {
         return base to op
     }
 
-    /** 顶层（`[]`/`()` 外、非 `<js>` 段）按 `##` 切分，**保留空段** —— 段数决定 replace 语义。 */
+    /**
+     * 顶层（`[]`/`()` 外、非 `<js>` 段、非 `{{…}}` 模板）按 `##` 切分，**保留空段** —— 段数决定 replace 语义。
+     * 模板里的 `##` 属于里面那条规则（`{{$.tags[*]##\n##•}}` 把多条结果连成「a•b」），Legado 是先展开模板再切 `##`。
+     */
     private fun splitTopHash(text: String): List<String> {
         val out = mutableListOf<String>()
         var depth = 0
@@ -267,6 +286,11 @@ object LegadoRuleAnalyzer {
             if (text.startsWith("<js>", i, ignoreCase = true)) {
                 val end = text.indexOf("</js>", i + 4, ignoreCase = true)
                 i = if (end < 0) text.length else end + 5
+                continue
+            }
+            val tpl = templateEnd(text, i)
+            if (tpl > 0) {
+                i = tpl
                 continue
             }
             val c = text[i]
@@ -299,13 +323,23 @@ object LegadoRuleAnalyzer {
             !s.startsWith("//") &&
             !s.startsWith(":")
 
-    /** 括号感知的顶层切分：`[...]`/`(...)` 内的分隔符不切；反斜杠转义跳过。 */
+    /**
+     * 括号感知的顶层切分：`[...]`/`(...)` 内、`{{…}}` 模板里的分隔符不切；反斜杠转义跳过。
+     *
+     * 模板要跳过：`{{$.recommend_count||$.booknum}}` 里的 `||` 是模板里那条规则的回退，不是整条规则的。
+     * 从前从中间切开，「{{$.level}}级 {{$.recommend_count」成了一个分支，晋江书单的日期行只剩半截。
+     */
     private fun splitTop(text: String, delim: String): List<String> {
         val out = mutableListOf<String>()
         var depth = 0
         var start = 0
         var i = 0
         while (i < text.length) {
+            val tpl = templateEnd(text, i)
+            if (tpl > 0) {
+                i = tpl
+                continue
+            }
             val c = text[i]
             when {
                 c == '\\' -> { i += 2; continue }
@@ -335,6 +369,11 @@ object LegadoRuleAnalyzer {
                 i = if (end < 0) text.length else end + 5
                 continue
             }
+            val tpl = templateEnd(text, i)
+            if (tpl > 0) {
+                i = tpl
+                continue
+            }
             val c = text[i]
             when {
                 c == '\\' -> { i += 2; continue }
@@ -343,6 +382,28 @@ object LegadoRuleAnalyzer {
                 depth == 0 && text.startsWith(token, i) -> return i
             }
             i++
+        }
+        return -1
+    }
+
+    /**
+     * [i] 处是 `{{` 时，返回与它配对的 `}}` 之后的下标（嵌套的 `{{…}}` 一并计入）；不是模板开头、或者没配上，返回 -1
+     * —— 没配上的 `{{` 照普通字符走，别把后面整条规则都吞进去。
+     */
+    private fun templateEnd(text: String, i: Int): Int {
+        if (!text.startsWith("{{", i)) return -1
+        var depth = 0
+        var j = i
+        while (j < text.length) {
+            when {
+                text.startsWith("{{", j) -> { depth++; j += 2 }
+                text.startsWith("}}", j) -> {
+                    depth--
+                    j += 2
+                    if (depth == 0) return j
+                }
+                else -> j++
+            }
         }
         return -1
     }
