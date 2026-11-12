@@ -17,6 +17,29 @@ interface ScriptRuntime {
      * @throws Exception 脚本错误由调用方决定如何降级
      */
     fun eval(script: String, bindings: Map<String, Any?>, jsLib: String? = null): String?
+
+    /** 脚本里 `java.t2s` / `java.s2t` 用的繁简转换；平台没给就原样返回 */
+    val chineseConverter: ChineseConverter get() = ChineseConverter.NONE
+}
+
+/**
+ * 繁简转换（阅读的 `java.t2s` / `java.s2t`）。core 是纯 JVM、不带字表：app 拿 Android 自带的 ICU 实现注进来，
+ * 单测、没注入时原样返回 —— 原样返回总比方法不存在强：从前一调就 ReferenceError，ESJ Zone 的书名、作者、简介规则
+ * 都接一道 `@js:java.t2s(result)`，全部落空，搜到的书一本不剩。
+ */
+interface ChineseConverter {
+    /** 繁体 → 简体 */
+    fun toSimplified(text: String): String
+
+    /** 简体 → 繁体 */
+    fun toTraditional(text: String): String
+
+    companion object {
+        val NONE: ChineseConverter = object : ChineseConverter {
+            override fun toSimplified(text: String): String = text
+            override fun toTraditional(text: String): String = text
+        }
+    }
 }
 
 /**
@@ -25,6 +48,7 @@ interface ScriptRuntime {
  */
 class RhinoScriptRuntime(
     private val maxInstructions: Long = 20_000_000L,
+    override val chineseConverter: ChineseConverter = ChineseConverter.NONE,
 ) : ScriptRuntime {
 
     private val factory = object : ContextFactory() {
@@ -34,6 +58,8 @@ class RhinoScriptRuntime(
             cx.languageVersion = Context.VERSION_ES6
             cx.instructionObserverThreshold = 100_000
             cx.setClassShutter(BRIDGE_ONLY)
+            // 桥上的列表（Jsoup 替身的 Elements）当数组用：下标、length、map / forEach
+            cx.wrapFactory = BridgeWrapFactory()
             return cx
         }
 

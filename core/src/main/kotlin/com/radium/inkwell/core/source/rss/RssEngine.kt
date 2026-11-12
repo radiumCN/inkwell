@@ -1,19 +1,28 @@
 package com.radium.inkwell.core.source.rss
 
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
 import com.radium.inkwell.core.source.EvalContext
 import com.radium.inkwell.core.source.JsContext
 import com.radium.inkwell.core.source.LegadoRuleAnalyzer
+import com.radium.inkwell.core.source.PageRenderer
 import com.radium.inkwell.core.source.RuleEvaluator
 import com.radium.inkwell.core.source.SourceException
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.UrlOptions
+import com.radium.inkwell.core.source.js.EngineJsHttp
 import com.radium.inkwell.core.source.js.ScriptRuntime
+import com.radium.inkwell.core.source.parseHeaderJson
+import com.radium.inkwell.core.source.parsePage
 import com.radium.inkwell.core.source.resolveUrl
 import com.radium.inkwell.core.source.splitUrlOptions
+import com.radium.inkwell.core.source.withoutLegadoOnlyHeaders
 import org.jsoup.Jsoup
 
 /**
@@ -23,21 +32,47 @@ import org.jsoup.Jsoup
 class RssEngine(
     private val http: SourceHttpClient,
     scriptRuntime: ScriptRuntime? = null,
+    /**
+     * 地址声明了 `webView` 的（阅读的写法：东方财富的列表是页面脚本画的、学术站拿它过人机验证）用它渲染；
+     * 没注入、渲染失败照旧静态抓
+     */
+    private val renderer: PageRenderer? = null,
 ) {
-    private val evaluator = RuleEvaluator(scriptRuntime = scriptRuntime)
+    /**
+     * 规则脚本的网络出口（`java.ajax` / `post` / `ajaxAll`）。从前订阅这边没接：脚本里的请求一律回空，
+     * 拿 ajax 拼正文的图集、把文章发给翻译接口的学术订阅源，列表和正文全空 —— 两份公开合集里 58 个订阅源这么写
+     */
+    private val jsHttp = EngineJsHttp(http)
+    private val evaluator = RuleEvaluator(scriptRuntime = scriptRuntime, jsHttp = jsHttp)
     // 订阅文章留着图：文章页是滚动着看的，不分页（小说、本地书那几处照旧不收图）
     private val htmlToElements = HtmlToElements(keepImages = true)
 
     /**
      * 公开入口一律在 IO 线程自我确权（同 BookSourceEngine）：调用方是 viewModelScope，
      * 抓取恢复之后的解码、XML/Jsoup 解析、规则脚本（Rhino 最多 2000 万条指令）从前全跑在主线程上。
+     *
+     * 并把当前 Job 绑给 [jsHttp]（同 BookSourceEngine.engineIo）：脚本里的 java.ajax 是阻塞等的，
+     * 用户退出文章页时外层取消要传得进去，掐掉还在飞的请求。
      */
+    private suspend fun <T> rssIo(block: suspend () -> T): T =
+        withContext(Dispatchers.IO) {
+            withContext(jsHttp.bindingTo(coroutineContext[Job])) {
+                try {
+                    block()
+                } catch (e: Exception) {
+                    // 外层取消时脚本里的 ajax 只能交回空串、规则「正常」跑完抽不到东西 —— 别让它冒成「解析不出文章」
+                    if (e !is CancellationException) currentCoroutineContext().ensureActive()
+                    throw e
+                }
+            }
+        }
+
     suspend fun articles(rule: RssSourceRule, sortUrl: String, page: Int = 1): RssArticlePage =
-        withContext(Dispatchers.IO) { articlesOnIo(rule, sortUrl, page) }
+        rssIo { articlesOnIo(rule, sortUrl, page) }
 
     private suspend fun articlesOnIo(rule: RssSourceRule, sortUrl: String, page: Int): RssArticlePage {
         val vars = mapOf("baseUrl" to rule.id, "page" to page.toString())
-        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+        val js = jsContextOf(rule)
         val fetched = fetch(rule, sortUrl, vars, js)
         val url = fetched.finalUrl
 
@@ -48,7 +83,8 @@ class RssEngine(
             return RssArticlePage(items.map { it.absolutize(fetched.finalUrl) }, hasMore = false)
         }
 
-        val doc = Jsoup.parse(fetched.bodyText, fetched.finalUrl)
+        // 在 feed 上写规则的（`//item`、`link@text`）得按 XML 解析，HTML 解析器会把 `<link>` 的地址挤出元素
+        val doc = parsePage(fetched.bodyText, fetched.finalUrl)
         val root = EvalContext(
             element = doc,
             json = fetched.bodyText,
@@ -83,7 +119,7 @@ class RssEngine(
      * [RssContent.teaser]：调用方先把摘要亮出来，再拿 [fullText] 去原网页整理全文。
      */
     suspend fun content(rule: RssSourceRule, article: RssArticle): RssContent =
-        withContext(Dispatchers.IO) { contentOnIo(rule, article) }
+        rssIo { contentOnIo(rule, article) }
 
     /**
      * 去原网页把全文整理出来（feed 只给了摘要时，见 [RssContent.teaser]）。请求头、编码照订阅源里写的。
@@ -95,20 +131,24 @@ class RssEngine(
         rule: RssSourceRule,
         article: RssArticle,
         summary: List<ContentElement> = emptyList(),
-    ): List<ContentElement>? = withContext(Dispatchers.IO) {
-        val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+    ): List<ContentElement>? = rssIo {
+        val js = jsContextOf(rule)
         val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
         val elements = ArticleExtractor.extract(Jsoup.parse(fetched.bodyText, fetched.finalUrl), article.title)
         val length = RssTeaser.textLength(elements)
         elements.takeIf { length >= MIN_FULL_TEXT && length > RssTeaser.textLength(summary) }
     }
 
+    /** 脚本里的 `source`：`source.sourceUrl` / `sourceName` 是订阅源自己的（阅读的 RssSource 字段） */
+    private fun jsContextOf(rule: RssSourceRule) =
+        JsContext(sourceKey = rule.id, sourceName = rule.name, jsLib = rule.jsLib)
+
     private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): RssContent {
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {
-            val js = JsContext(sourceKey = rule.id, jsLib = rule.jsLib)
+            val js = jsContextOf(rule)
             val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
             val ctx = EvalContext(
-                element = Jsoup.parse(fetched.bodyText, fetched.finalUrl),
+                element = parsePage(fetched.bodyText, fetched.finalUrl),
                 json = fetched.bodyText,
                 baseUrl = fetched.finalUrl,
                 js = js,
@@ -152,13 +192,39 @@ class RssEngine(
         val expanded = evaluator.expandTemplate(scripted, ctx)
         val (bare, options) = splitUrlOptions(expanded) ?: (expanded to UrlOptions())
         val url = if (bare.startsWith("data:", ignoreCase = true)) bare else resolveUrl(rule.id, bare)
+        val method = options.method?.uppercase() ?: "GET"
+        val headers = sourceHeaders(rule, js) + options.headers
+        // 声明了 webView 的交给渲染器（同书源：只会 GET，带体的照旧静态抓）；渲染失败退回静态抓
+        if (options.webView && options.body == null && method == "GET" && renderer != null && !url.startsWith("data:")) {
+            val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+                ?: SourceHttpClient.DEFAULT_UA
+            renderer.render(url, headers.withoutLegadoOnlyHeaders(), ua)?.let { return it }
+        }
         return http.fetch(
             url,
-            method = options.method?.uppercase() ?: "GET",
+            method = method,
             body = options.body,
-            headers = rule.headers + options.headers,
+            headers = headers,
             charsetOverride = options.charset ?: rule.charset,
         )
+    }
+
+    /**
+     * 订阅源级的请求头：JSON 写法照存着的；脚本写法（[RssSourceRule.headerScript]）同书源每次请求现跑 ——
+     * 脚本里有 java / source / cookie / cache、`baseUrl`（订阅源地址）和 jsLib，跑不出 JSON 就当没有。
+     * 变量表拷一份给它，header 脚本里 java.put 的东西不混进这条链路。脚本 `source.putLoginHeader` 存下的头盖在最上面
+     */
+    private fun sourceHeaders(rule: RssSourceRule, js: JsContext): Map<String, String> {
+        val base = rule.headerScript?.let { script ->
+            val ctx = EvalContext(
+                element = null,
+                json = null,
+                baseUrl = rule.id,
+                js = js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap(js.scriptVars)),
+            )
+            parseHeaderJson(evaluator.evalSourceScript(script, ctx))
+        } ?: rule.headers
+        return base + evaluator.loginHeaders(rule.id)
     }
 
     /**

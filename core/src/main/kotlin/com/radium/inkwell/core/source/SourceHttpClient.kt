@@ -64,6 +64,15 @@ internal fun dataUriPage(url: String): FetchedPage? {
     )
 }
 
+/**
+ * 阅读自己用的请求头，不发给站点：`proxy` 是阅读给这个来源设的代理（AnalyzeUrl 把它拿走），我们不做代理。
+ * 翻译类订阅源的 header 脚本一律带着 `'proxy': ''`，原样发出去，IEEE 的防火墙直接回「Request Rejected」。
+ * 静态抓取在这里滤掉；交给 WebView 渲染的，引擎用 [withoutLegadoOnlyHeaders] 先滤
+ */
+internal fun isLegadoOnlyHeader(name: String): Boolean = name.equals("proxy", ignoreCase = true)
+
+internal fun Map<String, String>.withoutLegadoOnlyHeaders(): Map<String, String> = filterKeys { !isLegadoOnlyHeader(it) }
+
 private val DATA_URI = Regex("^data:[^,]*?;base64,([^,]*)", RegexOption.IGNORE_CASE)
 
 /** 抓取结果；bodyText 已按探测到的字符集解码。不再同时握一份 bodyBytes —— 解码后那份字节只是峰值翻倍。 */
@@ -109,6 +118,15 @@ class SourceHttpClient(
         .callTimeout(CALL_TIMEOUT)
         .build()
 
+    /**
+     * 不跟随重定向的那一份（脚本的 `java.get/post/head`，见 JsHttp.fetch）。由 [client] 派生：连接池、Cookie、
+     * 私网防护（DNS 与拦截器）、超时都是同一套
+     */
+    private val noRedirectClient: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
     fun cookieOf(url: String): String = url.toHttpUrlOrNull()
         ?.let { u -> cookieJar.loadForRequest(u).joinToString("; ") { "${it.name}=${it.value}" } }
@@ -140,6 +158,8 @@ class SourceHttpClient(
          * 4xx/5xx 也得把 body/code 交出去，不能在这里打死整段 JS。
          */
         throwOnHttpError: Boolean = true,
+        /** false：3xx 原样交回（带着 Location），不往下跳 */
+        followRedirects: Boolean = true,
     ): FetchedPage {
         dataUriPage(url)?.let { return it }
         val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
@@ -152,7 +172,7 @@ class SourceHttpClient(
             val request = buildRequest(httpUrl, method, body, headers, charsetOverride)
             val startNs = System.nanoTime()
             val response = try {
-                execute(client.newCall(request))
+                execute((if (followRedirects) client else noRedirectClient).newCall(request))
             } catch (e: IOException) {
                 // 握手/发请求时被 RST（报错就是一句干巴巴的「Connection reset」）多半是瞬时的：
                 // 连接池里的旧连接被服务端单方面关了、移动网络切基站。再试一次就好，用户却得
@@ -281,19 +301,22 @@ class SourceHttpClient(
             // 头值：书源常把 Referer 写成 {{baseUrl}}，而书源 URL 里可能带 emoji 后缀 —— 丢掉该头即可，
             // 不该让整个书源不可用。
             if (!isValidHeaderName(k) || !isValidHeaderValue(v)) return@forEach
+            if (isLegadoOnlyHeader(k)) return@forEach
             if (k.equals("User-Agent", ignoreCase = true)) hasUa = true
             if (k.equals("Content-Type", ignoreCase = true)) contentType = v
             b.header(k, v)
         }
         if (!hasUa) b.header("User-Agent", DEFAULT_UA)
 
-        if (method.equals("POST", ignoreCase = true)) {
+        // PUT / PATCH 同 POST 带请求体（Jsoup 替身的 `.method(Connection.Method.PUT).requestBody(…)`）：
+        // OkHttp 不许这两种不带体，从前一律当成无体的方法发，直接抛 IllegalArgumentException
+        if (method.uppercase() in BODY_METHODS) {
             // 没声明 Content-Type 时按 body 的样子定：JSON 就发 application/json（与 Legado 一致）。
             // 从前一律当表单发，`,{"method":"POST","body":"{\"id\":1}"}` 这类接口源要么 415，
             // 要么服务端按表单解析拿不到参数 —— 搜索/目录直接是空的
             val mediaType = (contentType ?: defaultPostContentType(body)).toMediaTypeOrNull()
             val cs = charsetOverride?.let { runCatching { charsetOf(it) }.getOrNull() } ?: Charsets.UTF_8
-            b.post((body ?: "").toByteArray(cs).toRequestBody(mediaType))
+            b.method(method.uppercase(), (body ?: "").toByteArray(cs).toRequestBody(mediaType))
         } else {
             b.method(method.uppercase(), null)
         }
@@ -355,6 +378,8 @@ class SourceHttpClient(
     }
 
     companion object {
+        private val BODY_METHODS = setOf("POST", "PUT", "PATCH")
+
         /**
          * 书源规则是照着这个 UA 抓到的页面写的，JS 渲染器必须沿用同一个，否则站点可能
          * 按 UA 给出另一套 DOM（创世中文网就会在移动 UA 下跳转到 m. 站），规则随即全部落空。

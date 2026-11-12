@@ -113,13 +113,18 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 
 面向文本类规则。支持的子集包括：
 
-- 默认 Jsoup 层级（`class.foo.0@tag.a@href`）、`@css:`、JSONPath（`$.`）、`:正则`、XPath（`@XPath:` / `//`）
+- 默认 Jsoup 层级（`class.foo.0@tag.a@href`）、`@css:`、JSONPath（`$.`）、`:正则`、XPath（`@XPath:` / `//`）；以 `<?xml` 开头的内容（RSS / Atom feed）按 XML 解析，`link@text` 取得到
 - `||` 回退、`&&` 拼接、`##正则##替换` 净化、`replaceRegex`
-- JS 规则（`<js>` / `@js:` / 部分 `{{表达式}}`），由 Rhino 执行；引擎带沙箱与超时，禁止访问本地私网等危险能力
+- JS 规则（`<js>` / `@js:` / 部分 `{{表达式}}`），由 Rhino 执行；引擎带沙箱与超时，禁止访问本地私网等危险能力。列表规则可以写成「脚本 + 尾规则」（`<js>…</js>` 换行接 CSS / XPath / JSONPath），尾规则在脚本的产物上取节点
 - 脚本里常用的加解密与签名：`java.createSymmetricCrypto`（AES / DES / DESede）、`aes*` / `des*`、`HMacHex` / `HMacBase64`；直接调 JDK 的写法（`JavaImporter` / `Packages`）只给 Base64（含 `android.util.Base64`）、Cipher 与密钥规格这几样替身，不开放其他 Java 类
-- 源级 `header` 的 JSON 写法与脚本写法（`@js:` / `<js>`，每次请求现跑）
+- 脚本里直接用 Jsoup（`org.jsoup.Jsoup.parse` / `parseBodyFragment` / `connect`、`Parser.xmlParser()`、`new TextNode(…)`）：同样是替身，方法照 Jsoup 的 Element / Elements；一组元素能当数组用（下标、`length`、`toArray().map`、`forEach`）；`Jsoup.connect` 经来源脚本的网络出口发出
+- 脚本里的网络与内容：`java.ajax` / `connect` / `ajaxAll`（一组并发抓取）；`java.get` / `post` / `head` 同阅读不跟随重定向，响应可读 `header` / `cookies` / `raw().request().url()`；`java.setContent` 换一份内容再 `getString`；订阅源的规则脚本同样能发请求
+- 其他常用接口：`java.toNumChapter`、`java.t2s` / `s2t`（繁简转换用系统 ICU）、`source` 的登录信息（`getLoginInfoMap` 等；不做登录界面，没登录过为空，脚本 `putLoginHeader` 存下的请求头只在进程内、之后这个来源的请求都带上）
+- 源级 `header` 的 JSON 写法与脚本写法（`@js:` / `<js>`，每次请求现跑），订阅源同样；阅读自用的 `proxy` 头不发给站点
+- 订阅源地址的 `webView` 选项：交给内置 WebView 渲染，渲染不出来退回直接抓取
 - POST 搜索（`searchUrl` 的 method/body/charset 选项，含字符集编码选项）
 - `exploreUrl` 发现页（`名称::url` 格式）、`concurrentRate` 限速、倒序目录（`-` 前缀）
+- 规则集读得宽：`ruleSearch` 等写成 JSON 字符串的解开再读，写成 `[]` 之类的当没写，不连累整个来源导入失败
 
 **不支持**：音频 / 漫画 / 文件源（`bookSourceType` ≠ 0）；依赖未实现 Legado API 或绕过沙箱的极端 JS；部分动态发现地址无法静态列举。关键规则无法解析时会在导入或校验结果中说明；次要字段失败时丢弃该字段、规则仍可用。
 

@@ -10,6 +10,10 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import org.mozilla.javascript.BaseFunction
+import org.mozilla.javascript.Context
+import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.ScriptableObject
 
 /**
  * 书源脚本可见的桥对象。
@@ -24,12 +28,35 @@ import javax.crypto.spec.SecretKeySpec
 
 /** 书源脚本能发的 HTTP 请求；由引擎注入，脚本里以 `java.ajax(...)` 等形式调用 */
 interface JsHttp {
-    /** 同步抓取（脚本是同步的，只能阻塞）；失败返回 null */
-    fun fetch(url: String, method: String = "GET", body: String? = null, headers: Map<String, String> = emptyMap()): StrResponse?
+    /**
+     * 同步抓取（脚本是同步的，只能阻塞）；失败返回 null。
+     * @param followRedirects 阅读的 `java.get/post/head` 走 Jsoup、**不跟随**重定向（脚本拿 `.header("Location")`
+     *   读跳转地址）；`java.ajax/connect` 跟随
+     */
+    fun fetch(
+        url: String,
+        method: String = "GET",
+        body: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        followRedirects: Boolean = true,
+    ): StrResponse?
+
+    /** `java.ajaxAll`：一组请求一起发，结果按传入顺序；失败的那一格为 null。默认挨个发 */
+    fun fetchAll(requests: List<JsHttpRequest>): List<StrResponse?> =
+        requests.map { fetch(it.url, it.method, it.body, it.headers) }
+
     fun cookieOf(url: String): String
     fun setCookie(url: String, cookie: String)
     fun removeCookie(url: String)
 }
+
+/** `java.ajaxAll` 一组里的一个：地址后面的 `,{…}` 选项已经拆开 */
+data class JsHttpRequest(
+    val url: String,
+    val method: String = "GET",
+    val body: String? = null,
+    val headers: Map<String, String> = emptyMap(),
+)
 
 /**
  * Legado `connect/get/post/head` 的返回值。
@@ -37,6 +64,10 @@ interface JsHttp {
  * 脚本习惯写 `java.get(url).body()` / `.statusCode()` / `.headers('Location')`。
  * 从前这里直接返回 String，一调 `.body()` 就 TypeError，整段 JS 挂掉。
  * [toString] 等于 body，纯拼接 / `String(resp)` 仍能当文本用。
+ *
+ * 阅读的 `java.get/post/head` 给的是 Jsoup 的 Response（`.header(name)`、`.cookies()`），`java.connect` 给的是
+ * 自己的 StrResponse（`.raw()` 是 OkHttp 的 Response，脚本拿 `.raw().request().url()` 读跳转后的地址）。
+ * 两边脚本常用的方法这里都有一份，名字照原样。
  */
 class StrResponse(
     val bodyText: String = "",
@@ -61,11 +92,84 @@ class StrResponse(
         return values.toTypedArray()
     }
 
+    /** Jsoup 的 `header(name)`：同名取第一个，没有为 null。书仓网、来看文学拿 POST 的 `Location` 当搜索结果页 */
+    fun header(name: String): String? = headers(name).firstOrNull()
+
+    /** Jsoup 的 `headers()`：头名 → 第一个值 */
+    fun headers(): JsStringMap =
+        JsStringMap(headerMap.entries.associate { (k, v) -> k to v.firstOrNull().orEmpty() })
+
+    /**
+     * Jsoup 的 `cookies()`：**这次响应** Set-Cookie 下发的 cookie，名 → 值。
+     * 一读这几个站先回一段脚本挑战，`java.head(url).cookies()` 拿到 token / secret 再自己拼 Cookie
+     */
+    fun cookies(): JsStringMap = JsStringMap(responseCookies())
+
+    fun cookie(name: String): String? = responseCookies()[name]
+
+    private fun responseCookies(): Map<String, String> =
+        headers("Set-Cookie").mapNotNull { line ->
+            val pair = line.substringBefore(';')
+            val eq = pair.indexOf('=')
+            if (eq <= 0) null else pair.substring(0, eq).trim() to pair.substring(eq + 1).trim()
+        }.toMap()
+
+    fun isSuccessful(): Boolean = status in 200..299
+
+    /** Jsoup 的 `execute().parse()`：响应体当页面解析（`<?xml` 开头的按 XML） */
+    fun parse(): JsElement = JsoupShim.parsePageText(bodyText, finalUrl)
+
+    fun contentType(): String? = header("Content-Type")
+
+    /** 没有状态描述可给（HTTP/2 本来就没有），给空串 */
+    fun message(): String = ""
+
+    fun statusMessage(): String = ""
+
+    /** OkHttp 的 Response：脚本只拿它读请求地址、状态和头，交回自己 */
+    fun raw(): StrResponse = this
+
+    /** `.raw().request().url()`：跳转之后最终请求的地址 */
+    fun request(): JsRequest = JsRequest(finalUrl)
+
     override fun toString(): String = bodyText
 
     companion object {
         fun empty(): StrResponse = StrResponse()
     }
+}
+
+/** [StrResponse.request] 的返回值：只有地址 */
+class JsRequest(private val url: String) {
+    fun url(): String = url
+    override fun toString(): String = url
+}
+
+/**
+ * 交给脚本的字符串表，当 JS 对象用：`m.token`、`m['token']`、`m.get('token')`、`JSON.stringify(m)` 都行。
+ *
+ * 不把 `java.util.Map` 直接交出去：ClassShutter 只放行桥所在的包，脚本一碰 LinkedHashMap 就被挡下（这是故意的，
+ * 见 RhinoScriptRuntime.BRIDGE_ONLY）。阅读那边是 Java 的 Map，脚本两种写法都有：`cookies().token` 和
+ * `getLoginInfoMap().get('x')`，所以既是 JS 对象、又挂一个不可枚举的 `get`。
+ */
+class JsStringMap(private val map: Map<String, String>) : ScriptableObject() {
+    init {
+        map.forEach { (k, v) -> defineProperty(k, v, EMPTY) }
+        if ("get" !in map) {
+            defineProperty("get", object : BaseFunction() {
+                override fun call(cx: Context?, scope: Scriptable?, thisObj: Scriptable?, args: Array<out Any?>): Any? =
+                    args.firstOrNull()?.let { map[Context.toString(it)] }
+            }, DONTENUM)
+        }
+    }
+
+    override fun getClassName(): String = "Object"
+
+    // 没有原型（桥方法里拿不到脚本的作用域），`'' + m` 找不到 toString：直接给 JSON
+    override fun getDefaultValue(typeHint: Class<*>?): Any = toString()
+
+    override fun toString(): String =
+        kotlinx.serialization.json.JsonObject(map.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }).toString()
 }
 
 /**
@@ -76,20 +180,15 @@ interface JsRuleQuery {
     fun getString(rule: String): String
     fun getStringList(rule: String): Array<String>
     fun getElement(rule: String): JsElement?
-    fun getElements(rule: String): Array<JsElement>
+    fun getElements(rule: String): JsElements
+
+    /**
+     * `java.setContent(内容, baseUrl?)`：之后的 getString / getElement 落在这份内容上（字符串当新页面，
+     * getElements 拿到的元素就落在那个元素上）。起点、来看文学重新 ajax 一遍页面再接着抽；优特逐个元素抽字段
+     */
+    fun withContent(content: Any?, baseUrl: String?): JsRuleQuery = this
 }
 
-/**
- * 包装 Jsoup 节点给脚本用。不把 `org.jsoup.nodes.Element` 直接交出去 ——
- * ClassShutter 不会放行 jsoup 包，脚本一调 `.text()` 就会被挡。
- */
-class JsElement(private val el: org.jsoup.nodes.Element) {
-    fun text(): String = el.text()
-    fun html(): String = el.html()
-    fun outerHtml(): String = el.outerHtml()
-    fun attr(name: String): String = el.attr(name)
-    override fun toString(): String = el.outerHtml()
-}
 
 /** 带 TTL 的 KV；`cache.*` 与 `java.cache*` 用。条目上限 256，get 时过期删除，put 时顺手淘汰。 */
 class JsCache {
@@ -152,6 +251,11 @@ class SourceBridge(
 ) {
     @JvmField val bookSourceUrl: String = key
 
+    // 订阅源在阅读里是 RssSource，字段名不带 book：`source.sourceUrl` 拼 Referer（翻译类订阅源的 header 脚本、登录界面都这么写）
+    @JvmField val sourceUrl: String = key
+    @JvmField val sourceName: String = bookSourceName
+    @JvmField val sourceComment: String = bookSourceComment
+
     fun getKey(): String = key
 
     fun put(k: String, value: String): String {
@@ -169,6 +273,50 @@ class SourceBridge(
     }
 
     fun setVariable(v: String?): String = putVariable(v)
+
+    // ---- 登录信息 ----
+    // 不做登录界面：没人填过，就是阅读里「还没登录」的样子 —— getLoginInfo / getLoginInfoMap 为 null。
+    // 从前这几个方法不存在，一调就 ReferenceError：霹雳书屋的 jsLib 拼地址前先读一下登录信息，整个源搜不了；
+    // 订阅源的 header 脚本包在 try 里倒是不死，但请求头一个也没算出来。
+    // 脚本自己存进来的（一读先过一道脚本挑战、算出 Cookie 后 putLoginHeader）照存，只在进程内
+
+    fun getLoginInfo(): String? = store[LOGIN_INFO]
+
+    fun getLoginInfoMap(): JsStringMap? = getLoginInfo()?.let(::jsonStringMap)
+
+    fun putLoginInfo(info: String?): Boolean {
+        if (info.isNullOrBlank()) store.remove(LOGIN_INFO) else store[LOGIN_INFO] = info
+        return true
+    }
+
+    fun removeLoginInfo() {
+        store.remove(LOGIN_INFO)
+    }
+
+    fun getLoginHeader(): String? = store[LOGIN_HEADER]
+
+    fun getLoginHeaderMap(): JsStringMap? = getLoginHeader()?.let(::jsonStringMap)
+
+    fun putLoginHeader(header: String?) {
+        if (header.isNullOrBlank()) store.remove(LOGIN_HEADER) else store[LOGIN_HEADER] = header
+    }
+
+    fun removeLoginHeader() {
+        store.remove(LOGIN_HEADER)
+    }
+
+    private fun jsonStringMap(json: String): JsStringMap? = runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject
+    }.getOrNull()?.let { obj ->
+        JsStringMap(obj.mapValues { (_, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content ?: v.toString() })
+    }
+
+    companion object {
+        private const val LOGIN_INFO = "\$loginInfo"
+
+        /** 引擎读它给这个来源的请求补头（RuleEvaluator.loginHeaders） */
+        const val LOGIN_HEADER = "\$loginHeader"
+    }
 }
 
 /** Cookie，脚本里是 `cookie` */
@@ -237,7 +385,11 @@ class JavaBridge(
     private val cache: JsCache,
     private val vars: MutableMap<String, String>,
     private val query: JsRuleQuery? = null,
+    private val chinese: ChineseConverter = ChineseConverter.NONE,
 ) {
+
+    /** getString / getElement 落在哪份内容上；[setContent] 换掉它 */
+    private var content: JsRuleQuery? = query
 
     // ---- 网络 ----
 
@@ -247,6 +399,25 @@ class JavaBridge(
      * 返回 null 会在 JS 里抛 TypeError，把整条脚本连同书源一起搞死（思路客、大文学等一批源就死在这）。
      */
     fun ajax(url: String): String = fetchWithOptions(url, "GET", null, emptyMap()).body()
+
+    /**
+     * 一组地址一起抓，结果按传入的顺序（阅读的 `java.ajaxAll`）：漫画、图集的正文要把十几页挨个取回来拼图，
+     * 翻译类订阅源把整篇文章的段落分几批发给翻译接口。地址同样可以带 `,{…}` 选项；抓不回来的那一格是空响应，
+     * 不是 null —— 脚本直接 `res[i].body()`。
+     * [skipRateLimit] 是阅读的「这批不按来源的并发率排队」，我们这里本来就不排，忽略。
+     */
+    @JvmOverloads
+    fun ajaxAll(urlList: Array<String>, skipRateLimit: Boolean = false): Array<StrResponse> {
+        val client = http ?: return Array(urlList.size) { StrResponse.empty() }
+        // 选项照 ajax 那样整块带上：翻译类订阅源的每一格都是 `…,{"method":"post","body":…}`，丢了就是一排 405
+        val requests = urlList.map { raw ->
+            val split = splitUrlOptions(raw)
+            val opt = split?.second
+            JsHttpRequest(split?.first ?: raw, opt?.method ?: "GET", opt?.body, opt?.headers.orEmpty())
+        }
+        val results = client.fetchAll(requests)
+        return Array(urlList.size) { i -> results.getOrNull(i) ?: StrResponse.empty() }
+    }
 
     fun connect(url: String): StrResponse = fetchWithOptions(url, "GET", null, emptyMap())
 
@@ -258,6 +429,7 @@ class JavaBridge(
         method: String,
         body: String?,
         headers: Map<String, String>,
+        followRedirects: Boolean = true,
     ): StrResponse {
         val split = splitUrlOptions(url)
         val bare = split?.first ?: url
@@ -267,6 +439,7 @@ class JavaBridge(
             method = opt?.method ?: method,
             body = opt?.body ?: body,
             headers = headers + opt?.headers.orEmpty(),
+            followRedirects = followRedirects,
         ) ?: StrResponse.empty()
     }
 
@@ -280,24 +453,48 @@ class JavaBridge(
 
     fun getVerificationCode(url: String): String = ""
 
+    // 阅读的 get / post / head 走 Jsoup、**不跟随重定向**：书仓网、来看文学 POST 搜索后读 `.header("Location")`
+    // 拿结果页地址。从前跟着跳了过去，拿到的是结果页本身，Location 是空的，搜索地址拼成「站点/null」。
+    // 带超时的那几个重载（第三、四个参数是毫秒）照样认，超时用我们自己的
+
     fun get(url: String, headers: Map<*, *>?): StrResponse =
-        fetchWithOptions(url, "GET", null, toStringMap(headers))
+        fetchWithOptions(url, "GET", null, toStringMap(headers), followRedirects = false)
+
+    fun get(url: String, headers: Map<*, *>?, timeout: Int): StrResponse = get(url, headers)
 
     fun post(url: String, body: String?, headers: Map<*, *>?): StrResponse =
-        fetchWithOptions(url, "POST", body, toStringMap(headers))
+        fetchWithOptions(url, "POST", body, toStringMap(headers), followRedirects = false)
+
+    fun post(url: String, body: String?, headers: Map<*, *>?, timeout: Int): StrResponse = post(url, body, headers)
 
     fun head(url: String, headers: Map<*, *>?): StrResponse =
-        fetchWithOptions(url, "HEAD", null, toStringMap(headers))
+        fetchWithOptions(url, "HEAD", null, toStringMap(headers), followRedirects = false)
+
+    fun head(url: String, headers: Map<*, *>?, timeout: Int): StrResponse = head(url, headers)
 
     // ---- 用规则语法回抽当前页（混合写法：先 JS 判断再用 CSS）----
 
-    fun getString(rule: String): String = query?.getString(rule).orEmpty()
+    fun getString(rule: String): String = content?.getString(rule).orEmpty()
 
-    fun getStringList(rule: String): Array<String> = query?.getStringList(rule) ?: emptyArray()
+    fun getStringList(rule: String): Array<String> = content?.getStringList(rule) ?: emptyArray()
 
-    fun getElement(rule: String): JsElement? = query?.getElement(rule)
+    fun getElement(rule: String): JsElement? = content?.getElement(rule)
 
-    fun getElements(rule: String): Array<JsElement> = query?.getElements(rule) ?: emptyArray()
+    /** 同阅读给的是 Elements：`size()` / `get(i)` / `text()`，下标和 length 也认（见 BridgeWrapFactory） */
+    fun getElements(rule: String): JsElements = content?.getElements(rule) ?: JsElements(emptyList())
+
+    /** 脚本里 `org.jsoup.Jsoup.connect(url)` 的落点（Jsoup 替身转过来）：经这个来源的网络出口发 */
+    fun jsoupConnect(url: String): JsConnection = JsConnection(http, url)
+
+    /**
+     * 换一份内容给后面的 getString / getElement 用（阅读的 `java.setContent`）：字符串当新页面，
+     * getElements 拿到的元素就落在那个元素上。从前没有这个方法，起点「过了 cookie 验证重新 ajax 一遍」那条路一走就是 ReferenceError
+     */
+    fun setContent(content: Any?) = setContent(content, null)
+
+    fun setContent(content: Any?, baseUrl: String?) {
+        this.content = query?.withContent(content, baseUrl)
+    }
 
     // ---- 变量（同一条抓取链路内传值）----
 
@@ -402,6 +599,25 @@ class JavaBridge(
 
     fun htmlFormat(str: String): String = org.jsoup.Jsoup.parse(str).text()
 
+    /** 繁体 → 简体（阅读的 `java.t2s`）；平台没给转换器时原样返回，见 [ChineseConverter] */
+    fun t2s(text: String?): String = text?.let(chinese::toSimplified).orEmpty()
+
+    /** 简体 → 繁体：台湾站搜索前先把关键词转成繁体（`searchkey={{java.s2t(key)}}`） */
+    fun s2t(text: String?): String = text?.let(chinese::toTraditional).orEmpty()
+
+    /**
+     * 「第一百二十三章 xxx」→「第123章」（阅读的 `java.toNumChapter`）：返回的**只有**换成数字的那一段「第N章」，
+     * 标题其余部分不要 —— 来源就是这么用的：`.replace(/第([零一二…]+)章/g, java.toNumChapter(result))`。
+     * 没有「第…章」原样返回；章号认不出（「第1卷 第3章」那种懒惰匹配到的一大段）给回匹配到的原文，阅读这时写成「第-1章」，没必要学
+     */
+    fun toNumChapter(s: String?): String? {
+        s ?: return null
+        val m = TITLE_NUM.find(s) ?: return s
+        val n = com.radium.inkwell.core.source.detect.ChapterTitles.parseNumber(m.groupValues[2].filterNot { it.isWhitespace() })
+            ?: return m.value
+        return "${m.groupValues[1]}$n${m.groupValues[3]}"
+    }
+
     fun randomUUID(): String = UUID.randomUUID().toString()
 
     /**
@@ -462,6 +678,9 @@ class JavaBridge(
         }.getOrDefault(emptyMap())
     }
 }
+
+/** 阅读的 AppPattern.titleNumPattern */
+private val TITLE_NUM = Regex("(第)(.+?)(章)")
 
 /** 书源里的 base64 常缺 padding 或用 URL 变体，宽松处理；实在解不开给空数组 */
 internal fun decodeBase64Lenient(str: String): ByteArray {

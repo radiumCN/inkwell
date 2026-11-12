@@ -23,6 +23,7 @@ import javax.crypto.spec.SecretKeySpec
  * Base64 用的是 Android 那套 `decode(字节, 2)` / `encodeToString(字节, NO_WRAP)`，也照它做了（[AndroidBase64]）。
  * 替身之外的类（`java.io.File`、`java.lang.Runtime`、`java.lang.System`……）在 `Packages` 里压根没有，
  * 导进来也是 undefined，和从前一样跑不起来。
+ * `org.jsoup`（Jsoup、Connection、TextNode、Parser）也挂在这棵树上，替身本身在 JsoupShim。
  *
  * 只在脚本里出现这几个名字时才装（[COMPAT_TRIGGERS]），装在这一次求值自己的作用域上（[PRELUDE]），不串到别的来源。
  */
@@ -75,9 +76,22 @@ class JdkCompat {
 
     fun gcm(tagBits: Int, iv: ByteArray): GcmParameterShim = GcmParameterShim(tagBits, iv.copyOf())
 
+    // org.jsoup：解析与造节点，见 JsoupShim。`Jsoup.connect` 要这一次求值的网络出口，替身里转给 `java.jsoupConnect`
+
+    fun jsoupParse(html: String, baseUri: String, xml: Boolean): JsElement = JsoupShim.parse(html, baseUri, xml)
+
+    fun jsoupParseBodyFragment(html: String, baseUri: String): JsElement = JsoupShim.parseBodyFragment(html, baseUri)
+
+    fun jsoupTextNode(text: String): JsElement = JsoupShim.textNode(text)
+
+    fun jsoupElement(tag: String): JsElement = JsoupShim.element(tag)
+
     companion object {
-        /** 脚本（或它的 jsLib）里出现这些字才装替身：不用 JDK 的脚本一点开销都没有 */
-        val COMPAT_TRIGGERS = listOf("Packages", "JavaImporter", "importPackage", "importClass")
+        /**
+         * 脚本（或它的 jsLib）里出现这些字才装替身：不用 JDK 的脚本一点开销都没有。
+         * `org.jsoup`：阅读的作用域里 `org` 是顶层包，脚本不写 Packages 直接 `org.jsoup.Jsoup.parse(…)`
+         */
+        val COMPAT_TRIGGERS = listOf("Packages", "JavaImporter", "importPackage", "importClass", "org.jsoup")
 
         fun wanted(script: String, jsLib: String?): Boolean =
             COMPAT_TRIGGERS.any { script.contains(it) || jsLib?.contains(it) == true }
@@ -132,10 +146,31 @@ class JdkCompat {
     return arguments.length > 1 ? jdk.iv(b, off, len) : jdk.iv(b);
   });
   var Gcm = cls('GCMParameterSpec', function (bits, b) { return jdk.gcm(bits, b); });
+  // org.jsoup：Parser 只是个记号，parse 认出 xmlParser 就按 XML 解析
+  function str(v) { return v == null ? '' : String(v); }
+  function isParser(p) { return !!(p && p.__inkwellParser); }
+  var Prs = cls('Parser', null, {
+    xmlParser: function () { return { __inkwellParser: 'xml' }; },
+    htmlParser: function () { return { __inkwellParser: 'html' }; }
+  });
+  var Jsp = cls('Jsoup', null, {
+    parse: function (html, base, parser) {
+      if (isParser(base)) { parser = base; base = ''; }
+      return jdk.jsoupParse(str(html), str(base), !!(parser && parser.__inkwellParser === 'xml'));
+    },
+    parseBodyFragment: function (html, base) { return jdk.jsoupParseBodyFragment(str(html), str(base)); },
+    connect: function (url) { return top.java.jsoupConnect(String(url)); }
+  });
+  var Conn = cls('Connection', null, {
+    Method: { GET: 'GET', POST: 'POST', PUT: 'PUT', DELETE: 'DELETE', PATCH: 'PATCH', HEAD: 'HEAD', OPTIONS: 'OPTIONS', TRACE: 'TRACE' }
+  });
+  var TxtNode = cls('TextNode', function (t) { return jdk.jsoupTextNode(str(t)); });
+  var Elem = cls('Element', function (tag) { return jdk.jsoupElement(String(tag)); });
   var pkgs = {
     java: { lang: { String: Str }, util: { Base64: B64, Arrays: Arr } },
     javax: { crypto: { Cipher: Ciph, spec: { SecretKeySpec: Key, IvParameterSpec: Iv, GCMParameterSpec: Gcm } } },
-    android: { util: { Base64: B64 } }
+    android: { util: { Base64: B64 } },
+    org: { jsoup: { Jsoup: Jsp, Connection: Conn, nodes: { TextNode: TxtNode, Element: Elem }, parser: { Parser: Prs } } }
   };
   function importInto(target, what) {
     if (!what) return;
@@ -152,6 +187,7 @@ class JdkCompat {
   };
   JavaImporter.prototype.importClass = JavaImporter.prototype.importPackage;
   top.Packages = pkgs;
+  top.org = pkgs.org;
   top.JavaImporter = JavaImporter;
   top.importPackage = function () { for (var i = 0; i < arguments.length; i++) importInto(top, arguments[i]); };
   top.importClass = top.importPackage;

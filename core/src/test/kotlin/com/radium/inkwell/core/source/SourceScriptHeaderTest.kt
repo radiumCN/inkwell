@@ -134,6 +134,32 @@ class SourceScriptHeaderTest {
     }
 
     @Test
+    fun `规则里 putLoginHeader 存下的头，这个来源后面的请求都带上`() = runBlocking {
+        // 一读这类站：先回一段脚本挑战，规则算出 Cookie 存进登录头，后面的请求靠它过
+        val src = source(
+            header = """{"User-Agent":"src-ua"}""",
+            name = "h3@text@js:source.putLoginHeader(JSON.stringify({'Cookie': 't=1', 'User-Agent': 'login-ua'})); result",
+        )
+        val eng = engine()
+        val hit = eng.search(src, "斗破").items.single()
+        eng.getDetail(src, hit.bookUrl, hit.variables)
+        assertNull(nextRequest().getHeader("Cookie"))
+        val detail = nextRequest()
+        assertEquals("t=1", detail.getHeader("Cookie"))
+        // 登录头盖过源级请求头（同阅读的 getHeaderMap）
+        assertEquals("login-ua", detail.getHeader("User-Agent"))
+    }
+
+    @Test
+    fun `proxy 头是阅读设代理用的，不发给站点`() = runBlocking {
+        val src = source("@js:JSON.stringify({'X-A': '1', 'proxy': ''})")
+        engine().search(src, "斗破")
+        val req = nextRequest()
+        assertEquals("1", req.getHeader("X-A"))
+        assertNull(req.getHeader("proxy"))
+    }
+
+    @Test
     fun `header 脚本的两种写法都认，JSON 写法不算脚本`() {
         assertEquals("JSON.stringify({})", headerScriptOf("@js:JSON.stringify({})"))
         assertEquals("\nvar h = 1 < 2;\nJSON.stringify({})\n", headerScriptOf("<js>\nvar h = 1 < 2;\nJSON.stringify({})\n</js>"))

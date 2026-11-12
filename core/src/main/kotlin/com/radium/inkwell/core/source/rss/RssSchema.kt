@@ -21,6 +21,11 @@ data class RssSourceRule(
     val group: String = "",
     val enabled: Boolean = true,
     val headers: Map<String, String> = emptyMap(),
+    /**
+     * 请求头写成脚本时的脚本本体（阅读 header 的 `@js:` / `<js>` 写法，去掉包装）；JSON 写法在 [headers] 里，这里为 null。
+     * 同书源，引擎每次请求现跑（RssEngine.sourceHeaders）：翻译类学术订阅源拿它拼 UA、Referer
+     */
+    val headerScript: String? = null,
     val charset: String? = null,
     /** 分类。为空时用源地址本身当唯一分类 */
     val sorts: List<RssSort> = emptyList(),

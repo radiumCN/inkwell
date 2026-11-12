@@ -1,9 +1,17 @@
 package com.radium.inkwell.core.source
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.nullable
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
 /** 书源 JSON 统一编解码实例；存的是 Legado 原生格式，未知字段忽略 */
@@ -41,11 +49,12 @@ data class BookSourceRule(
     val concurrentRate: String? = null,
     val searchUrl: String? = null,
     val exploreUrl: String? = null,
-    val ruleSearch: SearchRuleSet? = null,
-    val ruleExplore: SearchRuleSet? = null,
-    val ruleBookInfo: BookInfoRuleSet? = null,
-    val ruleToc: TocRuleSet? = null,
-    val ruleContent: ContentRuleSet? = null,
+    // 规则集读得宽：对象、JSON 字符串都认，别的写法（`[]`、乱填的值）当没有，同阅读的导入 —— 见 [LenientRuleSet]
+    @Serializable(with = LenientSearchRuleSet::class) val ruleSearch: SearchRuleSet? = null,
+    @Serializable(with = LenientSearchRuleSet::class) val ruleExplore: SearchRuleSet? = null,
+    @Serializable(with = LenientBookInfoRuleSet::class) val ruleBookInfo: BookInfoRuleSet? = null,
+    @Serializable(with = LenientTocRuleSet::class) val ruleToc: TocRuleSet? = null,
+    @Serializable(with = LenientContentRuleSet::class) val ruleContent: ContentRuleSet? = null,
     /**
      * 公共脚本库（Legado 的 jsLib）：规则、模板、地址里的脚本都能调它定义的函数。
      * 阅读的远程库写法（`{"名字":"地址"}`）不下载，当没有库。
@@ -148,6 +157,39 @@ data class ContentRuleSet(
     val replaceRegex: String? = null,
     val imageStyle: String? = null,
 )
+
+/**
+ * 规则集（ruleSearch / ruleExplore / ruleBookInfo / ruleToc / ruleContent）的宽松读法，同阅读导入时的 GSON：
+ * 是对象照常读；是字符串、里面是一个 JSON 对象的，解开再读（有的合集导出时把规则集存成了字符串）；
+ * 其余（`[]`、数字、解不开的字符串）当这个规则集没写。
+ *
+ * 从前一律按对象读，一个来源把没用到的发现规则写成 `"ruleExplore": []`，整条解析失败、导入时被跳过 ——
+ * 搜索、目录、正文明明都好好的（UU看书、肉文小说这几个就是这么没的）。写出去照旧是对象。
+ */
+abstract class LenientRuleSet<T : Any>(private val inner: KSerializer<T>) : KSerializer<T?> {
+    override val descriptor: SerialDescriptor = inner.descriptor.nullable
+
+    override fun deserialize(decoder: Decoder): T? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeNullableSerializableValue(inner.nullable)
+        val obj = when (val el = json.decodeJsonElement()) {
+            is JsonObject -> el
+            is JsonPrimitive -> el.contentOrNull
+                ?.takeIf { el.isString && it.trimStart().startsWith("{") }
+                ?.let { runCatching { json.json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+            else -> null
+        } ?: return null
+        return runCatching { json.json.decodeFromJsonElement(inner, obj) }.getOrNull()
+    }
+
+    override fun serialize(encoder: Encoder, value: T?) {
+        encoder.encodeNullableSerializableValue(inner, value)
+    }
+}
+
+object LenientSearchRuleSet : LenientRuleSet<SearchRuleSet>(SearchRuleSet.serializer())
+object LenientBookInfoRuleSet : LenientRuleSet<BookInfoRuleSet>(BookInfoRuleSet.serializer())
+object LenientTocRuleSet : LenientRuleSet<TocRuleSet>(TocRuleSet.serializer())
+object LenientContentRuleSet : LenientRuleSet<ContentRuleSet>(ContentRuleSet.serializer())
 
 /** 令牌桶限速：每 intervalMs 补一个令牌，桶容量 burst */
 @Serializable

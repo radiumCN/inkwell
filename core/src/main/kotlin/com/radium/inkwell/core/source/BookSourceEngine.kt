@@ -725,7 +725,7 @@ class BookSourceEngine(
         // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
         val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
             ?: SourceHttpClient.DEFAULT_UA
-        return r.render(target, headers, ua)?.also { page ->
+        return r.render(target, headers.withoutLegadoOnlyHeaders(), ua)?.also { page ->
             trace?.onFetch(
                 FetchTrace(target, "RENDER", page.statusCode, page.finalUrl, page.detectedCharset, page.bodyText.take(500))
             )
@@ -804,8 +804,14 @@ class BookSourceEngine(
      *
      * 跑不出 JSON（报错、返回的不是对象）就当没有源级请求头 —— 和从前一样，别让一段坏 header 把这个源的请求全拦下。
      * 变量表拷一份给它：header 脚本里 java.put 的东西不该混进这条链路要交回去的变量（[SearchResult.variables]）。
+     *
+     * 脚本 `source.putLoginHeader(…)` 存下的头盖在最上面（同阅读的 getHeaderMap）：一读这类站先回一段脚本挑战，
+     * 规则算出 Cookie 存进去，后面的请求就得带着它
      */
-    private fun sourceHeaders(source: BookSourceRule, js: JsContext = jsContextOf(source)): Map<String, String> {
+    private fun sourceHeaders(source: BookSourceRule, js: JsContext = jsContextOf(source)): Map<String, String> =
+        baseSourceHeaders(source, js) + evaluator.loginHeaders(source.id)
+
+    private fun baseSourceHeaders(source: BookSourceRule, js: JsContext): Map<String, String> {
         val script = source.headerScript ?: return source.headers
         val ctx = urlContext(
             source,
@@ -820,14 +826,14 @@ class BookSourceEngine(
         return headers
     }
 
-    /** 页面上下文：HTML 与原始文本（JSON 规则懒解析）同时可用 */
+    /** 页面上下文：文档（`<?xml` 开头的按 XML 解析，见 [parsePage]）与原始文本（JSON 规则懒解析）同时可用 */
     private fun pageContext(
         fetched: FetchedPage,
         vars: Map<String, String>,
         js: JsContext = JsContext(),
     ): EvalContext =
         EvalContext(
-            element = Jsoup.parse(fetched.bodyText, fetched.finalUrl),
+            element = parsePage(fetched.bodyText, fetched.finalUrl),
             json = fetched.bodyText,
             baseUrl = fetched.finalUrl,
             vars = vars,
