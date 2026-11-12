@@ -41,6 +41,13 @@ data class SearchResult(
     val sourceId: String,
     /** 书源名称。只有 id（其实是书源网址）的话，换源列表里满屏都是域名，没人认得出哪个是哪个 */
     val sourceName: String = "",
+    /**
+     * 搜索这一步 `java.put` / `@put` 存下的变量（Legado 的 searchBook.variable）：进详情时经
+     * [BookSourceEngine.getDetail] 的 `variables` 交回去，之后随书存、目录正文都读得到。
+     * 接口源常在搜索地址的脚本里把签名用的请求头 put 下来，详情、目录地址再 `java.get` 拼上 ——
+     * 不交回去，后面每一步都少了请求头（七猫的接口源就是这样 401 的）。
+     */
+    val variables: Map<String, String> = emptyMap(),
 )
 
 data class SearchPage(
@@ -162,10 +169,13 @@ class BookSourceEngine(
                 ?: throw SourceException("来源「${source.name}」未配置搜索规则")
             val rule = source.ruleSearch ?: throw SourceException("来源「${source.name}」未配置搜索规则")
             val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
-            val fetched = fetchByRequest(source, searchUrl, vars, "search")
+            // 地址脚本和列表规则用同一张变量表（同 Legado 的 ruleData）：搜索地址里 java.put 的东西，
+            // 解析结果时 java.get 要拿得到。从前两边各开一张，put 进去的转头就没了
+            val js = jsContextOf(source)
+            val fetched = fetchByRequest(source, searchUrl, vars, "search", js)
             parseListPage(
                 source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-                pageable = pageable(searchUrl),
+                pageable = pageable(searchUrl), js = js,
             )
         }
 
@@ -201,10 +211,11 @@ class BookSourceEngine(
                 ?: source.ruleExplore
                 ?: throw SourceException("来源「${source.name}」未配置发现规则")
             val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
-            val fetched = fetchByRequest(source, item.url, vars, "explore")
+            val js = jsContextOf(source)
+            val fetched = fetchByRequest(source, item.url, vars, "explore", js)
             parseListPage(
                 source, "explore", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-                pageable = pageable(item.url),
+                pageable = pageable(item.url), js = js,
             )
         }
 
@@ -220,28 +231,42 @@ class BookSourceEngine(
         r.kind?.let { put("kind", it) }
     }
 
-    suspend fun getDetail(source: BookSourceRule, bookUrl: String): RemoteBookDetail =
+    /**
+     * @param variables 搜索结果带来的变量（[SearchResult.variables]）。详情规则的 `java.get` 先能读到它们，
+     *   返回的 [RemoteBookDetail.variables] 里也含着，随书存下（Legado：book.variable 取自 searchBook.variable）
+     */
+    suspend fun getDetail(
+        source: BookSourceRule,
+        bookUrl: String,
+        variables: Map<String, String> = emptyMap(),
+    ): RemoteBookDetail =
         engineIo {
             val url = resolveUrl(source.baseUrl, bookUrl)
             // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
             // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
             // Legado 里 ruleBookInfo 可缺省（详情页即目录页），缺省时直接用详情页地址当目录地址。
-            withRenderFallback(source, "detail") { render -> parseDetail(source, url, render) }
-                ?: RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
+            withRenderFallback(source, "detail") { render -> parseDetail(source, url, render, variables) }
+                ?: RemoteBookDetail(
+                    title = "", author = null, coverUrl = null, intro = null, tocUrl = url, variables = variables,
+                )
         }
 
     private suspend fun parseDetail(
         source: BookSourceRule,
         url: String,
         render: Boolean,
+        variables: Map<String, String>,
     ): RemoteBookDetail? {
         val info = source.ruleBookInfo
         if (info == null) {
-            // 无详情规则：详情页即目录页，不抓取，直接把地址透传给目录阶段
-            return RemoteBookDetail(title = "", author = null, coverUrl = null, intro = null, tocUrl = url)
+            // 无详情规则：详情页即目录页，不抓取，直接把地址透传给目录阶段（搜索带来的变量照样往下交）
+            return RemoteBookDetail(
+                title = "", author = null, coverUrl = null, intro = null, tocUrl = url, variables = variables,
+            )
         }
         val fetched = fetchPage(source, url, "detail", render)
         val js = jsContextOf(source, bookUrl = url)
+        js.scriptVars.putAll(variables)
         val pageCtx = pageContext(fetched, varsOf(source), js)
         // Legado 先跑 init，再在它**选中的那块内容**上求后面的字段（setContent(getElement(init))）。
         // 常见两种写法：@put:{n,a,k} 存变量给后面 @get:{n}；`$.data` / `class.info` 切换求值内容。
@@ -615,24 +640,16 @@ class BookSourceEngine(
         stage: String,
         render: Boolean,
     ): FetchedPage {
-        if (render && renderer != null) {
-            val split = splitUrlOptions(url)
-            val opt = split?.second
+        val split = splitUrlOptions(url)
+        val opt = split?.second
+        // 地址自带 webView（书源声明这一页要渲染）的，不等「静态解析为空」再回退，直接渲染
+        if ((render || opt?.webView == true) && renderer != null) {
             val staticOnly = opt != null && (opt.body != null || (opt.method ?: "GET") != "GET")
             if (!staticOnly) {
                 val target = split?.first ?: url
                 // 源级 header 模板（{{baseUrl}} 等）要用真实变量展开，否则防盗链站拿到空 Referer 会 403
                 val headers = mergeHeaders(source.headers, opt?.headers.orEmpty(), varsOf(source))
-                // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
-                val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
-                    ?: SourceHttpClient.DEFAULT_UA
-                renderer.render(target, headers, ua)?.let { page ->
-                    trace?.onFetch(
-                        FetchTrace(target, "RENDER", page.statusCode, page.finalUrl,
-                            page.detectedCharset, page.bodyText.take(500))
-                    )
-                    return page
-                }
+                render(target, headers)?.let { return it }
             }
         }
         return fetchUrl(source, url, stage)
@@ -648,9 +665,10 @@ class BookSourceEngine(
         urlTemplate: String,
         vars: Map<String, String>,
         stage: String,
+        js: JsContext = jsContextOf(source),
     ): FetchedPage {
         // 地址里的 {{}} 同样按 Legado 语义展开（JS 表达式 / 嵌套规则），不只是变量替换
-        val urlCtx = urlContext(source, vars)
+        val urlCtx = urlContext(source, vars, js)
         val keyword = vars["keyword"].orEmpty()
 
         // 地址整串可能是 JS（<js>…</js> / @js:…），脚本的返回值才是真地址；
@@ -682,15 +700,36 @@ class BookSourceEngine(
         val expanded = evaluator.expandTemplate(markKeyword(urlPart), urlCtx)
             .replace(KEYWORD_MARK, encodeUrlComponent(keyword, charset))
         val url = resolveUrl(source.baseUrl, encodeNonAsciiQuery(expanded, charset))
+        val mergedHeaders = mergeHeaders(source.headers, headers, vars)
+        // 书源自己声明了要 WebView（Legado 的 webView）：搜索、发现也照办。不声明的源照旧只静态抓 ——
+        // 自动回退（[withRenderFallback]）不碰搜索，是怕上百个源一起排队等 WebView；声明了的只有寥寥几个，
+        // 而它们的结果本来就是页面脚本拉回来的，静态抓永远是空壳（七猫的网页版）。
+        // 渲染器只会 GET：带 body 的照旧静态抓。渲染失败（超时、加载出错）也退回静态抓
+        if (opt.webView && body == null && method.equals("GET", ignoreCase = true)) {
+            render(url, mergedHeaders)?.let { return it }
+        }
         return doFetch(
             stage = stage,
             url = url,
             method = method,
             body = body,
-            headers = mergeHeaders(source.headers, headers, vars),
+            headers = mergedHeaders,
             charset = charset,
             rateLimit = source.rateLimit,
         )
+    }
+
+    /** 交给渲染器；没注入渲染器或渲染失败返回 null，调用方退回静态抓取 */
+    private suspend fun render(target: String, headers: Map<String, String>): FetchedPage? {
+        val r = renderer ?: return null
+        // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
+        val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+            ?: SourceHttpClient.DEFAULT_UA
+        return r.render(target, headers, ua)?.also { page ->
+            trace?.onFetch(
+                FetchTrace(target, "RENDER", page.statusCode, page.finalUrl, page.detectedCharset, page.bodyText.take(500))
+            )
+        }
     }
 
     /**
@@ -774,13 +813,14 @@ class BookSourceEngine(
 
     /** 脚本上下文：书源标识 + 当前书/章节。scriptVars 每条抓取链路一份，供 java.put/get 传值 */
     /** 展开地址模板用的上下文：没有页面，只有变量与脚本桥 */
-    private fun urlContext(source: BookSourceRule, vars: Map<String, String>) = EvalContext(
-        element = null,
-        json = null,
-        baseUrl = source.baseUrl,
-        vars = vars,
-        js = jsContextOf(source),
-    )
+    private fun urlContext(source: BookSourceRule, vars: Map<String, String>, js: JsContext = jsContextOf(source)) =
+        EvalContext(
+            element = null,
+            json = null,
+            baseUrl = source.baseUrl,
+            vars = vars,
+            js = js,
+        )
 
     private fun jsContextOf(
         source: BookSourceRule,
@@ -816,9 +856,15 @@ class BookSourceEngine(
         fields: Map<String, String>,
         nextPageRule: String?,
         pageable: Boolean = false,
+        js: JsContext = jsContextOf(source),
     ): SearchPage {
-        val ctx = pageContext(fetched, vars, jsContextOf(source))
-        val items = evalList(stage, listRule, ctx).mapNotNull { itemCtx ->
+        val ctx = pageContext(fetched, vars, js)
+        val items = evalList(stage, listRule, ctx).mapNotNull { node ->
+            // 每条结果拷一份页面的变量表（同 Legado：每个 searchBook 拷一份 ruleData 的变量）：
+            // 一条结果的规则里 put 的，不串到下一条
+            val itemCtx = node.copy(
+                js = node.js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap(js.scriptVars)),
+            )
             val title = evalField(stage, "title", fields["title"], itemCtx)
             val bookUrl = evalUrlField(stage, "bookUrl", fields["bookUrl"], itemCtx)
                 ?.takeIf { it.isNotBlank() }
@@ -836,6 +882,7 @@ class BookSourceEngine(
                 kind = evalField(stage, "kind", fields["kind"], itemCtx),
                 sourceId = source.id,
                 sourceName = source.name,
+                variables = itemCtx.js.scriptVars.toMap(),
             )
         }
         // nextPage 规则命中即可继续；书源没有该规则时，只要地址模板带 page 且这一页有结果，
@@ -1061,6 +1108,11 @@ internal data class UrlOptions(
     val body: String? = null,
     val charset: String? = null,
     val headers: Map<String, String> = emptyMap(),
+    /**
+     * 书源声明这个地址要用 WebView 打开、等页面脚本跑完再取 HTML（Legado 的 `webView`）：
+     * 结果是页面加载后再由脚本拉回来的站（七猫的网页版搜索），静态抓到的只是一个空壳。
+     */
+    val webView: Boolean = false,
 )
 
 /**
@@ -1138,9 +1190,12 @@ internal fun splitUrlOptions(url: String): Pair<String, UrlOptions>? {
 private fun parseUrlOptions(text: String): UrlOptions? {
     val obj = parseLenientJsonObject(text) ?: return null
     fun str(k: String) = (obj[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    // 值为空的头照样发（同 Legado）：接口源常把一组头（含 `AUTHORIZATION: ""` 这类空值）连同键名一起算签名，
+    // 少发一个，服务端按收到的头验签就对不上 —— 七猫的接口源因此整个 401。从前这里把空值滤掉了。
+    // 只丢 JSON 的 null（没有值，不是空串）
     val hdr = (obj["headers"] as? kotlinx.serialization.json.JsonObject)
-        ?.mapValues { (_, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.orEmpty() }
-        ?.filterValues { it.isNotBlank() }
+        ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { k to it } }
+        ?.toMap()
         .orEmpty()
     // Legado 的 body 可以直接写成 JSON 对象/数组，发送时序列化成 JSON 文本（UrlOption.getBody 里的 toJson）。
     // 从前只认字符串，`"body":{"page":1}` 整个被丢掉，POST 发出去的是空 body
@@ -1154,6 +1209,12 @@ private fun parseUrlOptions(text: String): UrlOptions? {
         body = body,
         charset = str("charset"),
         headers = hdr,
+        // 同 Legado 的 useWebView()：没有、空串、false / "false" 是不用，其余（true、"1"、任何字）都算要
+        webView = when (val w = obj["webView"]) {
+            null, is kotlinx.serialization.json.JsonNull -> false
+            is kotlinx.serialization.json.JsonPrimitive -> w.content.isNotBlank() && !w.content.equals("false", true)
+            else -> true
+        },
     )
 }
 

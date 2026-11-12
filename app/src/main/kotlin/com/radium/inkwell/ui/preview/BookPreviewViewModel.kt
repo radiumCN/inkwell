@@ -213,7 +213,7 @@ class BookPreviewViewModel(
                 // 当成整页取消往外抛会让 loading 停在 true（WebView 渲染超时就会这样）。
                 val deferred = async {
                     try {
-                        Result.success(netBookRepo.fetchDetailAndToc(rule, r.bookUrl))
+                        Result.success(netBookRepo.fetchDetailAndToc(rule, r.bookUrl, r.variables))
                     } catch (e: TimeoutCancellationException) {
                         Result.failure(e)
                     } catch (e: CancellationException) {

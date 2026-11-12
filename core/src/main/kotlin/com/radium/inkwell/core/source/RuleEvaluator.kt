@@ -270,9 +270,22 @@ class RuleEvaluator(
      * 有元素的上下文（HTML 页面）、`@` 开头的、带模板的不动。
      */
     private fun bareJsonPath(rule: String, ctx: EvalContext): String? {
-        if (ctx.element != null || ctx.json == null) return null
+        val json = ctx.json ?: return null
+        // 页面一级的上下文同时带着 Jsoup 文档和原文（BookSourceEngine.pageContext）：原文本身是 JSON 才按 JSONPath 走，
+        // 同 Legado 的 isJSON —— 内容是 JSON 时，不带前缀的规则一律是 JSONPath（Jayway 自己补 `$.`）。
+        // 从前这一级只认 `$.` 开头的：接口源把列表写成 `data.books`、详情 init 写成 `data.book`，
+        // 被当成 CSS 选择器去 HTML 里找，一个节点都没有（七猫的接口源搜索、详情全空）
+        if (ctx.element != null && !(json is String && looksLikeJson(json))) return null
         if (rule.isBlank() || rule.startsWith("@") || rule.contains("{{")) return null
         return "$." + rule.trim()
+    }
+
+    /** 同 Legado 的 `String.isJson()`：去掉首尾空白后由 `{…}` 或 `[…]` 包住。只看两头，不为判断复制几 MB 的响应体 */
+    private fun looksLikeJson(text: String): Boolean {
+        val first = text.indexOfFirst { !it.isWhitespace() }
+        if (first < 0) return false
+        val last = text.indexOfLast { !it.isWhitespace() }
+        return (text[first] == '{' && text[last] == '}') || (text[first] == '[' && text[last] == ']')
     }
 
     private fun readJsonPath(path: String, ctx: EvalContext): Any? {

@@ -110,7 +110,8 @@ class AutoSourceSwitcher(
             }
             ?: return null
 
-        val detail = engine.getDetail(rule, hit.bookUrl)
+        // 搜索那步存下的变量（签名用的请求头之类）交回去，同手动换源
+        val detail = engine.getDetail(rule, hit.bookUrl, hit.variables)
         val toc = engine.getToc(
             rule, detail.tocUrl.ifBlank { hit.bookUrl },
             bookUrl = hit.bookUrl, bookTitle = detail.title.ifBlank { hit.title },

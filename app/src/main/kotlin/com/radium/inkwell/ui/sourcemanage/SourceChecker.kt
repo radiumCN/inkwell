@@ -160,7 +160,9 @@ class SourceChecker(
                 }
 
                 step = CheckStep.DETAIL
-                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl) { step = CheckStep.TOC }
+                val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, hit.bookUrl, hit.variables) {
+                    step = CheckStep.TOC
+                }
                 if (!opts.checkToc && !opts.checkContent) return@withTimeout ok(chars = -1, startedAt)
                 if (toc.isEmpty()) throw CheckFailed("目录为空")
                 if (!opts.checkContent) return@withTimeout ok(chars = -1, startedAt)
