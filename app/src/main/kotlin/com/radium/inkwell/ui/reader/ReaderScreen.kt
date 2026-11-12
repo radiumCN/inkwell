@@ -37,6 +37,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.imageAt
+import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.selectWordAt
 import androidx.compose.foundation.layout.Arrangement
@@ -216,6 +218,8 @@ fun ReaderScreen(
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
+    /** 长按看大图：正在看的那张图（resourceId）；null = 没在看 */
+    var viewingImage by remember { mutableStateOf<String?>(null) }
     /** 正在双指调字号 / 右边缘调亮度时的读数（见 QuickAdjustOverlay）；null = 没在调 */
     var quickAdjust by remember { mutableStateOf<QuickAdjust?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -241,12 +245,16 @@ fun ReaderScreen(
         !pageUi.loading &&
         spec != null &&
         selection == null &&
+        viewingImage == null &&
         !addShelfPrompt
     LaunchedEffect(volumeFlip) { keyBus.volumeFlipEnabled = volumeFlip }
 
     // 选字期间自动翻页暂停：ViewModel 停表（松手后重新计满一个间隔再翻，不会一取消选区就立刻跳页），
     // 这里再拦一道 —— 万一请求已经在路上，也别在选区底下把页翻走
-    LaunchedEffect(selection != null) { viewModel.setSelectionActive(selection != null) }
+    // 看大图时同理：底下那页别自己翻走，关掉大图还得找回刚才那一页
+    LaunchedEffect(selection != null || viewingImage != null) {
+        viewModel.setSelectionActive(selection != null || viewingImage != null)
+    }
     // 自动翻页与音量键共用 FlipController，沿用用户选的仿真/覆盖/平移等效果
     LaunchedEffect(Unit) {
         viewModel.animatedFlipRequests.collect {
@@ -366,10 +374,21 @@ fun ReaderScreen(
             !overlay.readerSheetOpen &&
             overlay.sourceCandidates == null &&
             selection == null &&
+            viewingImage == null &&
             !overlay.autoChanging &&
             pageUi.error == null &&
             !pageUi.loading &&
             layout != null
+
+        // 点在图上：没取到的那条提示是「点按重试」，点了就重取、不翻页；点在真图上照旧翻页 / 开菜单
+        val onImageTap: (PageItem.ImageBox) -> Boolean = { box ->
+            if (box.failed) {
+                viewModel.retryImage(box.resourceId)
+                true
+            } else {
+                false
+            }
+        }
 
         // 翻页区（含页眉页脚）录进 pageBackdrop：阅读菜单与选字工具条对它取样做毛玻璃（readerGlass），只在 recordPage 时录。
         // 页面全是 Compose 自己画的（PageCanvas、仿真页的位图也画在 Compose 画布上），图层录得下来；
@@ -510,6 +529,11 @@ fun ReaderScreen(
                             tapZones = session.settings.tapZones,
                             onFlip = { viewModel.flip(it) },
                             onCenterTap = { viewModel.toggleMenu() },
+                            onImageTap = onImageTap,
+                            onImageLongPress = if (!session.settings.showImages) null else { box ->
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewingImage = box.resourceId
+                            },
                         )
                         PageInfoBar(pageUi, session, layout)
                     }
@@ -526,11 +550,23 @@ fun ReaderScreen(
                             // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
                             // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
                             // 子节点没消费的才轮到它 —— 静止长按恰好没人消费。
-                            .pointerInput(session.textSelectionEnabled) {
-                                if (!session.textSelectionEnabled) return@pointerInput
+                            // 长按一张图是看大图（图上没有字，和选字不冲突）；选字关着时长按图照样能看
+                            .pointerInput(session.textSelectionEnabled, session.settings.showImages) {
+                                val selectText = session.textSelectionEnabled
+                                val viewImages = session.settings.showImages
+                                if (!selectText && !viewImages) return@pointerInput
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = { pos ->
                                         val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
+                                        if (viewImages) {
+                                            val image = p.imageAt(pos.x, pos.y, layoutLatest.value)
+                                            if (image != null && !image.failed) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                viewingImage = image.resourceId
+                                                return@detectDragGesturesAfterLongPress
+                                            }
+                                        }
+                                        if (!selectText) return@detectDragGesturesAfterLongPress
                                         val sel = p.selectWordAt(pos.x, pos.y, layoutLatest.value)
                                         if (sel != null && !sel.isEmpty) {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -579,6 +615,7 @@ fun ReaderScreen(
                             controller = flipController,
                             tapZones = session.settings.tapZones,
                             selection = selection,
+                            onImageTap = onImageTap,
                         )
                         PageInfoBar(pageUi, session, layout)
                     }
@@ -620,6 +657,22 @@ fun ReaderScreen(
                     pageBackdrop = pageBackdrop,
                 )
             }
+        }
+
+        // 长按看大图：盖在整个阅读页最上面。留住最后一张的 id，退场淡出时还有东西可画
+        val lastViewed = remember { mutableStateOf("") }
+        viewingImage?.let { lastViewed.value = it }
+        AnimatedVisibility(
+            visible = viewingImage != null,
+            enter = scrimEnter(),
+            exit = scrimExit(),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            ReaderImageViewer(
+                resourceId = lastViewed.value,
+                load = { w, h -> viewModel.loadViewerImage(lastViewed.value, w, h) },
+                onDismiss = { viewingImage = null },
+            )
         }
 
         if (pageUi.atBookEnd) {
@@ -853,6 +906,8 @@ private fun buildLayoutSpec(
         fontId = settings.fontId,
         justify = settings.justify,
         letterSpacingEm = settings.letterSpacingEm,
+        showImages = settings.showImages,
+        density = density.density,
     )
 }
 

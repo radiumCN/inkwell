@@ -58,19 +58,64 @@ class ChapterContentCacheTest {
     }
 
     /**
-     * 标题与分隔符必须原样存回。丢掉它们会让「首次分页」（走网络，含 Heading/Divider）与
-     * 「二次分页」（走缓存）的页边界和 charOffset 对不上，恢复阅读位置就会漂到别的页。
-     *
-     * 图片则**读时跳过**：解析器早已不产出图片元素（产品只排文本），老缓存里的 `IMG:` 行
-     * 读回来只会变成一个永远填不上的灰色占位框。
+     * 标题、分隔符、图必须原样存回。丢掉它们会让「首次分页」（走网络）与「二次分页」（走缓存）
+     * 的页边界和 charOffset 对不上（分隔符和图各占 1 个偏移），恢复阅读位置就会漂到别的页。
      */
     @Test
-    fun `往返保留标题与分隔符，跳过历史遗留的图片行`() {
+    fun `往返保留标题、分隔符与图`() {
         cache.write("b1", "https://ex.com/1.html", content)
+        val entry = cache.readEntry("b1", "https://ex.com/1.html")!!
+        assertEquals(content.elements, entry.content.elements)
+        assertTrue(entry.withImages)
+    }
+
+    /**
+     * v4 是只收字的那一版（0.2.9 ~ 0.5.8 书不收图）。升级后照样认，不然离线缓存了整本的书一升级就读不了；
+     * 但标明它没有图：开着「正文显示图片」、又联网时，阅读页拿它当过期的重抓一份带图的
+     */
+    @Test
+    fun `只有字的 v4 缓存照样能读，标明没收过图`() {
+        val url = "https://ex.com/1.html"
+        cache.write("b1", url, content)
+        val f = File(root, "b1").listFiles()!!.single { it.name.endsWith(".txt") }
+        f.writeText("\u0001V4\n正文第一段。\n---\n正文第二段。")
+
+        val entry = cache.readEntry("b1", url)!!
+        assertFalse(entry.withImages)
         assertEquals(
-            content.elements.filterNot { it is ContentElement.Image },
-            cache.read("b1", "https://ex.com/1.html")?.elements,
+            listOf(ContentElement.Paragraph("正文第一段。"), ContentElement.Divider, ContentElement.Paragraph("正文第二段。")),
+            entry.content.elements,
         )
+        // 预取问「还要不要抓」：不要图时 v4 算有；要图时得重抓
+        assertTrue(cache.hasCurrent("b1", url))
+        assertFalse(cache.hasCurrent("b1", url, needImages = true))
+    }
+
+    @Test
+    fun `插图按地址存取，跟着书一起清`() {
+        val img = "https://ex.com/img/1.jpg"
+        assertNull(cache.readImage("b1", img))
+        cache.writeImage("b1", img, byteArrayOf(1, 2, 3))
+        assertEquals(listOf<Byte>(1, 2, 3), cache.readImage("b1", img)!!.toList())
+        cache.clear("b1")
+        assertNull(cache.readImage("b1", img))
+    }
+
+    @Test
+    fun `超龄的插图随自动清理删掉，最近看过的留着`() {
+        val now = 1_700_000_000_000L
+        val day = 86_400_000L
+        cache.writeImage("b1", "https://ex.com/old.jpg", byteArrayOf(1))
+        cache.writeImage("b1", "https://ex.com/new.jpg", byteArrayOf(2))
+        val dir = File(root, "b1/img")
+        val (old, fresh) = dir.listFiles()!!.partition { it.readBytes().contentEquals(byteArrayOf(1)) }
+        old.single().setLastModified(now - 20 * day)
+        fresh.single().setLastModified(now - 1 * day)
+
+        cache.pruneBehindProgress("b1", readChapterIndex = 0, chapterUrls = emptyList(), maxAgeMs = 14 * day, nowMs = now)
+
+        assertFalse(old.single().exists())
+        assertTrue(fresh.single().exists())
     }
 
     /**

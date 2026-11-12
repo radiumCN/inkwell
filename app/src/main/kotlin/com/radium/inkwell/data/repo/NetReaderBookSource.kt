@@ -1,17 +1,16 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.model.ChapterContent
+import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.ChapterEntity
-import com.radium.inkwell.core.source.guardPrivateNetwork
 import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.util.SingleFlight
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /** 网络书的阅读数据源：磁盘缓存优先，未命中走书源引擎抓取并落盘 */
 class NetReaderBookSource(
@@ -23,7 +22,6 @@ class NetReaderBookSource(
     private val chapterDao: ChapterDao,
     /** 详情页存下的书级变量（BookEntity.variable 解出来的）；正文规则 @get 取不到本章变量时落到这里 */
     private val bookVariables: Map<String, String> = emptyMap(),
-    private val http: OkHttpClient = IMAGE_HTTP,
 ) : ReaderBookSource {
 
     /**
@@ -58,6 +56,13 @@ class NetReaderBookSource(
     @Volatile
     var cacheWritesHeld: Boolean = false
 
+    /**
+     * 阅读设置「正文显示图片」开着没有，由阅读页跟着设置改。开着时，升级前缓存的只有字的那一版（v4，见
+     * [ChapterContentCache.TEXT_ONLY_VERSION]）算过期：读到时重抓一份带图的；抓不到（没网）照旧读那份字。
+     */
+    @Volatile
+    var imagesWanted: Boolean = false
+
     override val chapterCount: Int get() = toc.chapters.size
 
     override fun chapterTitle(index: Int): String? = toc.chapters.getOrNull(index)?.title
@@ -77,19 +82,27 @@ class NetReaderBookSource(
         val url = chapter.url ?: error("章节缺少地址")
         // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节。
         // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
-        withContext(Dispatchers.IO) { cache.read(bookId, url) }?.let { return it }
-        return loads.run(url) {
-            // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
-            val remote = engine.getContent(
-                rule, url, toc.urls,
-                chapterVariable = chapter.variable,
-                chapterTitle = chapter.title.orEmpty(),
-                chapterIndex = index,
-                variables = bookVariables,
-            )
-            val content = ChapterContent(remote.elements)
-            store(url, content)
-            content
+        val cached = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) }
+        if (cached != null && (cached.withImages || !imagesWanted)) return cached.content
+        return try {
+            loads.run(url) {
+                // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
+                val remote = engine.getContent(
+                    rule, url, toc.urls,
+                    chapterVariable = chapter.variable,
+                    chapterTitle = chapter.title.orEmpty(),
+                    chapterIndex = index,
+                    variables = bookVariables,
+                )
+                val content = ChapterContent(remote.elements)
+                store(url, content)
+                content
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 为了图去重抓只有字的旧缓存，没抓到（离线、来源抽风）：先读那份字，别让升级前缓存好的书读不了
+            cached?.content ?: throw e
         }
     }
 
@@ -98,7 +111,7 @@ class NetReaderBookSource(
         val chapter = toc.chapters.getOrNull(index) ?: return
         val url = chapter.url ?: return
         // 只问「有没有」，别 read：命中时整章读进来解析一遍再扔掉，每到章首章尾都要这样过几章（见 hasCurrent）
-        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url) }) return
+        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url, needImages = imagesWanted) }) return
         // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
         // 静态抓不到就放弃，等用户真翻到这一章再走 loadChapter 的渲染回退。
         val remote = engine.getContent(
@@ -127,27 +140,38 @@ class NetReaderBookSource(
         }
     }
 
-    override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
-        runCatching {
-            http.newCall(Request.Builder().url(resourceId).build()).execute().use { resp ->
-                if (resp.isSuccessful) resp.body.bytes() else null
-            }
-        }.getOrNull()
+    /** 同一张图同时只取一次：本章排版、邻章预载、看大图可能一起要它 */
+    private val imageLoads = SingleFlight<String, ByteArray?>(Dispatchers.IO)
+
+    /**
+     * 往后预取时顺带把这一章的图取进缓存（开着「正文显示图片」时），翻到时不用再等。
+     * 只看已经缓存好的正文（[prefetchChapter] 刚取过），不为了它去抓正文 —— 那条路可能开 WebView，预取不许。
+     */
+    suspend fun prefetchImages(index: Int) {
+        val url = toc.chapters.getOrNull(index)?.url ?: return
+        val entry = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) } ?: return
+        for (el in entry.content.elements) {
+            if (el is ContentElement.Image) loadImage(el.resourceId)
+        }
     }
 
-    private companion object {
-        /**
-         * 插图下载。地址同样由书源规则给出（不可信），所以和正文抓取一视同仁：
-         * 走内网拦截，并配全套超时 —— 阅读器翻到带图的一页会等它，不能无限期等。
-         *
-         * 建成 companion 的单例而非每本书新建：OkHttpClient 自带连接池和线程池，
-         * 每开一本书造一个是白扔资源。
-         */
-        val IMAGE_HTTP: OkHttpClient = OkHttpClient.Builder()
-            .guardPrivateNetwork()
-            .connectTimeout(java.time.Duration.ofSeconds(15))
-            .readTimeout(java.time.Duration.ofSeconds(20))
-            .callTimeout(java.time.Duration.ofSeconds(45))
-            .build()
+    /**
+     * 正文插图：先看缓存（离线也看得到读过的图），没有再经引擎取 —— 带上来源的请求头、防盗链时补 Referer、
+     * 私网防护和超时都和正文同一套（地址同样出自书源规则，不可信），见 [BookSourceEngine.getImage]。
+     * 取到就落盘；换源进行中不落（理由同 [cacheWritesHeld]）。取不到返回 null，阅读页排一条「点按重试」。
+     */
+    override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
+        cache.readImage(bookId, resourceId)?.let { return@withContext it }
+        imageLoads.run(resourceId) {
+            try {
+                engine.getImage(rule, resourceId).also { bytes ->
+                    if (!cacheWritesHeld) cache.writeImage(bookId, resourceId, bytes)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

@@ -35,8 +35,12 @@ import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.TextMeasureFacade
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
+import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.paginate.Paginator
 import com.radium.inkwell.reader.render.RenderablePage
+import androidx.compose.ui.graphics.ImageBitmap
+import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.model.ChapterContent
@@ -232,6 +236,14 @@ private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
 private class ContentTimeoutException : Exception("正文加载超时")
 
 /**
+ * 网上的书、关着「正文显示图片」时，这一章只有图没有字。从前解析时就抹掉了图，这种章是一章空正文、
+ * 报「读不出来」、触发自动换源（不少站拿图片当正文防抓取，换个源多半就有字了）—— 关着开关时照旧这么走，
+ * 只是把话说清楚：开了开关就看得到。
+ */
+private class ImageOnlyChapterException :
+    Exception("本章只有图片。在阅读设置「更多」里打开「正文显示图片」就能看到")
+
+/**
  * 阅读会话：持有数据源、3 章分页窗口、页游标。
  * 进度真身 = (chapterIndex, charOffset)，页码只是当前排版下的投影。
  */
@@ -340,6 +352,16 @@ class ReaderViewModel(
      * 预载与显示不在同一线程，用并发集合。
      */
     private val purifySkipped: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** 正文插图：排版前量尺寸、画的时候解码、看大图（见 [ReaderImages]） */
+    private val readerImages = ReaderImages()
+
+    /** 等着解码的图（按要的先后：当前页先、前后页后），见 [imagesFor]。只在主线程上碰 */
+    private val pendingDecodes = LinkedHashMap<String, PageItem.ImageBox>()
+    private var decodeJob: Job? = null
+
+    /** 正在重试的图：连点几下「点按重试」只算一次 */
+    private val retryingImages = HashSet<String>()
 
     init {
         viewModelScope.launch {
@@ -506,6 +528,10 @@ class ReaderViewModel(
                 withContext(Dispatchers.IO) { LocalReaderBookSource(bookRepo.openLocal(b)) }
             }
             source = src
+            (src as? NetReaderBookSource)?.imagesWanted = spec?.showImages ?: _state.value.settings.showImages
+            // 上个会话（换源前）没取到的图不再记着：新会话里它们该有机会重新取；排着队等解码的是旧源的图，作废
+            readerImages.forgetFailures()
+            pendingDecodes.clear()
             // 零章节的书进了阅读器就是个死局：chapterCount == 0 时 ensurePaginated 的越界守卫
             // 静默返回 null，showPosition 直接 return —— 页面永远转圈，连报错出口都不给。
             // 网络书在上面 chapters 为空时会补抓一次目录，本地书走的是 else 分支，从前没有
@@ -585,6 +611,9 @@ class ReaderViewModel(
         if (this.spec == spec && this.facade != null) return
         this.facade = facade
         this.spec = spec
+        // 「正文显示图片」也在排版指纹里：开关一拨走到这里，按同一个字符偏移重排。
+        // 网上的书顺带改口：开着时，升级前只缓存了字的章读到时重抓一份带图的
+        (source as? NetReaderBookSource)?.imagesWanted = spec.showImages
         // 加载途中旋转/改字号：用户点的那一章还没出来，重排要接着去那一章，别退回旧章
         navigate(invalidate = true) { pendingTarget ?: position }
     }
@@ -878,9 +907,90 @@ class ReaderViewModel(
      * 章标题（第 0 个元素）不算：净化只跑正文里的段落和小标题，标题里命中了也换不到。还没排好时是空表。
      */
     fun currentChapterParagraphs(): List<String> {
-        val measured = paginated[_state.value.chapterIndex]?.measured ?: return emptyList()
+        val result = paginated[_state.value.chapterIndex] ?: return emptyList()
+        val measured = result.measured
         val last = measured.keys.maxOrNull() ?: return emptyList()
-        return List(last + 1) { i -> if (i == 0) "" else measured[i]?.text.orEmpty() }
+        // 没取到的图那一行提示（「图片没加载出来 · 点按重试」）也量在表里，它不是正文，别让净化拿它去匹配
+        val imageRows = result.chapter.pages.flatMapTo(HashSet()) { page ->
+            page.items.mapNotNull { (it as? PageItem.ImageBox)?.elementIndex }
+        }
+        return List(last + 1) { i -> if (i == 0 || i in imageRows) "" else measured[i]?.text.orEmpty() }
+    }
+
+    // ---------- 正文插图 ----------
+
+    /**
+     * 点了「图片没加载出来 · 点按重试」：再取一次，取到了按同一个字符偏移重排（图从提示条变回图，后面的字跟着挪），
+     * 还是没取到就说一声 —— 什么反应都没有的话，人会以为没点上。
+     */
+    fun retryImage(resourceId: String) {
+        val src = source ?: return
+        if (!retryingImages.add(resourceId)) return
+        messageBus.emit("正在重新加载图片…")
+        viewModelScope.launch {
+            try {
+                if (readerImages.retry(src, resourceId)) {
+                    if (src === source) navigate(invalidate = true) { pendingTarget ?: position }
+                } else {
+                    messageBus.emit("图片还是没加载出来")
+                }
+            } finally {
+                retryingImages.remove(resourceId)
+            }
+        }
+    }
+
+    /** 长按看大图：解一张不超过 [maxWidth]×[maxHeight] 的（调用方给屏幕的两倍，放大了也不糊） */
+    suspend fun loadViewerImage(resourceId: String, maxWidth: Int, maxHeight: Int): ImageBitmap? {
+        val src = source ?: return null
+        return readerImages.decodeForViewer(src, resourceId, maxWidth, maxHeight)
+    }
+
+    /**
+     * 这一页上的图里已经解好的那些；没解好的排进队列，解好一张就刷新一次眼前这几页（[refreshImages]）。
+     * 框的大小分页时就定了，图晚到不挪字，先画一块淡底占着（见 PageCanvas）。
+     */
+    private fun imagesFor(page: PageSpec): Map<Int, ImageBitmap> {
+        var out: HashMap<Int, ImageBitmap>? = null
+        for (item in page.items) {
+            if (item !is PageItem.ImageBox || item.failed) continue
+            val w = item.width.toInt().coerceAtLeast(1)
+            val h = item.height.toInt().coerceAtLeast(1)
+            val bmp = readerImages.bitmap(item.resourceId, w, h)
+            if (bmp != null) {
+                (out ?: HashMap<Int, ImageBitmap>().also { out = it })[item.elementIndex] = bmp
+            } else if (!readerImages.isUndecodable(item.resourceId, w, h)) {
+                pendingDecodes.putIfAbsent("${item.resourceId}\u0000$w\u0000$h", item)
+            }
+        }
+        if (pendingDecodes.isNotEmpty() && decodeJob?.isActive != true) startDecoding()
+        return out ?: emptyMap()
+    }
+
+    private fun startDecoding() {
+        decodeJob = viewModelScope.launch {
+            while (true) {
+                val src = source ?: break
+                val (key, box) = pendingDecodes.entries.firstOrNull()?.toPair() ?: break
+                pendingDecodes.remove(key)
+                readerImages.decode(src, box.resourceId, box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
+                refreshImages()
+            }
+        }
+    }
+
+    /**
+     * 图解好了：眼前这一页和前后两页按同一份分页结果重建一遍，把新到的图挂上去。不动游标、不存进度。
+     * 没变就不写（[samePage] 连图一起比），免得整棵阅读树白重组。
+     */
+    private fun refreshImages() {
+        val s = _state.value
+        if (s.page == null) return
+        val result = paginated[s.chapterIndex] ?: return
+        val page = renderable(result, s.pageInChapter) ?: return
+        val (prev, next) = neighborPages(s.chapterIndex, s.pageInChapter)
+        if (samePage(page, s.page) && samePage(prev, s.prevPage) && samePage(next, s.nextPage)) return
+        _state.value = s.copy(page = page, prevPage = prev, nextPage = next)
     }
 
     // ---------- 换源 ----------
@@ -1449,6 +1559,7 @@ class ReaderViewModel(
         return RenderablePage(
             spec = page,
             measured = result.measured,
+            images = imagesFor(page),
             header = result.chapter.title,
             footer = "${pageIndex + 1}/${result.chapter.pages.size}",
         )
@@ -1528,9 +1639,12 @@ class ReaderViewModel(
         _state.value = s.copy(prevPage = prev, nextPage = next)
     }
 
-    /** 同一份分页结果里的同一页：[renderable] 每次现建外壳，里头的 PageSpec / 测量表是同一个实例 */
+    /**
+     * 同一份分页结果里的同一页：[renderable] 每次现建外壳，里头的 PageSpec / 测量表是同一个实例。
+     * 挂着的图也要一样：图晚到的那一页是同一个 PageSpec，不比图的话新到的图永远挂不上去
+     */
     private fun samePage(a: RenderablePage?, b: RenderablePage?): Boolean =
-        a === b || (a != null && b != null && a.spec === b.spec && a.measured === b.measured)
+        a === b || (a != null && b != null && a.spec === b.spec && a.measured === b.measured && a.images == b.images)
 
     /**
      * [userFacing] 这一章是不是用户正在等的那一章 —— **由调用方声明，不要再靠 position 去猜**。
@@ -1561,9 +1675,19 @@ class ReaderViewModel(
             // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
             // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
             // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
-            val content = loadPurified(src, chapterIndex).let { c ->
-                c.copy(elements = RepeatedTitle.strip(c.elements, title, book?.title.orEmpty()))
+            val purified = loadPurified(src, chapterIndex)
+            // 关着图时，网上的书只有图没有字的章照旧当读不出来（见 ImageOnlyChapterException）。
+            // 看的是去掉重复标题**之前**：那一行标题也是字，从前它在时这一章不算空
+            if (!spec.showImages && book?.type == BookType.NET &&
+                purified.elements.isNotEmpty() && purified.elements.all { it is ContentElement.Image }
+            ) {
+                throw ImageOnlyChapterException()
             }
+            val content = purified.copy(
+                elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()),
+            )
+            // 开着图：排版前先把这一章的图量好（要知道多高才知道这一页装不装得下），见 ReaderImages.measure
+            if (spec.showImages) readerImages.measure(src, content)
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
             fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
             val result = measureMutex.withLock {
@@ -1576,6 +1700,7 @@ class ReaderViewModel(
                     Paginator(facade).paginate(
                         chapterIndex, title, content, spec,
                         notifyAfterChar = notifyAfterChar,
+                        images = { readerImages.info(it.resourceId) },
                         // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
                         isAbandoned = { job?.isActive == false || stale() },
                         onPartial = { partial ->
@@ -1732,6 +1857,8 @@ class ReaderViewModel(
                 // 网络书这条路径禁止开 WebView（见 NetReaderBookSource.prefetchChapter）。
                 try {
                     src.prefetchChapter(i)
+                    // 开着图：网上的书把这一章的图也先取进缓存，翻到时不用再等（本地书的图就在包里，不用取）
+                    if (src is NetReaderBookSource && src.imagesWanted) src.prefetchImages(i)
                 } catch (e: CancellationException) {
                     // 换源/退出取消了预取。runCatching 会吞掉，循环继续往下章写，和清缓存打架。
                     throw e

@@ -74,6 +74,7 @@ class ReaderPrefs(
         val SCROLL_CLICK_TO_FLIP = booleanPreferencesKey("scroll_click_to_flip")
         val PINCH_FONT_SIZE = booleanPreferencesKey("pinch_font_size")
         val EDGE_BRIGHTNESS = booleanPreferencesKey("edge_brightness")
+        val SHOW_IMAGES = booleanPreferencesKey("show_images")
         /** 九宫格点击分区，见 [TapZones.encode] */
         val TAP_ZONES = stringPreferencesKey("tap_zones")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
@@ -137,6 +138,7 @@ class ReaderPrefs(
             scrollClickToFlip = p[Keys.SCROLL_CLICK_TO_FLIP] ?: false,
             pinchFontSize = p[Keys.PINCH_FONT_SIZE] ?: true,
             edgeBrightness = p[Keys.EDGE_BRIGHTNESS] ?: true,
+            showImages = p[Keys.SHOW_IMAGES] ?: false,
             tapZones = TapZones.decode(p[Keys.TAP_ZONES]),
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
@@ -186,6 +188,7 @@ class ReaderPrefs(
             p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
             p[Keys.PINCH_FONT_SIZE] = settings.pinchFontSize
             p[Keys.EDGE_BRIGHTNESS] = settings.edgeBrightness
+            p[Keys.SHOW_IMAGES] = settings.showImages
             p[Keys.TAP_ZONES] = settings.tapZones.encode()
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
@@ -305,6 +308,7 @@ suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
             "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
             "pinch_font_size" to s.pinchFontSize.toString(),
             "edge_brightness" to s.edgeBrightness.toString(),
+            "show_images" to s.showImages.toString(),
             "tap_zones" to s.tapZones.encode(),
             "auto_flip_seconds" to s.autoFlipSeconds.toString(),
             "preload_chapters" to s.preloadChapters.toString(),
@@ -356,6 +360,7 @@ suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
             scrollClickToFlip = v["scroll_click_to_flip"]?.toBooleanStrictOrNull() ?: base.scrollClickToFlip,
             pinchFontSize = v["pinch_font_size"]?.toBooleanStrictOrNull() ?: base.pinchFontSize,
             edgeBrightness = v["edge_brightness"]?.toBooleanStrictOrNull() ?: base.edgeBrightness,
+            showImages = v["show_images"]?.toBooleanStrictOrNull() ?: base.showImages,
             // 键缺失（旧版本的备份）或读不懂（新版本加了动作）→ 保留本地，别冲成默认
             tapZones = TapZones.decodeOrNull(v["tap_zones"]) ?: base.tapZones,
             autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,

@@ -11,7 +11,14 @@ import com.radium.inkwell.reader.measure.TextMeasureFacade
  * 分页器：把章节段落流按视口贪心装箱成页。纯逻辑，只依赖 TextMeasureFacade。
  *
  * 排版元素表 = [标题虚拟元素] + content.elements，PageItem.elementIndex 指向该表。
- * 规则：行是最小切割单位；图片不跨页；标题 keep-with-next（其后放不下 2 行正文则推下页）。
+ * 规则：行是最小切割单位；图片不跨页（本页剩下的放不下就整张挪到下一页）；标题 keep-with-next（其后放不下 2 行正文则推下页）。
+ *
+ * 图在字符流里**不占偏移**（排不排都一样：开关关着、比一个字还小、没取到）。进度按章内字符偏移记：
+ * - 0.2.9 ~ 0.5.8 书不收图，那时存下的进度是在只有字的字符流上算的。图要是占 1 个，升级后插图之前的进度
+ *   全往前错几个字 —— 存下的偏移正好是页首，往前错一个字就落到上一页，「再进来退回一页」。
+ * - 开关一拨、某张图这次没取到，后面的字偏移都不变，进度不会跟着挪。
+ * 代价：一页上只有一张图时这一页的首尾偏移相同，按偏移定位会落到它后面那一页（停在整页插画上退出，
+ * 再进来看到的是插画后面那页字），翻页本身不受影响。
  */
 class Paginator(private val measurer: TextMeasureFacade) {
 
@@ -34,6 +41,8 @@ class Paginator(private val measurer: TextMeasureFacade) {
      *   是就立刻收手，返回 `complete = false` 的半截结果 —— 调用方得自己丢掉它，别当缓存。
      *   排版是纯 CPU 循环、没有挂起点，协程取消对它无效：不问这一句的话，连点几下 A+，
      *   每一档都要把整章排完、还一路占着测量锁，新字号排在它们后面干等。
+     * @param images 每张图的尺寸（只在 [LayoutSpec.showImages] 开着时问）。null = 不排这张；
+     *   要先量好再排，见 [ImageInfo]
      */
     fun paginate(
         chapterIndex: Int,
@@ -43,6 +52,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         notifyAfterChar: Int = 0,
         onPartial: ((Result) -> Unit)? = null,
         isAbandoned: () -> Boolean = { false },
+        images: (ContentElement.Image) -> ImageInfo? = { null },
     ): Result {
         val elements = buildList {
             add(TitleElement(title))
@@ -58,6 +68,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         val bodyStyle = spec.bodyStyle()
         val titleStyle = spec.titleStyle()
         val headingStyle = spec.headingStyle()
+        val failedStyle by lazy(LazyThreadSafetyMode.NONE) { spec.failedLabelStyle() }
         var partialEmitted = false
         val partialCb = onPartial.takeIf { notifyAfterChar != Int.MAX_VALUE }
 
@@ -125,9 +136,29 @@ class Paginator(private val measurer: TextMeasureFacade) {
                     charOffset += element.text.length
                 }
                 is ContentElement.Image -> {
-                    placeImage(idx, element, spec, cursor, charOffset, onSeal = ::seal, currentCursor = { cursor })
-                    cursor.addGap(spec.paragraphSpacingPx)
-                    charOffset += 1
+                    when (val info = if (spec.showImages) images(element) else null) {
+                        is ImageInfo.Sized -> fitImage(info, spec)?.let { size ->
+                            placeImage(idx, element, size, failed = false, spec, cursor, charOffset,
+                                onSeal = ::seal, currentCursor = { cursor })
+                            cursor.addGap(spec.paragraphSpacingPx)
+                        }
+                        ImageInfo.Failed -> {
+                            // 提示条的字和正文同一套测量，渲染层照段落的办法画（见 PageCanvas）
+                            val mp = measurer.measureParagraph(IMAGE_FAILED_LABEL, failedStyle, spec.contentWidthPx)
+                            measured[idx] = mp
+                            val textH = mp.lineBottom(mp.lineCount - 1) - mp.lineTop(0)
+                            val minH = IMAGE_FAILED_MIN_DP * spec.density
+                            val size = ImageSize(
+                                spec.contentWidthPx.toFloat(),
+                                maxOf(minH, textH + minH / 3f).coerceAtMost(spec.contentHeightPx),
+                            )
+                            placeImage(idx, element, size, failed = true, spec, cursor, charOffset,
+                                onSeal = ::seal, currentCursor = { cursor })
+                            cursor.addGap(spec.paragraphSpacingPx)
+                        }
+                        null -> Unit
+                    }
+                    // 不占偏移（见类注释）
                 }
                 ContentElement.Divider -> {
                     cursor.addGap(spec.lineHeightPx)
@@ -200,6 +231,8 @@ class Paginator(private val measurer: TextMeasureFacade) {
     private inline fun placeImage(
         elementIndex: Int,
         element: ContentElement.Image,
+        size: ImageSize,
+        failed: Boolean,
         spec: LayoutSpec,
         startCursor: PageCursor,
         elementCharBase: Int,
@@ -207,17 +240,14 @@ class Paginator(private val measurer: TextMeasureFacade) {
         currentCursor: () -> PageCursor,
     ) {
         var cursor = startCursor
-        val maxW = spec.contentWidthPx.toFloat()
-        val maxH = spec.contentHeightPx
-        // 无固有尺寸信息时按 4:3 占位；渲染层拿到真实图后等比适配该框
-        val boxW = maxW
-        val boxH = (maxW * 0.75f).coerceAtMost(maxH)
+        // 本页剩下的地方放不下就整张挪到下一页（前一页底下空一截，纸书的插画页也是这样）。
+        // 高度已经按一屏封顶（fitImage），挪过去一定放得下
+        val boxH = size.height.coerceAtMost(spec.contentHeightPx)
         if (!cursor.fits(boxH) && !cursor.isEmpty) {
             onSeal()
             cursor = currentCursor()
         }
-        cursor.addImage(elementIndex, element.resourceId, boxW, boxH.coerceAtMost(maxH), elementCharBase)
-        cursor.noteCharEnd(elementCharBase + 1)
+        cursor.addImage(elementIndex, element.resourceId, size.width, boxH, elementCharBase, failed)
     }
 
     internal class TitleElement(val text: String)
@@ -254,6 +284,15 @@ class Paginator(private val measurer: TextMeasureFacade) {
         isBold = true,
         justify = false,
         letterSpacingEm = letterSpacingEm,
+    )
+
+    /** 「图片没加载出来」那一行：小一号、不缩进、不两端对齐（居中画，见 PageCanvas） */
+    private fun LayoutSpec.failedLabelStyle() = ResolvedTextStyle(
+        fontSizePx = fontSizePx * IMAGE_FAILED_TEXT_SCALE,
+        lineHeightPx = fontSizePx * IMAGE_FAILED_TEXT_SCALE * 1.4f,
+        fontId = fontId,
+        firstLineIndentEm = 0f,
+        justify = false,
     )
 }
 
@@ -297,13 +336,21 @@ internal class PageCursor(private val spec: LayoutSpec) {
         endChar = maxOf(endChar, sliceEnd)
     }
 
-    fun addImage(elementIndex: Int, resourceId: String, width: Float, height: Float, elementCharBase: Int) {
+    fun addImage(
+        elementIndex: Int,
+        resourceId: String,
+        width: Float,
+        height: Float,
+        elementCharBase: Int,
+        failed: Boolean = false,
+    ) {
         val left = (spec.contentWidthPx - width) / 2f
-        items += PageItem.ImageBox(elementIndex, resourceId, left, usedHeight, width, height)
+        items += PageItem.ImageBox(elementIndex, resourceId, left, usedHeight, width, height, failed)
         usedHeight += height
         contentBottom = usedHeight
+        // 图不占偏移（见 Paginator 类注释）：只把这一页的起点定在它所在的位置
         if (startChar < 0) startChar = elementCharBase
-        endChar = maxOf(endChar, elementCharBase + 1)
+        endChar = maxOf(endChar, elementCharBase)
     }
 
     fun addGap(gap: Float) {

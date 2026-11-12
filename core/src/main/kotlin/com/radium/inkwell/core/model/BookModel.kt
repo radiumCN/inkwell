@@ -51,11 +51,15 @@ sealed interface ContentElement {
     data class Quote(val text: String) : ContentElement
 }
 
+/**
+ * 这一块在章内字符流里占几个偏移（阅读进度按它记）。图占 0 个：书有好几个版本不收图，
+ * 那时存下的进度是在只有字的字符流上算的，图要是占位，升级后进度会往前错（见 reader 的 Paginator）
+ */
 val ContentElement.charLength: Int
     get() = when (this) {
         is ContentElement.Paragraph -> text.length
         is ContentElement.Heading -> text.length
-        is ContentElement.Image -> 1
+        is ContentElement.Image -> 0
         ContentElement.Divider -> 1
         is ContentElement.Code -> text.length
         is ContentElement.ListItem -> text.length

@@ -15,10 +15,13 @@ import java.util.concurrent.ConcurrentHashMap
  * 以**章节 URL** 而非序号为 key：站点在前面插入章节（公告章、防盗章）后目录整体后移，
  * 若按序号存取，第 5 章会读出旧的第 5 章正文 —— 缓存必须跟着章节走，而不是跟着槽位走。
  *
- * 行格式：普通段落直接一行；`H<级别>:` 标题；`IMG:` 图片 URL（历史遗留，读时跳过）；`---` 分隔符。
- * 标题与分隔符必须原样存回：分页器对它们的处理和普通段落不同（标题另一套字号、
- * 分隔符占 1 个字符偏移），丢掉会让「首次分页」与「读缓存后分页」的页边界和
+ * 行格式：普通段落直接一行；`H<级别>:` 标题；`IMG:` 图片地址；`---` 分隔符。
+ * 标题、分隔符、图必须原样存回：分页器对它们的处理和普通段落不同（标题另一套字号、
+ * 分隔符和图各占 1 个字符偏移），丢掉会让「首次分页」与「读缓存后分页」的页边界和
  * charOffset 对不上，恢复阅读位置就会漂。
+ *
+ * 正文里的插图另存在书目录下的 `img/`（[readImage] / [writeImage]），按图片地址的 MD5 命名：
+ * 跟着书一起清（换源、删书、清缓存），离线也看得到读过的图。
  */
 class ChapterContentCache(private val root: File) {
 
@@ -80,14 +83,19 @@ class ChapterContentCache(private val root: File) {
      * 每到章首章尾都要把后面几章这样过一遍。只看 [has] 又不够 —— 旧版本格式的文件在，
      * read 却当没缓存，预取就该照抓。
      */
-    fun hasCurrent(bookId: String, chapterUrl: String): Boolean {
+    fun hasCurrent(bookId: String, chapterUrl: String, needImages: Boolean = false): Boolean {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return false
-        return runCatching { f.bufferedReader().use { it.readLine() } == FORMAT_VERSION }
+        return runCatching { f.bufferedReader().use { it.readLine() }.isUsable(needImages) }
             .getOrDefault(false)
     }
 
-    fun read(bookId: String, chapterUrl: String): ChapterContent? {
+    /** 读到的一章缓存。[withImages] = 这份解析收过图（v5 起）；v4 的是只有字的那一版，见 [TEXT_ONLY_VERSION] */
+    class Entry(val content: ChapterContent, val withImages: Boolean)
+
+    fun read(bookId: String, chapterUrl: String): ChapterContent? = readEntry(bookId, chapterUrl)?.content
+
+    fun readEntry(bookId: String, chapterUrl: String): Entry? {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return null
         val lines = f.readLines()
@@ -95,7 +103,8 @@ class ChapterContentCache(private val root: File) {
         // 这里存的是**解析结果**而不是原始 HTML —— 解析器修好了，磁盘上那份旧结果并不会
         // 跟着变好。没有这道校验的话，用户已经读过（也就是最想看到修复效果）的章节
         // 会永远停在旧解析上，升级完一看一模一样。见 [FORMAT_VERSION]。
-        if (lines.firstOrNull() != FORMAT_VERSION) return null
+        val version = lines.firstOrNull()
+        if (!version.isUsable(needImages = false)) return null
         val elements = lines.drop(1).mapNotNull { line ->
             when {
                 // 转义过的普通段落：它本来长得像标记行（H1:/IMG:/---），存时加了前缀，这里先剥掉。
@@ -103,10 +112,9 @@ class ChapterContentCache(private val root: File) {
                 line.startsWith(ESCAPE) -> ContentElement.Paragraph(line.substring(ESCAPE.length))
                 line.isBlank() -> null
                 line == DIVIDER -> ContentElement.Divider
-                // 产品只排文本：解析器早已不再产出图片元素，这一行只会来自很老的缓存。
-                // 读回成 Image 的话分页器会给它留一个 4:3 的灰色占位框（翻页模式不折叠），
-                // 而图永远不会加载 —— 直接跳过。写侧的 IMG_PREFIX 分支保留只为 when 穷尽。
-                line.startsWith(IMG_PREFIX) -> null
+                line.startsWith(IMG_PREFIX) -> line.substring(IMG_PREFIX.length).trim()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { ContentElement.Image(it) }
                 // 标题只认 `H<数字>:`。从前是「H 开头且含冒号」，会把 "He said: ..." 这类
                 // 英文段落误判成标题、冒号前整段丢失。
                 HEAD_REGEX.matchAt(line, 0) != null -> ContentElement.Heading(
@@ -122,7 +130,41 @@ class ChapterContentCache(private val root: File) {
         if (touched.add(f.absolutePath)) {
             f.setLastModified(System.currentTimeMillis())
         }
-        return ChapterContent(elements)
+        return Entry(ChapterContent(elements), withImages = version == FORMAT_VERSION)
+    }
+
+    /** 首行版本号认不认：当前版本总认；只有字的 v4 在不要图时也认（离线缓存的书升级后照样能读） */
+    private fun String?.isUsable(needImages: Boolean): Boolean =
+        this == FORMAT_VERSION || (!needImages && this == TEXT_ONLY_VERSION)
+
+    // ---- 正文插图 ----
+
+    private fun imageFile(bookId: String, imageUrl: String): File =
+        File(File(bookDir(bookId), IMAGE_DIR), key(imageUrl))
+
+    /** 读过的插图。命中同样续命（自动清理按「多久没碰过」算，见 [pruneBehindProgress]） */
+    fun readImage(bookId: String, imageUrl: String): ByteArray? {
+        val f = imageFile(bookId, imageUrl)
+        if (!f.isFile) return null
+        val bytes = runCatching { f.readBytes() }.getOrNull() ?: return null
+        if (touched.add(f.absolutePath)) f.setLastModified(System.currentTimeMillis())
+        return bytes
+    }
+
+    /** 同正文：先写临时文件再改名，进程被杀不留半张图被当成有效缓存 */
+    fun writeImage(bookId: String, imageUrl: String, bytes: ByteArray) {
+        val target = imageFile(bookId, imageUrl)
+        target.parentFile?.mkdirs()
+        val tmp = File.createTempFile("img", ".part", target.parentFile)
+        try {
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(target)) {
+                target.delete()
+                if (!tmp.renameTo(target)) target.writeBytes(bytes)
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
     }
 
     /** 段落文本恰好长得像标记行时要转义，否则读回会被误解析 */
@@ -248,6 +290,11 @@ class ChapterContentCache(private val root: File) {
             ?.filter { it.lastModified() <= cutoff }
             ?.forEach { it.delete() }
 
+        // 插图不知道属于哪一章，只按「多久没碰过」清：往回翻看到的图读一次就续上命
+        File(bookDir, IMAGE_DIR).listFiles()
+            ?.filter { it.isFile && it.lastModified() <= cutoff }
+            ?.forEach { it.delete() }
+
         return pruned
     }
 
@@ -287,11 +334,22 @@ class ChapterContentCache(private val root: File) {
          * 段落结构在规则求值阶段就没了。改动的是 LegadoSelector 而不是 HtmlToElements ——
          * 正是「范围是整条链」这句话要拦住的情况。
          * v4：HtmlToElements 不再把 img / image 收成正文元素（分页空框、滚动半页空白）。
+         * v5：书的正文又收图了（阅读设置「正文显示图片」，见 HtmlToElements），`IMG:` 行读回成图。
          *
          * 用 [ESCAPE] 打头，保证撞不上任何正文：真以 ESCAPE 开头的段落会被
          * escapeIfAmbiguous 再加一层前缀。老缓存没有这一行，读时自然对不上、当没缓存。
          */
-        const val FORMAT_VERSION = "\u0001V4"
+        const val FORMAT_VERSION = "\u0001V5"
+
+        /**
+         * v4 是**唯一**一个升级后照旧认的旧版本：v5 只是多收了图，字的解析和 v4 一模一样。
+         * 当没缓存的话，离线缓存了整本的书升级完就读不了了。只有开着「正文显示图片」、又联网时，
+         * 阅读页才拿它当过期的、重抓一份带图的（见 NetReaderBookSource），没网照旧读这份文字版。
+         */
+        const val TEXT_ONLY_VERSION = "\u0001V4"
+
+        /** 插图在书目录下的子目录 */
+        const val IMAGE_DIR = "img"
 
         const val IMG_PREFIX = "IMG:"
         const val HEAD_PREFIX = "H"

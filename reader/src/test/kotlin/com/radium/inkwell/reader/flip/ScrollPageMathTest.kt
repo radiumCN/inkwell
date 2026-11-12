@@ -168,24 +168,27 @@ class ScrollPageMathTest {
         assertEquals(0f, step.leftover)
     }
 
+    /**
+     * 图的框是按原图比例量好的（见 fitImage），解没解出来都一样高。从前没图的框要折叠掉
+     * （那时框是一律 4:3 的占位、图永远不来）；现在再折叠，图解出来那一刻后面的字会整块往下跳
+     */
     @Test
-    fun `没加载的图不撑开滚动页高`() {
+    fun `图还没解出来也按框高撑开滚动页高`() {
         val page = RenderablePage(
             spec = PageSpec(
                 chapterIndex = 0,
                 pageIndexInChapter = 5,
                 items = listOf(
                     PageItem.TextSlice(1, 0, 1, 0f, 80f, isTitle = false),
-                    PageItem.ImageBox(2, "img:1", 0f, 80f, 300f, 800f),
-                    PageItem.TextSlice(3, 0, 0, 880f, 40f, isTitle = false),
+                    PageItem.ImageBox(2, "img:1", 0f, 80f, 300f, 200f),
+                    PageItem.TextSlice(3, 0, 0, 280f, 40f, isTitle = false),
                 ),
                 startCharOffset = 0,
                 endCharOffset = 20,
             ),
             measured = emptyMap(),
         )
-        // 800px 空图收掉后，两段字挨在一起
-        assertEquals(120f, scrollPageHeight(page), 0.01f)
+        assertEquals(320f, scrollPageHeight(page), 0.01f)
     }
 
     @Test

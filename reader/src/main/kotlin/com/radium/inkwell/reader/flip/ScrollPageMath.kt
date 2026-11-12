@@ -83,9 +83,11 @@ fun scrollContentBottom(layout: LayoutSpec): Float =
 fun pageContentHeight(page: RenderablePage?): Float = scrollPageHeight(page)
 
 /**
- * 滚动叠页高度。没加载出来的图不占位：阅读页现在不会把图填进 [RenderablePage.images]，
- * 分页却按整屏宽的 4:3 留了一大块，叠下一页时就会在正文底下空出半屏。
- * 上滑把后面的字拖上来，下滑又藏回去 —— 就是这块空白在进进出出。
+ * 滚动叠页高度：最后一项的底 + 页尾段距。
+ *
+ * 图按分页时定好的框算，解没解出来都一样高（没解出来的先画淡底占着）。0.2.9 那会儿阅读页不画图、
+ * 分页却按整屏宽 4:3 给图留框，这里只好把没图的框折叠掉；现在框是按原图比例量出来的，
+ * 折叠反倒会让图解出来那一刻后面的字整块往下跳。
  *
  * 页尾段距（[com.radium.inkwell.reader.paginate.PageSpec.trailingGapPx]）要算进来：下一页紧贴着
  * 这个高度往下接，只量到最后一行的底，恰好在段尾断页时两段就贴在一起，比页内段距窄一截。
@@ -95,19 +97,10 @@ fun scrollPageHeight(page: RenderablePage?): Float {
     val items = page.spec.items
     if (items.isEmpty()) return 0f
     var bottom = 0f
-    var collapse = 0f
     for (item in items) {
         when (item) {
-            is PageItem.TextSlice -> {
-                bottom = maxOf(bottom, item.yTopInPage + item.height - collapse)
-            }
-            is PageItem.ImageBox -> {
-                if (page.images[item.elementIndex] != null) {
-                    bottom = maxOf(bottom, item.top + item.height - collapse)
-                } else {
-                    collapse += item.height
-                }
-            }
+            is PageItem.TextSlice -> bottom = maxOf(bottom, item.yTopInPage + item.height)
+            is PageItem.ImageBox -> bottom = maxOf(bottom, item.top + item.height)
         }
     }
     return bottom + page.spec.trailingGapPx

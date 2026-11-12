@@ -1613,6 +1613,22 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
+    // 默认关、和从前一样只排文字。开了就地重排（停在同一个字上），说明随开关换：
+    // 关着说开了会怎样；开着提醒流量，顺带交代长按看大图（不说没人知道）
+    ReaderGroup("图片") {
+        SwitchRow(
+            title = "正文显示图片",
+            subtitle = if (settings.showImages) {
+                "在线书的图片要另外下载，会多用一些流量。长按图片可以看大图"
+            } else {
+                "关着时只排文字。打开后，书里和在线章节里的插图排进正文"
+            },
+            checked = settings.showImages,
+            onCheckedChange = { onUpdate(settings.copy(showImages = it)) },
+            position = SettingGroupPosition.Alone,
+        )
+    }
+
     ReaderGroup("预加载章节") {
         ReaderBlock {
             SegmentedChoice(

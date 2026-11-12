@@ -114,8 +114,12 @@ class BookSourceEngineTest {
         )
         // 广告行被净化规则删除
         assertTrue(paras.none { it.text.contains("本站广告") })
-        // 正文图抹掉，不进元素、不占分页空框
-        assertTrue(content.elements.none { it is ContentElement.Image })
+        // 正文图照收、相对地址按那一页补全（阅读页显示不显示是阅读设置的事），排在它所在的那一段之后
+        assertEquals(
+            listOf(ContentElement.Image("$base/img/scene.jpg")),
+            content.elements.filterIsInstance<ContentElement.Image>(),
+        )
+        assertTrue(content.elements.last() is ContentElement.Image)
     }
 
     @Test
@@ -380,6 +384,32 @@ class BookSourceEngineTest {
         assertEquals(src, roundTrip)
     }
 
+    // ---- 正文插图 ----
+
+    @Test
+    fun `取插图：相对地址按来源补全，带来源请求头`() = runBlocking {
+        assertEquals(listOf<Byte>(1, 2, 3), engine().getImage(source(), "/img/scene.jpg").toList())
+    }
+
+    /** 防盗链的图床：先不带 Referer，被拒了再带上来源站点取一次 */
+    @Test
+    fun `取插图被拒时带上来源站点再取一次`() = runBlocking {
+        assertEquals(listOf<Byte>(9, 8), engine().getImage(source(), "$base/img/guarded.jpg").toList())
+        assertNull(server.takeRequest().getHeader("Referer"))
+        assertEquals("$base/", server.takeRequest().getHeader("Referer"))
+    }
+
+    /** 阅读的写法：图片地址后面跟 `,{"headers":…}` */
+    @Test
+    fun `取插图认地址自带的请求头选项`() = runBlocking {
+        assertEquals(listOf<Byte>(7), engine().getImage(source(), "$base/img/headers.jpg,{\"headers\":{\"X-Token\":\"t1\"}}").toList())
+    }
+
+    @Test
+    fun `取不到的插图抛错`() {
+        assertFailsWith<java.io.IOException> { runBlocking { engine().getImage(source(), "$base/img/none.jpg") } }
+    }
+
     // ---- fixtures ----
 
     private class FixtureDispatcher : Dispatcher() {
@@ -416,6 +446,17 @@ class BookSourceEngineTest {
                 // 故意慢回来的第二页：并发抓目录时它比第三页晚到，结果仍得按页序拼
                 path == "/mp/slowtoc2" -> html(MP_TOC_2).setBodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS)
                 path == "/selftoc" -> html(SELF_TOC_PAGE)
+                path == "/img/scene.jpg" -> MockResponse().setBody(Buffer().write(byteArrayOf(1, 2, 3)))
+                // 防盗链图床：不带本站 Referer 一律 403
+                path == "/img/guarded.jpg" ->
+                    if (request.getHeader("Referer")?.startsWith("http://") == true) {
+                        MockResponse().setBody(Buffer().write(byteArrayOf(9, 8)))
+                    } else {
+                        MockResponse().setResponseCode(403)
+                    }
+                path == "/img/headers.jpg" ->
+                    if (request.getHeader("X-Token") == "t1") MockResponse().setBody(Buffer().write(byteArrayOf(7)))
+                    else MockResponse().setResponseCode(401)
                 path == "/gbk/chap" -> MockResponse()
                     .setBody(Buffer().write(GBK_CHAP.toByteArray(charset("GBK"))))
                     .setHeader("Content-Type", "text/html")

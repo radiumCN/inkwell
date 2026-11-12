@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.sourcewizard
 
+import com.radium.inkwell.core.model.textOrNull
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
@@ -529,7 +530,8 @@ class SourceWizardViewModel(
                     bookUrl = book.bookUrl,
                     variables = detail.variables,
                 )
-                if (text.elements.isEmpty()) error("按识别结果没抓到正文")
+                // 只有图没有字的不算抓到正文（正文里的图照收，见 HtmlToElements）
+                if (text.elements.none { it.textOrNull != null }) error("按识别结果没抓到正文")
                 // 带了搜索就也搜一次：存进去的源要是搜不出东西，搜索页里它只会一直报错
                 s.search?.keyword?.let { kw ->
                     if (draft.search != null && engine.search(draft, kw).items.isEmpty()) error("按识别结果没搜出东西")

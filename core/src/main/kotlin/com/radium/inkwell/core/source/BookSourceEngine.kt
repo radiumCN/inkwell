@@ -474,6 +474,27 @@ class BookSourceEngine(
         result ?: throw SourceException("正文规则未匹配到内容: $chapterUrl")
     }
 
+    /**
+     * 正文里一张插图的字节（[ContentElement.Image.resourceId] 就是这里的 [imageUrl]）。
+     *
+     * 带上来源的请求头（UA、Referer、Cookie 这些防盗链要看的）；地址自带 `,{"headers":…}` 的（阅读的写法）照它的来。
+     * 来源没写 Referer、图床又拒了的，带上来源站点再取一次 —— 浏览器里看得见的图，是因为浏览器带着网页的来源。
+     * 不一上来就带：有的图床反过来，带了别的站就回一张「禁止外链」的占位图（正常返回，没有机会重试），
+     * 订阅文章的图也是这么取的（见 app 的 ImageReferer）。
+     */
+    suspend fun getImage(source: BookSourceRule, imageUrl: String): ByteArray = engineIo {
+        val split = splitUrlOptions(imageUrl)
+        val url = resolveUrl(source.baseUrl, split?.first ?: imageUrl)
+        val headers = mergeHeaders(sourceHeaders(source), split?.second?.headers.orEmpty(), varsOf(source))
+        try {
+            http.fetchBytes(url, headers)
+        } catch (e: SourceHttpClient.HttpStatusException) {
+            val referer = siteOrigin(source.baseUrl)
+            if (referer == null || headers.keys.any { it.equals("Referer", ignoreCase = true) }) throw e
+            http.fetchBytes(url, headers + ("Referer" to referer))
+        }
+    }
+
     /** 变量表 ↔ JSON（随章节一起落库，见 ChapterEntity.variable） */
     private fun encodeVars(vars: Map<String, String>): String = SourceVariables.encode(vars)
 
@@ -526,7 +547,8 @@ class BookSourceEngine(
             val html = evalField("content", "content", rule.content, ctx)
             if (html != null) {
                 val body = Jsoup.parseBodyFragment(asContentHtml(html), fetched.finalUrl).body()
-                elements += HtmlToElements().convert(body)
+                // 插图照收（相对地址按这一页的地址补全）；阅读页显示不显示是阅读设置的事，见 HtmlToElements
+                elements += HtmlToElements(keepImages = true, keepBlocks = false).convert(body)
             }
             url = rule.nextContentUrl
                 ?.let { evalUrlField("content", "nextPage", it, ctx) }
@@ -1114,6 +1136,16 @@ internal fun resolveUrl(base: String, ref: String): String {
 private fun bareUrl(url: String): String {
     val optAt = optionsIndex(url)
     return if (optAt >= 0) url.substring(0, optAt) else url
+}
+
+/**
+ * 站点的来源（`https://www.example.com/`）：取图被拒时当 Referer 带上（见 [BookSourceEngine.getImage]）。
+ * 浏览器跨站取图默认也只带来源，图床认的就是它。不是 http(s) 地址返回 null。
+ */
+internal fun siteOrigin(url: String): String? {
+    val u = bareUrl(url).trim().toHttpUrlOrNull() ?: return null
+    val port = if (u.port != okhttp3.HttpUrl.defaultPort(u.scheme)) ":${u.port}" else ""
+    return "${u.scheme}://${u.host}$port/"
 }
 
 /** 能拿去抓的地址：http(s)。`javascript:void(0)`、空串、未能解析成绝对地址的相对路径都不算 */

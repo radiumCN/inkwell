@@ -44,11 +44,13 @@ import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.measure.MeasuredParagraph
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.render.PageCanvas
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPage
+import com.radium.inkwell.reader.render.imageAt
 import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +111,11 @@ fun PageFlipContainer(
     modifier: Modifier = Modifier,
     /** 长按选中的文字；只在静止态（没在翻页）才可能非空 */
     selection: TextSelection? = null,
+    /**
+     * 点在当前页的一张图上（含没取到的那条提示）。返回 true = 这一下处理掉了（点提示条重试），不再翻页 / 开菜单；
+     * 点在真图上照旧按点击分区走，由调用方返回 false。
+     */
+    onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -271,6 +278,8 @@ fun PageFlipContainer(
     val selectionLatest = rememberUpdatedState(selection)
     // 手势循环的 pointerInput 不以它为 key：在面板里改分区不该把正在进行的手势循环拆了重建
     val tapZonesLatest = rememberUpdatedState(tapZones)
+    val onImageTapLatest = rememberUpdatedState(onImageTap)
+    val layoutLatest = rememberUpdatedState(layout)
     LaunchedEffect(controller) {
         controller.requests.collect { dir ->
             // 选字中不接程序化翻页（音量键、自动翻页、菜单上的滑动翻页）。拖拽/点按手势早就因为选区停了，
@@ -436,11 +445,16 @@ fun PageFlipContainer(
                             }
                             FlipReleaseBeforeSlop.Tap -> {
                                 if (!pressedDuringSettle && !settling && direction == null) {
-                                    tapAction(
-                                        down.position.x, down.position.y,
-                                        size.width.toFloat(), size.height.toFloat(),
-                                        tapZonesLatest.value,
-                                    ).dispatch(onMenu = onCenterTap, onFlip = ::startProgrammaticFlip)
+                                    val hit = onImageTapLatest.value?.let {
+                                        (heldPages?.current ?: currentLatest.value)?.imageAt(down.position.x, down.position.y, layoutLatest.value)
+                                    }
+                                    if (hit == null || onImageTapLatest.value?.invoke(hit) != true) {
+                                        tapAction(
+                                            down.position.x, down.position.y,
+                                            size.width.toFloat(), size.height.toFloat(),
+                                            tapZonesLatest.value,
+                                        ).dispatch(onMenu = onCenterTap, onFlip = ::startProgrammaticFlip)
+                                    }
                                 }
                             }
                             FlipReleaseBeforeSlop.Ignore -> Unit

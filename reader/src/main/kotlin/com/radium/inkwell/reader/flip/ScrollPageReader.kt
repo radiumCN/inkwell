@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -30,8 +31,10 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPageItems
+import com.radium.inkwell.reader.render.imageAt
 
 /**
  * 滚动阅读：与仿真/覆盖同一套分页，用 [pageOffset] 在 prev/cur/next 三页上滑。
@@ -53,6 +56,13 @@ fun ScrollPageReader(
     onFlip: (FlipDirection) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 点在一张图上（含没取到的那条提示）。返回 true = 这一下处理掉了（点提示条重试），不再翻页 / 开菜单；
+     * 点在真图上照旧翻页 / 开菜单，由调用方返回 false。
+     */
+    onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
+    /** 长按一张图（看大图）。null = 不接长按 */
+    onImageLongPress: ((PageItem.ImageBox) -> Unit)? = null,
 ) {
     val offset = remember { mutableFloatStateOf(0f) }
     var size by remember { mutableStateOf(IntSize.Zero) }
@@ -73,6 +83,8 @@ fun ScrollPageReader(
     val tapZonesLatest = rememberUpdatedState(tapZones)
     // 与 onFlip 一样取最新：点按的 pointerInput 不以回调为 key，直接捕获会一直拿着第一次组合时的那个
     val onCenterTapLatest = rememberUpdatedState(onCenterTap)
+    val onImageTapLatest = rememberUpdatedState(onImageTap)
+    val onImageLongPressLatest = rememberUpdatedState(onImageLongPress)
 
     val leftover = remember { mutableFloatStateOf(0f) }
     var leftoverChain by remember { mutableIntStateOf(0) }
@@ -169,6 +181,19 @@ fun ScrollPageReader(
         }
     }
 
+    /** 触点落在三页里哪张图上：三页叠着、跟着 [offset] 挪，和 [ScrollPageLayer] 画的位置算法一致 */
+    fun imageUnder(x: Float, y: Float): PageItem.ImageBox? {
+        val spec = layoutLatest.value
+        val top = scrollContentTop(spec)
+        if (y < top || y > scrollContentBottom(spec)) return null
+        val cur = currentLatest.value ?: return null
+        val curHeight = scrollPageHeight(cur).let { if (it <= 0f) 1f else it }
+        val shift = offset.floatValue
+        return cur.imageAt(x, y, spec, originY = top + shift)
+            ?: nextLatest.value?.imageAt(x, y, spec, originY = top + curHeight + shift)
+            ?: prevLatest.value?.let { p -> p.imageAt(x, y, spec, originY = top - scrollPageHeight(p) + shift) }
+    }
+
     val contentTop = scrollContentTop(layout)
     val contentBottom = scrollContentBottom(layout)
     val curH = scrollPageHeight(current).let { if (it <= 0f) 1f else it }
@@ -195,9 +220,16 @@ fun ScrollPageReader(
                 // 默认 false：正 delta = 手指下滑，和 pageOffset 同号。verticalScroll 会把这个翻掉，这里别学。
                 reverseDirection = false,
             )
-            .pointerInput(gesturesEnabled, size, clickToFlip) {
+            .pointerInput(gesturesEnabled, size, clickToFlip, onImageLongPress != null) {
                 if (!gesturesEnabled) return@pointerInput
-                detectTapGestures { pos ->
+                // 不接长按时别挂：挂上了，按久一点再松手就不算点按，开不了菜单
+                val longPress: ((Offset) -> Unit)? = if (onImageLongPressLatest.value == null) null else ({ pos: Offset ->
+                    val hit = imageUnder(pos.x, pos.y)
+                    if (hit != null && !hit.failed) onImageLongPressLatest.value?.invoke(hit)
+                })
+                detectTapGestures(onLongPress = longPress) { pos ->
+                    val image = onImageTapLatest.value?.let { imageUnder(pos.x, pos.y) }
+                    if (image != null && onImageTapLatest.value?.invoke(image) == true) return@detectTapGestures
                     tapAction(
                         pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
                         tapZonesLatest.value, enabled = clickToFlipLatest.value,
@@ -247,7 +279,7 @@ private fun ScrollPageLayer(
             .fillMaxSize()
             .graphicsLayer { translationY = baseY + offset.floatValue }
             .drawBehind {
-                drawPageItems(page, layout, theme, originY = 0f, collapseMissingImages = true)
+                drawPageItems(page, layout, theme, originY = 0f)
             },
     )
 }

@@ -73,7 +73,7 @@ class HtmlToElementsTest {
         assertEquals(listOf("第一段", "第二段"), paras)
     }
 
-    /** 正文里的图不当元素、也不占位；前后文本仍按原分段切开 */
+    /** 不收图（默认）：正文里的图不当元素、也不占位；前后文本仍按原分段切开 */
     @Test
     fun `img 和 svg image 直接抹掉`() {
         val els = HtmlToElements().convert(
@@ -84,6 +84,56 @@ class HtmlToElementsTest {
         )
         assertEquals(emptyList(), els.filterIsInstance<ContentElement.Image>())
         assertEquals(listOf("前段", "后段"), els.filterIsInstance<ContentElement.Paragraph>().map { it.text })
+    }
+
+    // ---- 书：EPUB / MOBI 的地址交给解析器自己换 ----
+
+    private fun bookImages(html: String) =
+        HtmlToElements(keepImages = true, keepBlocks = false, resolveImage = { img ->
+            img.attr("src").ifBlank { img.attr("xlink:href") }.ifBlank { img.attr("href") }
+                .takeIf { it.isNotBlank() }?.let { "zip:$it" }
+        }).convert(Jsoup.parse(html).body())
+
+    /**
+     * EPUB 的整页插画是 svg 包着一个 image（svg 只为按页面等比缩放）。订阅里的 svg 多是图标，照旧整块丢；
+     * 书里得收，不然轻小说的彩页一张都出不来。图前后的段落各自成段、顺序不乱
+     */
+    @Test
+    fun `书里的 img 与 svg 包着的 image 都收，地址交给解析器`() {
+        val els = bookImages(
+            "<p>前段</p><img src=\"../Images/1.jpg\" alt=\"插图一\"><p>中段</p>" +
+                "<div><svg viewBox=\"0 0 600 800\"><image width=\"600\" height=\"800\" xlink:href=\"../Images/2.jpg\"/></svg></div>" +
+                "<p>后段</p>",
+        )
+        assertEquals(
+            listOf(
+                ContentElement.Paragraph("前段"),
+                ContentElement.Image("zip:../Images/1.jpg", "插图一"),
+                ContentElement.Paragraph("中段"),
+                ContentElement.Image("zip:../Images/2.jpg"),
+                ContentElement.Paragraph("后段"),
+            ),
+            els,
+        )
+    }
+
+    /** 解析器认不出的地址（resolveImage 给 null）不收；表情图照旧换回文字、不切段 */
+    @Test
+    fun `书里认不出的图不收，表情图仍换回字`() {
+        val els = HtmlToElements(keepImages = true, keepBlocks = false, resolveImage = { null }).convert(
+            Jsoup.parse(
+                "<p>前文<img src=\"x.jpg\"/>后文</p>" +
+                    "<p>赞<img class=\"emoji\" alt=\"👍\" src=\"https://twemoji.maxcdn.com/72x72/1f44d.png\"/>好</p>",
+            ).body(),
+        )
+        assertEquals(
+            listOf(
+                ContentElement.Paragraph("前文"),
+                ContentElement.Paragraph("后文"),
+                ContentElement.Paragraph("赞👍好"),
+            ),
+            els,
+        )
     }
 
     /** 段内插图当边界切开，避免「前文+后文」粘成一句 */

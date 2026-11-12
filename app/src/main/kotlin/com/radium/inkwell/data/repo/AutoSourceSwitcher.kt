@@ -1,5 +1,6 @@
 package com.radium.inkwell.data.repo
 
+import com.radium.inkwell.core.model.textOrNull
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
@@ -144,7 +145,8 @@ class AutoSourceSwitcher(
             // 探测要和真读时同一条路：详情页存的书级变量不交回去，靠它拼地址的源会被误判成抓不下来
             variables = detail.variables,
         )
-        if (content.elements.isEmpty()) return null
+        // 只有图没有字的不算抓到（正文里的图照收以后，拿图片当正文防抓取的站会只交回一串图）
+        if (content.elements.none { it.textOrNull != null }) return null
 
         return Probe(result = hit.copy(bookUrl = hit.bookUrl), rule = rule)
     }
