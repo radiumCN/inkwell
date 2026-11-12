@@ -97,6 +97,8 @@ class RhinoScriptRuntime(
             cx.newObject(proto).also {
                 it.prototype = proto
                 it.parentScope = null
+                // 库自己的顶层代码就用 JavaImporter / Packages 的，加载前先装上（替身无状态，按库缓存不串源）
+                if (JdkCompat.wanted(lib, null)) installJdkCompat(cx, it)
                 cx.evaluateString(it, lib, "jsLib.js", 1, null)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -130,6 +132,9 @@ class RhinoScriptRuntime(
             bindings.forEach { (name, value) ->
                 holder.put(name, holder, Context.javaToJS(value, holder))
             }
+            // 阅读来源直接拿 JDK 做加解密（JavaImporter / Packages.javax.crypto…）：装上替身，见 JdkCompat。
+            // 装在这一次的 holder 上，不进每线程共用的原型 —— 顶层 importPackage 导进来的名字不能串到别的来源
+            if (JdkCompat.wanted(script, jsLib)) installJdkCompat(cx, holder)
             val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it) }
             val scope: Scriptable = if (lib == null) holder else cx.newObject(proto).also {
                 it.prototype = lib
@@ -162,6 +167,17 @@ class RhinoScriptRuntime(
         } finally {
             Context.exit()
         }
+    }
+
+    @Volatile
+    private var compiledPrelude: org.mozilla.javascript.Script? = null
+
+    /** 在 [target] 上装 JDK 替身（[JdkCompat.PRELUDE]）；替身脚本只编译一次 */
+    private fun installJdkCompat(cx: Context, target: Scriptable) {
+        target.put("__inkwellJdk", target, Context.javaToJS(JdkCompat(), target))
+        val prelude = compiledPrelude
+            ?: cx.compileString(JdkCompat.PRELUDE, "jdk-compat.js", 1, null).also { compiledPrelude = it }
+        prelude.exec(cx, target)
     }
 
     /** 用 Rhino 内置的 JSON.stringify 序列化原生数组/对象；失败返回 null 交调用方兜底。 */
