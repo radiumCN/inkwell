@@ -19,6 +19,8 @@ import javax.crypto.spec.SecretKeySpec
  * 这类来源的正文一律是空的。**不放宽沙箱**：真把 JDK 类交给脚本，`getClass()`、反射、`Runtime` 的口子就又开了。
  * 改成在这个包里照 JDK 的样子写几样**纯计算**的替身 —— Base64、Arrays、String、Cipher 和三种密钥 / 参数规格，
  * 方法名、参数照 JDK，脚本不用改；真正的 JDK 对象都攥在这些类的私有字段里，不交给脚本。
+ * 阅读跑在 Android 上，另有一批来源（连城读书、书耽、柚免费耽美……）导的是 `Packages.android.util`，
+ * Base64 用的是 Android 那套 `decode(字节, 2)` / `encodeToString(字节, NO_WRAP)`，也照它做了（[AndroidBase64]）。
  * 替身之外的类（`java.io.File`、`java.lang.Runtime`、`java.lang.System`……）在 `Packages` 里压根没有，
  * 导进来也是 undefined，和从前一样跑不起来。
  *
@@ -46,6 +48,18 @@ class JdkCompat {
     fun base64Encoder(): Base64EncoderShim = Base64EncoderShim(Base64.getEncoder())
 
     fun base64UrlEncoder(): Base64EncoderShim = Base64EncoderShim(Base64.getUrlEncoder())
+
+    // android.util.Base64：阅读跑在 Android 上，不少来源导的是 Packages.android.util，调法是「串或字节 + 标志位」
+
+    fun androidBase64Decode(text: String, flags: Int): ByteArray = AndroidBase64.decode(text, flags)
+
+    fun androidBase64Decode(bytes: ByteArray, flags: Int): ByteArray =
+        AndroidBase64.decode(String(bytes, Charsets.ISO_8859_1), flags)
+
+    fun androidBase64Encode(bytes: ByteArray, flags: Int): ByteArray =
+        AndroidBase64.encodeToString(bytes, flags).toByteArray(Charsets.US_ASCII)
+
+    fun androidBase64EncodeToString(bytes: ByteArray, flags: Int): String = AndroidBase64.encodeToString(bytes, flags)
 
     fun copyOfRange(bytes: ByteArray, from: Int, to: Int): ByteArray = bytes.copyOfRange(from, to)
 
@@ -83,12 +97,27 @@ class JdkCompat {
     return f;
   }
   var Str = cls('String', function (a, b) { return arguments.length > 1 ? jdk.string(a, b) : jdk.string(a); });
+  // java.util.Base64 与 android.util.Base64 是同一个对象：两边的静态方法名不重叠，
+  // 脚本把两个包都导进同一个 JavaImporter 时，谁后导进来都不会把另一套方法盖掉
+  function slice(b, off, len) { return jdk.copyOfRange(b, off, off + len); }
   var B64 = cls('Base64', null, {
     getDecoder: function () { return jdk.base64Decoder(); },
     getMimeDecoder: function () { return jdk.base64MimeDecoder(); },
     getUrlDecoder: function () { return jdk.base64UrlDecoder(); },
     getEncoder: function () { return jdk.base64Encoder(); },
-    getUrlEncoder: function () { return jdk.base64UrlEncoder(); }
+    getUrlEncoder: function () { return jdk.base64UrlEncoder(); },
+    DEFAULT: 0, NO_PADDING: 1, NO_WRAP: 2, CRLF: 4, URL_SAFE: 8, NO_CLOSE: 16,
+    decode: function (input, a, b, c) {
+      return arguments.length > 3 ? jdk.androidBase64Decode(slice(input, a, b), c | 0) : jdk.androidBase64Decode(input, a | 0);
+    },
+    encode: function (bytes, a, b, c) {
+      return arguments.length > 3 ? jdk.androidBase64Encode(slice(bytes, a, b), c | 0) : jdk.androidBase64Encode(bytes, a | 0);
+    },
+    encodeToString: function (bytes, a, b, c) {
+      return arguments.length > 3
+        ? jdk.androidBase64EncodeToString(slice(bytes, a, b), c | 0)
+        : jdk.androidBase64EncodeToString(bytes, a | 0);
+    }
   });
   var Arr = cls('Arrays', null, {
     copyOfRange: function (a, from, to) { return jdk.copyOfRange(a, from, to); },
@@ -105,7 +134,8 @@ class JdkCompat {
   var Gcm = cls('GCMParameterSpec', function (bits, b) { return jdk.gcm(bits, b); });
   var pkgs = {
     java: { lang: { String: Str }, util: { Base64: B64, Arrays: Arr } },
-    javax: { crypto: { Cipher: Ciph, spec: { SecretKeySpec: Key, IvParameterSpec: Iv, GCMParameterSpec: Gcm } } }
+    javax: { crypto: { Cipher: Ciph, spec: { SecretKeySpec: Key, IvParameterSpec: Iv, GCMParameterSpec: Gcm } } },
+    android: { util: { Base64: B64 } }
   };
   function importInto(target, what) {
     if (!what) return;
@@ -187,4 +217,44 @@ class CipherShim internal constructor(private val cipher: Cipher) {
     fun getBlockSize(): Int = cipher.blockSize
 
     private fun jdkKey(key: SecretKeyShim) = SecretKeySpec(key.getEncoded(), key.getAlgorithm())
+}
+
+/**
+ * `android.util.Base64` 的编解码规则，标志位同它（NO_PADDING 1、NO_WRAP 2、CRLF 4、URL_SAFE 8；NO_CLOSE 只管流，这里无关）。
+ *
+ * 和 `java.util.Base64` 不一样的两处，来源的签名、解密都靠它对上：
+ * - 编码不带 NO_WRAP 时**每 76 个字符换一次行，末尾也带一个换行**（DEFAULT 就是这样）。拿它的结果再算签名的，
+ *   少一个换行就对不上；
+ * - 解码很宽松：字母表以外的字符（换行、空格、另一套字母表的 `-_` / `+/`）一律跳过，结尾的 `=` 可有可无。
+ */
+internal object AndroidBase64 {
+    private const val NO_PADDING = 1
+    private const val NO_WRAP = 2
+    private const val CRLF = 4
+    private const val URL_SAFE = 8
+    private const val LINE_CHARS = 76
+
+    fun encodeToString(bytes: ByteArray, flags: Int): String {
+        var encoder = if (flags and URL_SAFE != 0) Base64.getUrlEncoder() else Base64.getEncoder()
+        if (flags and NO_PADDING != 0) encoder = encoder.withoutPadding()
+        val text = encoder.encodeToString(bytes)
+        if (flags and NO_WRAP != 0 || text.isEmpty()) return text
+        val newline = if (flags and CRLF != 0) "\r\n" else "\n"
+        return text.chunked(LINE_CHARS).joinToString("") { it + newline }
+    }
+
+    fun decode(text: String, flags: Int): ByteArray {
+        val urlSafe = flags and URL_SAFE != 0
+        val clean = StringBuilder(text.length)
+        for (c in text) {
+            if (c == '=') break // 填充即结尾
+            if (inAlphabet(c, urlSafe)) clean.append(c)
+        }
+        val decoder = if (urlSafe) Base64.getUrlDecoder() else Base64.getDecoder()
+        return decoder.decode(clean.toString())
+    }
+
+    private fun inAlphabet(c: Char, urlSafe: Boolean): Boolean =
+        c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' ||
+            (if (urlSafe) c == '-' || c == '_' else c == '+' || c == '/')
 }

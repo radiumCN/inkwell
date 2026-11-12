@@ -32,7 +32,10 @@ data class BookSourceRule(
     val bookSourceComment: String = "",
     val enabled: Boolean = true,
     val enabledExplore: Boolean = true,
-    /** 源级请求头：JSON 字符串（`@js:` 形式暂不支持，忽略） */
+    /**
+     * 源级请求头：JSON 字符串，或返回 JSON 字符串的脚本（`@js:…` / `<js>…</js>`，阅读两种都认）。
+     * JSON 解析一次就记住（[headers]）；脚本由引擎每次请求现跑（[headerScript]，见 BookSourceEngine.sourceHeaders）
+     */
     val header: String? = null,
     /** 并发限制："500"(毫秒间隔) 或 "1/1000"(次/毫秒) */
     val concurrentRate: String? = null,
@@ -70,6 +73,9 @@ data class BookSourceRule(
     // （JSON 解析 + 正则），搜一轮几百个源、目录几十页就是几百上千遍。规则对象不可变，懒算安全；
     // 带委托的属性不参与序列化，也不进 data class 的 equals / copy。
     val headers: Map<String, String> by lazy(LazyThreadSafetyMode.PUBLICATION) { parseHeaderJson(header) }
+
+    /** [header] 写成脚本时的脚本本体（去掉 `@js:` / `<js>` 包装）；JSON 写法、没写为 null */
+    val headerScript: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { headerScriptOf(header) }
 
     val rateLimit: RateLimitRule? by lazy(LazyThreadSafetyMode.PUBLICATION) { parseConcurrentRate(concurrentRate) }
 
@@ -175,6 +181,24 @@ internal fun parseHeaderJson(raw: String?): Map<String, String> {
             k to ((v as? JsonPrimitive)?.content ?: v.toString())
         }
     }.getOrDefault(emptyMap())
+}
+
+/**
+ * 源级 header 的脚本写法（同阅读 BaseSource.getHeaderMap）：`@js:` 开头取后面的全部，`<js>` 开头取到最后一个 `</js>`。
+ * 31 个来源这么写（2893 个里）：签名带时间戳、`"User-Agent": java.getWebViewUA()`、`"Referer": baseUrl`。
+ * 从前一律当没有源级请求头，请求头里该带的 UA、签名一个都没发出去
+ */
+internal fun headerScriptOf(raw: String?): String? {
+    val t = raw?.trim().orEmpty()
+    val script = when {
+        t.startsWith("@js:", ignoreCase = true) -> t.substring(4)
+        t.startsWith("<js>", ignoreCase = true) -> {
+            val end = t.lastIndexOf("</js>", ignoreCase = true)
+            if (end >= 4) t.substring(4, end) else t.substring(4)
+        }
+        else -> return null
+    }
+    return script.takeIf { it.isNotBlank() }
 }
 
 /** concurrentRate: "500"(毫秒间隔) 或 "1/1000"(次数/毫秒) */

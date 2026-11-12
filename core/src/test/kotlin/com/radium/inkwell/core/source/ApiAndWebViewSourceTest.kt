@@ -126,6 +126,25 @@ class ApiAndWebViewSourceTest {
     }
 
     @Test
+    fun `脚本拼出的地址选项块跨了行，还是一个地址 —— 不按行拆成几段废地址`() = runBlocking {
+        // 凤凰网书城的写法：`…/directory,{` 换行 `"body": …,` 换行 `"method": "POST"` 换行 `}`
+        val src = BookSourceRule(
+            bookSourceUrl = base,
+            bookSourceName = "接口源",
+            ruleBookInfo = BookInfoRuleSet(
+                init = "data.book",
+                name = "title",
+                tocUrl = "@js:'/api/toc,{\\n  \"body\": \"bookId=17&getNum=10000\",\\n  \"method\": \"POST\"\\n}'",
+            ),
+        )
+        val detail = engine().getDetail(src, "$base/api/detail?id=17")
+        val (url, opt) = splitUrlOptions(detail.tocUrl)!!
+        assertEquals("$base/api/toc", url)
+        assertEquals("POST", opt.method)
+        assertEquals("bookId=17&getNum=10000", opt.body)
+    }
+
+    @Test
     fun `一条结果规则里 put 的变量不串到下一条`() = runBlocking {
         // 书名规则先读 k、分类规则后存 k：变量表要是各条共用，第二条的书名前面就会粘上第一条存的 k
         val src = BookSourceRule.fromJson(

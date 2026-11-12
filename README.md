@@ -116,6 +116,8 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 - 默认 Jsoup 层级（`class.foo.0@tag.a@href`）、`@css:`、JSONPath（`$.`）、`:正则`、XPath（`@XPath:` / `//`）
 - `||` 回退、`&&` 拼接、`##正则##替换` 净化、`replaceRegex`
 - JS 规则（`<js>` / `@js:` / 部分 `{{表达式}}`），由 Rhino 执行；引擎带沙箱与超时，禁止访问本地私网等危险能力
+- 脚本里常用的加解密与签名：`java.createSymmetricCrypto`（AES / DES / DESede）、`aes*` / `des*`、`HMacHex` / `HMacBase64`；直接调 JDK 的写法（`JavaImporter` / `Packages`）只给 Base64（含 `android.util.Base64`）、Cipher 与密钥规格这几样替身，不开放其他 Java 类
+- 源级 `header` 的 JSON 写法与脚本写法（`@js:` / `<js>`，每次请求现跑）
 - POST 搜索（`searchUrl` 的 method/body/charset 选项，含字符集编码选项）
 - `exploreUrl` 发现页（`名称::url` 格式）、`concurrentRate` 限速、倒序目录（`-` 前缀）
 

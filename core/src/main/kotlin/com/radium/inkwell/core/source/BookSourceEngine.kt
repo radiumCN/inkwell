@@ -648,7 +648,7 @@ class BookSourceEngine(
             if (!staticOnly) {
                 val target = split?.first ?: url
                 // 源级 header 模板（{{baseUrl}} 等）要用真实变量展开，否则防盗链站拿到空 Referer 会 403
-                val headers = mergeHeaders(source.headers, opt?.headers.orEmpty(), varsOf(source))
+                val headers = mergeHeaders(sourceHeaders(source), opt?.headers.orEmpty(), varsOf(source))
                 render(target, headers)?.let { return it }
             }
         }
@@ -700,7 +700,7 @@ class BookSourceEngine(
         val expanded = evaluator.expandTemplate(markKeyword(urlPart), urlCtx)
             .replace(KEYWORD_MARK, encodeUrlComponent(keyword, charset))
         val url = resolveUrl(source.baseUrl, encodeNonAsciiQuery(expanded, charset))
-        val mergedHeaders = mergeHeaders(source.headers, headers, vars)
+        val mergedHeaders = mergeHeaders(sourceHeaders(source, js), headers, vars)
         // 书源自己声明了要 WebView（Legado 的 webView）：搜索、发现也照办。不声明的源照旧只静态抓 ——
         // 自动回退（[withRenderFallback]）不碰搜索，是怕上百个源一起排队等 WebView；声明了的只有寥寥几个，
         // 而它们的结果本来就是页面脚本拉回来的，静态抓永远是空壳（七猫的网页版）。
@@ -761,7 +761,7 @@ class BookSourceEngine(
                     if (method.equals("POST", ignoreCase = true)) encodeKeyInFormTemplate(raw, charset) else raw
                 expandTemplate(templated, vars)
             },
-            headers = mergeHeaders(source.headers, headers, vars),
+            headers = mergeHeaders(sourceHeaders(source), headers, vars),
             charset = charset,
             rateLimit = source.rateLimit,
         )
@@ -796,6 +796,29 @@ class BookSourceEngine(
         vars: Map<String, String>,
     ): Map<String, String> =
         (sourceHeaders + requestHeaders).mapValues { (_, v) -> expandTemplate(v, vars) }
+
+    /**
+     * 源级请求头。JSON 写法解析一次就记住（[BookSourceRule.headers]）；脚本写法（[BookSourceRule.headerScript]）
+     * 同阅读，**每次请求现跑**：脚本常拿当前时间算签名（值得阅读、书香之家），记住一份就是一份过期的签名。
+     * 脚本里有 java / source / cookie / cache / baseUrl 和源的 jsLib。
+     *
+     * 跑不出 JSON（报错、返回的不是对象）就当没有源级请求头 —— 和从前一样，别让一段坏 header 把这个源的请求全拦下。
+     * 变量表拷一份给它：header 脚本里 java.put 的东西不该混进这条链路要交回去的变量（[SearchResult.variables]）。
+     */
+    private fun sourceHeaders(source: BookSourceRule, js: JsContext = jsContextOf(source)): Map<String, String> {
+        val script = source.headerScript ?: return source.headers
+        val ctx = urlContext(
+            source,
+            varsOf(source),
+            js.copy(scriptVars = java.util.concurrent.ConcurrentHashMap(js.scriptVars)),
+        )
+        val out = evaluator.evalSourceScript(script, ctx)
+        val headers = parseHeaderJson(out)
+        trace?.onRule(
+            RuleTrace("header", "header", script, out, error = if (headers.isEmpty()) "header 脚本没有返回请求头" else null),
+        )
+        return headers
+    }
 
     /** 页面上下文：HTML 与原始文本（JSON 规则懒解析）同时可用 */
     private fun pageContext(
@@ -833,6 +856,8 @@ class BookSourceEngine(
         chapterIndex: Int = 0,
     ) = JsContext(
         sourceKey = source.id,
+        sourceName = source.bookSourceName,
+        sourceComment = source.bookSourceComment,
         jsLib = source.jsLib,
         book = com.radium.inkwell.core.source.js.BookBridge(
             name = bookName,
@@ -971,7 +996,9 @@ class BookSourceEngine(
 
         /**
          * JS 的 `list.push` 经 Rhino 会 stringify 成 `["/p2","/p3"]`，evalToStrings 只拿到这一段。
-         * 换行分隔的多地址同样拆开。
+         * 换行分隔的多地址同样拆开 —— 但「一个地址 + 跨行的 `,{…}` 选项块」是**一个**地址：
+         * 凤凰网书城的目录地址是脚本拼的 `…/directory,{` 换行 `"body": …,` 换行 `"method": "POST"` 换行 `}`，
+         * 从前按行拆成四段，取第一段 `…/directory,{` 去抓，必然 404。
          */
         fun flattenUrlResults(values: List<String>): List<String> {
             val out = ArrayList<String>()
@@ -993,7 +1020,8 @@ class BookSourceEngine(
                         if (any) continue
                     }
                 }
-                if ('\n' in t) {
+                val optAt = if ('\n' in t) optionsIndex(t) else -1
+                if ('\n' in t && !(optAt > 0 && '\n' !in t.substring(0, optAt))) {
                     t.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.forEach { out += it }
                 } else {
                     out += t

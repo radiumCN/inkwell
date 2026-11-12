@@ -3,12 +3,12 @@ package com.radium.inkwell.core.source.js
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
+import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.splitUrlOptions
 import com.radium.inkwell.core.util.toHex
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
+import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -139,8 +139,18 @@ class JsCache {
  *
  * 目前只在进程内存活。跨会话持久化（登录 token 那类）要落库，属于后续工作 ——
  * 大多数规则的 put/get 都发生在同一条抓取链路内，进程内足够。
+ *
+ * 阅读交给脚本的 `source` 是书源对象本身，脚本会直接读它的字段：`source.bookSourceUrl` 拼 Referer，
+ * 还有一批来源把公用函数写在「来源说明」里、规则开头 `eval(String(source.bookSourceComment))` 加载 ——
+ * 没有这个字段，eval 的是字符串 "undefined"，后面一调那些函数就 ReferenceError，整条规则落空。
  */
-class SourceBridge(private val key: String, private val store: MutableMap<String, String> = ConcurrentHashMap()) {
+class SourceBridge(
+    private val key: String,
+    private val store: MutableMap<String, String> = ConcurrentHashMap(),
+    @JvmField val bookSourceName: String = "",
+    @JvmField val bookSourceComment: String = "",
+) {
+    @JvmField val bookSourceUrl: String = key
 
     fun getKey(): String = key
 
@@ -314,8 +324,9 @@ class JavaBridge(
     /** Legado 的 16 位 MD5：取 32 位的中间 16 位 */
     fun md5Encode16(str: String): String = md5Encode(str).substring(8, 24)
 
-    fun digestHex(algorithm: String, str: String): String =
-        digest(algorithm, str.toByteArray(Charsets.UTF_8))
+    /** 同阅读：`java.digestHex(数据, 算法)`。从前参数是反的（算法在前），照阅读写的脚本拿到的是一个报错 */
+    fun digestHex(data: String, algorithm: String): String =
+        digest(algorithm, data.toByteArray(Charsets.UTF_8))
 
     fun hexEncodeToString(str: String): String =
         str.toByteArray(Charsets.UTF_8).toHex()
@@ -336,18 +347,52 @@ class JavaBridge(
 
     fun encodeURI(str: String, enc: String): String = URLEncoder.encode(str, enc)
 
-    // ---- 对称加密（书源常用 AES 解正文）----
+    // ---- 对称加密（书源常用 AES / DES 解正文、算签名）----
+    // 同阅读：这几个都经 createSymmetricCrypto 走，字符串密文自动认十六进制 / Base64（见 [SymmetricCrypto]）。
+    // 从前 aesDecodeToString 把密文串的 UTF-8 字节直接当密文，接口返回的密文都是编过码的，解不开；
+    // 非 CBC 的模式（CFB、CTR……）也一律不带 IV
+
+    fun createSymmetricCrypto(transformation: String, key: String): SymmetricCrypto =
+        createSymmetricCrypto(transformation, key, null)
+
+    fun createSymmetricCrypto(transformation: String, key: String, iv: String?): SymmetricCrypto =
+        SymmetricCrypto(transformation, key.toByteArray(Charsets.UTF_8), iv?.toByteArray(Charsets.UTF_8))
+
+    fun createSymmetricCrypto(transformation: String, key: ByteArray): SymmetricCrypto =
+        createSymmetricCrypto(transformation, key, null)
+
+    fun createSymmetricCrypto(transformation: String, key: ByteArray, iv: ByteArray?): SymmetricCrypto =
+        SymmetricCrypto(transformation, key, iv)
 
     fun aesDecodeToString(data: String, key: String, transformation: String, iv: String): String =
-        String(aes(Cipher.DECRYPT_MODE, data.toByteArray(Charsets.UTF_8), key, transformation, iv), Charsets.UTF_8)
+        createSymmetricCrypto(transformation, key, iv).decryptStr(data)
 
     fun aesBase64DecodeToString(data: String, key: String, transformation: String, iv: String): String =
-        String(aes(Cipher.DECRYPT_MODE, decodeBase64(data), key, transformation, iv), Charsets.UTF_8)
+        createSymmetricCrypto(transformation, key, iv).decryptStr(data)
 
     fun aesEncodeToBase64String(data: String, key: String, transformation: String, iv: String): String =
-        Base64.getEncoder().encodeToString(
-            aes(Cipher.ENCRYPT_MODE, data.toByteArray(Charsets.UTF_8), key, transformation, iv)
-        )
+        createSymmetricCrypto(transformation, key, iv).encryptBase64(data)
+
+    fun desDecodeToString(data: String, key: String, transformation: String, iv: String): String =
+        createSymmetricCrypto(transformation, key, iv).decryptStr(data)
+
+    fun desBase64DecodeToString(data: String, key: String, transformation: String, iv: String): String =
+        createSymmetricCrypto(transformation, key, iv).decryptStr(data)
+
+    fun desEncodeToString(data: String, key: String, transformation: String, iv: String): String =
+        String(createSymmetricCrypto(transformation, key, iv).encrypt(data), Charsets.UTF_8)
+
+    fun desEncodeToBase64String(data: String, key: String, transformation: String, iv: String): String =
+        createSymmetricCrypto(transformation, key, iv).encryptBase64(data)
+
+    // ---- HMAC 签名：名字照阅读（HMacHex / HMacBase64），算法写 HmacMD5、HMacSHA256……大小写都认 ----
+
+    @Suppress("FunctionName")
+    fun HMacHex(data: String, algorithm: String, key: String): String = hmac(data, algorithm, key).toHex()
+
+    @Suppress("FunctionName")
+    fun HMacBase64(data: String, algorithm: String, key: String): String =
+        Base64.getEncoder().encodeToString(hmac(data, algorithm, key))
 
     // ---- 时间/文本/杂项 ----
 
@@ -358,6 +403,12 @@ class JavaBridge(
     fun htmlFormat(str: String): String = org.jsoup.Jsoup.parse(str).text()
 
     fun randomUUID(): String = UUID.randomUUID().toString()
+
+    /**
+     * 阅读给的是系统 WebView 的 UA；我们抓取、渲染一律用 [SourceHttpClient.DEFAULT_UA]（站点按 UA 给不同的页面，
+     * 规则是照同一份写的），这里也给它。header 脚本里 `"User-Agent": java.getWebViewUA()` 的来源（晋江、太极小说）靠它
+     */
+    fun getWebViewUA(): String = SourceHttpClient.DEFAULT_UA
 
     /** 书源用它打调试日志；返回原值方便串在表达式里 */
     fun log(msg: Any?): Any? = msg
@@ -373,34 +424,16 @@ class JavaBridge(
 
     // ---- 内部 ----
 
-    private fun aes(mode: Int, data: ByteArray, key: String, transformation: String, iv: String): ByteArray {
-        val cipher = Cipher.getInstance(transformation)
-        val keySpec = SecretKeySpec(key.toByteArray(Charsets.UTF_8), "AES")
-        if (iv.isEmpty() || !transformation.contains("CBC", ignoreCase = true)) {
-            cipher.init(mode, keySpec)
-        } else {
-            cipher.init(mode, keySpec, IvParameterSpec(iv.toByteArray(Charsets.UTF_8)))
-        }
-        return cipher.doFinal(data)
+    private fun hmac(data: String, algorithm: String, key: String): ByteArray {
+        val mac = Mac.getInstance(algorithm)
+        mac.init(SecretKeySpec(key.toByteArray(Charsets.UTF_8), algorithm))
+        return mac.doFinal(data.toByteArray(Charsets.UTF_8))
     }
 
     private fun digest(algorithm: String, bytes: ByteArray): String =
         MessageDigest.getInstance(algorithm).digest(bytes).toHex()
 
-    /** 书源里的 base64 常缺 padding 或用 URL 变体，宽松处理 */
-    private fun decodeBase64(str: String): ByteArray {
-        val clean = str.trim().replace("\n", "").replace("\r", "")
-        return runCatching { Base64.getDecoder().decode(padded(clean)) }
-            .recoverCatching { Base64.getUrlDecoder().decode(padded(clean)) }
-            .recoverCatching { Base64.getMimeDecoder().decode(clean) }
-            .getOrElse { ByteArray(0) }
-    }
-
-    private fun padded(s: String): String = when (s.length % 4) {
-        2 -> "$s=="
-        3 -> "$s="
-        else -> s
-    }
+    private fun decodeBase64(str: String): ByteArray = decodeBase64Lenient(str)
 
     private fun hexToBytes(hex: String): ByteArray {
         val clean = hex.removePrefix("0x").filter { !it.isWhitespace() }
@@ -428,4 +461,19 @@ class JavaBridge(
                 }
         }.getOrDefault(emptyMap())
     }
+}
+
+/** 书源里的 base64 常缺 padding 或用 URL 变体，宽松处理；实在解不开给空数组 */
+internal fun decodeBase64Lenient(str: String): ByteArray {
+    val clean = str.trim().replace("\n", "").replace("\r", "")
+    return runCatching { Base64.getDecoder().decode(padded(clean)) }
+        .recoverCatching { Base64.getUrlDecoder().decode(padded(clean)) }
+        .recoverCatching { Base64.getMimeDecoder().decode(clean) }
+        .getOrElse { ByteArray(0) }
+}
+
+private fun padded(s: String): String = when (s.length % 4) {
+    2 -> "$s=="
+    3 -> "$s="
+    else -> s
 }

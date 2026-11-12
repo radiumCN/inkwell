@@ -31,8 +31,12 @@ data class EvalContext(
  * scriptVars 是 java.put/java.get 的变量表（Legado 里目录→正文传参极常用）。
  */
 data class JsContext(
-    /** 书源标识，脚本里的 source.getKey() */
+    /** 书源标识，脚本里的 source.getKey() / source.bookSourceUrl */
     val sourceKey: String = "",
+    /** 脚本里的 source.bookSourceName */
+    val sourceName: String = "",
+    /** 脚本里的 source.bookSourceComment：不少来源把公用函数写在这里，规则开头 eval 它 */
+    val sourceComment: String = "",
     val book: com.radium.inkwell.core.source.js.BookBridge =
         com.radium.inkwell.core.source.js.BookBridge(),
     val chapter: com.radium.inkwell.core.source.js.ChapterBridge =
@@ -596,6 +600,15 @@ class RuleEvaluator(
         runJs(scriptOf(script, ctx), ctx, input = contextText(ctx))
 
     /**
+     * 来源级的脚本（源级 header 的 `@js:` / `<js>`）：同阅读的 BaseSource.evalJS，不在哪一页上跑，
+     * 没有 `result`，脚本原样跑、不先展开 `{{}}`。没有 JS 引擎、脚本报错都返回 null，由调用方当「没有」处理
+     */
+    fun evalSourceScript(script: String, ctx: EvalContext): String? {
+        if (scriptRuntime == null) return null
+        return runJs(script, ctx, input = "")
+    }
+
+    /**
      * 绑定书源脚本可见的全部上下文：变量（result/src/baseUrl/key/page）+ 桥对象
      * （java/cookie/cache/source/book/chapter）。Rhino 会把这些 Kotlin 对象反射成 JS 对象。
      *
@@ -622,7 +635,12 @@ class RuleEvaluator(
                     "java" to java,
                     "cookie" to com.radium.inkwell.core.source.js.CookieBridge(jsHttp),
                     "cache" to jsCache,
-                    "source" to com.radium.inkwell.core.source.js.SourceBridge(ctx.js.sourceKey, store),
+                    "source" to com.radium.inkwell.core.source.js.SourceBridge(
+                        ctx.js.sourceKey,
+                        store,
+                        bookSourceName = ctx.js.sourceName,
+                        bookSourceComment = ctx.js.sourceComment,
+                    ),
                     "book" to ctx.js.book,
                     "chapter" to ctx.js.chapter,
                 ),
