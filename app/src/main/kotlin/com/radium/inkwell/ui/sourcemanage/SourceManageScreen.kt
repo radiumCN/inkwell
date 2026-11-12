@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -43,7 +41,6 @@ import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
-import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppMenuItem
@@ -55,7 +52,7 @@ import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.BatchAction
 import com.radium.inkwell.ui.components.BatchActionBar
-import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.CollectExportShares
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.ContentListDefaults
@@ -63,11 +60,13 @@ import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.EmptyState
+import com.radium.inkwell.ui.components.GroupFilterChip
 import com.radium.inkwell.ui.components.InlineTag
+import com.radium.inkwell.ui.components.ListSearchHeader
 import com.radium.inkwell.ui.components.LoadingState
-import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupedCardItem
+import com.radium.inkwell.ui.components.highlightMatches
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.settingsPageColor
@@ -116,22 +115,9 @@ fun SourceManageScreen(
     var showSortPicker by remember { mutableStateOf(false) }
     var showGroupAssign by remember { mutableStateOf(false) }
     var groupInput by remember { mutableStateOf("") }
-    val context = LocalContext.current
 
     // 导出：写到缓存目录后交给系统分享（存网盘、发给别人都行）
-    LaunchedEffect(Unit) {
-        viewModel.exportFile.collect { file ->
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                context, "${context.packageName}.fileprovider", file,
-            )
-            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(android.content.Intent.createChooser(intent, "导出来源"))
-        }
-    }
+    CollectExportShares(viewModel.exportFile, chooserTitle = "导出来源")
     val selectionMode = selected.isNotEmpty()
     // 多选态下按系统返回：先退出多选，而不是直接退出整个页面
     BackHandler(selectionMode) { viewModel.clearSelection() }
@@ -353,6 +339,7 @@ fun SourceManageScreen(
                         },
                         selected = source.id in selected,
                         selectionMode = selectionMode,
+                        query = query,
                         onClick = {
                             if (selectionMode) viewModel.toggleSelect(source.id)
                             else onOpen(source.id)
@@ -506,55 +493,17 @@ private fun SourceListHeader(
     onDisableInvalid: () -> Unit,
     onDeleteInvalid: () -> Unit,
 ) {
-    var showGroupPicker by remember { mutableStateOf(false) }
     Column {
         // 几百个书源，没有搜索和筛选就只能一路滑
-        SearchField(
-            value = query,
-            onValueChange = onQueryChange,
+        ListSearchHeader(
+            query = query,
+            onQueryChange = onQueryChange,
             placeholder = "搜索来源名称或网址",
-            modifier = Modifier.fillMaxWidth()
-                .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
-        )
-        ChipRow(
-            options = SourceFilter.entries.map { it.label },
-            selectedIndex = SourceFilter.entries.indexOf(filter),
-            onSelect = { onFilterChange(SourceFilter.entries[it]) },
-            contentPadding = PaddingValues(horizontal = Dimens.listHorizontal),
+            filters = SourceFilter.entries.map { it.label },
+            selectedFilter = SourceFilter.entries.indexOf(filter),
+            onFilterChange = { onFilterChange(SourceFilter.entries[it]) },
             trailing = if (groups.isNotEmpty()) {
-                {
-                    // 分组从这颗 chip 上弹出来选（当前分组打勾），不再另起一个底部面板
-                    Box {
-                        AppFilterChip(
-                            selected = groupFilter != null,
-                            onClick = { showGroupPicker = true },
-                            label = groupFilter ?: "分组",
-                        )
-                        AppDropdownMenu(
-                            expanded = showGroupPicker,
-                            onDismissRequest = { showGroupPicker = false },
-                            items = listOf(
-                                AppMenuItem(
-                                    "全部分组",
-                                    onClick = {
-                                        showGroupPicker = false
-                                        onGroupFilterChange(null)
-                                    },
-                                    selected = groupFilter == null,
-                                ),
-                            ) + groups.map { group ->
-                                AppMenuItem(
-                                    group,
-                                    onClick = {
-                                        showGroupPicker = false
-                                        onGroupFilterChange(group)
-                                    },
-                                    selected = group == groupFilter,
-                                )
-                            },
-                        )
-                    }
-                }
+                { GroupFilterChip(groups, groupFilter, onGroupFilterChange) }
             } else {
                 null
             },
@@ -638,11 +587,14 @@ private fun SourceListRow(
     checkState: RowCheck,
     selected: Boolean,
     selectionMode: Boolean,
+    /** 搜索词：名称、网址里命中的字标强调色（同净化替换、订阅源） */
+    query: String,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val accent = MiuixTheme.colorScheme.primary
     // 行尾：平时是启用开关；多选时换成勾选框（HyperOS 编辑模式的勾在行尾，与书架列表一致）。
     // 从前平时行尾是「删除图标 + 开关」，48dp 的垃圾桶紧挨着开关，挤，也容易手滑点到 —— 删除走多选。
     // 勾选框纯展示：整行是一个复选语义目标（ContentListItem 的 checked 重载），框自己不可点，读屏不会多一个焦点
@@ -667,7 +619,7 @@ private fun SourceListRow(
     val supporting: @Composable () -> Unit = {
         Column {
             Text(
-                source.id,
+                remember(source.id, query, accent) { highlightMatches(source.id, query, accent) },
                 style = ContentListDefaults.supportingStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -684,7 +636,7 @@ private fun SourceListRow(
     val headline: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                source.name,
+                remember(source.name, query, accent) { highlightMatches(source.name, query, accent) },
                 style = ContentListDefaults.titleStyle,
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),

@@ -3,8 +3,10 @@ package com.radium.inkwell.data.repo
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.rss.ExportRssSource
 import com.radium.inkwell.core.source.rss.LegadoRssConverter
 import com.radium.inkwell.core.source.rss.RssPayload
+import com.radium.inkwell.core.source.rss.RssSourceExport
 import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.core.source.rss.RssXmlParser
 import com.radium.inkwell.core.util.LegadoLinks
@@ -68,6 +70,39 @@ class RssRepository(
 
     suspend fun delete(id: String) = dao.softDeleteById(id, System.currentTimeMillis())
 
+    // ---- 多选批量（订阅源页的底部操作条） ----
+
+    suspend fun setEnabled(ids: Collection<String>, enabled: Boolean) =
+        dao.setEnabledByIds(ids.toList(), enabled, System.currentTimeMillis())
+
+    suspend fun delete(ids: Collection<String>) = dao.softDeleteByIds(ids.toList(), System.currentTimeMillis())
+
+    /** 只改 groupName 这一列、不动规则 JSON：重新导入时靠两边对不上认出「用户改过分组」（见 [importedGroup]） */
+    suspend fun setGroup(ids: Collection<String>, group: String) =
+        dao.setGroupByIds(ids.toList(), group.trim(), System.currentTimeMillis())
+
+    /** 选中的订阅源导出成阅读的订阅源 JSON（见 [RssSourceExport]），顺序同列表 */
+    suspend fun exportJson(ids: Collection<String>): String {
+        val idSet = ids.toSet()
+        val rows = dao.getAll()
+            .filter { !it.deleted && it.id in idSet }
+            .sortedWith(compareBy({ it.sortOrder }, { it.name }))
+        return withContext(Dispatchers.Default) {
+            RssSourceExport.toJson(
+                rows.map {
+                    ExportRssSource(
+                        url = it.id,
+                        name = it.name,
+                        icon = it.icon,
+                        group = it.groupName,
+                        enabled = it.enabled,
+                        sourceJson = it.sourceJson,
+                    )
+                },
+            )
+        }
+    }
+
     /**
      * 导入：粘进来的、剪贴板里的、文件里的，三个入口都走这里。
      *
@@ -130,6 +165,7 @@ class RssRepository(
                 // 重复导入保留用户的启用/禁用与排序
                 enabled = existing[c.rule.id]?.enabled ?: c.rule.enabled,
                 sortOrder = existing[c.rule.id]?.sortOrder ?: 0,
+                groupName = importedGroup(existing[c.rule.id], c.rule),
                 // 同书源导入：原样重导不算修改，盖 now 会让本机旧的启停在 WebDAV 合并里赢过别的设备；
                 // 墓碑被重新导入是「加回来」，要盖新时间戳
                 updatedAt = existing[c.rule.id]
@@ -158,6 +194,8 @@ class RssRepository(
                     sourceJson = "",
                     enabled = existing?.enabled ?: true,
                     sortOrder = existing?.sortOrder ?: 0,
+                    // 再粘一次同一个地址：用户给它设的分组留着（feed 自己没有分组可言）
+                    groupName = existing?.takeUnless { it.deleted }?.groupName.orEmpty(),
                     updatedAt = System.currentTimeMillis(),
                 )
             )
@@ -169,16 +207,29 @@ class RssRepository(
         )
     }
 
+    /**
+     * 重新导入时分组听谁的（同 BookSourceRepository.importedGroup）：用户在订阅源页改过分组
+     * （库里的分组 ≠ 旧规则自带的分组）就留用户的 —— 否则重导一次合集，设好的分组全回到作者写的那个；
+     * 没改过就跟着新规则走，作者在新版里调整了分组，用户理应拿到。
+     */
+    private fun importedGroup(existing: RssSourceEntity?, rule: RssSourceRule): String {
+        if (existing == null || existing.deleted) return rule.group
+        val oldRuleGroup = runCatching { RssSourceRule.fromJson(existing.json).group }.getOrNull()
+            ?: return existing.groupName
+        return if (existing.groupName == oldRuleGroup) rule.group else existing.groupName
+    }
+
     private fun RssSourceRule.toEntity(
         sourceJson: String,
         enabled: Boolean,
         sortOrder: Int,
         updatedAt: Long,
+        groupName: String = group,
     ) = RssSourceEntity(
         id = id,
         name = name,
         icon = icon,
-        groupName = group,
+        groupName = groupName,
         enabled = enabled,
         sortOrder = sortOrder,
         json = copy(enabled = enabled).toJson(),
