@@ -48,6 +48,10 @@ interface ReplaceRuleDao {
     @Query("UPDATE replace_rule SET enabled = :enabled, updatedAt = :now WHERE id = :id")
     suspend fun setEnabled(id: String, enabled: Boolean, now: Long)
 
+    /** 多选批量启停：一条语句，同样盖 updatedAt */
+    @Query("UPDATE replace_rule SET enabled = :enabled, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun setEnabledByIds(ids: List<String>, enabled: Boolean, now: Long)
+
     @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM replace_rule WHERE deleted = 0")
     suspend fun maxSortOrder(): Int
 

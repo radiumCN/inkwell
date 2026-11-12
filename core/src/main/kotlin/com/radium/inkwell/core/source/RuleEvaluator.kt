@@ -31,8 +31,12 @@ data class EvalContext(
  * scriptVars 是 java.put/java.get 的变量表（Legado 里目录→正文传参极常用）。
  */
 data class JsContext(
-    /** 书源标识，脚本里的 source.getKey() */
+    /** 书源标识，脚本里的 source.getKey() / source.bookSourceUrl */
     val sourceKey: String = "",
+    /** 脚本里的 source.bookSourceName */
+    val sourceName: String = "",
+    /** 脚本里的 source.bookSourceComment：不少来源把公用函数写在这里，规则开头 eval 它 */
+    val sourceComment: String = "",
     val book: com.radium.inkwell.core.source.js.BookBridge =
         com.radium.inkwell.core.source.js.BookBridge(),
     val chapter: com.radium.inkwell.core.source.js.ChapterBridge =
@@ -125,8 +129,34 @@ class RuleEvaluator(
         // `##广告##`（正则替换）。从前这里直接 evalToNodes(source) 把 ops 全丢了 —— bookList/
         // chapterList 写成这类形态就得空列表。改为先走字符串管道求值（ops 在里面执行），
         // 再把每个产物按 Js 分支同样的逻辑转回节点（HTML→子元素 / JSON→条目 / 其余→标量）。
-        is RuleNode.Pipe -> wholeJsonPipe(node, ctx) ?: evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
+        is RuleNode.Pipe -> wholeJsonPipe(node, ctx)
+            ?: tailRuleNodes(node, ctx)
+            ?: evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
     }
+
+    /**
+     * 列表规则以一条规则收尾的管道（`<js>…</js>\n.list li`、`<js>…</js>\n//item`）：照 Legado 的 getElements，
+     * 前面各段的产物当一份**新内容**，最后那条规则在它上面取**节点**。
+     *
+     * 从前整条管道先求成字符串、再把字符串转回节点：尾规则是 CSS 的，不带 `@text` 的选择器求不出字符串，列表直接为空；
+     * 是 XPath 的，取到的是各项的文字，后面的书名、链接规则落在纯文本上，一个也取不到。
+     * 书源里三十来个搜索 / 目录这么写，翻译类订阅源的文章列表也是（脚本先把整份 feed 过一遍翻译，再 `//item`）。
+     * JSON 收尾的（`<js>…</js>$.data.list`）原来那条路是对的，走这里结果一样，只是少序列化一遍。
+     */
+    private fun tailRuleNodes(node: RuleNode.Pipe, ctx: EvalContext): List<EvalContext>? {
+        val last = node.ops.lastOrNull() as? PipeOp.Rule ?: return null
+        val tail = runCatching { LegadoRuleAnalyzer.analyze(last.rule) }.getOrNull() ?: return null
+        val contents = node.ops.dropLast(1)
+            .fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
+            .filter { it.isNotEmpty() }
+        return contents.flatMap { s ->
+            runCatching { evalToNodes(tail, contentContext(s, ctx)) }.getOrDefault(emptyList())
+        }
+    }
+
+    /** 上一步的产物（一段 HTML / XML / JSON）当新内容：文档与原文同时带着，同页面上下文 */
+    private fun contentContext(text: String, ctx: EvalContext): EvalContext =
+        ctx.copy(element = parsePage(text, ctx.baseUrl), json = text)
 
     /**
      * JSON 列表后面接脚本的管道（`$.data.list[*]<js>…</js>$.[*]`）：照 Legado 的 getElements，
@@ -160,6 +190,8 @@ class RuleEvaluator(
             t.isEmpty() -> emptyList()
             t.startsWith("[") -> expandJsonArray(t, ctx)
             t.startsWith("{") -> listOf(ctx.copy(element = null, json = t))
+            // 整份 XML（脚本原样交回一份 feed）没有 body，取根下的元素
+            isXmlText(t) -> parsePage(t, ctx.baseUrl).children().map { ctx.copy(element = it, json = null) }
             t.startsWith("<") -> Jsoup.parse(t).body().children().map { ctx.copy(element = it, json = null) }
             else -> listOf(ctx.copy(element = null, json = t))
         }
@@ -270,9 +302,22 @@ class RuleEvaluator(
      * 有元素的上下文（HTML 页面）、`@` 开头的、带模板的不动。
      */
     private fun bareJsonPath(rule: String, ctx: EvalContext): String? {
-        if (ctx.element != null || ctx.json == null) return null
+        val json = ctx.json ?: return null
+        // 页面一级的上下文同时带着 Jsoup 文档和原文（BookSourceEngine.pageContext）：原文本身是 JSON 才按 JSONPath 走，
+        // 同 Legado 的 isJSON —— 内容是 JSON 时，不带前缀的规则一律是 JSONPath（Jayway 自己补 `$.`）。
+        // 从前这一级只认 `$.` 开头的：接口源把列表写成 `data.books`、详情 init 写成 `data.book`，
+        // 被当成 CSS 选择器去 HTML 里找，一个节点都没有（七猫的接口源搜索、详情全空）
+        if (ctx.element != null && !(json is String && looksLikeJson(json))) return null
         if (rule.isBlank() || rule.startsWith("@") || rule.contains("{{")) return null
         return "$." + rule.trim()
+    }
+
+    /** 同 Legado 的 `String.isJson()`：去掉首尾空白后由 `{…}` 或 `[…]` 包住。只看两头，不为判断复制几 MB 的响应体 */
+    private fun looksLikeJson(text: String): Boolean {
+        val first = text.indexOfFirst { !it.isWhitespace() }
+        if (first < 0) return false
+        val last = text.indexOfLast { !it.isWhitespace() }
+        return (text[first] == '{' && text[last] == '}') || (text[first] == '[' && text[last] == ']')
     }
 
     private fun readJsonPath(path: String, ctx: EvalContext): Any? {
@@ -561,8 +606,7 @@ class RuleEvaluator(
             val node = runCatching { LegadoRuleAnalyzer.analyze(op.rule) }.getOrNull()
             if (node == null) list
             else list.flatMap { s ->
-                val sub = ctx.copy(element = Jsoup.parse(s, ctx.baseUrl), json = s)
-                runCatching { evalToStrings(node, sub) }.getOrDefault(emptyList())
+                runCatching { evalToStrings(node, contentContext(s, ctx)) }.getOrDefault(emptyList())
             }
         }
         is PipeOp.Js -> list.mapNotNull { s -> runJs(scriptOf(op.script, ctx), ctx, input = s) }
@@ -583,6 +627,15 @@ class RuleEvaluator(
         runJs(scriptOf(script, ctx), ctx, input = contextText(ctx))
 
     /**
+     * 来源级的脚本（源级 header 的 `@js:` / `<js>`）：同阅读的 BaseSource.evalJS，不在哪一页上跑，
+     * 没有 `result`，脚本原样跑、不先展开 `{{}}`。没有 JS 引擎、脚本报错都返回 null，由调用方当「没有」处理
+     */
+    fun evalSourceScript(script: String, ctx: EvalContext): String? {
+        if (scriptRuntime == null) return null
+        return runJs(script, ctx, input = "")
+    }
+
+    /**
      * 绑定书源脚本可见的全部上下文：变量（result/src/baseUrl/key/page）+ 桥对象
      * （java/cookie/cache/source/book/chapter）。Rhino 会把这些 Kotlin 对象反射成 JS 对象。
      *
@@ -594,7 +647,7 @@ class RuleEvaluator(
             ?: throw UnsupportedRuleException("该来源需要 JS 引擎，当前版本不支持")
         val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
         val java = com.radium.inkwell.core.source.js.JavaBridge(
-            jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx),
+            jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx), chinese = runtime.chineseConverter,
         )
         return try {
             runtime.eval(
@@ -609,7 +662,12 @@ class RuleEvaluator(
                     "java" to java,
                     "cookie" to com.radium.inkwell.core.source.js.CookieBridge(jsHttp),
                     "cache" to jsCache,
-                    "source" to com.radium.inkwell.core.source.js.SourceBridge(ctx.js.sourceKey, store),
+                    "source" to com.radium.inkwell.core.source.js.SourceBridge(
+                        ctx.js.sourceKey,
+                        store,
+                        bookSourceName = ctx.js.sourceName,
+                        bookSourceComment = ctx.js.sourceComment,
+                    ),
                     "book" to ctx.js.book,
                     "chapter" to ctx.js.chapter,
                 ),
@@ -622,8 +680,18 @@ class RuleEvaluator(
         }
     }
 
+    /**
+     * 来源脚本 `source.putLoginHeader(…)` 存下的请求头（同 Legado：之后这个来源的每个请求都带上）。
+     * 只在进程内：不做登录界面，脚本自己算出来的 Cookie / token（一读这类站先过一道脚本挑战）照样接得上。
+     * 没存过、存的不是 JSON 对象为空
+     */
+    fun loginHeaders(sourceKey: String): Map<String, String> =
+        sourceStores[sourceKey]?.get(com.radium.inkwell.core.source.js.SourceBridge.LOGIN_HEADER)
+            ?.let { parseHeaderJson(it) }
+            .orEmpty()
+
     /** `java.getString(rule)`：在当前页上下文上再跑一条规则。 */
-    private fun ruleQuery(ctx: EvalContext) = object : com.radium.inkwell.core.source.js.JsRuleQuery {
+    private fun ruleQuery(ctx: EvalContext): com.radium.inkwell.core.source.js.JsRuleQuery = object : com.radium.inkwell.core.source.js.JsRuleQuery {
         override fun getString(rule: String): String =
             runCatching { evalToString(LegadoRuleAnalyzer.analyze(rule), ctx) }.getOrNull().orEmpty()
 
@@ -632,16 +700,46 @@ class RuleEvaluator(
                 .getOrDefault(emptyArray())
 
         override fun getElement(rule: String): com.radium.inkwell.core.source.js.JsElement? =
-            getElements(rule).firstOrNull()
+            getElements(rule).first()
 
-        override fun getElements(rule: String): Array<com.radium.inkwell.core.source.js.JsElement> =
-            runCatching {
-                evalToNodes(LegadoRuleAnalyzer.analyze(rule), ctx)
-                    .mapNotNull { it.element?.let { el -> com.radium.inkwell.core.source.js.JsElement(el) } }
-                    .toTypedArray()
-            }.getOrDefault(emptyArray())
+        override fun getElements(rule: String): com.radium.inkwell.core.source.js.JsElements =
+            com.radium.inkwell.core.source.js.JsElements(
+                runCatching { evalToNodes(LegadoRuleAnalyzer.analyze(rule), ctx).mapNotNull { it.element } }
+                    .getOrDefault(emptyList()),
+            )
+
+        // 字符串当一份新页面（HTML / XML / JSON 都认，同 [contentContext]），getElements 拿到的元素就落在那个元素上
+        override fun withContent(content: Any?, baseUrl: String?): com.radium.inkwell.core.source.js.JsRuleQuery {
+            val base = ctx.copy(baseUrl = baseUrl?.takeIf { it.isNotBlank() } ?: ctx.baseUrl)
+            return ruleQuery(
+                when (content) {
+                    null -> base.copy(element = null, json = null)
+                    // 元素：后面的规则落在它上面；文字节点没有可选的东西，当它的文字
+                    is com.radium.inkwell.core.source.js.JsElement ->
+                        content.element?.let { base.copy(element = it, json = null) }
+                            ?: base.copy(element = null, json = content.text())
+                    else -> contentContext(content.toString(), base)
+                },
+            )
+        }
     }
 }
+
+// ---- 页面解析 ----
+
+/**
+ * 抓回来的内容（整页、脚本产物）→ Jsoup 文档。以 `<?xml` 开头的按 **XML** 解析，同 Legado 的 AnalyzeByJSoup / AnalyzeByXPath。
+ *
+ * HTML 解析器认 HTML 的标签语义，拿它解析 RSS 会丢东西：`<link>` 在 HTML 里是空元素，
+ * `<link>https://…</link>` 的地址被挤到元素外面，`link@text`、`//link/text()` 一律取空 —— 订阅源写规则取 feed 的，
+ * 文章链接就这么全没了。只看开头、不先 trim：阅读也只认紧贴开头的声明，开头带空白的 XHTML 页照旧按 HTML 解析。
+ */
+internal fun parsePage(text: String, baseUrl: String): Document =
+    if (isXmlText(text)) Jsoup.parse(text, baseUrl, org.jsoup.parser.Parser.xmlParser())
+    else Jsoup.parse(text, baseUrl)
+
+private fun isXmlText(text: String): Boolean =
+    text.removePrefix("\uFEFF").startsWith("<?xml", ignoreCase = true)
 
 // ---- JSON 工具 ----
 

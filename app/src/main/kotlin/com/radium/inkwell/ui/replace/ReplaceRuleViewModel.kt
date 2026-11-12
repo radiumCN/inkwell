@@ -6,20 +6,28 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
+import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.RuleImportItem
 import com.radium.inkwell.ui.components.MessageBus
+import com.radium.inkwell.ui.components.writeExportFile
+import com.radium.inkwell.core.source.ExportPurifyRule
 import com.radium.inkwell.core.source.ImportedPurifyRule
 import com.radium.inkwell.core.source.PurifyImportException
 import com.radium.inkwell.core.source.PurifyRule
+import com.radium.inkwell.core.source.PurifyRuleExport
 import com.radium.inkwell.core.source.PurifyRuleImport
 import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.source.Purifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import java.io.File
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,9 +60,19 @@ data class ReplaceRuleUiState(
     val importItems: List<RuleImportItem>? = null,
     /** 导入面板里勾上的（规则 id） */
     val importSelected: Set<String> = emptySet(),
+    /** 搜索框里的字 */
+    val query: String = "",
+    val filter: RuleFilter = RuleFilter.ALL,
+    /** 搜索 + 筛选之后列表上显示的规则（[filterRules]），和 [rules] 同一拍更新，进页不闪空列表 */
+    val visibleRules: List<ReplaceRuleEntity> = emptyList(),
+    /** 多选勾上的规则 id；空 = 不在多选态。只会是 [visibleRules] 里的（见 [ReplaceRuleViewModel.refiltered]） */
+    val selected: Set<String> = emptySet(),
 ) {
     /** 编辑面板里有没保存的改动（只看规则本身；样例文本不存，不算） */
     val editorDirty: Boolean get() = editing != null && editing != editingOriginal
+
+    /** 搜了或者筛了：列表空着时说「没有符合条件的规则」，而不是「还没有净化规则」 */
+    val narrowed: Boolean get() = query.isNotBlank() || filter != RuleFilter.ALL
 }
 
 class ReplaceRuleViewModel(
@@ -62,6 +80,8 @@ class ReplaceRuleViewModel(
     private val repo: ReplaceRuleRepository,
     /** 「从网络链接导入」用注入的那个客户端：它配了超时（裸 OkHttpClient() 没有总闸） */
     private val http: OkHttpClient,
+    /** 导出「本书专属」的规则时查书名（见 [exportSelected]） */
+    private val books: BookRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReplaceRuleUiState())
@@ -72,17 +92,140 @@ class ReplaceRuleViewModel(
     init {
         viewModelScope.launch {
             repo.observeAll().collect { rules ->
-                _state.value = _state.value.copy(rules = rules, rulesLoaded = true)
+                _state.value = refiltered(_state.value.copy(rules = rules, rulesLoaded = true))
+            }
+        }
+    }
+
+    /**
+     * 按搜索词和筛选重算 [ReplaceRuleUiState.visibleRules]，顺手把多选收窄到看得见的那些：
+     * 选了几条再改搜索词 / 筛选，看不见的还留在选中里的话，「删除 N 条」会连它们一起删掉（同来源管理）。
+     * 规则顶多几百条，就地同步算，不另开线程 —— 和 rules 同一拍落地，列表不会先空一下。
+     */
+    private fun refiltered(s: ReplaceRuleUiState): ReplaceRuleUiState {
+        val visible = filterRules(s.rules, s.query, s.filter)
+        val ids = visible.mapTo(HashSet()) { it.id }
+        return s.copy(
+            visibleRules = visible,
+            selected = if (ids.containsAll(s.selected)) s.selected else s.selected.filterTo(LinkedHashSet()) { it in ids },
+        )
+    }
+
+    // ---- 搜索 / 筛选 ----
+
+    fun setQuery(query: String) {
+        _state.value = refiltered(_state.value.copy(query = query))
+    }
+
+    fun setFilter(filter: RuleFilter) {
+        _state.value = refiltered(_state.value.copy(filter = filter))
+    }
+
+    /** 筛完是空的时候的出口：搜索词、筛选一并放开 */
+    fun clearFilters() {
+        _state.value = refiltered(_state.value.copy(query = "", filter = RuleFilter.ALL))
+    }
+
+    // ---- 多选 ----
+
+    fun toggleSelect(id: String) {
+        val s = _state.value
+        _state.value = s.copy(selected = if (id in s.selected) s.selected - id else s.selected + id)
+    }
+
+    /**
+     * 只全选**当前看得见的**（搜索、筛选之后）：搜「某站名」→ 全选 → 删除，清掉的就是这个站的那几条，
+     * 没显示出来的不会被连带删掉（同来源管理）
+     */
+    fun selectAll() {
+        val s = _state.value
+        _state.value = s.copy(selected = s.visibleRules.mapTo(LinkedHashSet()) { it.id })
+    }
+
+    fun clearSelection() {
+        _state.value = _state.value.copy(selected = emptySet())
+    }
+
+    // ---- 批量操作（底部操作条） ----
+
+    /** 启停之后留在多选里（同来源管理）：可能还要接着删、导出；筛着「已启用」时关掉的会自己从选中里掉出去 */
+    fun setEnabledSelected(enabled: Boolean) {
+        val ids = _state.value.selected
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repo.setEnabled(ids, enabled)
+            messages.emit("${if (enabled) "已启用" else "已禁用"} ${ids.size} 条规则")
+        }
+    }
+
+    fun deleteSelected() {
+        val ids = _state.value.selected
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repo.delete(ids.toList())
+            clearSelection()
+            messages.emit("已删除 ${ids.size} 条规则")
+        }
+    }
+
+    private val _exportFile = MutableSharedFlow<File>(extraBufferCapacity = 1)
+
+    /** 导出好的文件，页面收到就交给系统分享（[com.radium.inkwell.ui.components.CollectExportShares]） */
+    val exportFile: SharedFlow<File> = _exportFile.asSharedFlow()
+
+    /**
+     * 选中的规则导出成阅读格式的 json（[PurifyRuleExport]），按列表顺序。
+     *
+     * 「本书专属」的规则在阅读里没有对应 —— 那边的规则不挂在某一本书上 —— 作用范围换成书名：
+     * 阅读认书名，Inkwell 的作用范围也认书名，导到哪边都只管这一本书。查不到书的（书已经删了）跳过并说一声，
+     * 不能把它当成通用规则导出去：一条只想删某本书里一句话的规则，到了别处会删所有书的。
+     */
+    fun exportSelected() {
+        val s = _state.value
+        if (s.selected.isEmpty()) return
+        val picked = s.rules.filter { it.id in s.selected }
+        viewModelScope.launch {
+            try {
+                var orphaned = 0
+                val rules = picked.mapNotNull { r ->
+                    val scope = if (r.bookId.isEmpty()) {
+                        r.scope
+                    } else {
+                        books.getBook(r.bookId)?.title?.takeIf { it.isNotBlank() } ?: run {
+                            orphaned++
+                            return@mapNotNull null
+                        }
+                    }
+                    ExportPurifyRule(
+                        id = r.id,
+                        name = r.name,
+                        pattern = r.pattern,
+                        replacement = r.replacement,
+                        isRegex = r.isRegex,
+                        scope = scope,
+                        enabled = r.enabled,
+                    )
+                }
+                if (rules.isEmpty()) {
+                    messages.emit("选中的规则对应的书都已删除，没有可导出的")
+                    return@launch
+                }
+                val text = withContext(Dispatchers.Default) { PurifyRuleExport.toJson(rules) }
+                val file = writeExportFile(context, "inkwell-replace-rules.json", text)
+                clearSelection()
+                _exportFile.emit(file)
+                if (orphaned > 0) messages.emit("已跳过 $orphaned 条本书专属规则：对应的书已删除")
+            } catch (e: CancellationException) {
+                // 退出页面会取消导出：接住不放就会弹一条假的「导出失败」
+                throw e
+            } catch (e: Exception) {
+                messages.emit("导出失败: ${e.message?.take(60)}")
             }
         }
     }
 
     fun setEnabled(rule: ReplaceRuleEntity, enabled: Boolean) {
         viewModelScope.launch { repo.setEnabled(rule.id, enabled) }
-    }
-
-    fun delete(rule: ReplaceRuleEntity) {
-        viewModelScope.launch { repo.delete(listOf(rule.id)) }
     }
 
     fun newRule() = openEditor(ReplaceRuleEntity(id = "", name = "", pattern = ""))

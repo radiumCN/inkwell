@@ -9,6 +9,8 @@ import com.radium.inkwell.data.db.entity.CheckStatus
 import kotlinx.coroutines.flow.mapLatest
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.MessageBus
+import com.radium.inkwell.ui.components.splitGroups
+import com.radium.inkwell.ui.components.writeExportFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -218,15 +220,8 @@ class SourceManageViewModel(
         if (ids.isEmpty()) return
         viewModelScope.launch {
             runCatching {
-                val text = sourceRepo.exportJson(ids)
-                // 落在 cacheDir/export/ 下：FileProvider 只把这个子目录交出去（file_paths.xml），
-                // 别让分享面板拿到的 URI 能够到 cacheDir 里的其他东西（下载的安装包、图片缓存）
-                val file = java.io.File(java.io.File(context.cacheDir, "export"), "inkwell-sources.json")
-                withContext(Dispatchers.IO) {
-                    file.parentFile?.mkdirs()
-                    file.writeText(text)
-                }
-                file
+                // 落在 cacheDir/export/ 下（见 writeExportFile）
+                writeExportFile(context, "inkwell-sources.json", sourceRepo.exportJson(ids))
             }.onSuccess { file ->
                 _exportFile.emit(file)
                 clearSelection()
@@ -286,9 +281,7 @@ class SourceManageViewModel(
     /** 所有出现过的分组名。一个书源可能挂多个组（逗号分隔） */
     val groups: StateFlow<List<String>> = sources
         .map { list ->
-            list.flatMap { it.groupName.split(',', '，') }
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
+            list.flatMap { splitGroups(it.groupName) }
                 .distinct()
                 .sorted()
         }
@@ -350,7 +343,7 @@ class SourceManageViewModel(
             list.asSequence()
                 .filter { matchesQuery(it, q) }
                 .filter { matchesFilter(it, f, exploreOnly) }
-                .filter { g == null || it.groupName.split(',', '，').any { s -> s.trim() == g } }
+                .filter { g == null || g in splitGroups(it.groupName) }
                 .sortedWith(sourceComparator(o))
                 .toList()
         }

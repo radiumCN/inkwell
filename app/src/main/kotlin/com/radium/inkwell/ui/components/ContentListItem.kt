@@ -118,6 +118,25 @@ object ContentListDefaults {
         )
     }
 
+    /**
+     * 关着的条目（关掉的订阅源）：字淡到和禁用一样，但行**照样能点、能长按**。
+     * 别拿 `enabled = false` 冒充 —— 那会连点击、长按一起关掉：关着的源点不开，也长按不进多选，
+     * 筛出「已禁用」想一口气删掉时一行都选不上。
+     */
+    @Composable
+    @ReadOnlyComposable
+    fun dimmedColors(): ContentListColors {
+        val base = colors()
+        return ContentListColors(
+            containerColor = base.containerColor,
+            selectedContainerColor = base.selectedContainerColor,
+            contentColor = base.contentColor.let { it.copy(alpha = it.alpha * DISABLED_ALPHA) },
+            selectedContentColor = base.selectedContentColor,
+            supportingColor = base.supportingColor.let { it.copy(alpha = it.alpha * DISABLED_ALPHA) },
+            selectedSupportingColor = base.selectedSupportingColor,
+        )
+    }
+
     /** 标题字号：照 Miuix `BasicComponent` 的标题（headline1 = 17sp，Medium） */
     val titleStyle: TextStyle
         @Composable @ReadOnlyComposable

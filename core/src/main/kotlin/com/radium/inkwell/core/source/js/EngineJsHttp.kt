@@ -1,15 +1,20 @@
 package com.radium.inkwell.core.source.js
 
 import com.radium.inkwell.core.source.SourceHttpClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration
@@ -52,6 +57,9 @@ class EngineJsHttp(
 
         /** 此刻这根线程上跑的那次引擎调用的 Job；脚本运行时靠它响应取消（RhinoScriptRuntime） */
         internal fun currentJob(): Job? = parentJob.get()
+
+        /** `java.ajaxAll` 同时在飞的请求数 */
+        private const val AJAX_ALL_PARALLEL = 6
     }
 
     override fun fetch(
@@ -59,12 +67,64 @@ class EngineJsHttp(
         method: String,
         body: String?,
         headers: Map<String, String>,
+        followRedirects: Boolean,
     ): StrResponse? = runCatching {
+        blockingUnderParent { request(url, method, body, headers, followRedirects) }
+    }.getOrNull()
+
+    /**
+     * `java.ajaxAll`：一起发、同一道看门（外层一取消，整批一起掐掉）。同时在飞的封顶 [AJAX_ALL_PARALLEL] 个：
+     * 图集正文一次几十页，全放出去就是对着一个站并发几十个请求。单个失败只空那一格，不连累别的
+     */
+    override fun fetchAll(requests: List<JsHttpRequest>): List<StrResponse?> =
+        runCatching {
+            blockingUnderParent {
+                val gate = Semaphore(AJAX_ALL_PARALLEL)
+                requests.map { r ->
+                    async {
+                        gate.withPermit {
+                            try {
+                                request(r.url, r.method, r.body, r.headers, followRedirects = true)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+        }.getOrNull() ?: requests.map { null }
+
+    private suspend fun request(
+        url: String,
+        method: String,
+        body: String?,
+        headers: Map<String, String>,
+        followRedirects: Boolean,
+    ): StrResponse {
+        // 4xx/5xx 也要交给脚本看 statusCode，不能在这儿抛成 ajax 空串
+        val page = http.fetch(
+            url, method = method, body = body, headers = headers,
+            throwOnHttpError = false,
+            followRedirects = followRedirects,
+        )
+        return StrResponse(
+            bodyText = page.bodyText,
+            status = page.statusCode,
+            finalUrl = page.finalUrl,
+            headerMap = page.headers,
+            cookieStr = http.cookieOf(page.finalUrl),
+        )
+    }
+
+    /** 外层已取消返回 null；否则阻塞跑完 [block]（整段最多 [timeout]），外层一取消就掐掉 */
+    private fun <T> blockingUnderParent(block: suspend CoroutineScope.() -> T): T? {
         val parent = parentJob.get()
         // 外层已经取消了就别再发：同一段脚本里后面的 java.ajax、目录逐条执行的脚本都会走到这里，
         // 每一个都会实打实跑完一整个请求（最长 [timeout]），用户早就离开了页面
         if (parent?.isCancelled == true) return null
-        runBlocking {
+        return runBlocking {
             val blockingScope = this
             // 看门协程**挂在外层 Job 之下**：父一进入 cancelling，子立刻被取消 —— 这才是我们要的
             // 「外层取消」信号。从前写的是 `p.join()`，等的却是父「完成」；而父此刻正被这个
@@ -85,25 +145,12 @@ class EngineJsHttp(
                 }
             }
             try {
-                withTimeout(timeout) {
-                    // 4xx/5xx 也要交给脚本看 statusCode，不能在这儿抛成 ajax 空串
-                    val page = http.fetch(
-                        url, method = method, body = body, headers = headers,
-                        throwOnHttpError = false,
-                    )
-                    StrResponse(
-                        bodyText = page.bodyText,
-                        status = page.statusCode,
-                        finalUrl = page.finalUrl,
-                        headerMap = page.headers,
-                        cookieStr = http.cookieOf(page.finalUrl),
-                    )
-                }
+                withTimeout(timeout) { block() }
             } finally {
                 watcher?.cancel()
             }
         }
-    }.getOrNull()
+    }
 
     override fun cookieOf(url: String): String = http.cookieOf(url)
 

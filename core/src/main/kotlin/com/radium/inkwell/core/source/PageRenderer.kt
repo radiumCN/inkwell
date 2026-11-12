@@ -7,7 +7,8 @@ package com.radium.inkwell.core.source
  * 纯 HTTP + Jsoup 无论规则怎么写都拿不到。core 是纯 JVM 模块，实现由 Android 侧（WebView）注入。
  *
  * 代价不小：一次渲染是秒级，且实现通常需要串行化。引擎只在「静态抓取成功但规则解析为空」时
- * 才回退到这里，且不用于搜索/发现（会向大量书源并发扇出）。
+ * 才回退到这里，且这种自动回退不用于搜索/发现（会向大量书源并发扇出）。例外是书源在地址选项里
+ * 自己声明了 `webView`（Legado 的写法）：那几个源的结果本来就是页面脚本画出来的，搜索也直接渲染。
  */
 interface PageRenderer {
 

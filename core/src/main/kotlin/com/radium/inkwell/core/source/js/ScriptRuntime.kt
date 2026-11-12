@@ -17,6 +17,29 @@ interface ScriptRuntime {
      * @throws Exception 脚本错误由调用方决定如何降级
      */
     fun eval(script: String, bindings: Map<String, Any?>, jsLib: String? = null): String?
+
+    /** 脚本里 `java.t2s` / `java.s2t` 用的繁简转换；平台没给就原样返回 */
+    val chineseConverter: ChineseConverter get() = ChineseConverter.NONE
+}
+
+/**
+ * 繁简转换（阅读的 `java.t2s` / `java.s2t`）。core 是纯 JVM、不带字表：app 拿 Android 自带的 ICU 实现注进来，
+ * 单测、没注入时原样返回 —— 原样返回总比方法不存在强：从前一调就 ReferenceError，ESJ Zone 的书名、作者、简介规则
+ * 都接一道 `@js:java.t2s(result)`，全部落空，搜到的书一本不剩。
+ */
+interface ChineseConverter {
+    /** 繁体 → 简体 */
+    fun toSimplified(text: String): String
+
+    /** 简体 → 繁体 */
+    fun toTraditional(text: String): String
+
+    companion object {
+        val NONE: ChineseConverter = object : ChineseConverter {
+            override fun toSimplified(text: String): String = text
+            override fun toTraditional(text: String): String = text
+        }
+    }
 }
 
 /**
@@ -25,6 +48,7 @@ interface ScriptRuntime {
  */
 class RhinoScriptRuntime(
     private val maxInstructions: Long = 20_000_000L,
+    override val chineseConverter: ChineseConverter = ChineseConverter.NONE,
 ) : ScriptRuntime {
 
     private val factory = object : ContextFactory() {
@@ -34,6 +58,8 @@ class RhinoScriptRuntime(
             cx.languageVersion = Context.VERSION_ES6
             cx.instructionObserverThreshold = 100_000
             cx.setClassShutter(BRIDGE_ONLY)
+            // 桥上的列表（Jsoup 替身的 Elements）当数组用：下标、length、map / forEach
+            cx.wrapFactory = BridgeWrapFactory()
             return cx
         }
 
@@ -97,6 +123,8 @@ class RhinoScriptRuntime(
             cx.newObject(proto).also {
                 it.prototype = proto
                 it.parentScope = null
+                // 库自己的顶层代码就用 JavaImporter / Packages 的，加载前先装上（替身无状态，按库缓存不串源）
+                if (JdkCompat.wanted(lib, null)) installJdkCompat(cx, it)
                 cx.evaluateString(it, lib, "jsLib.js", 1, null)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -130,6 +158,9 @@ class RhinoScriptRuntime(
             bindings.forEach { (name, value) ->
                 holder.put(name, holder, Context.javaToJS(value, holder))
             }
+            // 阅读来源直接拿 JDK 做加解密（JavaImporter / Packages.javax.crypto…）：装上替身，见 JdkCompat。
+            // 装在这一次的 holder 上，不进每线程共用的原型 —— 顶层 importPackage 导进来的名字不能串到别的来源
+            if (JdkCompat.wanted(script, jsLib)) installJdkCompat(cx, holder)
             val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it) }
             val scope: Scriptable = if (lib == null) holder else cx.newObject(proto).also {
                 it.prototype = lib
@@ -162,6 +193,17 @@ class RhinoScriptRuntime(
         } finally {
             Context.exit()
         }
+    }
+
+    @Volatile
+    private var compiledPrelude: org.mozilla.javascript.Script? = null
+
+    /** 在 [target] 上装 JDK 替身（[JdkCompat.PRELUDE]）；替身脚本只编译一次 */
+    private fun installJdkCompat(cx: Context, target: Scriptable) {
+        target.put("__inkwellJdk", target, Context.javaToJS(JdkCompat(), target))
+        val prelude = compiledPrelude
+            ?: cx.compileString(JdkCompat.PRELUDE, "jdk-compat.js", 1, null).also { compiledPrelude = it }
+        prelude.exec(cx, target)
     }
 
     /** 用 Rhino 内置的 JSON.stringify 序列化原生数组/对象；失败返回 null 交调用方兜底。 */

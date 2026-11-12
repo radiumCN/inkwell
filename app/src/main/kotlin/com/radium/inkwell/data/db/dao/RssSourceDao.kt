@@ -39,6 +39,17 @@ interface RssSourceDao {
     @Query("UPDATE rss_source SET deleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDeleteById(id: String, now: Long)
 
+    // ---- 多选批量（订阅源页的底部操作条）：一条语句，同样盖 updatedAt ----
+
+    @Query("UPDATE rss_source SET enabled = :enabled, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun setEnabledByIds(ids: List<String>, enabled: Boolean, now: Long)
+
+    @Query("UPDATE rss_source SET deleted = 1, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun softDeleteByIds(ids: List<String>, now: Long)
+
+    @Query("UPDATE rss_source SET groupName = :group, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun setGroupByIds(ids: List<String>, group: String, now: Long)
+
     /** 订阅源最近一次改动的时间（含墓碑）；空表为 0。同步「两边都没动就跳过」的本地一侧（见 WebDavRepository.syncLocked） */
     @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM rss_source")
     suspend fun lastChangeAt(): Long

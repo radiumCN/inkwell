@@ -121,6 +121,7 @@ class ScriptRuntimeTest {
                 method: String,
                 body: String?,
                 headers: Map<String, String>,
+                followRedirects: Boolean,
             ) = StrResponse(
                 bodyText = "ok",
                 status = 302,
@@ -150,6 +151,7 @@ class ScriptRuntimeTest {
                 method: String,
                 body: String?,
                 headers: Map<String, String>,
+                followRedirects: Boolean,
             ): StrResponse {
                 calls += Triple(url, method, body)
                 return StrResponse(bodyText = "ok")

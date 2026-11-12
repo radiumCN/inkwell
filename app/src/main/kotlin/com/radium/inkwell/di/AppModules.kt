@@ -93,9 +93,11 @@ val appModule = module {
             },
         )
     }
-    // Rhino 解释执行 JS 规则（与 Legado 同引擎）
+    // Rhino 解释执行 JS 规则（与 Legado 同引擎）；脚本里的繁简转换用系统 ICU
     single<com.radium.inkwell.core.source.js.ScriptRuntime> {
-        com.radium.inkwell.core.source.js.RhinoScriptRuntime()
+        com.radium.inkwell.core.source.js.RhinoScriptRuntime(
+            chineseConverter = com.radium.inkwell.data.source.IcuChineseConverter(),
+        )
     }
     // JS 渲染回退：静态 HTML 解析不出内容时用 WebView 执行页面 JS 再试（详情/目录/正文三级）
     single<com.radium.inkwell.core.source.PageRenderer> {
@@ -110,7 +112,7 @@ val appModule = module {
             globalPurify = { source, bookTitle -> replaceRules.purifyFor(source, bookTitle) },
         )
     }
-    single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get()) }
+    single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get(), renderer = get()) }
     // 新建书源的页面识别：与引擎共用抓取客户端（同一套 UA、Cookie、私网防护）、WebView 渲染回退、
     // 脚本运行时与全局净化 —— 「高级」页的试抓要和加书后的正式引擎一个样
     single {
@@ -180,7 +182,7 @@ val appModule = module {
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }
-    viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get()) }
+    viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.rss.RssSourceViewModel(androidContext(), get(), get()) }
     // 空串 = 看「全部」（Koin 的参数别传 null）
     viewModel { (sourceId: String) -> com.radium.inkwell.ui.rss.RssTimelineViewModel(sourceId.ifBlank { null }, get(), get()) }

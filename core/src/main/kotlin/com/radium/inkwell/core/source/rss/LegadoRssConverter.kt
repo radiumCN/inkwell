@@ -1,6 +1,7 @@
 package com.radium.inkwell.core.source.rss
 
 import com.radium.inkwell.core.source.LEGADO_ITEM_SEPARATOR
+import com.radium.inkwell.core.source.headerScriptOf
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -21,9 +22,10 @@ object LegadoRssConverter {
      * v2：sortUrl 与 Legado 一样按 `&&` 拆分（v1 只按换行）。
      * v3：单网页源（singleUrl）不再跳过，转成 [RssSourceRule.singleUrl]。
      * v4：带上公共脚本库（jsLib）。
+     * v5：header 写成脚本的带上脚本（[RssSourceRule.headerScript]），从前当没有请求头。
      * 存着的转换结果比这个旧、又留着原始 JSON 的，打开时按原始 JSON 重转一次（见 RssRepository.getRule）
      */
-    const val VERSION = 4
+    const val VERSION = 5
 
     data class Converted(val rule: RssSourceRule, val sourceJson: String)
     data class Skipped(val name: String, val url: String, val reason: String)
@@ -69,6 +71,7 @@ object LegadoRssConverter {
             group = src.str("sourceGroup")?.trim().orEmpty(),
             enabled = src.bool("enabled") ?: true,
             headers = parseHeaders(src.str("header")),
+            headerScript = headerScriptOf(src.str("header")),
             sorts = parseSorts(src.str("sortUrl")),
             articles = src.str("ruleArticles"),
             nextPage = src.str("ruleNextPage"),

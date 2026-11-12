@@ -34,10 +34,15 @@ class NetBookRepository(
     suspend fun fetchDetailAndToc(
         rule: BookSourceRule,
         bookUrl: String,
+        /**
+         * 搜索结果带来的变量（[SearchResult.variables]）：手上有那条搜索结果就交进来。接口源常在搜索那步
+         * java.put 下签名用的请求头，详情、目录地址再 java.get 拼上 —— 不交，后面每一步都少了请求头
+         */
+        variables: Map<String, String> = emptyMap(),
         /** 详情页拿到了、开始取目录时调一下。书源校验靠它分清坏在详情页还是目录 */
         onDetailFetched: () -> Unit = {},
     ): Pair<RemoteBookDetail, List<RemoteChapter>> {
-        val detail = engine.getDetail(rule, bookUrl)
+        val detail = engine.getDetail(rule, bookUrl, variables)
         onDetailFetched()
         val toc = engine.getToc(
             rule, detail.tocUrl.ifBlank { bookUrl },
@@ -50,7 +55,7 @@ class NetBookRepository(
 
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
     suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = try {
-        val (detail, toc) = fetchDetailAndToc(rule, result.bookUrl)
+        val (detail, toc) = fetchDetailAndToc(rule, result.bookUrl, result.variables)
         Result.success(persist(rule.id, result.bookUrl, detail, toc, fallback = result, inShelf = true))
     } catch (e: CancellationException) {
         throw e
@@ -330,7 +335,7 @@ class NetBookRepository(
          */
         alignFrom: ReadAnchor? = null,
     ): Result<Unit> = try {
-        val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl)
+        val (detail, toc) = fetchDetailAndToc(newRule, newResult.bookUrl, newResult.variables)
         check(toc.isNotEmpty()) { "新来源目录为空" }
 
         withContext(Dispatchers.IO) { cache.clear(book.id) } // 旧源的正文缓存整本作废（成千个文件）

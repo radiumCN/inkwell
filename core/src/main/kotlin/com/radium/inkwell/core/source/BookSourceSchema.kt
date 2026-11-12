@@ -1,9 +1,17 @@
 package com.radium.inkwell.core.source
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.nullable
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 
 /** 书源 JSON 统一编解码实例；存的是 Legado 原生格式，未知字段忽略 */
@@ -32,17 +40,21 @@ data class BookSourceRule(
     val bookSourceComment: String = "",
     val enabled: Boolean = true,
     val enabledExplore: Boolean = true,
-    /** 源级请求头：JSON 字符串（`@js:` 形式暂不支持，忽略） */
+    /**
+     * 源级请求头：JSON 字符串，或返回 JSON 字符串的脚本（`@js:…` / `<js>…</js>`，阅读两种都认）。
+     * JSON 解析一次就记住（[headers]）；脚本由引擎每次请求现跑（[headerScript]，见 BookSourceEngine.sourceHeaders）
+     */
     val header: String? = null,
     /** 并发限制："500"(毫秒间隔) 或 "1/1000"(次/毫秒) */
     val concurrentRate: String? = null,
     val searchUrl: String? = null,
     val exploreUrl: String? = null,
-    val ruleSearch: SearchRuleSet? = null,
-    val ruleExplore: SearchRuleSet? = null,
-    val ruleBookInfo: BookInfoRuleSet? = null,
-    val ruleToc: TocRuleSet? = null,
-    val ruleContent: ContentRuleSet? = null,
+    // 规则集读得宽：对象、JSON 字符串都认，别的写法（`[]`、乱填的值）当没有，同阅读的导入 —— 见 [LenientRuleSet]
+    @Serializable(with = LenientSearchRuleSet::class) val ruleSearch: SearchRuleSet? = null,
+    @Serializable(with = LenientSearchRuleSet::class) val ruleExplore: SearchRuleSet? = null,
+    @Serializable(with = LenientBookInfoRuleSet::class) val ruleBookInfo: BookInfoRuleSet? = null,
+    @Serializable(with = LenientTocRuleSet::class) val ruleToc: TocRuleSet? = null,
+    @Serializable(with = LenientContentRuleSet::class) val ruleContent: ContentRuleSet? = null,
     /**
      * 公共脚本库（Legado 的 jsLib）：规则、模板、地址里的脚本都能调它定义的函数。
      * 阅读的远程库写法（`{"名字":"地址"}`）不下载，当没有库。
@@ -70,6 +82,9 @@ data class BookSourceRule(
     // （JSON 解析 + 正则），搜一轮几百个源、目录几十页就是几百上千遍。规则对象不可变，懒算安全；
     // 带委托的属性不参与序列化，也不进 data class 的 equals / copy。
     val headers: Map<String, String> by lazy(LazyThreadSafetyMode.PUBLICATION) { parseHeaderJson(header) }
+
+    /** [header] 写成脚本时的脚本本体（去掉 `@js:` / `<js>` 包装）；JSON 写法、没写为 null */
+    val headerScript: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { headerScriptOf(header) }
 
     val rateLimit: RateLimitRule? by lazy(LazyThreadSafetyMode.PUBLICATION) { parseConcurrentRate(concurrentRate) }
 
@@ -143,6 +158,39 @@ data class ContentRuleSet(
     val imageStyle: String? = null,
 )
 
+/**
+ * 规则集（ruleSearch / ruleExplore / ruleBookInfo / ruleToc / ruleContent）的宽松读法，同阅读导入时的 GSON：
+ * 是对象照常读；是字符串、里面是一个 JSON 对象的，解开再读（有的合集导出时把规则集存成了字符串）；
+ * 其余（`[]`、数字、解不开的字符串）当这个规则集没写。
+ *
+ * 从前一律按对象读，一个来源把没用到的发现规则写成 `"ruleExplore": []`，整条解析失败、导入时被跳过 ——
+ * 搜索、目录、正文明明都好好的（UU看书、肉文小说这几个就是这么没的）。写出去照旧是对象。
+ */
+abstract class LenientRuleSet<T : Any>(private val inner: KSerializer<T>) : KSerializer<T?> {
+    override val descriptor: SerialDescriptor = inner.descriptor.nullable
+
+    override fun deserialize(decoder: Decoder): T? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeNullableSerializableValue(inner.nullable)
+        val obj = when (val el = json.decodeJsonElement()) {
+            is JsonObject -> el
+            is JsonPrimitive -> el.contentOrNull
+                ?.takeIf { el.isString && it.trimStart().startsWith("{") }
+                ?.let { runCatching { json.json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+            else -> null
+        } ?: return null
+        return runCatching { json.json.decodeFromJsonElement(inner, obj) }.getOrNull()
+    }
+
+    override fun serialize(encoder: Encoder, value: T?) {
+        encoder.encodeNullableSerializableValue(inner, value)
+    }
+}
+
+object LenientSearchRuleSet : LenientRuleSet<SearchRuleSet>(SearchRuleSet.serializer())
+object LenientBookInfoRuleSet : LenientRuleSet<BookInfoRuleSet>(BookInfoRuleSet.serializer())
+object LenientTocRuleSet : LenientRuleSet<TocRuleSet>(TocRuleSet.serializer())
+object LenientContentRuleSet : LenientRuleSet<ContentRuleSet>(ContentRuleSet.serializer())
+
 /** 令牌桶限速：每 intervalMs 补一个令牌，桶容量 burst */
 @Serializable
 data class RateLimitRule(
@@ -175,6 +223,24 @@ internal fun parseHeaderJson(raw: String?): Map<String, String> {
             k to ((v as? JsonPrimitive)?.content ?: v.toString())
         }
     }.getOrDefault(emptyMap())
+}
+
+/**
+ * 源级 header 的脚本写法（同阅读 BaseSource.getHeaderMap）：`@js:` 开头取后面的全部，`<js>` 开头取到最后一个 `</js>`。
+ * 31 个来源这么写（2893 个里）：签名带时间戳、`"User-Agent": java.getWebViewUA()`、`"Referer": baseUrl`。
+ * 从前一律当没有源级请求头，请求头里该带的 UA、签名一个都没发出去
+ */
+internal fun headerScriptOf(raw: String?): String? {
+    val t = raw?.trim().orEmpty()
+    val script = when {
+        t.startsWith("@js:", ignoreCase = true) -> t.substring(4)
+        t.startsWith("<js>", ignoreCase = true) -> {
+            val end = t.lastIndexOf("</js>", ignoreCase = true)
+            if (end >= 4) t.substring(4, end) else t.substring(4)
+        }
+        else -> return null
+    }
+    return script.takeIf { it.isNotBlank() }
 }
 
 /** concurrentRate: "500"(毫秒间隔) 或 "1/1000"(次数/毫秒) */
