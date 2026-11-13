@@ -3,6 +3,7 @@ package com.radium.inkwell.core.source
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.nullable
 import kotlinx.serialization.encoding.Decoder
@@ -42,13 +43,21 @@ data class BookSourceRule(
     val enabledExplore: Boolean = true,
     /**
      * 源级请求头：JSON 字符串，或返回 JSON 字符串的脚本（`@js:…` / `<js>…</js>`，阅读两种都认）。
-     * JSON 解析一次就记住（[headers]）；脚本由引擎每次请求现跑（[headerScript]，见 BookSourceEngine.sourceHeaders）
+     * JSON 解析一次就记住（[headers]）；脚本由引擎每次请求现跑（[headerScript]，见 BookSourceEngine.sourceHeaders）。
+     * 有的合集直接写成 JSON 对象而不是字符串，照样认（[LenientJsonText]）
      */
-    val header: String? = null,
+    @Serializable(with = LenientJsonText::class) val header: String? = null,
     /** 并发限制："500"(毫秒间隔) 或 "1/1000"(次/毫秒) */
     val concurrentRate: String? = null,
     val searchUrl: String? = null,
-    val exploreUrl: String? = null,
+    @Serializable(with = LenientJsonText::class) val exploreUrl: String? = null,
+    /**
+     * 阅读的登录脚本。我们不做登录，但不少来源把公用函数写在这里、规则开头 `eval(String(source.loginUrl))` 加载 ——
+     * 脚本里的 `source.loginUrl` 读的就是它（见 [scriptFacts]）。这个字段之前导入的来源没存它：重新导入一次才有
+     */
+    val loginUrl: String? = null,
+    /** 阅读的登录界面（一排控件的 JSON）。不画它，只给脚本读：聚合源拿 `typeof source.loginUi` 认 App，见 SourceBridge.loginUi */
+    @Serializable(with = LenientJsonText::class) val loginUi: String? = null,
     // 规则集读得宽：对象、JSON 字符串都认，别的写法（`[]`、乱填的值）当没有，同阅读的导入 —— 见 [LenientRuleSet]
     @Serializable(with = LenientSearchRuleSet::class) val ruleSearch: SearchRuleSet? = null,
     @Serializable(with = LenientSearchRuleSet::class) val ruleExplore: SearchRuleSet? = null,
@@ -93,6 +102,32 @@ data class BookSourceRule(
 
     /** 发现页目录，从 exploreUrl 解析（`名称::地址` 多行 / JSON 数组）；动态(JS)地址得空列表 */
     val explore: List<ExploreItem> by lazy(LazyThreadSafetyMode.PUBLICATION) { parseExplore(exploreUrl, enabledExplore) }
+
+    /**
+     * 脚本里 `source.…` 读得到的来源字段（阅读交给脚本的 `source` 是来源对象本身）。每条规则、每个列表项都新建一个
+     * SourceBridge，规则集序列化成键值表这一步在这里算一次
+     */
+    internal val scriptFacts: com.radium.inkwell.core.source.js.SourceFacts by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        com.radium.inkwell.core.source.js.SourceFacts(
+            name = bookSourceName,
+            comment = bookSourceComment,
+            group = bookSourceGroup,
+            type = bookSourceType,
+            loginUrl = loginUrl,
+            loginUi = loginUi,
+            header = header,
+            jsLib = jsLib,
+            searchUrl = searchUrl,
+            exploreUrl = exploreUrl,
+            ruleSets = buildMap {
+                ruleSearch?.let { put("ruleSearch", ruleFields(SearchRuleSet.serializer(), it)) }
+                ruleExplore?.let { put("ruleExplore", ruleFields(SearchRuleSet.serializer(), it)) }
+                ruleBookInfo?.let { put("ruleBookInfo", ruleFields(BookInfoRuleSet.serializer(), it)) }
+                ruleToc?.let { put("ruleToc", ruleFields(TocRuleSet.serializer(), it)) }
+                ruleContent?.let { put("ruleContent", ruleFields(ContentRuleSet.serializer(), it)) }
+            },
+        )
+    }
 
     fun toJson(): String = BookSourceJson.encodeToString(serializer(), this)
 
@@ -185,6 +220,33 @@ abstract class LenientRuleSet<T : Any>(private val inner: KSerializer<T>) : KSer
         encoder.encodeNullableSerializableValue(inner, value)
     }
 }
+
+/**
+ * 本该是字符串、合集里却常写成 JSON 对象 / 数组的字段（`header`、`exploreUrl`、`loginUi`）：字符串照读，
+ * 对象、数组按 JSON 原文收下（阅读那边这几个字段装的本来就是 JSON 文本），null 和别的写法当没写。
+ * 从前按字符串硬读，一个来源把 header 写成 `{"User-Agent": …}` 对象，整条解析失败、导入时被跳过（思兔小说）
+ */
+object LenientJsonText : KSerializer<String?> {
+    override val descriptor: SerialDescriptor = String.serializer().descriptor.nullable
+
+    override fun deserialize(decoder: Decoder): String? {
+        val json = decoder as? JsonDecoder ?: return decoder.decodeNullableSerializableValue(String.serializer().nullable)
+        return when (val el = json.decodeJsonElement()) {
+            is JsonPrimitive -> el.contentOrNull?.takeIf { el.isString }
+            is JsonObject, is kotlinx.serialization.json.JsonArray -> el.toString()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        encoder.encodeNullableSerializableValue(String.serializer().nullable, value)
+    }
+}
+
+/** 规则集 → 阅读字段名的键值表（没写的规则不在里面），给脚本的 `source.ruleSearch.author` */
+private fun <T> ruleFields(serializer: KSerializer<T>, value: T): Map<String, String> =
+    BookSourceJson.encodeToJsonElement(serializer, value).jsonObject.mapNotNull { (k, v) ->
+        (v as? JsonPrimitive)?.contentOrNull?.let { k to it }
+    }.toMap()
 
 object LenientSearchRuleSet : LenientRuleSet<SearchRuleSet>(SearchRuleSet.serializer())
 object LenientBookInfoRuleSet : LenientRuleSet<BookInfoRuleSet>(BookInfoRuleSet.serializer())

@@ -39,6 +39,27 @@ object LegadoRuleAnalyzer {
         return synchronized(cache) { cache.getOrPut(rule) { built } }
     }
 
+    /**
+     * 纯 JSON 内容上不带 `$.` 的组合规则（`.[?(@.bookName)]||.[?(@.title)]`、`data.books||data.list`）按 JSONPath 编译：
+     * Legado 对 JSON 内容默认按 JSONPath 求值，jayway 自己补 `$.`。[analyze] 认不出这是 JSONPath，整串当 Jsoup 规则交出去
+     * （[RuleNode.Legado]，`||` / `&&` / `%%` 留给 LegadoSelector 切），求值器到了 JSON 上下文里再整串补 `$.` ——
+     * 带着 `||` 的路径什么都匹配不到（书旗（知秋）的搜索一本都没有）。这里照常切开，每段补成 JSONPath；
+     * 没有组合符的返回 null（整串补 `$.` 就对）
+     */
+    fun analyzeAsJson(rule: String): RuleNode? {
+        if (!rule.contains("||") && !rule.contains("&&") && !rule.contains("%%")) return null
+        val key = JSON_KEY + rule
+        synchronized(cache) { cache[key] }?.let { return it }
+        val parts = splitTop(rule.trim(), "||").map { buildConcat(it.trim(), ::jsonAtom) }
+        val built = if (parts.size == 1) parts[0] else RuleNode.Fallback(parts)
+        return synchronized(cache) { cache.getOrPut(key) { built } }
+    }
+
+    private fun jsonAtom(a: String): RuleNode = RuleNode.JsonPath(if (a.startsWith("$")) a else "$.$a")
+
+    /** [analyzeAsJson] 在缓存里的键前缀：规则原文里不会有 NUL */
+    private const val JSON_KEY = "\u0000json\u0000"
+
     private fun build(raw: String): RuleNode {
         if (raw.isEmpty()) return RuleNode.Literal("")
         val (afterPut, putSpecs) = peelPut(raw)
@@ -166,18 +187,18 @@ object LegadoRuleAnalyzer {
      * 从前只认 `&&`：JSONPath / XPath 里的 `%%` 原样留在路径里，什么都匹配不到 —— 晋江书单
      * `$.data.recommend[*]%%$.data.find[*]` 整个分类一条都没有（纯 Jsoup 规则交给 LegadoSelector，它本来就懂 `%%`）。
      */
-    private fun buildConcat(s: String): RuleNode {
+    private fun buildConcat(s: String, atomOf: (String) -> RuleNode = ::atom): RuleNode {
         val and = topLevelIndexOf(s, "&&")
         val mix = topLevelIndexOf(s, "%%")
         val delim = when {
-            and < 0 && mix < 0 -> return atom(s.trim())
+            and < 0 && mix < 0 -> return atomOf(s.trim())
             mix < 0 -> "&&"
             and < 0 -> "%%"
             else -> if (and < mix) "&&" else "%%"
         }
         val parts = splitTop(s, delim)
-        if (parts.size == 1) return buildConcat(parts[0].trim())
-        val nodes = parts.map { buildConcat(it.trim()) }
+        if (parts.size == 1) return buildConcat(parts[0].trim(), atomOf)
+        val nodes = parts.map { buildConcat(it.trim(), atomOf) }
         return if (delim == "&&") RuleNode.Concat(nodes) else RuleNode.Interleave(nodes)
     }
 
@@ -188,7 +209,8 @@ object LegadoRuleAnalyzer {
         a.startsWith("@XPath:", ignoreCase = true) -> RuleNode.XPath(a.substring(7).trim())
         a.startsWith("//") -> RuleNode.XPath(a)
         a.startsWith("@json:", ignoreCase = true) -> RuleNode.JsonPath(a.substring(6).trim())
-        a.startsWith("$.") || a.startsWith("$[") -> RuleNode.JsonPath(a)
+        // 单独一个 `$` 是整份 JSON（接口直接回一个数组时的列表规则：墨阅·极速、限免书源），从前补成 `$.$` 什么都取不到
+        a == "$" || a.startsWith("$.") || a.startsWith("$[") -> RuleNode.JsonPath(a)
         // 前导冒号 = 正则（与旧转换器同约定）；css 伪类 :eq 之类恒以 @css: 或标签打头，不会裸起 :
         a.startsWith(":") -> RuleNode.RegexRule(a.substring(1))
         a.contains("{{") -> RuleNode.Literal(a)
@@ -318,6 +340,7 @@ object LegadoRuleAnalyzer {
             !s.contains("@js:", ignoreCase = true) &&
             !s.contains("$.") &&
             !s.startsWith("$[") &&
+            s != "$" &&
             !s.startsWith("@json:", ignoreCase = true) &&
             !s.startsWith("@XPath:", ignoreCase = true) &&
             !s.startsWith("//") &&

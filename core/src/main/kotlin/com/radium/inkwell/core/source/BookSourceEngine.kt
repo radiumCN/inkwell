@@ -884,14 +884,15 @@ class BookSourceEngine(
         chapterIndex: Int = 0,
     ) = JsContext(
         sourceKey = source.id,
-        sourceName = source.bookSourceName,
-        sourceComment = source.bookSourceComment,
+        sourceFacts = source.scriptFacts,
         jsLib = source.jsLib,
         book = com.radium.inkwell.core.source.js.BookBridge(
             name = bookName,
             author = bookAuthor,
             bookUrl = bookUrl,
             tocUrl = tocUrl,
+            origin = source.id,
+            originName = source.bookSourceName,
         ),
         chapter = com.radium.inkwell.core.source.js.ChapterBridge(
             title = chapterTitle,

@@ -93,10 +93,12 @@ val appModule = module {
             },
         )
     }
-    // Rhino 解释执行 JS 规则（与 Legado 同引擎）；脚本里的繁简转换用系统 ICU
+    // Rhino 解释执行 JS 规则（与 Legado 同引擎）；脚本里的繁简转换用系统 ICU，java.androidId() 给本机随机的设备号
     single<com.radium.inkwell.core.source.js.ScriptRuntime> {
+        val deviceId = com.radium.inkwell.data.source.ScriptDeviceId(androidContext())
         com.radium.inkwell.core.source.js.RhinoScriptRuntime(
             chineseConverter = com.radium.inkwell.data.source.IcuChineseConverter(),
+            deviceId = deviceId::get,
         )
     }
     // JS 渲染回退：静态 HTML 解析不出内容时用 WebView 执行页面 JS 再试（详情/目录/正文三级）

@@ -18,6 +18,7 @@ import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.UrlOptions
 import com.radium.inkwell.core.source.js.EngineJsHttp
 import com.radium.inkwell.core.source.js.ScriptRuntime
+import com.radium.inkwell.core.source.js.SourceFacts
 import com.radium.inkwell.core.source.parseHeaderJson
 import com.radium.inkwell.core.source.parsePage
 import com.radium.inkwell.core.source.resolveUrl
@@ -141,7 +142,7 @@ class RssEngine(
 
     /** 脚本里的 `source`：`source.sourceUrl` / `sourceName` 是订阅源自己的（阅读的 RssSource 字段） */
     private fun jsContextOf(rule: RssSourceRule) =
-        JsContext(sourceKey = rule.id, sourceName = rule.name, jsLib = rule.jsLib)
+        JsContext(sourceKey = rule.id, sourceFacts = SourceFacts(name = rule.name, jsLib = rule.jsLib), jsLib = rule.jsLib)
 
     private suspend fun contentOnIo(rule: RssSourceRule, article: RssArticle): RssContent {
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {

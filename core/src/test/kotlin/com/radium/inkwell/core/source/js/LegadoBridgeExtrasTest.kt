@@ -170,7 +170,7 @@ class LegadoBridgeExtrasTest {
 
     @Test
     fun `没登录过：登录信息是空的，脚本自己存进去的读得回来`() {
-        val source = SourceBridge("https://a.com", bookSourceName = "订阅")
+        val source = SourceBridge("https://a.com", facts = SourceFacts(name = "订阅"))
         fun js(script: String) = eval(script, mapOf("source" to source))
         // 学术订阅源的 header 脚本、霹雳书屋的 jsLib：先读一下登录信息
         assertEquals("null|null", js("String(source.getLoginInfoMap()) + '|' + String(source.getLoginInfo())"))
@@ -182,5 +182,55 @@ class LegadoBridgeExtrasTest {
         assertEquals("null", js("String(source.getLoginHeader())"))
         // 订阅源的字段名（阅读的 RssSource）
         assertEquals("https://a.com|订阅", js("source.sourceUrl + '|' + source.sourceName"))
+    }
+
+    /**
+     * 阅读交给脚本的 `source` 是来源对象本身：登录脚本（公用函数写在里面、规则开头 eval 它）、规则集都读得到；
+     * `loginUi` 是**方法** —— 聚合源拿 `typeof source.loginUi == 'function'` 认「是不是官方阅读」
+     */
+    @Test
+    fun `source 带着来源自己的字段，loginUi 是方法`() {
+        val facts = SourceFacts(
+            name = "爱丽丝",
+            loginUrl = "function GetUL() { return 'https://www.alicesw.com' }",
+            loginUi = "[]",
+            ruleSets = mapOf("ruleSearch" to mapOf("author" to "p.author@text")),
+        )
+        val source = SourceBridge("https://www.alicesw.com#备用", facts = facts)
+        fun js(script: String) = eval(script, mapOf("source" to source))
+        assertEquals("https://www.alicesw.com/search", js("eval(String(source.loginUrl)); GetUL() + '/search'"))
+        assertEquals("function", js("typeof source.loginUi"))
+        assertEquals("p.author@text", js("String(source.ruleSearch.author)"))
+        assertEquals("null", js("String(source.ruleToc)"))
+    }
+
+    @Test
+    fun `book 的字段照阅读的 Book，脚本能改；自定义变量、阅读设置的方法都在`() {
+        val book = BookBridge(name = "书")
+        fun js(script: String) = eval(script, mapOf("book" to book))
+        assertEquals("8", js("String(book.type)"))
+        js("book.type = 32; book.putCustomVariable('x'); book.setUseReplaceRule(false)")
+        assertEquals(32, book.type)
+        assertEquals("x|true", js("book.getCustomVariable() + '|' + book.getUseReplaceRule()"))
+    }
+
+    @Test
+    fun `androidId 给注入的设备号，timeFormatUTC 的偏移按毫秒`() {
+        val java = JavaBridge(null, JsCache(), mutableMapOf(), deviceId = { "3f2a9c7d1e5b8a40" })
+        fun js(script: String) = eval(script, mapOf("java" to java))
+        assertEquals("3f2a9c7d1e5b8a40", js("java.androidId()"))
+        // 1970-01-01 00:00 UTC；偏移 8 小时 = 28800000 毫秒，照阅读写成 8 的就是 UTC
+        assertEquals("1970-01-01 08:00", js("java.timeFormatUTC(0, 'yyyy-MM-dd HH:mm', 8 * 60 * 60 * 1000)"))
+        assertEquals("197001010000", js("java.timeFormatUTC(0, 'yyyyMMddHHmm', 8)"))
+    }
+
+    @Test
+    fun `cache 的内存存取存的是对象本身`() {
+        val cache = JsCache()
+        fun js(script: String) = eval(script, mapOf("cache" to cache))
+        js("cache.putMemory('sites', ['a', 'b'])")
+        assertEquals("a,b|2", js("var s = cache.getFromMemory('sites'); s.join(',') + '|' + s.length"))
+        js("cache.deleteMemory('sites')")
+        assertEquals("null", js("String(cache.getFromMemory('sites'))"))
     }
 }

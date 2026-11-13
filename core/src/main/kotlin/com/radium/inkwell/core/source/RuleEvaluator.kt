@@ -33,10 +33,8 @@ data class EvalContext(
 data class JsContext(
     /** 书源标识，脚本里的 source.getKey() / source.bookSourceUrl */
     val sourceKey: String = "",
-    /** 脚本里的 source.bookSourceName */
-    val sourceName: String = "",
-    /** 脚本里的 source.bookSourceComment：不少来源把公用函数写在这里，规则开头 eval 它 */
-    val sourceComment: String = "",
+    /** 脚本里 `source.…` 读得到的来源字段（名字、说明、登录脚本、规则集…）：不少来源把公用函数写在说明、登录脚本里，规则开头 eval 它 */
+    val sourceFacts: com.radium.inkwell.core.source.js.SourceFacts = com.radium.inkwell.core.source.js.SourceFacts(),
     val book: com.radium.inkwell.core.source.js.BookBridge =
         com.radium.inkwell.core.source.js.BookBridge(),
     val chapter: com.radium.inkwell.core.source.js.ChapterBridge =
@@ -100,7 +98,8 @@ class RuleEvaluator(
 
     /** 求值为节点列表（list 规则用）；每个节点携带原上下文的 baseUrl/vars */
     fun evalToNodes(node: RuleNode, ctx: EvalContext): List<EvalContext> = when (node) {
-        is RuleNode.Legado -> bareJsonPath(node.rule, ctx)?.let { evalToNodes(RuleNode.JsonPath(it), ctx) }
+        is RuleNode.Legado -> bareJsonPath(node.rule, ctx)
+            ?.let { path -> evalToNodes(LegadoRuleAnalyzer.analyzeAsJson(node.rule) ?: RuleNode.JsonPath(path), ctx) }
             ?: ctx.element
                 ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
                 ?.map { ctx.copy(element = it, json = null) }
@@ -118,7 +117,7 @@ class RuleEvaluator(
                 .takeIf { it.isNotBlank() }
                 ?.let { listOf(ctx.copy(element = null, json = it)) }
                 ?: emptyList()
-        is RuleNode.Js -> evalJs(node.script, ctx)?.let { stringToNodes(it, ctx) } ?: emptyList()
+        is RuleNode.Js -> evalJsList(node.script, ctx)
         is RuleNode.Fallback ->
             node.options.firstNotNullOfOrNull { o ->
                 evalToNodes(o, ctx).takeIf { it.isNotEmpty() }
@@ -129,7 +128,7 @@ class RuleEvaluator(
         // `##广告##`（正则替换）。从前这里直接 evalToNodes(source) 把 ops 全丢了 —— bookList/
         // chapterList 写成这类形态就得空列表。改为先走字符串管道求值（ops 在里面执行），
         // 再把每个产物按 Js 分支同样的逻辑转回节点（HTML→子元素 / JSON→条目 / 其余→标量）。
-        is RuleNode.Pipe -> wholeJsonPipe(node, ctx)
+        is RuleNode.Pipe -> wholeListPipe(node, ctx)
             ?: tailRuleNodes(node, ctx)
             ?: evalToStrings(node, ctx).flatMap { stringToNodes(it, ctx) }
     }
@@ -159,21 +158,66 @@ class RuleEvaluator(
         ctx.copy(element = parsePage(text, ctx.baseUrl), json = text)
 
     /**
+     * 列表规则接脚本：照 Legado 的 getElements，脚本拿到的是前面选出的**整组**（JSON 见 [wholeJsonPipe]，元素见 [wholeElementPipe]）。
+     * 不是这种形态（没有脚本段、一条都没取到、JSON 和元素混着）返回 null，照旧逐条
+     */
+    private fun wholeListPipe(node: RuleNode.Pipe, ctx: EvalContext): List<EvalContext>? {
+        if (node.ops.none { it is PipeOp.Js }) return null
+        val items = evalToNodes(node.source, ctx)
+        return when {
+            items.isEmpty() -> null
+            items.all { it.element == null } -> wholeJsonPipe(node, items, ctx)
+            items.all { it.element != null } -> wholeElementPipe(node, items, ctx)
+            else -> null
+        }
+    }
+
+    /**
      * JSON 列表后面接脚本的管道（`$.data.list[*]<js>…</js>$.[*]`）：照 Legado 的 getElements，
      * 脚本拿到的是**整组**结果（这里是一段 JSON 数组），后面的段也作用在脚本的返回值上。
      *
      * 从前逐条喂：每一条单独过脚本、再单独跑 `$.[*]`，一个对象的十来个字段各成一条 —— 晋江书单 100 个书单
-     * 变成 1049 条全是空标题的「文章」。HTML 元素列表仍逐条走（[evalToStrings] 那条路），那边的现有来源靠它。
-     * 不是这种形态（没有脚本段、源头不是 JSON、一条都没取到）返回 null，照旧逐条。
+     * 变成 1049 条全是空标题的「文章」。
      */
-    private fun wholeJsonPipe(node: RuleNode.Pipe, ctx: EvalContext): List<EvalContext>? {
-        if (node.ops.none { it is PipeOp.Js }) return null
-        val items = evalToNodes(node.source, ctx)
-        if (items.isEmpty() || items.any { it.element != null }) return null
+    private fun wholeJsonPipe(node: RuleNode.Pipe, items: List<EvalContext>, ctx: EvalContext): List<EvalContext> {
         val whole = jsonText(items.map { it.json })
         return node.ops.fold(listOf(whole)) { acc, op -> applyOp(op, acc, ctx) }
             .filter { it.isNotEmpty() }
             .flatMap { stringToNodes(it, ctx) }
+    }
+
+    /**
+     * 元素列表接脚本（`class.tr3 tac` 换行接 `@js:list=result.toArray()…`、`.grid tr!0` 换行接 `<js>result.toArray().slice(0, 3).map(el => …)</js>`）：
+     * 照 Legado 的 getElements，脚本拿到的 `result` 是选择器选出的**整组元素**（阅读那边是 Java 的 List），
+     * 交回元素、元素数组、JSON 或一段 HTML，都按列表展开；脚本后面还有一条规则的，在脚本的产物上取节点。
+     *
+     * 从前一个个元素转成字符串逐条喂进去：`result.toArray()` 是 undefined，这类搜索、目录全空
+     * （656 个来源里 23 个这么写，饭饭论坛、八一中文、冷冷文学、海棠书屋……）。
+     * 只在紧跟选择器的就是脚本（后面至多再接一条规则）时走这里；别的形态返回 null 照旧逐条。
+     * 选择器一个都没选到的（`class.book@html` 这种把提取器写进列表规则的）到不了这里，见 [wholeListPipe]
+     */
+    private fun wholeElementPipe(node: RuleNode.Pipe, items: List<EvalContext>, ctx: EvalContext): List<EvalContext>? {
+        val js = node.ops.firstOrNull() as? PipeOp.Js ?: return null
+        val tail = when (node.ops.size) {
+            1 -> null
+            2 -> (node.ops[1] as? PipeOp.Rule)?.let { runCatching { LegadoRuleAnalyzer.analyze(it.rule) }.getOrNull() } ?: return null
+            else -> return null
+        }
+        val elements = com.radium.inkwell.core.source.js.JsElements(items.map { it.element!! })
+        val value = runScript(ctx, elements) { runtime, bindings ->
+            runtime.evalForList(scriptOf(js.script, ctx), bindings, ctx.js.jsLib)
+        }
+        val nodes = when (value) {
+            null -> emptyList()
+            is com.radium.inkwell.core.source.js.ScriptValue.Nodes -> value.elements.map { ctx.copy(element = it, json = null) }
+            is com.radium.inkwell.core.source.js.ScriptValue.Text -> {
+                val text = value.text?.takeIf { it.isNotEmpty() } ?: return emptyList()
+                if (tail != null) return runCatching { evalToNodes(tail, contentContext(text, ctx)) }.getOrDefault(emptyList())
+                stringToNodes(text, ctx)
+            }
+        }
+        // 脚本交回元素、后面又接一条规则（脚本之后换行写 `@css:a`）：规则落在每个元素上
+        return if (tail == null) nodes else nodes.flatMap { runCatching { evalToNodes(tail, it) }.getOrDefault(emptyList()) }
     }
 
     /**
@@ -192,9 +236,24 @@ class RuleEvaluator(
             t.startsWith("{") -> listOf(ctx.copy(element = null, json = t))
             // 整份 XML（脚本原样交回一份 feed）没有 body，取根下的元素
             isXmlText(t) -> parsePage(t, ctx.baseUrl).children().map { ctx.copy(element = it, json = null) }
-            t.startsWith("<") -> Jsoup.parse(t).body().children().map { ctx.copy(element = it, json = null) }
+            t.startsWith("<") -> htmlFragment(t).map { ctx.copy(element = it, json = null) }
             else -> listOf(ctx.copy(element = null, json = t))
         }
+    }
+
+    /**
+     * 脚本拼出来的一段 HTML → 顶层元素。表格的行、格（`<tr>…`、`<td>…`）放进 body 里解析，会被 HTML 解析器整个拆掉，
+     * 只剩格子里的字和链接，`td:nth-of-type(1) a@text` 这种列规则一个也取不到；按它们该在的位置（表体、行）解析才留得住
+     */
+    private fun htmlFragment(html: String): List<Element> {
+        val context = when (FIRST_TAG.find(html)?.groupValues?.get(1)?.lowercase()) {
+            "tr" -> "tbody"
+            "td", "th" -> "tr"
+            "tbody", "thead", "tfoot", "caption", "colgroup" -> "table"
+            "option", "optgroup" -> "select"
+            else -> return Jsoup.parse(html).body().children()
+        }
+        return org.jsoup.parser.Parser.parseFragment(html, Element(context), "").filterIsInstance<Element>()
     }
 
     /** 把 JSON 数组文本解析后展开成逐条目节点；解析失败则整段作单个 json 上下文兜底。 */
@@ -213,7 +272,9 @@ class RuleEvaluator(
             if (isBareGetRule(node.rule)) {
                 if (resolved.isEmpty()) emptyList() else listOf(resolved)
             } else {
-                bareJsonPath(node.rule, ctx)?.let { jsonToStrings(readJsonPath(it, ctx)) }
+                bareJsonPath(node.rule, ctx)?.let { path ->
+                    LegadoRuleAnalyzer.analyzeAsJson(node.rule)?.let { evalToStrings(it, ctx) } ?: jsonToStrings(readJsonPath(path, ctx))
+                }
                     ?: ctx.element?.let { LegadoSelector.strings(it, resolved) }.orEmpty()
             }
         }
@@ -609,7 +670,7 @@ class RuleEvaluator(
                 runCatching { evalToStrings(node, contentContext(s, ctx)) }.getOrDefault(emptyList())
             }
         }
-        is PipeOp.Js -> list.mapNotNull { s -> runJs(scriptOf(op.script, ctx), ctx, input = s) }
+        is PipeOp.Js -> scriptOf(op.script, ctx).let { script -> list.mapNotNull { s -> runJs(script, ctx, input = scriptInput(script, s)) } }
     }
 
     /**
@@ -623,8 +684,48 @@ class RuleEvaluator(
     // ---- js ----
 
     /** 原子 js：result = 上下文文本（页面/元素/JSON） */
-    private fun evalJs(script: String, ctx: EvalContext): String? =
-        runJs(scriptOf(script, ctx), ctx, input = contextText(ctx))
+    private fun evalJs(script: String, ctx: EvalContext): String? {
+        val expanded = scriptOf(script, ctx)
+        return runJs(expanded, ctx, input = scriptInput(expanded, contextText(ctx)))
+    }
+
+    /**
+     * 交给脚本的 `result`：是 JSON、脚本又读它的字段（`result.book_id`、`result.toArray()`）时包成 ScriptJson ——
+     * 阅读交给脚本的是解析好的对象（Java 的 Map / List），我们从前一律给文本，`result.book_id` 是 undefined：
+     * 光遇聚合的目录地址拼成 `{"tab":"","url":""}`、晋江的搜索列表 `result.toArray()` 找不到函数（656 个来源里二十几个这么写）。
+     * 只用字符串方法的（`JSON.parse(result)`、`result.match(…)`）照旧给文本，不白解析一遍
+     */
+    private fun scriptInput(script: String, text: String): Any =
+        if (looksLikeJson(text) && readsResultFields(script)) com.radium.inkwell.core.source.js.ScriptJson(text) else text
+
+    /** 脚本里有没有 `result.字段`（字符串自己的方法、属性不算）；每段脚本算一次 */
+    private fun readsResultFields(script: String): Boolean {
+        if (!script.contains("result")) return false
+        synchronized(resultFieldScripts) { resultFieldScripts[script] }?.let { return it }
+        val reads = RESULT_MEMBER.findAll(script).any { it.groupValues[1] !in STRING_MEMBERS }
+        synchronized(resultFieldScripts) { resultFieldScripts[script] = reads }
+        return reads
+    }
+
+    private val resultFieldScripts = object : LinkedHashMap<String, Boolean>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > 128
+    }
+
+    /**
+     * 列表规则整条是脚本：交回的是元素（`doc.select('tr')`）就直接当节点，同 Legado 的 getElements；
+     * 交回文本再按 [stringToNodes] 拆。见 ScriptRuntime.evalForList
+     */
+    private fun evalJsList(script: String, ctx: EvalContext): List<EvalContext> {
+        val expanded = scriptOf(script, ctx)
+        val value = runScript(ctx, scriptInput(expanded, contextText(ctx))) { runtime, bindings ->
+            runtime.evalForList(expanded, bindings, ctx.js.jsLib)
+        }
+        return when (value) {
+            null -> emptyList()
+            is com.radium.inkwell.core.source.js.ScriptValue.Nodes -> value.elements.map { ctx.copy(element = it, json = null) }
+            is com.radium.inkwell.core.source.js.ScriptValue.Text -> value.text?.let { stringToNodes(it, ctx) }.orEmpty()
+        }
+    }
 
     /**
      * 来源级的脚本（源级 header 的 `@js:` / `<js>`）：同阅读的 BaseSource.evalJS，不在哪一页上跑，
@@ -641,37 +742,55 @@ class RuleEvaluator(
      *
      * 脚本异常按「不匹配」降级为空结果 —— 书源里的脚本质量参差，一处报错不该打死整条链路；
      * 未注入引擎则明确报不支持。
+     *
+     * `key` / `page` 只给拼地址的脚本（地址脚本、地址里的 `{{…}}`：没有页面，元素和 JSON 都是空的），同 Legado ——
+     * 它只在 AnalyzeUrl 里绑这两个，规则脚本里没有。从前处处都绑，光遇聚合的列表脚本 `const {key, tab, page} = res`
+     * 撞上已有的同名变量，Rhino 报「变量 page 被重新声明」，整个搜索一本都没有。
+     * [input] 是脚本的 `result`：多数时候是文字；是 JSON、脚本又读它的字段时是 ScriptJson（[scriptInput]）；
+     * 元素列表接脚本时是那组元素（[wholeElementPipe]），这时 `src` 给整页原文
      */
-    private fun runJs(script: String, ctx: EvalContext, input: String): String? {
+    private fun runJs(script: String, ctx: EvalContext, input: Any): String? =
+        runScript(ctx, input) { runtime, bindings -> runtime.eval(script, bindings, ctx.js.jsLib) }
+
+    private inline fun <T : Any> runScript(
+        ctx: EvalContext,
+        input: Any,
+        run: (com.radium.inkwell.core.source.js.ScriptRuntime, Map<String, Any?>) -> T?,
+    ): T? {
         val runtime = scriptRuntime
             ?: throw UnsupportedRuleException("该来源需要 JS 引擎，当前版本不支持")
         val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
         val java = com.radium.inkwell.core.source.js.JavaBridge(
             jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx), chinese = runtime.chineseConverter,
+            deviceId = { runtime.androidId },
         )
         return try {
-            runtime.eval(
-                script,
-                mapOf(
-                    "result" to input,
-                    "src" to input,
-                    "baseUrl" to ctx.baseUrl,
-                    "key" to (ctx.vars["keyword"] ?: ""),
-                    "page" to (ctx.vars["page"]?.toIntOrNull() ?: 1),
-                    "title" to ctx.js.chapter.title,
-                    "java" to java,
-                    "cookie" to com.radium.inkwell.core.source.js.CookieBridge(jsHttp),
-                    "cache" to jsCache,
-                    "source" to com.radium.inkwell.core.source.js.SourceBridge(
-                        ctx.js.sourceKey,
-                        store,
-                        bookSourceName = ctx.js.sourceName,
-                        bookSourceComment = ctx.js.sourceComment,
-                    ),
-                    "book" to ctx.js.book,
-                    "chapter" to ctx.js.chapter,
-                ),
-                jsLib = ctx.js.jsLib,
+            val inUrl = ctx.element == null && ctx.json == null
+            run(
+                runtime,
+                buildMap {
+                    put("result", input)
+                    put(
+                        "src",
+                        when (input) {
+                            is String -> input
+                            is com.radium.inkwell.core.source.js.ScriptJson -> input.text
+                            else -> contextText(ctx)
+                        },
+                    )
+                    put("baseUrl", ctx.baseUrl)
+                    if (inUrl) {
+                        put("key", ctx.vars["keyword"] ?: "")
+                        put("page", ctx.vars["page"]?.toIntOrNull() ?: 1)
+                    }
+                    put("title", ctx.js.chapter.title)
+                    put("java", java)
+                    put("cookie", com.radium.inkwell.core.source.js.CookieBridge(jsHttp))
+                    put("cache", jsCache)
+                    put("source", com.radium.inkwell.core.source.js.SourceBridge(ctx.js.sourceKey, store, ctx.js.sourceFacts))
+                    put("book", ctx.js.book)
+                    put("chapter", ctx.js.chapter)
+                },
             )
         } catch (e: Exception) {
             // 取消不是「脚本报错」：吞掉的话，被取消的那次调用还会带着空结果把剩下的条目一个个求值完
@@ -707,6 +826,8 @@ class RuleEvaluator(
                 runCatching { evalToNodes(LegadoRuleAnalyzer.analyze(rule), ctx).mapNotNull { it.element } }
                     .getOrDefault(emptyList()),
             )
+
+        override fun absoluteUrl(url: String): String = resolveUrl(ctx.baseUrl, url)
 
         // 字符串当一份新页面（HTML / XML / JSON 都认，同 [contentContext]），getElements 拿到的元素就落在那个元素上
         override fun withContent(content: Any?, baseUrl: String?): com.radium.inkwell.core.source.js.JsRuleQuery {
@@ -950,6 +1071,21 @@ private class ArithmeticParser(private val text: String) {
         while (pos < text.length && text[pos] == ' ') pos++
     }
 }
+
+/** 脚本里的 `result.成员`，见 RuleEvaluator.readsResultFields */
+private val RESULT_MEMBER = Regex("\\bresult\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)")
+
+/** 字符串自己的成员：脚本读这些是把 `result` 当字符串用 */
+private val STRING_MEMBERS = setOf(
+    "length", "constructor", "at", "charAt", "charCodeAt", "codePointAt", "concat", "endsWith", "equals", "equalsIgnoreCase",
+    "includes", "indexOf", "isWellFormed", "lastIndexOf", "localeCompare", "match", "matchAll", "normalize", "padEnd",
+    "padStart", "repeat", "replace", "replaceAll", "search", "slice", "split", "startsWith", "substr", "substring",
+    "toLocaleLowerCase", "toLocaleUpperCase", "toLowerCase", "toString", "toUpperCase", "toWellFormed", "trim",
+    "trimEnd", "trimLeft", "trimRight", "trimStart", "valueOf",
+)
+
+/** 一段 HTML 开头的标签名（`<tr class=…>` → tr），见 RuleEvaluator.htmlFragment */
+private val FIRST_TAG = Regex("^<([a-zA-Z][a-zA-Z0-9]*)")
 
 /** 字符集解析；GBK/GB2312 一律按 GB18030 处理 */
 internal fun charsetOf(name: String): Charset = when (name.trim().lowercase()) {
