@@ -20,3 +20,16 @@ data class ChapterEntity(
      */
     val variable: String = "",
 )
+
+/**
+ * 阅读页盯目录用的投影：[ChapterEntity] 去掉书 id 和本地书的字节偏移。
+ * 留下的够两件事 —— 目录面板（序号、标题、缓存标记），和判断目录结构变没变（地址、标题、变量，同 sameReadingToc）。
+ * 每次少建几千个书 id 字符串；目录结构真变了才按 [ChapterEntity] 整行再读（见 ReaderViewModel.observeToc）。
+ */
+data class TocRow(
+    val index: Int,
+    val title: String,
+    val url: String?,
+    val variable: String,
+    val isCached: Boolean,
+)

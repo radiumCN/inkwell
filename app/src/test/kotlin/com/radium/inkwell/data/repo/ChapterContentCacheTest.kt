@@ -333,4 +333,27 @@ class ChapterContentCacheTest {
         cache.clearAll()
         assertFalse(cache.writeIfEpoch("b1", "https://ex.com/2.html", content, again))
     }
+
+    /**
+     * 同一本书隔一阵才清一次：进书、冷启动的全书架清理都先问 claimPrune。
+     * 清理要把全书每章过一遍，几千章的书每次进书都来一遍，正撞在进书动画上。
+     */
+    @Test
+    fun `同一本书半天里只清一次，别的书不受影响`() {
+        val hour = 3_600_000L
+        val t0 = 1_000_000_000L
+        assertTrue(cache.claimPrune("b1", nowMs = t0))
+        assertFalse(cache.claimPrune("b1", nowMs = t0 + hour))
+        assertTrue(cache.claimPrune("b2", nowMs = t0 + hour))
+        // 过了间隔又可以清，并从这一次重新计时
+        assertTrue(cache.claimPrune("b1", nowMs = t0 + 13 * hour))
+        assertFalse(cache.claimPrune("b1", nowMs = t0 + 14 * hour))
+    }
+
+    @Test
+    fun `时钟往回拨：照样让清，别卡住`() {
+        val t0 = 1_000_000_000L
+        assertTrue(cache.claimPrune("b1", nowMs = t0))
+        assertTrue(cache.claimPrune("b1", nowMs = t0 - 60_000L))
+    }
 }

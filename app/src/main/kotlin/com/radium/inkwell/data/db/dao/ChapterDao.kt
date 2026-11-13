@@ -6,6 +6,7 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Transaction
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.TocRow
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,6 +21,10 @@ interface ChapterDao {
      */
     @Query("SELECT * FROM chapter WHERE bookId = :bookId ORDER BY `index`")
     fun observeByBook(bookId: String): Flow<List<ChapterEntity>>
+
+    /** 目录的轻量投影（见 [TocRow]）：阅读页每次 chapter 表有写入后读它，而不是整行 */
+    @Query("SELECT `index`, title, url, variable, isCached FROM chapter WHERE bookId = :bookId ORDER BY `index`")
+    suspend fun getTocRows(bookId: String): List<TocRow>
 
     @Query("SELECT * FROM chapter WHERE bookId = :bookId AND `index` = :index")
     suspend fun get(bookId: String, index: Int): ChapterEntity?

@@ -37,6 +37,14 @@ class BookRepository(
 
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
+    /**
+     * chapter 表每被写一次（哪本书都算）就来一声，不带数据、也不查表；订阅时先来一声。
+     *
+     * 给阅读页盯目录用（ReaderViewModel.observeToc）：Room 的失效是按整张表的，订阅一条 `SELECT *` 目录流，
+     * 预取每落一章、离线缓存每存一章，就把整本目录重读一遍。只听这一声，读不读、读多少由订阅方自己定
+     */
+    fun chapterTableChanges(): Flow<Unit> = db.invalidationTracker.createFlow("chapter").map { }
+
     /** 书架上已有书的 (书名, 作者) 键集合，用来判断某本网络书是否已在书架 */
     val shelfKeys: Flow<Set<Pair<String, String>>> =
         books.map { list -> list.mapTo(HashSet()) { bookKey(it.title, it.author) } }
@@ -362,6 +370,8 @@ class BookRepository(
             if (book.type != BookType.NET || book.readChapterIndex <= 0) continue
             // 本机从没缓存过的书（同步来的、只加没读的）占大多数：先看目录在不在，别白读一整本目录表
             if (!cache.hasAny(book.id)) continue
+            // 刚在阅读页里清过的书不再过一遍；这里清了的，接下来打开它也不重来（见 claimPrune）
+            if (!cache.claimPrune(book.id)) continue
             val urls = chapterUrlsByIndex(chapterDao.getByBook(book.id)).ifEmpty { continue }
             val pruned = cache.pruneBehindProgress(book.id, book.readChapterIndex, urls, maxAgeMs)
             if (pruned.isNotEmpty()) chapterDao.markUncached(book.id, pruned)

@@ -38,6 +38,30 @@ class ChapterContentCache(private val root: File) {
     private val bookEpochs = HashMap<String, Int>()
     private var allEpoch = 0
 
+    /** 每本书上次清理（[pruneBehindProgress]）的时刻，只记在进程里，见 [claimPrune] */
+    private val lastPrunedAt = ConcurrentHashMap<String, Long>()
+
+    /**
+     * 这本书这会儿该不该清：同一本书 [PRUNE_INTERVAL_MS] 里只清一次，答应了就记下。
+     *
+     * 清理按「天」计龄（最短 7 天），几个小时里清第二遍删不掉什么新东西，却要把全书每章算一遍文件名摘要、
+     * 进度之前每章 stat 一次 —— 几千章的书就是几千次系统调用。从前每次进书都来一遍。
+     * 冷启动的全书架清理（BookRepository.sweepContentCache）也先问这里：刚清过的书紧接着打开，不再重来。
+     * 只记在进程里：进程没了，冷启动那一轮本来就要整个书架过一遍。
+     */
+    fun claimPrune(bookId: String, nowMs: Long = System.currentTimeMillis()): Boolean {
+        var claimed = false
+        lastPrunedAt.compute(bookId) { _, last ->
+            if (last != null && nowMs - last in 0 until PRUNE_INTERVAL_MS) {
+                last
+            } else {
+                claimed = true
+                nowMs
+            }
+        }
+        return claimed
+    }
+
     /**
      * 书 id 拼进路径之前先过一道：id 不全是本机生成的 —— WebDAV 同步来的书行出自备份文件，
      * 谁能写备份谁就能填（明文 http 下还有中间人）。`../books` 这样的 id 原样拼进去，
@@ -319,6 +343,9 @@ class ChapterContentCache(private val root: File) {
     }
 
     private companion object {
+        /** 同一本书两次清理之间至少隔多久，见 [claimPrune] */
+        const val PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000L
+
         /**
          * 缓存格式 / 解析器版本。**任何会改变正文解析结果的改动都必须 +1。**
          *

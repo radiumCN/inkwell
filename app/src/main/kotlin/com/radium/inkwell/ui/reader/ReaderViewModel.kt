@@ -52,7 +52,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -66,11 +65,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -388,16 +388,34 @@ class ReaderViewModel(
      * 目录本身也会变：阅读中后台追更会整本换掉目录行。面板读的是这里的新目录，阅读会话手里却还是
      * 进书时那一份 —— 两边序号一错开，点新章没反应、点第 i 章打开的是旧目录的第 i 章。
      * 所以每来一份新目录，也交给 [syncSessionToc] 把会话对齐过去。
+     *
+     * 怎么盯：只听「chapter 表被写过」那一声（[BookRepository.chapterTableChanges]），每 [TOC_REFRESH_MS]
+     * 至多读一次轻量投影（[TocRow]）；目录结构和会话手里的一样（绝大多数时候，变的只是 isCached），
+     * 就只换面板上的缓存标记，不读整行。
+     *
+     * 从前直接订阅 `SELECT *` 的目录流：Room 按整张表失效，预取每落一章、离线缓存每存一章（别的书也算），
+     * 就把这本书几千行目录整读一遍、建几千个对象 —— 后面的防抖挡得住处理，挡不住查询本身。
+     * 这些分配招来的 GC 停的是所有线程，翻页动画也在内（同 [prefetchAhead] 里量过的那回事）。
      */
-    @OptIn(FlowPreview::class)
     private fun observeToc() {
         viewModelScope.launch {
-            chapterDao.observeByBook(bookId)
+            bookRepo.chapterTableChanges()
+                // 读的时候又写了几回：攒成一声，读完再隔一个间隔读最新的。不用 debounce：离线缓存一章接一章地写，
+                // 防抖一直等不到安静，面板上的缓存标记会一直停着，直到整本缓存完
+                .conflate()
+                .transform { delay(TOC_REFRESH_MS); emit(it) }
+                .map { chapterDao.getTocRows(bookId) }
                 .distinctUntilChanged()
-                .debounce(TOC_DEBOUNCE_MS)
                 .collect { rows ->
                     _state.value = _state.value.copy(toc = rows.map { TocItem(it.index, it.title, it.isCached) })
-                    syncSessionToc(rows)
+                    // 目录结构变了（后台追更）才把整行读出来，交给会话去对齐。条件同 syncSessionToc 开头那几条，
+                    // 先在这里挡掉，免得换源途中每一声都白读一遍整本目录
+                    val src = source as? NetReaderBookSource
+                    if (sessionReady && !sourceChanging && src != null && rows.isNotEmpty() &&
+                        !sameReadingToc(src.chapters, rows)
+                    ) {
+                        syncSessionToc(chapterDao.getByBook(bookId))
+                    }
                 }
         }
     }
@@ -565,9 +583,13 @@ class ReaderViewModel(
             )
             sessionReady = true
             // 网络书：首章加载别等清理。进度之前且超龄的正文缓存顺手清掉，目录 isCached 一并 sync。
+            // 先让开进书动画（同预取的 PREFETCH_LEAD_IN_MS）：清理要给全书每章算一遍文件名摘要、
+            // 进度之前每章 stat 一次，几千章就是几千次系统调用加一大坨分配，正好砸在入场动画中间
             if (b.type == BookType.NET) {
+                val readIndex = position.chapterIndex
                 viewModelScope.launch(Dispatchers.IO) {
-                    pruneStaleChapterCache(position.chapterIndex, chapters)
+                    delay(PREFETCH_LEAD_IN_MS)
+                    pruneStaleChapterCache(readIndex, chapters)
                 }
             }
             // 排版环境已就绪（换源重载场景）→ 立即重新分页。分页缓存在这里清（navigate 同步清一次、
@@ -588,6 +610,7 @@ class ReaderViewModel(
     /**
      * 按设置清掉「进度之前」且超龄的正文缓存，并 sync 目录 isCached。
      * 偏好为 0（关闭）时直接返回。不挡首章加载。
+     * 同一本书隔一阵才清一次（[ChapterContentCache.claimPrune]）：一天里反复进出同一本书，不必每次都把全书过一遍。
      */
     private suspend fun pruneStaleChapterCache(
         readChapterIndex: Int,
@@ -595,6 +618,7 @@ class ReaderViewModel(
     ) {
         val days = appPrefs.cacheAutoPruneDays.first()
         if (days <= 0) return
+        if (!contentCache.claimPrune(bookId)) return
         val maxAgeMs = days * 86_400_000L
         val urls = com.radium.inkwell.data.repo.chapterUrlsByIndex(chapters).ifEmpty { return }
         val pruned = contentCache.pruneBehindProgress(
@@ -1983,8 +2007,11 @@ class ReaderViewModel(
          */
         const val PREFETCH_LEAD_IN_MS = 400L
 
-        /** 目录 isCached 刷新防抖：预取连写几章不该每章重组一次菜单 */
-        const val TOC_DEBOUNCE_MS = 400L
+        /**
+         * 目录多久至多重读一次（[observeToc]）：预取连写几章，不该每章读一遍目录、重组一次菜单。
+         * 面板上的缓存标记晚一秒亮无妨；进书那一刻也正好让开入场动画 —— loadSession 自己已经读过一遍目录
+         */
+        const val TOC_REFRESH_MS = 1_000L
 
         /** 进度写入防抖；离开阅读页走 [flushProgress] 兜住 */
         const val PROGRESS_DEBOUNCE_MS = 400L
