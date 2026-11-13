@@ -4,17 +4,30 @@ import androidx.room3.Dao
 import androidx.room3.Query
 import androidx.room3.Upsert
 import com.radium.inkwell.data.db.entity.RssArticleEntity
+import com.radium.inkwell.data.db.entity.RssArticleRow
+import com.radium.inkwell.data.db.entity.RssArticleSeen
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface RssArticleDao {
 
-    /** 这几个「源 + 分类」里缓存着的文章。排序在 RssFeedRepository 里做：「全部」和单个源排法不一样 */
-    @Query("SELECT * FROM rss_article WHERE feed IN (:feeds)")
-    fun observeByFeeds(feeds: List<String>): Flow<List<RssArticleEntity>>
+    /**
+     * 这几个「源 + 分类」里缓存着的文章，**不带全文**（理由见 [RssArticleRow]）。
+     * 排序在 RssFeedRepository 里做：「全部」和单个源排法不一样
+     */
+    @Query(
+        "SELECT feed, articleKey, sourceId, title, link, image, pubDate, pubTime, firstSeenAt, lastSeenAt, position, readAt " +
+            "FROM rss_article WHERE feed IN (:feeds)",
+    )
+    fun observeRowsByFeeds(feeds: List<String>): Flow<List<RssArticleRow>>
 
-    @Query("SELECT * FROM rss_article WHERE feed = :feed")
-    suspend fun getByFeed(feed: String): List<RssArticleEntity>
+    /** 合并新取到的一页要的旧行：只取沿用的那几样，不把这条列表攒下的全文整读一遍 */
+    @Query("SELECT articleKey, firstSeenAt, readAt FROM rss_article WHERE feed = :feed")
+    suspend fun getSeenByFeed(feed: String): List<RssArticleSeen>
+
+    /** 点开一篇时取它的全文（时间线的行里没有它） */
+    @Query("SELECT description FROM rss_article WHERE feed = :feed AND articleKey = :articleKey")
+    suspend fun getDescription(feed: String, articleKey: String): String?
 
     @Upsert
     suspend fun upsertAll(rows: List<RssArticleEntity>)

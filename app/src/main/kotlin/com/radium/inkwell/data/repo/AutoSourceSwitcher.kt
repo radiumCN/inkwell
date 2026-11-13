@@ -189,9 +189,18 @@ class AutoSourceSwitcher(
         internal fun rankSearchResults(
             results: List<SearchResult>,
             sources: List<BookSourceRepository.EnabledSource>,
+        ): List<SearchResult> =
+            if (results.size <= 1) results else rankSearchResults(results, sources.associateBy { it.rule.id })
+
+        /**
+         * 同上，书源已经按 id 建好表的。搜索一轮要给几百本书各排一次：从前每排一本都把全部启用的书源
+         * （几百上千个）重建一遍表，每 250ms 发布一次就是几十万次插入，白白拖慢列表刷新。
+         */
+        internal fun rankSearchResults(
+            results: List<SearchResult>,
+            byId: Map<String, BookSourceRepository.EnabledSource>,
         ): List<SearchResult> {
             if (results.size <= 1) return results
-            val byId = sources.associateBy { it.rule.id }
             return results.sortedWith(
                 compareBy(
                     { statusRank(byId[it.sourceId]?.checkStatus ?: CheckStatus.UNCHECKED) },

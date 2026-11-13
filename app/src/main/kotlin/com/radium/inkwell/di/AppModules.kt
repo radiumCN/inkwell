@@ -193,6 +193,6 @@ val appModule = module {
         com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get(), url.ifBlank { null }, title.ifBlank { null })
     }
     viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->
-        com.radium.inkwell.ui.rss.RssArticleViewModel(args, get())
+        com.radium.inkwell.ui.rss.RssArticleViewModel(args, get(), get())
     }
 }

@@ -115,13 +115,23 @@ class RhinoScriptRuntime(
 
     /**
      * 同一段 JS 规则会被每个列表项、每章正文反复 eval。opt=-1 不能出字节码，
-     * 但 compileString 仍能把源码变成 AST，免掉每次的解析。64 条 LRU 够覆盖
-     * 一个书源里常见的 search/detail/toc/content 脚本，又不会把超长动态脚本攒满。
+     * 但 compileString 仍能把源码变成 AST，免掉每次的解析。
+     *
+     * 按条数**和总字数**封顶（[CompiledScripts]）。从前只留 64 条：一个书源够用，可一次搜索要轮几百个书源，
+     * 每个源的地址脚本、列表脚本、字段脚本加起来远不止 64 条，一轮下来全被挤掉，下一轮搜索每段都重编一遍；
+     * 而光按条数放宽，几段内嵌 CryptoJS 的长脚本又会把内存撑大。
      */
-    private val compiledScripts = object : LinkedHashMap<String, org.mozilla.javascript.Script>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, org.mozilla.javascript.Script>?): Boolean =
-            size > 64
-    }
+    private val compiledScripts = CompiledScripts(maxEntries = 512, maxChars = 1_000_000)
+
+    /**
+     * 源的公共脚本库（jsLib）编译好的样子，**全局一份**、各线程共用（编译结果只读，同 [compiledScripts]）。
+     *
+     * 库的作用域是每线程的（[libScopesByThread]），从前作用域没命中就把整份库 evaluateString 一遍 ——
+     * 解析 + 编译占了大头。搜索时协程在 IO 线程之间换着跑（拼地址在一根上，网络回来解析列表常换到另一根），
+     * 每根线程只留 [LIB_SCOPES_PER_THREAD] 份作用域，几十个带库的源轮一遍几乎回回落空：
+     * 一个带 146KB 聚合库的源，一次搜索要把库从头解析两遍。现在落空也只是在新作用域上跑一遍库的顶层代码。
+     */
+    private val compiledLibs = CompiledScripts(maxEntries = 64, maxChars = 1_500_000)
 
     /**
      * 每线程一份 initSafeStandardObjects 原型。eval 只 newObject 挂绑定，
@@ -159,7 +169,9 @@ class RhinoScriptRuntime(
                 it.parentScope = null
                 // 库自己的顶层代码就用 JavaImporter / Packages 的，加载前先装上（替身无状态，按库缓存不串源）
                 if (JdkCompat.wanted(lib, null)) installJdkCompat(cx, it)
-                cx.evaluateString(it, lib, "jsLib.js", 1, null)
+                val compiled = compiledLibs.get(lib)
+                    ?: compiledLibs.put(lib, cx.compileString(lib, "jsLib.js", 1, null))
+                compiled.exec(cx, it)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 取消不是「库坏了」：不记，下次照常加载
@@ -216,10 +228,8 @@ class RhinoScriptRuntime(
             try {
                 // 锁里只查表，编译放在锁外：一段几十 KB 的脚本（内嵌 CryptoJS 的源不少）编译期间，
                 // 从前别的书源的 JS 求值 —— 连缓存命中的 —— 全排在这把锁上。重了也只是多编一次
-                val compiled = synchronized(compiledScripts) { compiledScripts[script] }
-                    ?: cx.compileString(script, "rule.js", 1, null).let { fresh ->
-                        synchronized(compiledScripts) { compiledScripts.getOrPut(script) { fresh } }
-                    }
+                val compiled = compiledScripts.get(script)
+                    ?: compiledScripts.put(script, cx.compileString(script, "rule.js", 1, null))
                 val result = compiled.exec(cx, scope)
                 if (keepNodes) elementsOf(result)?.let { return ScriptValue.Nodes(it) }
                 return ScriptValue.Text(
@@ -297,6 +307,35 @@ class RhinoScriptRuntime(
         val prelude = compiledPrelude
             ?: cx.compileString(JdkCompat.PRELUDE, "jdk-compat.js", 1, null).also { compiledPrelude = it }
         prelude.exec(cx, target)
+    }
+
+    /**
+     * 编译好的脚本，按原文认，最久没用的先淘汰；条数和原文总字数各有上限（编译结果的体积大致跟着原文走）。
+     * 只在查表、入表时持锁，编译在锁外（见 [run]）。比任何一个上限都大的单段脚本照样交回、只是不留。
+     */
+    internal class CompiledScripts(private val maxEntries: Int, private val maxChars: Long) {
+        private val map = LinkedHashMap<String, org.mozilla.javascript.Script>(64, 0.75f, true)
+        private var chars = 0L
+
+        @Synchronized
+        fun get(source: String): org.mozilla.javascript.Script? = map[source]
+
+        /** 记下 [fresh]；别的线程抢先编好了同一段就交回那一份 */
+        @Synchronized
+        fun put(source: String, fresh: org.mozilla.javascript.Script): org.mozilla.javascript.Script {
+            map[source]?.let { return it }
+            if (source.length > maxChars) return fresh
+            map[source] = fresh
+            chars += source.length
+            val eldest = map.entries.iterator()
+            while ((map.size > maxEntries || chars > maxChars) && eldest.hasNext()) {
+                val e = eldest.next()
+                if (e.key === source) break // 走到刚放进去的这条了（它在最末），前面的已经清完
+                chars -= e.key.length
+                eldest.remove()
+            }
+            return fresh
+        }
     }
 
     /** 用 Rhino 内置的 JSON.stringify 序列化原生数组/对象；失败返回 null 交调用方兜底。 */

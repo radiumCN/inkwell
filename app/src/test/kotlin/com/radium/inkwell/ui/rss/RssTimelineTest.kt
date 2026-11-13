@@ -1,6 +1,6 @@
 package com.radium.inkwell.ui.rss
 
-import com.radium.inkwell.data.db.entity.RssArticleEntity
+import com.radium.inkwell.data.db.entity.RssArticleRow
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -22,13 +22,12 @@ class RssTimelineTest {
         firstSeenAt: Long = 0,
         lastSeenAt: Long = 0,
         position: Int = 0,
-    ) = RssArticleEntity(
+    ) = RssArticleRow(
         feed = "$source\nfeed",
         articleKey = key,
         sourceId = source,
         title = key,
         link = key,
-        description = null,
         image = null,
         pubDate = null,
         pubTime = pubTime,

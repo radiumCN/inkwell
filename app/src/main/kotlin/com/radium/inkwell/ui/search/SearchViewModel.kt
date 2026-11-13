@@ -167,10 +167,11 @@ class SearchViewModel(
     private val hitsMutex = Mutex()
 
     /**
-     * 本轮搜索时的书源健康度。打开详情 / 加入时按它挑源；
+     * 本轮搜索时的书源健康度，按书源 id 建好表。合并时给每本书排源（[merge]）、打开详情 / 加入时挑源都查它；
      * 用 [BookSourceRepository.getEnabledForSwitch] 一次拿齐，避免列表点一下再查一遍库。
+     * 建一次表就够：从前存的是列表，每排一本书都现建一遍（见 [AutoSourceSwitcher.rankSearchResults]）
      */
-    private var sourceMeta: List<BookSourceRepository.EnabledSource> = emptyList()
+    private var sourceMetaById: Map<String, BookSourceRepository.EnabledSource> = emptyMap()
 
     private val pendingIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val moreAcc = java.util.Collections.synchronizedList(mutableListOf<BookSourceRule>())
@@ -361,7 +362,7 @@ class SearchViewModel(
             // 上一轮被新搜索打断时没走到收尾，它测到的速度在这里落库
             flushSearchStats()
             val enabled = sourceRepo.getEnabledForSwitch()
-            sourceMeta = enabled
+            sourceMetaById = enabled.associateBy { it.rule.id }
             // 快的、活的先发，坏源排到最后（见 SearchScheduling）。从前按书源管理里的手动顺序发，
             // 一个吊死的源排在前面就占着一个并发名额等满超时，健康的源在后面干等
             val searchable = SearchScheduling.order(withLiveSpeed(enabled.filter { it.rule.search != null }))
@@ -486,7 +487,7 @@ class SearchViewModel(
 
     /** 打开详情前把多源结果按健康度排好，预览页用第一条当代表源 */
     fun rankedResults(results: List<SearchResult>): List<SearchResult> =
-        AutoSourceSwitcher.rankSearchResults(results, sourceMeta)
+        AutoSourceSwitcher.rankSearchResults(results, sourceMetaById)
 
     private suspend fun searchRound(
         rules: List<BookSourceRule>,
@@ -636,47 +637,50 @@ class SearchViewModel(
     /** 同名同作者视为同一本书；键的顺序即首次出现的顺序，用于同档同源数时保持稳定 */
     private val hits = LinkedHashMap<Pair<String, String>, SearchHit>()
 
-    private fun merge(items: List<SearchResult>) = mergeSearchResults(hits, items)
+    /**
+     * 并进来的同时把多源的书按健康度排好（[SearchHit.preferred] 就是第一条）。
+     *
+     * 从前存的是没排的，每次发布（每 250ms）再给每本多源的书重排一遍、各 new 一个 [SearchHit]：
+     * 懒算好的 key / result / origins 每次作废，列表每一行也因为换了实例跟着重组。
+     * 一本书只在多了一个源的那一刻才可能换顺序，在这里排一次就够了 —— 排的只是这一本的几条，主线程上也不费事。
+     */
+    private fun merge(items: List<SearchResult>) =
+        mergeSearchResults(hits, items) { AutoSourceSwitcher.rankSearchResults(it, sourceMetaById) }
 
     /**
      * 对快照排序。Collator 非线程安全，每次现场建一份；
      * 调用方先 [Collection.toList] 再丢进 Default，避免边 merge 边排。
+     * 各本书里的源在合并时已经排好（见 [merge]），这里只排书。
      */
     private fun ordered(
         items: List<SearchHit>,
         keyword: String,
         sort: SearchSort,
     ): List<SearchHit> {
-        val ranked = items.map { rankHit(it) }
         val collator = Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY }
         return when (sort) {
-            SearchSort.RELEVANCE -> ranked.sortedWith(
+            SearchSort.RELEVANCE -> items.sortedWith(
                 compareBy<SearchHit> { tier(it.result, keyword) }
                     .thenByDescending { it.origins.size },
             )
-            SearchSort.WORD_COUNT -> ranked.sortedWith(
+            SearchSort.WORD_COUNT -> items.sortedWith(
                 compareByDescending<SearchHit> { wordCountOf(it) }
                     .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
-            SearchSort.TITLE_PINYIN -> ranked.sortedWith(
+            SearchSort.TITLE_PINYIN -> items.sortedWith(
                 compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
                     .thenByDescending { it.origins.size },
             )
-            SearchSort.AUTHOR_PINYIN -> ranked.sortedWith(
+            SearchSort.AUTHOR_PINYIN -> items.sortedWith(
                 compareBy(collator) { hit: SearchHit ->
                     hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
                 }.thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
-            SearchSort.UPDATE_TIME -> ranked.sortedWith(
+            SearchSort.UPDATE_TIME -> items.sortedWith(
                 compareByDescending<SearchHit> { updateEpochOf(it) }
                     .thenBy(collator) { hit: SearchHit -> hit.result.title },
             )
         }
-    }
-
-    private fun rankHit(hit: SearchHit): SearchHit {
-        if (hit.results.size <= 1) return hit
-        return SearchHit(AutoSourceSwitcher.rankSearchResults(hit.results, sourceMeta))
     }
 
     /**
@@ -878,10 +882,13 @@ class SearchViewModel(
 /**
  * 把一页结果并进 [hits]：按 [searchKey] 跨书源合并成一本，同一书源只留首条。
  * 抽成顶层函数是为了能直接测 —— 合并键与列表 key 一旦对不上就是崩溃。
+ *
+ * @param rank 一本书多了一个源时，给它的几条排先后（搜索页按书源健康度排，见 SearchViewModel.merge）
  */
 internal fun mergeSearchResults(
     hits: MutableMap<Pair<String, String>, SearchHit>,
     items: List<SearchResult>,
+    rank: (List<SearchResult>) -> List<SearchResult> = { it },
 ) {
     for (r in items) {
         val key = r.searchKey
@@ -889,7 +896,7 @@ internal fun mergeSearchResults(
         hits[key] = when {
             old == null -> SearchHit(listOf(r))
             old.results.any { it.sourceId == r.sourceId } -> old
-            else -> SearchHit(old.results + r)
+            else -> SearchHit(rank(old.results + r))
         }
     }
 }

@@ -17,14 +17,70 @@ import java.util.concurrent.ConcurrentHashMap
  * @param baseUrl 页面最终 URL（重定向后），相对链接解析基准
  * @param vars 模板变量（keyword/page/baseUrl 等）
  * @param js 脚本桥（book/chapter/source/变量表）；书源脚本靠它拿上下文与传值
+ *
+ * **整页**的上下文（[page] / [asPage]）同时带着原文和文档，文档**用到才解析**。
+ * 从前抓回来就先整页 Jsoup 一遍，JSON 接口也不例外 —— 而规则走 JSONPath 时根本不碰文档：
+ * 搜索几百个接口源，每个源白解析一页；详情接口常把整本目录一起返回（0.5–2MB），打开一本书时
+ * 详情、目录两级各白解析一遍，手机上就是几百毫秒。原文要拿来当文档用的照旧解析，结果完全一样。
+ *
+ * 不再是 data class：[copy] 要能「元素不变」而不去碰（因而不去解析）那份文档。没有地方比较、解构它。
  */
-data class EvalContext(
-    val element: Element?,
+class EvalContext private constructor(
+    private val elementRef: Lazy<Element?>,
+    /** 是整页（原文 + 文档）：脚本的 result、`:regex` 据此给原文而不是 outerHtml，且不必为了判断去解析文档 */
+    val isPage: Boolean,
     val json: Any?,
     val baseUrl: String,
-    val vars: Map<String, String> = emptyMap(),
-    val js: JsContext = JsContext(),
-)
+    val vars: Map<String, String>,
+    val js: JsContext,
+) {
+    constructor(
+        element: Element?,
+        json: Any?,
+        baseUrl: String,
+        vars: Map<String, String> = emptyMap(),
+        js: JsContext = JsContext(),
+    ) : this(lazyOf(element), element is Document, json, baseUrl, vars, js)
+
+    val element: Element? get() = elementRef.value
+
+    /** 文档解析过没有（单测钉「JSON 页一直不解析」用：判断顺序一颠倒，按需解析就悄悄失效了） */
+    internal val documentParsed: Boolean get() = elementRef.isInitialized()
+
+    /** [element] 不传就沿用原来的（还没解析的照旧不解析）；传了（包括 null）就换成它 */
+    fun copy(
+        element: Element? = KEEP,
+        json: Any? = this.json,
+        baseUrl: String = this.baseUrl,
+        vars: Map<String, String> = this.vars,
+        js: JsContext = this.js,
+    ): EvalContext =
+        if (element === KEEP) EvalContext(elementRef, isPage, json, baseUrl, vars, js)
+        else EvalContext(element, json, baseUrl, vars, js)
+
+    /** 把 [text]（上一步的产物、脚本拼出的页面）当一份新的整页内容，其余照旧 */
+    fun asPage(text: String): EvalContext = page(text, baseUrl, vars, js)
+
+    override fun toString(): String = "EvalContext(baseUrl=$baseUrl, page=$isPage)"
+
+    companion object {
+        /** [copy] 里「元素不变」的记号；只比引用，永远不会被当成真元素用 */
+        private val KEEP = Element("keep")
+
+        /**
+         * 整页内容：原文进 [json]，文档用到才按原文解析（`<?xml` 开头的按 XML，见 [parsePage]）。
+         * PUBLICATION：同一个上下文偶尔被两根线程同时碰到，最多各解析一遍，不会拿到半截
+         */
+        fun page(
+            text: String,
+            baseUrl: String,
+            vars: Map<String, String> = emptyMap(),
+            js: JsContext = JsContext(),
+        ): EvalContext = EvalContext(
+            lazy(LazyThreadSafetyMode.PUBLICATION) { parsePage(text, baseUrl) }, true, text, baseUrl, vars, js,
+        )
+    }
+}
 
 /**
  * 一次抓取链路里的脚本上下文。book/chapter 让脚本读到当前书与章节，
@@ -153,9 +209,8 @@ class RuleEvaluator(
         }
     }
 
-    /** 上一步的产物（一段 HTML / XML / JSON）当新内容：文档与原文同时带着，同页面上下文 */
-    private fun contentContext(text: String, ctx: EvalContext): EvalContext =
-        ctx.copy(element = parsePage(text, ctx.baseUrl), json = text)
+    /** 上一步的产物（一段 HTML / XML / JSON）当新内容：文档与原文同时带着，同页面上下文（文档用到才解析） */
+    private fun contentContext(text: String, ctx: EvalContext): EvalContext = ctx.asPage(text)
 
     /**
      * 列表规则接脚本：照 Legado 的 getElements，脚本拿到的是前面选出的**整组**（JSON 见 [wholeJsonPipe]，元素见 [wholeElementPipe]）。
@@ -368,7 +423,8 @@ class RuleEvaluator(
         // 同 Legado 的 isJSON —— 内容是 JSON 时，不带前缀的规则一律是 JSONPath（Jayway 自己补 `$.`）。
         // 从前这一级只认 `$.` 开头的：接口源把列表写成 `data.books`、详情 init 写成 `data.book`，
         // 被当成 CSS 选择器去 HTML 里找，一个节点都没有（七猫的接口源搜索、详情全空）
-        if (ctx.element != null && !(json is String && looksLikeJson(json))) return null
+        // 先看原文：原文是 JSON 就用不着文档，别为了这句判断把整页解析一遍（见 EvalContext.page）
+        if (!(json is String && looksLikeJson(json)) && ctx.element != null) return null
         if (rule.isBlank() || rule.startsWith("@") || rule.contains("{{")) return null
         return "$." + rule.trim()
     }
@@ -634,7 +690,7 @@ class RuleEvaluator(
      */
     private fun contextText(ctx: EvalContext): String {
         val raw = ctx.json as? String
-        if (raw != null && ctx.element is Document) return raw
+        if (raw != null && ctx.isPage) return raw
         return ctx.element?.outerHtml() ?: raw ?: ctx.json?.let { scalarString(it) } ?: ""
     }
 
@@ -765,7 +821,7 @@ class RuleEvaluator(
             deviceId = { runtime.androidId },
         )
         return try {
-            val inUrl = ctx.element == null && ctx.json == null
+            val inUrl = ctx.json == null && ctx.element == null
             run(
                 runtime,
                 buildMap {

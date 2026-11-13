@@ -88,31 +88,19 @@ data class RssWebRoute(val sourceId: String) : NavKey
 data class RssArticleWebRoute(val sourceId: String, val url: String, val title: String) : NavKey
 
 /**
- * 文章阅读。整条文章随导航带过去 —— 为了看一篇文章把整个列表再抓一遍毫无道理，
- * 而且不少源的摘要（description）本来就是全文，重抓反而丢了它。
+ * 文章阅读。标题、链接、日期随导航带过去，全文（description）由文章页从订阅缓存里取 ——
+ * 为了看一篇文章把整个列表再抓一遍毫无道理，而且不少源的摘要本来就是全文。全文为什么不进参数见 RssArticleArgs。
  * 内容含 `/ ? &`，作为 path 参数会被切断，故 Base64 传递。
+ * 旧版本存下的参数里带着 description 字段：ROUTE_JSON 忽略未知键，照样解得开。
  */
 @Serializable
 data class RssArticleRoute(val argsArg: String) : NavKey {
     val args: com.radium.inkwell.ui.rss.RssArticleArgs
-        get() {
-            val base: com.radium.inkwell.ui.rss.RssArticleArgs =
-                ROUTE_JSON.decodeFromString(decodeArg(argsArg))
-            // 正文（description）不进导航参数，从进程内暂存按链接取回；取不到（进程被杀）就为 null
-            return base.copy(
-                description = base.description
-                    ?: com.radium.inkwell.ui.rss.RssArticleContent.get(base.link),
-            )
-        }
+        get() = ROUTE_JSON.decodeFromString(decodeArg(argsArg))
 
     companion object {
-        fun of(args: com.radium.inkwell.ui.rss.RssArticleArgs): RssArticleRoute {
-            // 全文正文放进程内暂存，导航参数只带短字段，避免撑爆 Binder 事务上限
-            com.radium.inkwell.ui.rss.RssArticleContent.put(args.link, args.description)
-            return RssArticleRoute(
-                encodeArg(ROUTE_JSON.encodeToString(args.copy(description = null))),
-            )
-        }
+        fun of(args: com.radium.inkwell.ui.rss.RssArticleArgs): RssArticleRoute =
+            RssArticleRoute(encodeArg(ROUTE_JSON.encodeToString(args)))
     }
 }
 

@@ -2,6 +2,7 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.data.db.entity.RssArticleEntity
+import com.radium.inkwell.data.db.entity.RssArticleSeen
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -16,8 +17,13 @@ class RssFeedMergeTest {
     private fun article(link: String, title: String = link, pubDate: String? = null) =
         RssArticle(sourceId = "https://a.com/feed", title = title, link = link, pubDate = pubDate)
 
+    /** 库里读回来的旧行只有沿用的那几样（RssArticleDao.getSeenByFeed）；测试里拿上一次合并出的整行折成它 */
     private fun merge(existing: List<RssArticleEntity>, fetched: List<RssArticle>, now: Long) =
-        RssFeedRepository.mergeFetched(feed, "https://a.com/feed", existing, fetched, now)
+        RssFeedRepository.mergeFetched(
+            feed, "https://a.com/feed",
+            existing.map { RssArticleSeen(it.articleKey, it.firstSeenAt, it.readAt) },
+            fetched, now,
+        )
 
     @Test
     fun `第一次取到：时刻都是现在，位置照这一页`() {

@@ -1,13 +1,13 @@
 package com.radium.inkwell.ui.rss
 
-import com.radium.inkwell.data.db.entity.RssArticleEntity
+import com.radium.inkwell.data.db.entity.RssArticleRow
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
 /** 时间线上的一篇 */
 data class TimelineItem(
-    val row: RssArticleEntity,
+    val row: RssArticleRow,
     /** 来源名；只看一个源时为 null（整页都是它，不用每行再写一遍） */
     val sourceName: String?,
 ) {
@@ -29,18 +29,18 @@ data class TimelineSection(val day: LocalDate?, val items: List<TimelineItem>)
  * 排行榜、书单这类源，顺序本身就是内容，不能按时间重排。
  */
 internal fun buildTimeline(
-    rows: List<RssArticleEntity>,
+    rows: List<RssArticleRow>,
     sourceNames: Map<String, String>,
     single: Boolean,
     zone: ZoneId = ZoneId.systemDefault(),
 ): List<TimelineSection> {
     if (rows.isEmpty()) return emptyList()
     if (single) {
-        val ordered = rows.sortedWith(compareByDescending<RssArticleEntity> { it.lastSeenAt }.thenBy { it.position })
+        val ordered = rows.sortedWith(compareByDescending<RssArticleRow> { it.lastSeenAt }.thenBy { it.position })
         return listOf(TimelineSection(null, ordered.map { TimelineItem(it, null) }))
     }
     val ordered = rows.sortedWith(
-        compareByDescending<RssArticleEntity> { it.sortTime }.thenBy { it.position }.thenBy { it.sourceId },
+        compareByDescending<RssArticleRow> { it.sortTime }.thenBy { it.position }.thenBy { it.sourceId },
     )
     return ordered
         .groupBy { Instant.ofEpochMilli(it.sortTime).atZone(zone).toLocalDate() }
@@ -48,7 +48,7 @@ internal fun buildTimeline(
 }
 
 /** 「全部」里排先后用的时刻：发布时间，没有就第一次取到的时刻 */
-internal val RssArticleEntity.sortTime: Long get() = if (pubTime > 0) pubTime else firstSeenAt
+internal val RssArticleRow.sortTime: Long get() = if (pubTime > 0) pubTime else firstSeenAt
 
 /** 分段小标题：今天 / 昨天 / 11月9日 / 2025年12月31日（不是今年才写年份） */
 internal fun sectionTitle(day: LocalDate, today: LocalDate): String = when {

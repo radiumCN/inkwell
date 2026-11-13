@@ -20,7 +20,6 @@ import com.radium.inkwell.core.source.js.EngineJsHttp
 import com.radium.inkwell.core.source.js.ScriptRuntime
 import com.radium.inkwell.core.source.js.SourceFacts
 import com.radium.inkwell.core.source.parseHeaderJson
-import com.radium.inkwell.core.source.parsePage
 import com.radium.inkwell.core.source.resolveUrl
 import com.radium.inkwell.core.source.splitUrlOptions
 import com.radium.inkwell.core.source.withoutLegadoOnlyHeaders
@@ -84,15 +83,9 @@ class RssEngine(
             return RssArticlePage(items.map { it.absolutize(fetched.finalUrl) }, hasMore = false)
         }
 
-        // 在 feed 上写规则的（`//item`、`link@text`）得按 XML 解析，HTML 解析器会把 `<link>` 的地址挤出元素
-        val doc = parsePage(fetched.bodyText, fetched.finalUrl)
-        val root = EvalContext(
-            element = doc,
-            json = fetched.bodyText,
-            baseUrl = fetched.finalUrl,
-            vars = vars,
-            js = js,
-        )
+        // 在 feed 上写规则的（`//item`、`link@text`）得按 XML 解析，HTML 解析器会把 `<link>` 的地址挤出元素（parsePage 认 `<?xml`）。
+        // 文档用到才解析：JSON 接口的订阅源走 JSONPath，用不着它（见 EvalContext.page）
+        val root = EvalContext.page(fetched.bodyText, fetched.finalUrl, vars, js)
         val nodes = evaluator.evalToNodes(LegadoRuleAnalyzer.analyze(rule.articles), root)
         val items = nodes.mapNotNull { item ->
             val title = field(rule.title, item)
@@ -148,12 +141,7 @@ class RssEngine(
         if (!rule.content.isNullOrBlank() && article.link.isNotBlank()) {
             val js = jsContextOf(rule)
             val fetched = fetch(rule, article.link, mapOf("baseUrl" to rule.id), js)
-            val ctx = EvalContext(
-                element = parsePage(fetched.bodyText, fetched.finalUrl),
-                json = fetched.bodyText,
-                baseUrl = fetched.finalUrl,
-                js = js,
-            )
+            val ctx = EvalContext.page(fetched.bodyText, fetched.finalUrl, js = js)
             val html = evaluator.evalToString(LegadoRuleAnalyzer.analyze(rule.content), ctx)
             if (!html.isNullOrBlank()) {
                 val body = Jsoup.parseBodyFragment(html, fetched.finalUrl).body()

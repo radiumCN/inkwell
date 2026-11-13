@@ -848,19 +848,15 @@ class BookSourceEngine(
         return headers
     }
 
-    /** 页面上下文：文档（`<?xml` 开头的按 XML 解析，见 [parsePage]）与原始文本（JSON 规则懒解析）同时可用 */
+    /**
+     * 页面上下文：文档（`<?xml` 开头的按 XML 解析，见 [parsePage]）与原始文本（JSON 规则懒解析）同时可用。
+     * 文档用到才解析（[EvalContext.page]）：JSON 接口的页面走 JSONPath，不必先整页 Jsoup 一遍
+     */
     private fun pageContext(
         fetched: FetchedPage,
         vars: Map<String, String>,
         js: JsContext = JsContext(),
-    ): EvalContext =
-        EvalContext(
-            element = parsePage(fetched.bodyText, fetched.finalUrl),
-            json = fetched.bodyText,
-            baseUrl = fetched.finalUrl,
-            vars = vars,
-            js = js,
-        )
+    ): EvalContext = EvalContext.page(fetched.bodyText, fetched.finalUrl, vars, js)
 
     /** 脚本上下文：书源标识 + 当前书/章节。scriptVars 每条抓取链路一份，供 java.put/get 传值 */
     /** 展开地址模板用的上下文：没有页面，只有变量与脚本桥 */

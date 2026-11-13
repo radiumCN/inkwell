@@ -116,7 +116,9 @@ class RssTimelineViewModel(
             val keys = v.keys
             if (keys.isEmpty()) return@flatMapLatest flowOf(Articles(keys, emptyList()))
             val names = catalog.value?.sources?.associate { it.id to it.name }.orEmpty()
-            feeds.observe(keys).map { rows -> Articles(keys, buildTimeline(rows, names, v.single)) }
+            // 表按整张失效：只看一个源时别的源写库、点开一篇标成读过（同一篇在别的分类里那行）也会再查一遍，
+            // 查回来一模一样就别重排、别让整页重组
+            feeds.observe(keys).distinctUntilChanged().map { rows -> Articles(keys, buildTimeline(rows, names, v.single)) }
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -183,7 +185,7 @@ class RssTimelineViewModel(
         fetch(list, force = true)
     }
 
-    /** 点开一篇：标成读过（标题变灰），返回文章页要的参数 */
+    /** 点开一篇：标成读过（标题变灰），返回文章页要的参数。全文不随参数走，文章页按 feed + articleKey 从库里取 */
     fun open(item: TimelineItem): RssArticleArgs {
         val row = item.row
         viewModelScope.launch { feeds.markRead(row.sourceId, row.articleKey) }
@@ -191,8 +193,9 @@ class RssTimelineViewModel(
             sourceId = row.sourceId,
             title = row.title,
             link = row.link,
-            description = row.description,
             pubDate = row.pubDate,
+            feed = row.feed,
+            articleKey = row.articleKey,
         )
     }
 
