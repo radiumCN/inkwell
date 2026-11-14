@@ -21,6 +21,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.bookshelf.BookshelfLayout
+import com.radium.inkwell.ui.bookshelf.ShelfColumns
+import com.radium.inkwell.ui.components.SegmentedChoice
+import com.radium.inkwell.ui.components.SettingBlock
+import com.radium.inkwell.ui.components.expandEnter
+import com.radium.inkwell.ui.components.expandExit
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.text.font.FontWeight
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
@@ -58,6 +67,7 @@ fun AppearanceSettingsScreen(
     val rssEntryEnabled = appPrefs.rssEntryEnabledState.collectAsStateWithLifecycle().value ?: true
     val duplicateHint = appPrefs.duplicateHintEnabledState.collectAsStateWithLifecycle().value ?: true
     val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
+    val bookshelfColumns = appPrefs.bookshelfColumnsState.collectAsStateWithLifecycle().value ?: ShelfColumns.DEFAULT
     var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
 
@@ -116,6 +126,17 @@ fun AppearanceSettingsScreen(
                     },
                     position = SettingGroupPosition.First,
                 )
+                // 每行几本只对网格有意义：切到列表就收起
+                AnimatedVisibility(
+                    visible = bookshelfLayout == BookshelfLayout.GRID,
+                    enter = expandEnter(),
+                    exit = expandExit(),
+                ) {
+                    BookshelfColumnsBlock(
+                        columns = bookshelfColumns,
+                        onSelect = { picked -> scope.launch { appPrefs.setBookshelfColumns(picked) } },
+                    )
+                }
                 SwitchRow(
                     title = "显示「发现」入口",
                     checked = exploreEnabled,
@@ -155,6 +176,36 @@ fun AppearanceSettingsScreen(
                 }
             },
             onDismiss = { showIconPicker = false },
+        )
+    }
+}
+
+/**
+ * 「每行本数」：标题 + 说明 + 3 本 / 4 本 / 5 本的分段。只有三档、固定不变，正是 [SegmentedChoice] 的用法，
+ * 点一下就换，不用再弹列表。
+ *
+ * 标题和说明照 Miuix 设置行（BasicComponent）的字号写，上下 16dp 也同那些行 —— 夹在一串设置行中间，
+ * 这一块的标题要和上下几行的标题看着是一排的。说明里点出书架上能捏合：手势没人告诉就没人知道。
+ */
+@Composable
+private fun BookshelfColumnsBlock(columns: Int, onSelect: (Int) -> Unit) {
+    SettingBlock(Modifier.padding(vertical = Dimens.gapXS)) {
+        Column {
+            Text(
+                "每行本数",
+                style = MiuixTheme.textStyles.headline1,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                "书架上双指捏合也能换；平板、横屏会多排几本",
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        SegmentedChoice(
+            options = ShelfColumns.OPTIONS.map { "$it 本" },
+            selectedIndex = ShelfColumns.OPTIONS.indexOf(columns),
+            onSelect = { onSelect(ShelfColumns.OPTIONS[it]) },
         )
     }
 }

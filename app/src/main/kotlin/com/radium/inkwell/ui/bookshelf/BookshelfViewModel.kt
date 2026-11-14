@@ -233,6 +233,19 @@ class BookshelfViewModel(
             appPrefs.bookshelfLayoutState.value ?: BookshelfLayout.GRID,
         )
 
+    /** 网格每行几本（见 [ShelfColumns]）。初值同上，别让每行 4 本的人先看一帧 3 本 */
+    val columns: StateFlow<Int> = appPrefs.bookshelfColumnsState
+        .map { it ?: ShelfColumns.DEFAULT }
+        .stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            appPrefs.bookshelfColumnsState.value ?: ShelfColumns.DEFAULT,
+        )
+
+    /** 书架上捏合换了一档 */
+    fun setColumns(columns: Int) {
+        viewModelScope.launch { appPrefs.setBookshelfColumns(columns) }
+    }
+
     /**
      * Room 送来的书架；null = 第一帧还没到。
      *

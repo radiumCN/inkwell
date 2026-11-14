@@ -107,6 +107,8 @@ import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.flip.FLIP_SLOP_DP
 import com.radium.inkwell.ui.theme.argbToHsv
 import com.radium.inkwell.ui.theme.hsvToArgb
+import com.radium.inkwell.ui.theme.hsvToColor
+import com.radium.inkwell.ui.components.AppColorSlider
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.semantics.heading
@@ -1691,10 +1693,22 @@ private fun MoreTab(
 }
 
 /**
- * 自定义纸张：调纸色（色相/浓度/明度）与字色深浅。
+ * 自定义纸张：调纸色（色相 / 浓度 / 明度）与字色。
+ *
+ * **一行一条、各带名字、轨道画成渐变**（[AppColorSlider]）。从前是「纸色」小标题下三条 28dp 的粗轨上下零间距：
+ * 拇指压到下一条上、看着是一整块，三条也分不清谁是色相谁是明度（名字只有读屏念得出来）；轨道一律填强调色，
+ * 看不出往哪拖会变成什么色（被指出过）。现在名字在行头，轨道上看到的就是拖到那儿得到的颜色：
+ * - 色相：最浓那档（[PAPER_SAT_MAX]）的一圈色相。纸太暗时按 [HUE_TRACK_MIN_VALUE] 的明度画，深色纸上也看得出色相
+ * - 浓度：从灰到这个色相最浓（上限 [PAPER_SAT_MAX]，纸不会太艳）
+ * - 明度：从黑到亮
+ * - 字色：这张纸上从最深到最浅的字
  *
  * **实时报对比度**，低于 7:1 就明说。不拦着用户配，但得让他知道代价 ——
  * 「墨绿纸配灰字」看着挺雅，读两章眼睛就疼，而用户根本不会把眼疼归因到自己调的色上。
+ *
+ * **编辑中以手里这份 HSV（[PaperHsv]）为准**，不每次从 ARGB 反解：纸色是 8 位 RGB，浓度很低时反解出的色相会跳；
+ * 浓度拖到 0（纯灰）、明度拖到 0（纯黑）时干脆反解不出色相 / 浓度，色相轨的拇指会一下跳回最左（红）。
+ * 别处改了纸（换了预设又切回来、同步下来一份新配色）、对不上手里这份时，才从 ARGB 重新反解。
  */
 @Composable
 private fun CustomPaperEditor(
@@ -1702,51 +1716,84 @@ private fun CustomPaperEditor(
     onChange: (ReaderTheme) -> Unit,
     onChangeFinished: () -> Unit,
 ) {
-    val bgHsv = remember(theme.background) { argbToHsv(theme.background) }
-    // 字色深浅：0 = 与纸同色（看不见），1 = 纯黑/纯白（最刺眼）。取它在纸色明度上的相对位置
-    val textLevel = remember(theme.textColor) { argbToHsv(theme.textColor)[2] }
+    val held = remember { HeldPaper() }
+    val parsed = remember(theme.background, theme.textColor) { PaperHsv.of(theme) }
+    val paper = held.value?.takeIf { it.background == theme.background && it.text == theme.textColor } ?: parsed
 
-    fun rebuild(h: Float = bgHsv[0], s: Float = bgHsv[1], v: Float = bgHsv[2], t: Float = textLevel) {
-        val bg = hsvToArgb(h, s, v)
-        // 字色沿用纸的色相，但压低浓度 —— 完全同色相的浓字会显脏，完全无彩的灰字又跟纸不搭
-        val text = hsvToArgb(h, (s * 0.45f).coerceAtMost(0.35f), t)
-        onChange(ReaderTheme.custom(bg, text))
+    fun update(next: PaperHsv) {
+        held.value = next
+        onChange(ReaderTheme.custom(next.background, next.text))
     }
 
+    val hueValue = paper.v.coerceAtLeast(HUE_TRACK_MIN_VALUE)
+    val textSat = paperTextSaturation(paper.s)
+    val hueTrack = remember(hueValue) {
+        List(HUE_TRACK_STOPS) { i -> hsvToColor(360f * i / (HUE_TRACK_STOPS - 1), PAPER_SAT_MAX, hueValue) }
+    }
+    val satTrack = remember(paper.h, paper.v) {
+        List(TRACK_STOPS) { i -> hsvToColor(paper.h, PAPER_SAT_MAX * i / (TRACK_STOPS - 1), paper.v) }
+    }
+    val valueTrack = remember(paper.h, paper.s) {
+        List(TRACK_STOPS) { i -> hsvToColor(paper.h, paper.s, i / (TRACK_STOPS - 1f)) }
+    }
+    val textTrack = remember(paper.h, textSat) {
+        List(TRACK_STOPS) { i -> hsvToColor(paper.h, textSat, i / (TRACK_STOPS - 1f)) }
+    }
+    val paperColor = Color(paper.background)
     val ratio = ReaderTheme.contrastRatio(theme.background, theme.textColor)
 
-    Spacer(Modifier.height(Dimens.gapM))
-    SectionLabel("纸色")
-    AppSlider(
-        value = bgHsv[0],
-        valueRange = 0f..360f,
-        onValueChange = { rebuild(h = it) },
-        onValueChangeFinished = onChangeFinished,
-        label = "纸色色相",
-    )
-    AppSlider(
-        value = bgHsv[1],
-        valueRange = 0f..0.25f,
-        onValueChange = { rebuild(s = it) },
-        onValueChangeFinished = onChangeFinished,
-        label = "纸色浓度",
-    )
-    AppSlider(
-        value = bgHsv[2],
-        valueRange = 0f..1f,
-        onValueChange = { rebuild(v = it) },
-        onValueChangeFinished = onChangeFinished,
-        label = "纸色明度",
-    )
-
-    SectionLabel("字色深浅")
-    AppSlider(
-        value = textLevel,
-        valueRange = 0f..1f,
-        onValueChange = { rebuild(t = it) },
-        onValueChangeFinished = onChangeFinished,
-        label = "字色深浅",
-    )
+    Column(
+        Modifier.padding(top = Dimens.gapL),
+        verticalArrangement = Arrangement.spacedBy(Dimens.gapM),
+    ) {
+        PaperSliderRow("色相") {
+            AppColorSlider(
+                value = paper.h,
+                valueRange = 0f..360f,
+                onValueChange = { update(paper.copy(h = it)) },
+                onValueChangeFinished = onChangeFinished,
+                trackColors = hueTrack,
+                thumbColor = hsvToColor(paper.h, PAPER_SAT_MAX, hueValue),
+                label = "纸色色相",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        PaperSliderRow("浓度") {
+            AppColorSlider(
+                value = paper.s,
+                valueRange = 0f..PAPER_SAT_MAX,
+                onValueChange = { update(paper.copy(s = it)) },
+                onValueChangeFinished = onChangeFinished,
+                trackColors = satTrack,
+                thumbColor = paperColor,
+                label = "纸色浓度",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        PaperSliderRow("明度") {
+            AppColorSlider(
+                value = paper.v,
+                onValueChange = { update(paper.copy(v = it)) },
+                onValueChangeFinished = onChangeFinished,
+                trackColors = valueTrack,
+                thumbColor = paperColor,
+                label = "纸色明度",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        // 纸、字两组之间比组内多空一档：一眼看出前三条管纸、这条管字
+        PaperSliderRow("字色", Modifier.padding(top = Dimens.gapXS)) {
+            AppColorSlider(
+                value = paper.t,
+                onValueChange = { update(paper.copy(t = it)) },
+                onValueChangeFinished = onChangeFinished,
+                trackColors = textTrack,
+                thumbColor = Color(paper.text),
+                label = "字色深浅",
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
 
     Text(
         text = "正文对比度 %.1f:1".format(ratio) + when {
@@ -1757,9 +1804,70 @@ private fun CustomPaperEditor(
         style = MiuixTheme.textStyles.footnote1,
         color = if (ratio >= 7.0) MiuixTheme.colorScheme.onSurfaceVariantSummary
         else MiuixTheme.colorScheme.error,
-        modifier = Modifier.padding(top = Dimens.gapXS),
+        modifier = Modifier.padding(top = Dimens.gapS, bottom = Dimens.gapXS),
     )
 }
+
+/**
+ * 调色区的一行：两个字的名字 + 一条调色滑块。名字都是两个汉字，宽度天然一样，几条滑轨左端对得齐，不用定宽。
+ * 名字只给看：读屏念滑块自己的 label（「纸色色相」比「色相」说得全），这里不再念一遍。
+ */
+@Composable
+private fun PaperSliderRow(
+    name: String,
+    modifier: Modifier = Modifier,
+    slider: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
+    ) {
+        Text(
+            name,
+            style = MiuixTheme.textStyles.body2,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
+        slider()
+    }
+}
+
+/**
+ * 自定义纸张手里那份 HSV：纸的色相 [h]（0~360）/ 浓度 [s] / 明度 [v]，加上字的明度 [t]（0 = 黑，1 = 白）。
+ * 字的色相跟纸走、浓度由纸的浓度推出来（[paperTextSaturation]），不单独调。
+ */
+private data class PaperHsv(val h: Float, val s: Float, val v: Float, val t: Float) {
+    val background: Long = hsvToArgb(h, s, v)
+    val text: Long = hsvToArgb(h, paperTextSaturation(s), t)
+
+    companion object {
+        fun of(theme: ReaderTheme): PaperHsv {
+            val bg = argbToHsv(theme.background)
+            return PaperHsv(bg[0], bg[1], bg[2], argbToHsv(theme.textColor)[2])
+        }
+    }
+}
+
+/** 最近一次调出来的那份 HSV。只在回调里写、组合时读（读到的那一拍 theme 已经是它调出来的了），不用是 State */
+private class HeldPaper {
+    var value: PaperHsv? = null
+}
+
+/** 字色沿用纸的色相，但压低浓度 —— 完全同色相的浓字会显脏，完全无彩的灰字又跟纸不搭 */
+private fun paperTextSaturation(paperSat: Float): Float = (paperSat * 0.45f).coerceAtMost(0.35f)
+
+/** 纸色浓度上限：再浓就不像纸了 */
+private const val PAPER_SAT_MAX = 0.25f
+
+/** 色相轨至少按这个明度画：纸调得很暗时，按纸的明度画出来是一条看不出色相的黑带 */
+private const val HUE_TRACK_MIN_VALUE = 0.6f
+
+/** 色相轨每 30° 一个色标，一圈 13 个（首尾都是红） */
+private const val HUE_TRACK_STOPS = 13
+
+/** 其余几条轨道的色标数。HSV 的浓度 / 明度在 RGB 里近乎线性，几个色标就够平滑 */
+private const val TRACK_STOPS = 6
 
 /**
  * 纸张主题选择。
@@ -1879,21 +1987,6 @@ private const val DISABLED_CONTENT_ALPHA = 0.38f
 
 /** 设置面板内容区占窗口高度的比例。加上 Tab 与拖拽把手约半屏，上半屏留给正文当实时预览 */
 private const val PANEL_HEIGHT_FRACTION = 0.42f
-
-/**
- * 分组卡里的小标题（自定义纸张的「纸色」「字色深浅」）。用次要文字色，与卡外的分组标题同一级 ——
- * 共享的 SectionHeader 自带卡外的那套缩进，放进卡里会对不齐。
- */
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MiuixTheme.textStyles.body2,
-        fontWeight = FontWeight.Medium,
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(top = Dimens.gapM, bottom = Dimens.gapS),
-    )
-}
 
 /** 自动翻页可选间隔（秒）。太快来不及读，太慢不如自己翻 */
 private val AUTO_FLIP_OPTIONS = listOf(5, 10, 15, 20, 30, 45, 60)

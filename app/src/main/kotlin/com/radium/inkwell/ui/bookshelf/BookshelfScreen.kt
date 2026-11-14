@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -231,6 +230,7 @@ fun BookshelfScreen(
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
     val rssEntryVisible by viewModel.rssEntryVisible.collectAsStateWithLifecycle()
     val layout by viewModel.layout.collectAsStateWithLifecycle()
+    val columns by viewModel.columns.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
@@ -251,6 +251,8 @@ fun BookshelfScreen(
         biometricAvailable = BiometricAuth.isAvailable(context)
     }
     val haptic = LocalHapticFeedback.current
+    // 捏合手势的 pointerInput 不以本数为 key（换一档不该把正在捏的这一手拆掉），每次起手读最新的
+    val currentColumns = rememberUpdatedState(columns)
 
     // 滚动状态提到这里，展开隐藏区时要能把它拨回顶部（见下面的 LaunchedEffect）
     val gridState = rememberLazyGridState()
@@ -742,10 +744,16 @@ fun BookshelfScreen(
                         modifier = Modifier.padding(top = topInset, bottom = bottomInset),
                     )
                     layout == BookshelfLayout.GRID -> LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = Dimens.bookshelfGridMin),
-                        // HyperOS 的回弹 + 甩到头轻震（见 pageScroll）；自带的那份回弹关掉，免得叠两层
+                        // 手机上每行 columns 本，宽屏按同一档的格宽多排（见 ShelfGridCells）
+                        columns = ShelfGridCells(columns),
+                        // HyperOS 的回弹 + 甩到头轻震（见 pageScroll）；自带的那份回弹关掉，免得叠两层。
+                        // 双指捏合换每行本数（见 shelfPinch），每换一档轻震一下，同字号滑轨每过一档
                         modifier = Modifier
                             .fillMaxSize()
+                            .shelfPinch(currentColumns) { next ->
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                viewModel.setColumns(next)
+                            }
                             .pageScroll(),
                         state = gridState,
                         // 顶上垫顶栏高度、底部垫导航栏高度：书封滚到两头的玻璃下面，
@@ -809,6 +817,7 @@ fun BookshelfScreen(
                                     book = book,
                                     selected = book.id in selected,
                                     selectionMode = selectionMode,
+                                    showLatestChapter = ShelfColumns.showsLatestChapter(columns),
                                     onClick = { bounds -> click(book, bounds) },
                                     onLongClick = { longPress(book) },
                                 )
@@ -1160,6 +1169,8 @@ private fun BookCard(
     book: BookEntity,
     selected: Boolean,
     selectionMode: Boolean,
+    /** 每行 5 本时格子太窄，最新章不印（见 [ShelfColumns.showsLatestChapter]） */
+    showLatestChapter: Boolean,
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1274,7 +1285,7 @@ private fun BookCard(
         )
         // 最新章节。数据一直存在 BookEntity 里，却从来没画出来过 ——
         // 于是"这本书更到哪了"只能靠点进去看
-        if (!book.latestChapterTitle.isNullOrBlank()) {
+        if (showLatestChapter && !book.latestChapterTitle.isNullOrBlank()) {
             Text(
                 book.latestChapterTitle,
                 // 正文性小字不低于 footnote1（13sp）；footnote2 只有 11sp

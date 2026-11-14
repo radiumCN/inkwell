@@ -140,8 +140,15 @@ object Dimens {
     /** 详情 / 预览页书封（3:4） */
     val coverDetailWidth = 96.dp
     val coverDetailHeight = 128.dp
-    /** 书架网格单元最小边 —— Adaptive 栅格用 */
+    /**
+     * 书架网格「每行 3 / 4 / 5 本」三档在宽屏上的最小格宽（见 ShelfGridCells）。
+     * 手机竖屏上就是选的本数，用不到它们；平板、横屏按它们自动多排。三个值各自卡在
+     * 「最宽的手机（内容宽 416dp）上排不出 n+1 本」的下沿上：再小一档，430dp 宽的手机每行就多出一本。
+     * 3 本这档的 96 就是加这项设置之前固定的 Adaptive(96dp)：默认档在哪块屏上都和从前一样
+     */
     val bookshelfGridMin = 96.dp
+    val bookshelfGridMin4 = 76.dp
+    val bookshelfGridMin5 = 60.dp
     /** 进书 splash 居中显示的书封。3:4，比列表缩略图大一档，但**远不到铺满**（铺满会被拉糊） */
     val readerSplashCoverWidth = 120.dp
     val readerSplashCoverHeight = 160.dp
