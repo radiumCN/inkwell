@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -237,10 +236,10 @@ private fun ChipPill(
 }
 
 /**
- * chip 条末尾的「添加」：和 chip 一样高的一颗圆，**虚线**描边、中间一个 ＋（阅读设置里的导入字体）。
+ * chip 条末尾的「添加」：和 chip 一样高的一颗圆，**空心**细线描边、中间一个 ＋（阅读设置里的导入字体）。
  *
  * 动作不和选项长成一个样：从前「导入字体」是条末尾一颗普通 chip，和「默认」「衬线」一模一样，看着像一款叫「导入字体」的字。
- * 虚线框是「这里还空着、可以往里加」的意思，一眼和实心的选项分开。可点区照样保底 48dp（同 [ChipPill] 的外框），
+ * 空心的圆框一眼和填了底色的选项分开。描边是实线：从前是虚线，被要求改成实线。可点区照样保底 48dp（同 [ChipPill] 的外框），
  * 按压反馈画在里面那颗圆上；只有图标，读屏名字由 [contentDescription] 给。
  */
 @Composable
@@ -274,11 +273,8 @@ fun AddChip(
                     drawOutline(
                         shape.createOutline(size, layoutDirection, this),
                         color = color,
-                        // 描边一半落在裁切外面：线宽给到粗档，看着是一道细虚线
-                        style = Stroke(
-                            width = stroke,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(stroke * 2f, stroke * 1.5f)),
-                        ),
+                        // 描边一半落在裁切外面：线宽给到粗档，看着是一道细实线
+                        style = Stroke(width = stroke),
                     )
                 }
                 .indication(interactionSource, LocalIndication.current),
