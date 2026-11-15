@@ -149,9 +149,13 @@ fun PageFlipContainer(
             heldPages = null
         }
     }
-    val shownCurrent = heldPages?.current ?: current
-    val shownPrev = heldPages?.prev ?: prev
-    val shownNext = heldPages?.next ?: next
+    // ViewModel 追上来了（当前页对上）就用它给的三页，别等上面那个 SideEffect：它清掉 heldPages 要到下一次重组，
+    // 而 held 的邻页是翻之前不知道的（前翻没有 next、后翻没有 prev）。这一帧正好起手下一刀（连着快翻），
+    // 底下露出来的就是一张白纸，字闪一下才出来。
+    val held = heldPages?.takeUnless { current?.spec != null && current.spec == it.current?.spec }
+    val shownCurrent = held?.current ?: current
+    val shownPrev = held?.prev ?: prev
+    val shownNext = held?.next ?: next
 
     // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
     fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
