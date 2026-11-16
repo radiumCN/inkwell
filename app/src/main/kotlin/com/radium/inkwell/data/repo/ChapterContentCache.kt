@@ -191,6 +191,14 @@ class ChapterContentCache(private val root: File) {
         }
     }
 
+    /** 与正文共享失效代数，清完缓存后旧图片请求也不能把目录重新建出来。 */
+    fun writeImageIfEpoch(bookId: String, imageUrl: String, bytes: ByteArray, epoch: Long): Boolean =
+        synchronized(epochLock) {
+            if (epoch(bookId) != epoch) return false
+            writeImage(bookId, imageUrl, bytes)
+            true
+        }
+
     /** 段落文本恰好长得像标记行时要转义，否则读回会被误解析 */
     private fun escapeIfAmbiguous(text: String): String {
         val ambiguous = text == DIVIDER ||

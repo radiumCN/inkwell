@@ -5,6 +5,13 @@ import android.net.Uri
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.FileFontRegistry
 import com.radium.inkwell.reader.measure.FontRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,12 +39,19 @@ class ReaderFontStore(context: Context) {
     /** 排版用的字体解析：预设 + 本目录里的文件。整个应用共用一个，FontFamily 缓存才有意义 */
     val registry: FontRegistry = FileFontRegistry(dir)
 
-    private val _fonts = MutableStateFlow(scan())
+    private val scanMutex = Mutex()
+    private val _fonts = MutableStateFlow<List<UserFont>>(emptyList())
     val fonts: StateFlow<List<UserFont>> = _fonts.asStateFlow()
 
-    /** 这个字体在本机能不能用。预设字体恒为 true */
-    fun isAvailable(fontId: String): Boolean =
-        !ReaderSettings.isFileFont(fontId) || _fonts.value.any { it.id == fontId }
+    init {
+        // 构造阅读 VM 时不扫描磁盘。扫描与导入/删除后的发布串行，初次扫描不会盖回旧列表。
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { refresh() }
+    }
+
+    /** 备份导入在 IO 上查询实际文件，不把异步列表的初始空值当成“字体不存在”。 */
+    fun isAvailable(fontId: String): Boolean = fontFileAvailable(dir, fontId)
+
+    private suspend fun refresh() = scanMutex.withLock { _fonts.value = scan() }
 
     /**
      * 从 SAF 导入一个字体文件。先写临时文件、校验能被系统解析，再 rename 成正式文件 ——
@@ -55,8 +69,7 @@ class ReaderFontStore(context: Context) {
             resolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out ->
                     // 字体再大也就二三十 MB；拦住误选的超大文件，免得把存储写满
-                    val copied = input.copyTo(out)
-                    if (copied > MAX_FONT_BYTES) error("字体文件太大（超过 ${MAX_FONT_BYTES / 1024 / 1024} MB）")
+                    copyFontBytes(input, out, MAX_FONT_BYTES)
                 }
             } ?: error("无法读取所选文件")
             if (!isParsableFont(tmp)) error("这不是能用的字体文件")
@@ -65,7 +78,7 @@ class ReaderFontStore(context: Context) {
             if (!tmp.renameTo(dest)) throw IOException("保存字体失败")
             temp = null
             val font = dest.toUserFont()
-            _fonts.value = scan()
+            refresh()
             Result.success(font)
         } catch (e: CancellationException) {
             throw e
@@ -81,7 +94,7 @@ class ReaderFontStore(context: Context) {
             // id 来自本目录扫描，但仍只删这个目录里的文件 —— 与 deleteOwnedFile 同一个顾虑
             deleteOwnedFile(file.path, dir)
         }
-        _fonts.value = scan()
+        refresh()
     }
 
     private fun scan(): List<UserFont> =
@@ -125,4 +138,28 @@ class ReaderFontStore(context: Context) {
         fun sanitize(name: String): String =
             name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().ifBlank { "字体" }.take(60)
     }
+}
+
+/** 最多写入 limit 字节，再读一个字节判断是否越界；不等复制完一个大文件才发现超限。 */
+internal suspend fun copyFontBytes(input: java.io.InputStream, output: java.io.OutputStream, limit: Long) {
+    require(limit >= 0)
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var copied = 0L
+    while (true) {
+        currentCoroutineContext().ensureActive()
+        val remaining = limit - copied
+        val read = input.read(buffer, 0, if (remaining >= buffer.size) buffer.size else (remaining + 1).toInt())
+        if (read < 0) return
+        if (read.toLong() > remaining) throw IOException("字体文件太大（超过 ${limit / 1024 / 1024} MB）")
+        output.write(buffer, 0, read)
+        copied += read
+    }
+}
+
+internal fun fontFileAvailable(dir: File, fontId: String): Boolean {
+    if (!ReaderSettings.isFileFont(fontId)) return true
+    val file = File(dir, fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX))
+    val extension = file.extension.lowercase()
+    if (extension != "ttf" && extension != "otf") return false
+    return runCatching { file.parentFile?.canonicalPath == dir.canonicalPath && file.isFile }.getOrDefault(false)
 }

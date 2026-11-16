@@ -420,16 +420,6 @@ class BookSourceRepository(
     }
 
     /**
-     * WebDAV / 全量备份：逐条取完整行。
-     * 禁止一次性 `SELECT *` —— 源多或单源 JSON 大时 CursorWindow 直接崩。
-     */
-    suspend fun loadAllEntitiesIncludingDeleted(): List<BookSourceEntity> =
-        dao.getAllIdsIncludingDeleted().mapNotNull { loadEntity(it) }
-
-    /**
-     * 单条读取；CursorWindow 仍可能因**单行**过大失败，吞掉以免整页列表陪葬。
-     */
-    /**
      * 重新导入时分组听谁的。
      *
      * 用户在书源管理里改过分组（库里的分组 ≠ 旧规则自带的分组），就保留用户的 ——

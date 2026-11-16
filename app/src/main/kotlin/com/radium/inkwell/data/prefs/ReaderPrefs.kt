@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -44,7 +45,7 @@ class ReaderPrefs(
     private val fontAvailable: (String) -> Boolean = { true },
 ) {
 
-    private object Keys {
+    internal object Keys {
         val FONT_SIZE = floatPreferencesKey("font_size_sp")
         val TITLE_SCALE = floatPreferencesKey("title_scale")
         val TITLE_TOP_SPACING = floatPreferencesKey("title_top_spacing")
@@ -114,7 +115,16 @@ class ReaderPrefs(
     // 每本书每次点开都要按默认边距白排一遍版、再在入场动画中间推翻重排。
     // 真正的预热在 `InkwellApp.onCreate` 的 `koin.get<ReaderPrefs>()`，别把那行删了。
     val settings: StateFlow<ReaderSettings> = combine(context.readerDataStore.data, darkActive) { p, dark ->
-        ReaderSettings(
+        readSettings(p, dark)
+    }.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        // 首个真实值到达前的占位：按系统日夜给深/浅底，绝不给浅色默认，杜绝进书闪一帧浅色
+        ReaderSettings(theme = if (isSystemDark()) ReaderTheme.NIGHT else ReaderTheme.PAPER),
+    )
+
+    private fun readSettings(p: Preferences, dark: Boolean): ReaderSettings {
+        return ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
             titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING] ?: 24f,
@@ -143,16 +153,11 @@ class ReaderPrefs(
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
         )
-    }.stateIn(
-        scope,
-        SharingStarted.Eagerly,
-        // 首个真实值到达前的占位：按系统日夜给深/浅底，绝不给浅色默认，杜绝进书闪一帧浅色
-        ReaderSettings(theme = if (isSystemDark()) ReaderTheme.NIGHT else ReaderTheme.PAPER),
-    )
+    }
 
     suspend fun update(settings: ReaderSettings) {
         context.readerDataStore.edit { p ->
-            p[Keys.UPDATED_AT] = System.currentTimeMillis()
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
             p[Keys.FONT_SIZE] = settings.fontSizeSp
             p[Keys.TITLE_SCALE] = settings.titleScale
             p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
@@ -214,31 +219,6 @@ class ReaderPrefs(
         )
     }
 
-    /** 备份用：读出日/夜两槽的原值（不是当前生效那套），两台设备日/夜配色都同步 */
-    suspend fun themeBackupValues(): Map<String, String> {
-        val p = context.readerDataStore.data.first()
-        return mapOf(
-            "theme_day" to (p[Keys.THEME_DAY] ?: p[Keys.THEME] ?: ReaderTheme.PAPER.id),
-            "theme_night" to (p[Keys.THEME_NIGHT] ?: ReaderTheme.NIGHT.id),
-            "custom_day_bg" to (p[Keys.CUSTOM_DAY_BG] ?: p[Keys.CUSTOM_BG])?.toString().orEmpty(),
-            "custom_day_text" to (p[Keys.CUSTOM_DAY_TEXT] ?: p[Keys.CUSTOM_TEXT])?.toString().orEmpty(),
-            "custom_night_bg" to p[Keys.CUSTOM_NIGHT_BG]?.toString().orEmpty(),
-            "custom_night_text" to p[Keys.CUSTOM_NIGHT_TEXT]?.toString().orEmpty(),
-        )
-    }
-
-    /** 从备份写回日/夜两槽。兼容老备份（只有单一 "theme" → 归到日间槽） */
-    suspend fun importThemeSlots(v: Map<String, String>) {
-        context.readerDataStore.edit { p ->
-            (v["theme_day"] ?: v["theme"])?.let { p[Keys.THEME_DAY] = it }
-            v["theme_night"]?.let { p[Keys.THEME_NIGHT] = it }
-            (v["custom_day_bg"] ?: v["theme_custom_bg"])?.toLongOrNull()?.let { p[Keys.CUSTOM_DAY_BG] = it }
-            (v["custom_day_text"] ?: v["theme_custom_text"])?.toLongOrNull()?.let { p[Keys.CUSTOM_DAY_TEXT] = it }
-            v["custom_night_bg"]?.toLongOrNull()?.let { p[Keys.CUSTOM_NIGHT_BG] = it }
-            v["custom_night_text"]?.toLongOrNull()?.let { p[Keys.CUSTOM_NIGHT_TEXT] = it }
-        }
-    }
-
     /** 排版方案。跟阅读设置同一个 DataStore、同一个时间戳，WebDAV 里也随阅读设置整块走 */
     val layoutSchemes: StateFlow<List<LayoutScheme>> = context.readerDataStore.data
         .map { LayoutSchemeCodec.decode(it[Keys.LAYOUT_SCHEMES]) }
@@ -252,69 +232,68 @@ class ReaderPrefs(
     private suspend fun editSchemes(change: (List<LayoutScheme>) -> List<LayoutScheme>) {
         context.readerDataStore.edit { p ->
             p[Keys.LAYOUT_SCHEMES] = LayoutSchemeCodec.encode(change(LayoutSchemeCodec.decode(p[Keys.LAYOUT_SCHEMES])))
-            p[Keys.UPDATED_AT] = System.currentTimeMillis()
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
         }
     }
-
-    /** 备份用：方案列表原样的 JSON（没存过就是空串） */
-    internal suspend fun layoutSchemesRaw(): String =
-        context.readerDataStore.data.first()[Keys.LAYOUT_SCHEMES].orEmpty()
-
-    /** 从备份写回方案列表。键缺失（老备份）→ 不动本地 */
-    internal suspend fun importLayoutSchemes(raw: String?) {
-        raw ?: return
-        context.readerDataStore.edit { it[Keys.LAYOUT_SCHEMES] = raw }
-    }
-
-    /** 远端设置里的字体本机没有 → 留本地的。见构造参数 fontAvailable */
-    internal fun usableFontId(remote: String?, local: String): String =
-        remote?.takeIf { fontAvailable(it) } ?: local
 
     /** 最后一次改动时间；WebDAV 整块 LWW 用 */
     suspend fun updatedAt(): Long = context.readerDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
 
-    /** 从远端导入设置后，把时间戳按远端的写回，避免两台设备来回覆盖 */
-    suspend fun stampUpdatedAt(at: Long) {
-        context.readerDataStore.edit { it[Keys.UPDATED_AT] = at }
+    /** 值与时间戳来自同一份磁盘快照，不依赖可能滞后的热流。 */
+    internal suspend fun backupSnapshot(): BackupSettings {
+        val p = context.readerDataStore.data.first()
+        val s = readSettings(p, false)
+        return BackupSettings(
+            updatedAt = p[Keys.UPDATED_AT] ?: 0L,
+            values = mapOf(
+                "theme_day" to (p[Keys.THEME_DAY] ?: p[Keys.THEME] ?: ReaderTheme.PAPER.id),
+                "theme_night" to (p[Keys.THEME_NIGHT] ?: ReaderTheme.NIGHT.id),
+                "custom_day_bg" to (p[Keys.CUSTOM_DAY_BG] ?: p[Keys.CUSTOM_BG])?.toString().orEmpty(),
+                "custom_day_text" to (p[Keys.CUSTOM_DAY_TEXT] ?: p[Keys.CUSTOM_TEXT])?.toString().orEmpty(),
+                "custom_night_bg" to p[Keys.CUSTOM_NIGHT_BG]?.toString().orEmpty(),
+                "custom_night_text" to p[Keys.CUSTOM_NIGHT_TEXT]?.toString().orEmpty(),
+                "font_size_sp" to s.fontSizeSp.toString(),
+                "title_scale" to s.titleScale.toString(),
+                "title_top_spacing" to s.titleTopSpacingDp.toString(),
+                "header_top_spacing" to s.headerTopSpacingDp.toString(),
+                "font_id" to s.fontId,
+                "line_spacing" to s.lineSpacingMult.toString(),
+                "para_spacing" to s.paragraphSpacingEm.toString(),
+                "margin_h" to s.marginHorizontalDp.toString(),
+                "margin_v" to s.marginVerticalDp.toString(),
+                "first_line_indent" to s.firstLineIndentEm.toString(),
+                "justify" to s.justify.toString(),
+                "letter_spacing" to s.letterSpacingEm.toString(),
+                "layout_schemes" to p[Keys.LAYOUT_SCHEMES].orEmpty(),
+                "flip" to s.flipAnimation.name,
+                "brightness" to (s.brightnessOverride ?: -1f).toString(),
+                "keep_screen_on" to s.keepScreenOn.toString(),
+                "show_battery" to s.showBattery.toString(),
+                "volume_key_flip" to s.volumeKeyFlip.toString(),
+                "flip_haptic" to s.flipHaptic.toString(),
+                "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
+                "pinch_font_size" to s.pinchFontSize.toString(),
+                "edge_brightness" to s.edgeBrightness.toString(),
+                "show_images" to s.showImages.toString(),
+                "tap_zones" to s.tapZones.encode(),
+                "auto_flip_seconds" to s.autoFlipSeconds.toString(),
+                "preload_chapters" to s.preloadChapters.toString(),
+            ),
+        )
+    }
+
+    internal suspend fun restoreBackup(backup: BackupSettings): Boolean {
+        var applied = false
+        context.readerDataStore.edit { p ->
+            applied = ReaderBackupImport.apply(p, backup, fontAvailable)
+        }
+        return applied
     }
 
 }
 
-/** WebDAV 备份用：设置 ↔ 字符串表。键名与 DataStore 保持一致，读到不认识的键忽略。 */
-suspend fun ReaderPrefs.exportForBackup(): BackupSettings {
-    val s = settings.first()
-    return BackupSettings(
-        updatedAt = updatedAt(),
-        values = themeBackupValues() + mapOf(
-            "font_size_sp" to s.fontSizeSp.toString(),
-            "title_scale" to s.titleScale.toString(),
-            "title_top_spacing" to s.titleTopSpacingDp.toString(),
-            "header_top_spacing" to s.headerTopSpacingDp.toString(),
-            "font_id" to s.fontId,
-            "line_spacing" to s.lineSpacingMult.toString(),
-            "para_spacing" to s.paragraphSpacingEm.toString(),
-            "margin_h" to s.marginHorizontalDp.toString(),
-            "margin_v" to s.marginVerticalDp.toString(),
-            "first_line_indent" to s.firstLineIndentEm.toString(),
-            "justify" to s.justify.toString(),
-            "letter_spacing" to s.letterSpacingEm.toString(),
-            "layout_schemes" to layoutSchemesRaw(),
-            "flip" to s.flipAnimation.name,
-            "brightness" to (s.brightnessOverride ?: -1f).toString(),
-            "keep_screen_on" to s.keepScreenOn.toString(),
-            "show_battery" to s.showBattery.toString(),
-            "volume_key_flip" to s.volumeKeyFlip.toString(),
-            "flip_haptic" to s.flipHaptic.toString(),
-            "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
-            "pinch_font_size" to s.pinchFontSize.toString(),
-            "edge_brightness" to s.edgeBrightness.toString(),
-            "show_images" to s.showImages.toString(),
-            "tap_zones" to s.tapZones.encode(),
-            "auto_flip_seconds" to s.autoFlipSeconds.toString(),
-            "preload_chapters" to s.preloadChapters.toString(),
-        ),
-    )
-}
+/** 备份内容与时间戳来自同一次 DataStore 快照，避免 StateFlow 尚未追上新时间戳。 */
+suspend fun ReaderPrefs.exportForBackup(): BackupSettings = backupSnapshot()
 
 /**
  * id → 主题。自定义主题不在 ReaderTheme.ALL 那张表上（它的颜色是用户存的），
@@ -330,46 +309,42 @@ private fun resolveTheme(
     else -> ReaderTheme.ALL.firstOrNull { it.id == id } ?: fallback
 }
 
-suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings) {
-    val v = backup.values
-    val base = settings.first()
-    update(
-        base.copy(
-            fontSizeSp = v["font_size_sp"]?.toFloatOrNull() ?: base.fontSizeSp,
-            titleScale = v["title_scale"]?.toFloatOrNull() ?: base.titleScale,
-            titleTopSpacingDp = v["title_top_spacing"]?.toFloatOrNull() ?: base.titleTopSpacingDp,
-            headerTopSpacingDp = v["header_top_spacing"]?.toFloatOrNull() ?: base.headerTopSpacingDp,
-            fontId = usableFontId(v["font_id"], base.fontId),
-            lineSpacingMult = v["line_spacing"]?.toFloatOrNull() ?: base.lineSpacingMult,
-            paragraphSpacingEm = v["para_spacing"]?.toFloatOrNull() ?: base.paragraphSpacingEm,
-            marginHorizontalDp = v["margin_h"]?.toFloatOrNull() ?: base.marginHorizontalDp,
-            marginVerticalDp = v["margin_v"]?.toFloatOrNull() ?: base.marginVerticalDp,
-            firstLineIndentEm = v["first_line_indent"]?.toFloatOrNull() ?: base.firstLineIndentEm,
-            justify = v["justify"]?.toBooleanStrictOrNull() ?: base.justify,
-            letterSpacingEm = v["letter_spacing"]?.toFloatOrNull() ?: base.letterSpacingEm,
-            // 主题不走 copy —— 它现在是日/夜双槽，由下面的 importThemeSlots 单独写回
-            flipAnimation = v["flip"]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
-                ?: base.flipAnimation,
-            // 键缺失 → 保留本地值；键存在（含 -1=跟随系统）→ 用远端值
-            brightnessOverride = if ("brightness" in v) v["brightness"]?.toFloatOrNull()?.takeIf { it >= 0f }
-            else base.brightnessOverride,
-            keepScreenOn = v["keep_screen_on"]?.toBooleanStrictOrNull() ?: base.keepScreenOn,
-            showBattery = v["show_battery"]?.toBooleanStrictOrNull() ?: base.showBattery,
-            volumeKeyFlip = v["volume_key_flip"]?.toBooleanStrictOrNull() ?: base.volumeKeyFlip,
-            flipHaptic = v["flip_haptic"]?.toBooleanStrictOrNull() ?: base.flipHaptic,
-            scrollClickToFlip = v["scroll_click_to_flip"]?.toBooleanStrictOrNull() ?: base.scrollClickToFlip,
-            pinchFontSize = v["pinch_font_size"]?.toBooleanStrictOrNull() ?: base.pinchFontSize,
-            edgeBrightness = v["edge_brightness"]?.toBooleanStrictOrNull() ?: base.edgeBrightness,
-            showImages = v["show_images"]?.toBooleanStrictOrNull() ?: base.showImages,
-            // 键缺失（旧版本的备份）或读不懂（新版本加了动作）→ 保留本地，别冲成默认
-            tapZones = TapZones.decodeOrNull(v["tap_zones"]) ?: base.tapZones,
-            autoFlipSeconds = v["auto_flip_seconds"]?.toIntOrNull() ?: base.autoFlipSeconds,
-            preloadChapters = v["preload_chapters"]?.toIntOrNull() ?: base.preloadChapters,
-        )
-    )
-    importThemeSlots(v)
-    importLayoutSchemes(v["layout_schemes"])
-    // update() 会把时间戳刷成"现在"，但这份设置其实是远端的 —— 保留远端的时间戳，
-    // 否则下次同步时本地看起来更新，会把这份设置又推回去，两台设备来回打架。
-    stampUpdatedAt(backup.updatedAt)
+suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings): Boolean = restoreBackup(backup)
+
+/** 只转换备份明确提供且可读的值，缺失键保留；调用方在同一次 edit 内执行裁决和提交。 */
+internal object ReaderBackupImport {
+    private val keys = ReaderPrefs.Keys
+
+    fun apply(
+        p: MutablePreferences, backup: BackupSettings, fontAvailable: (String) -> Boolean,
+    ): Boolean {
+        if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return false
+        val v = backup.values
+        listOf(keys.FONT_SIZE, keys.TITLE_SCALE, keys.TITLE_TOP_SPACING, keys.HEADER_TOP_SPACING,
+            keys.LINE_SPACING, keys.PARA_SPACING, keys.MARGIN_H, keys.MARGIN_V,
+            keys.FIRST_LINE_INDENT, keys.LETTER_SPACING, keys.BRIGHTNESS).forEach { key ->
+            v[key.name]?.toFloatOrNull()?.takeIf { it.isFinite() }?.let { p[key] = it }
+        }
+        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.VOLUME_KEY_FLIP,
+            keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
+            keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES).forEach { key ->
+            v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }
+        }
+        v["font_id"]?.takeIf(fontAvailable)?.let { p[keys.FONT_ID] = it }
+        v["flip"]?.takeIf { value -> FlipAnimation.entries.any { it.name == value } }
+            ?.let { p[keys.FLIP] = it }
+        v["tap_zones"]?.let(TapZones::decodeOrNull)?.let { p[keys.TAP_ZONES] = it.encode() }
+        listOf(keys.AUTO_FLIP_SECONDS, keys.PRELOAD_CHAPTERS).forEach { key ->
+            v[key.name]?.toIntOrNull()?.let { p[key] = it }
+        }
+        (v["theme_day"] ?: v["theme"])?.let { p[keys.THEME_DAY] = it }
+        v["theme_night"]?.let { p[keys.THEME_NIGHT] = it }
+        (v["custom_day_bg"] ?: v["theme_custom_bg"])?.toLongOrNull()?.let { p[keys.CUSTOM_DAY_BG] = it }
+        (v["custom_day_text"] ?: v["theme_custom_text"])?.toLongOrNull()?.let { p[keys.CUSTOM_DAY_TEXT] = it }
+        v["custom_night_bg"]?.toLongOrNull()?.let { p[keys.CUSTOM_NIGHT_BG] = it }
+        v["custom_night_text"]?.toLongOrNull()?.let { p[keys.CUSTOM_NIGHT_TEXT] = it }
+        v["layout_schemes"]?.let { p[keys.LAYOUT_SCHEMES] = it }
+        p[keys.UPDATED_AT] = backup.updatedAt
+        return true
+    }
 }

@@ -81,6 +81,11 @@ data class SearchHit(val results: List<SearchResult>) {
      * 打开详情 / 加入书架时优先用的源。[results] 按书源健康度排过之后即第一条；
      * 和 [result] 分开，是因为副标题要字数，打开却要快的活源。
      */
+    // 一个 SearchHit 的来源列表不可变；合并新增来源时会创建新实例，排序值自然重新计算。
+    // 比较器只读缓存的数字，不再每次比较都编译正则、扫描简介和创建 Calendar。
+    internal val wordCount: Long by lazy { results.maxOf { parseWordCount(it.wordCount) } }
+    internal val updateEpoch: Long by lazy { results.maxOf { parseUpdateEpoch(it.kind, it.intro) } }
+
     val preferred: SearchResult get() = results.first()
     val origins: Set<String> by lazy(LazyThreadSafetyMode.PUBLICATION) { results.mapTo(LinkedHashSet()) { it.sourceId } }
 }
@@ -331,7 +336,7 @@ class SearchViewModel(
         sortJob = viewModelScope.launch {
             val snapshot = hitsMutex.withLock { hits.values.toList() }
             val sorted = withContext(Dispatchers.Default) {
-                ordered(snapshot, keyword, sort)
+                orderSearchHits(snapshot, keyword, sort)
             }
             if (_state.value.sortId != sortId) return@launch
             _state.value = _state.value.copy(results = sorted)
@@ -627,7 +632,7 @@ class SearchViewModel(
     private suspend fun orderedNow(snapshot: List<SearchHit>, keyword: String): List<SearchHit> {
         while (true) {
             val sort = _state.value.sort
-            val sorted = withContext(Dispatchers.Default) { ordered(snapshot, keyword, sort) }
+            val sorted = withContext(Dispatchers.Default) { orderSearchHits(snapshot, keyword, sort) }
             if (_state.value.sort == sort) return sorted
         }
     }
@@ -646,63 +651,6 @@ class SearchViewModel(
      */
     private fun merge(items: List<SearchResult>) =
         mergeSearchResults(hits, items) { AutoSourceSwitcher.rankSearchResults(it, sourceMetaById) }
-
-    /**
-     * 对快照排序。Collator 非线程安全，每次现场建一份；
-     * 调用方先 [Collection.toList] 再丢进 Default，避免边 merge 边排。
-     * 各本书里的源在合并时已经排好（见 [merge]），这里只排书。
-     */
-    private fun ordered(
-        items: List<SearchHit>,
-        keyword: String,
-        sort: SearchSort,
-    ): List<SearchHit> {
-        val collator = Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY }
-        return when (sort) {
-            SearchSort.RELEVANCE -> items.sortedWith(
-                compareBy<SearchHit> { tier(it.result, keyword) }
-                    .thenByDescending { it.origins.size },
-            )
-            SearchSort.WORD_COUNT -> items.sortedWith(
-                compareByDescending<SearchHit> { wordCountOf(it) }
-                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-            SearchSort.TITLE_PINYIN -> items.sortedWith(
-                compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
-                    .thenByDescending { it.origins.size },
-            )
-            SearchSort.AUTHOR_PINYIN -> items.sortedWith(
-                compareBy(collator) { hit: SearchHit ->
-                    hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
-                }.thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-            SearchSort.UPDATE_TIME -> items.sortedWith(
-                compareByDescending<SearchHit> { updateEpochOf(it) }
-                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-        }
-    }
-
-    /**
-     * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
-     * 同档内按「有这本书的书源数」降序 —— 越多书源都收录，越可能就是要找的那本。
-     *
-     * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
-     * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
-     */
-    private fun tier(r: SearchResult, keyword: String): Int = when {
-        r.title == keyword || r.author == keyword -> 0
-        r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
-        else -> 2
-    }
-
-    /** 合并条目取各源最大字数；解不出的当 -1，降序时沉底 */
-    private fun wordCountOf(hit: SearchHit): Long =
-        hit.results.maxOf { parseWordCount(it.wordCount) }
-
-    /** 合并条目取各源能解出的最新日期；解不出当 Long.MIN_VALUE，降序沉底 */
-    private fun updateEpochOf(hit: SearchHit): Long =
-        hit.results.maxOf { parseUpdateEpoch(it.kind, it.intro) }
 
     /**
      * 单个书源搜一页：网络/规则错误按「这个源没结果」降级，但**取消必须往外抛**。
@@ -901,17 +849,62 @@ internal fun mergeSearchResults(
     }
 }
 
+/** 对快照排序。Collator 不跨线程共享，排序数值随不可变 SearchHit 缓存。 */
+internal fun orderSearchHits(
+    items: List<SearchHit>,
+    keyword: String,
+    sort: SearchSort,
+): List<SearchHit> {
+    val collator by lazy { Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY } }
+    return when (sort) {
+        SearchSort.RELEVANCE -> items.sortedWith(
+            compareBy<SearchHit> { tier(it.result, keyword) }
+                .thenByDescending { it.origins.size },
+        )
+        SearchSort.WORD_COUNT -> items.sortedWith(
+            compareByDescending<SearchHit> { it.wordCount }
+                .thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+        SearchSort.TITLE_PINYIN -> items.sortedWith(
+            compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
+                .thenByDescending { it.origins.size },
+        )
+        SearchSort.AUTHOR_PINYIN -> items.sortedWith(
+            compareBy(collator) { hit: SearchHit ->
+                hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
+            }.thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+        SearchSort.UPDATE_TIME -> items.sortedWith(
+            compareByDescending<SearchHit> { it.updateEpoch }
+                .thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+    }
+}
+
+/**
+ * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
+ * 同档内按「有这本书的书源数」降序 —— 越多书源都收录，越可能就是要找的那本。
+ *
+ * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
+ * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
+ */
+private fun tier(r: SearchResult, keyword: String): Int = when {
+    r.title == keyword || r.author == keyword -> 0
+    r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
+    else -> 2
+}
+
 /** 「12万字」「1.5万」「12345字」→ 字数；解不出返回 -1 */
 internal fun parseWordCount(raw: String?): Long {
     if (raw.isNullOrBlank()) return -1L
     val t = raw.trim().replace(",", "").replace("，", "").replace(" ", "")
-    Regex("""([\d.]+)\s*亿""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+    WORD_YI.find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
         return (it * 100_000_000L).toLong()
     }
-    Regex("""([\d.]+)\s*万""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+    WORD_WAN.find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
         return (it * 10_000L).toLong()
     }
-    Regex("""(\d+)""").find(t)?.groupValues?.getOrNull(1)?.toLongOrNull()?.let { return it }
+    WORD_PLAIN.find(t)?.groupValues?.getOrNull(1)?.toLongOrNull()?.let { return it }
     return -1L
 }
 
@@ -939,3 +932,8 @@ internal fun parseUpdateEpoch(vararg blobs: String?): Long {
 }
 
 private val DATE_YMD = Regex("""(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})""")
+
+// 所有搜索结果共用编译好的模式；只缓存模式，不缓存用户输入或解析结果。
+private val WORD_YI = Regex("""([\d.]+)\s*亿""")
+private val WORD_WAN = Regex("""([\d.]+)\s*万""")
+private val WORD_PLAIN = Regex("""(\d+)""")

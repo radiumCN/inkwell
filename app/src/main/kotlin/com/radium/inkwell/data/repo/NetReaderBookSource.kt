@@ -74,7 +74,7 @@ class NetReaderBookSource(
      * 调 loadChapter —— 不合并的话同一章被并发抓两到四遍：白耗流量不说，JS 源要在 WebView 渲染锁上
      * 排队、限速源要排令牌，用户正等着的那一章被这些重复请求挤到超时，随后误触发自动换源、清缓存。
      */
-    private val loads = SingleFlight<String, ChapterContent>(Dispatchers.IO)
+    private val loads = SingleFlight<Pair<String, Long>, ChapterContent>(Dispatchers.IO)
 
     /** 显式刷新必须绕过磁盘缓存和正在进行的普通加载；抓取失败不触碰原文。 */
     suspend fun fetchFreshChapter(index: Int): ChapterContent {
@@ -92,9 +92,11 @@ class NetReaderBookSource(
     }
 
     /** 新正文成功排版后才替换缓存，URL 在发起请求时固定，目录插章不会写错章。 */
-    suspend fun cacheFreshChapter(url: String, content: ChapterContent) {
-        check(!cacheWritesHeld) { "正在切换书源" }
-        store(url, content)
+    fun cacheEpoch(): Long = cache.epoch(bookId)
+
+    suspend fun cacheFreshChapter(url: String, content: ChapterContent, epoch: Long) {
+        check(!cacheWritesHeld) { "正在切换来源" }
+        check(store(url, content, epoch)) { "来源或缓存已变化，请重新获取本章" }
     }
 
     override suspend fun loadChapter(index: Int): ChapterContent {
@@ -103,10 +105,11 @@ class NetReaderBookSource(
         val url = chapter.url ?: error("章节缺少地址")
         // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节。
         // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
+        val epoch = cacheEpoch()
         val cached = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) }
         if (cached != null && (cached.withImages || !imagesWanted)) return cached.content
         return try {
-            loads.run(url) {
+            loads.run(url to epoch) {
                 // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
                 val remote = engine.getContent(
                     rule, url, toc.urls,
@@ -116,7 +119,7 @@ class NetReaderBookSource(
                     variables = bookVariables,
                 )
                 val content = ChapterContent(remote.elements)
-                store(url, content)
+                store(url, content, epoch)
                 content
             }
         } catch (e: CancellationException) {
@@ -131,6 +134,7 @@ class NetReaderBookSource(
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: return
         val url = chapter.url ?: return
+        val epoch = cacheEpoch()
         // 只问「有没有」，别 read：命中时整章读进来解析一遍再扔掉，每到章首章尾都要这样过几章（见 hasCurrent）
         if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url, needImages = imagesWanted) }) return
         // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
@@ -143,7 +147,7 @@ class NetReaderBookSource(
             chapterIndex = index,
             variables = bookVariables,
         )
-        store(url, ChapterContent(remote.elements))
+        store(url, ChapterContent(remote.elements), epoch)
     }
 
     /**
@@ -153,16 +157,23 @@ class NetReaderBookSource(
      * 旧序号上躺着的是另一章，打错了标记，目录里没缓存的章亮着、缓存了的反倒灭着。
      * 一条按 URL 的 UPDATE 搞定：先查后改的两步之间目录照样可能被换掉。
      */
-    private suspend fun store(url: String, content: ChapterContent) {
-        if (cacheWritesHeld) return
-        withContext(Dispatchers.IO) {
-            cache.write(bookId, url, content)
-            chapterDao.markCachedByUrl(bookId, url, true)
+    private suspend fun store(url: String, content: ChapterContent, epoch: Long): Boolean {
+        if (cacheWritesHeld) return false
+        return withContext(Dispatchers.IO) {
+            if (cacheWritesHeld || !cache.writeIfEpoch(bookId, url, content, epoch)) return@withContext false
+            // 文件写入后可能已经被清理；不要给旧请求打新目录的缓存标记。
+            if (cacheEpoch() == epoch) {
+                chapterDao.markCachedByUrl(bookId, url, true)
+                if (cacheEpoch() != epoch) {
+                    chapterDao.markCachedByUrl(bookId, url, cache.hasCurrent(bookId, url))
+                }
+            }
+            true
         }
     }
 
     /** 同一张图同时只取一次：本章排版、邻章预载、看大图可能一起要它 */
-    private val imageLoads = SingleFlight<String, ByteArray?>(Dispatchers.IO)
+    private val imageLoads = SingleFlight<Pair<String, Long>, ByteArray?>(Dispatchers.IO)
 
     /**
      * 往后预取时顺带把这一章的图取进缓存（开着「正文显示图片」时），翻到时不用再等。
@@ -182,11 +193,12 @@ class NetReaderBookSource(
      * 取到就落盘；换源进行中不落（理由同 [cacheWritesHeld]）。取不到返回 null，阅读页排一条「点按重试」。
      */
     override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
+        val epoch = cacheEpoch()
         cache.readImage(bookId, resourceId)?.let { return@withContext it }
-        imageLoads.run(resourceId) {
+        imageLoads.run(resourceId to epoch) {
             try {
                 engine.getImage(rule, resourceId).also { bytes ->
-                    if (!cacheWritesHeld) cache.writeImage(bookId, resourceId, bytes)
+                    if (!cacheWritesHeld) cache.writeImageIfEpoch(bookId, resourceId, bytes, epoch)
                 }
             } catch (e: CancellationException) {
                 throw e

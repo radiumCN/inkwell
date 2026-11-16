@@ -1,5 +1,7 @@
 # 性能剖析
 
+> 2026-11-16 代码复核：本文保留历史测量结果。A 项现已通过书架 `ReportDrawnWhen { shelfReady }` 实现；Baseline Profile 夹具也已能触达阅读器。0.6.0 新增 `ReaderBenchmark` 的翻页帧耗时入口，但尚无本轮真机结果。B/C 仍需测量后再决定是否优化。
+
 ## Development Plan
 
 **Task**: 对 Inkwell 做一次有测量支撑的性能剖析，产出「哪里慢、慢多少、为什么」的定级清单；只补测量设施，不在本轮做大改。

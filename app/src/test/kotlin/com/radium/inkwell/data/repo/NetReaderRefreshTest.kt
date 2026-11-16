@@ -8,12 +8,16 @@ import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import java.lang.reflect.Proxy
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -66,7 +70,7 @@ class NetReaderRefreshTest {
         assertEquals(old, cache.read("book", url))
         assertTrue(marked.isEmpty())
 
-        source.cacheFreshChapter(url, fresh)
+        source.cacheFreshChapter(url, fresh, source.cacheEpoch())
         assertEquals(fresh, source.loadChapter(0))
         assertEquals(listOf(url), marked)
     }
@@ -87,8 +91,88 @@ class NetReaderRefreshTest {
     fun `换源期间不能提交旧源的新正文`() = runBlocking {
         cache.write("book", url, old)
         source.cacheWritesHeld = true
-        assertFailsWith<IllegalStateException> { source.cacheFreshChapter(url, old) }
+        assertFailsWith<IllegalStateException> { source.cacheFreshChapter(url, old, source.cacheEpoch()) }
         assertEquals(old, cache.read("book", url))
         assertTrue(marked.isEmpty())
     }
+    @Test
+    fun `正文请求期间清空缓存不会重新创建旧缓存或标记`() = runBlocking {
+        val release = holdResponse(MockResponse().setBody("<div id='content'><p>延迟正文</p></div>"))
+        val pending = async(Dispatchers.IO) { source.loadChapter(0) }
+        assertTrue(server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS) != null)
+        cache.clear("book")
+        release.countDown()
+        pending.await()
+        assertEquals(null, cache.read("book", url))
+        assertTrue(marked.isEmpty())
+    }
+
+    @Test
+    fun `图片请求期间清空缓存不重新写回图片`() = runBlocking {
+        val image = server.url("/image").toString()
+        val release = holdResponse(MockResponse().setBody(okio.Buffer().write(byteArrayOf(1, 2, 3))))
+        val pending = async(Dispatchers.IO) { source.loadImage(image) }
+        assertTrue(server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS) != null)
+        cache.clearAll()
+        release.countDown()
+        assertEquals(listOf<Byte>(1, 2, 3), pending.await()?.toList())
+        assertEquals(null, cache.readImage("book", image))
+    }
+
+    @Test
+    fun `手动刷新开始后清理缓存则拒绝提交且不打标记`() = runBlocking {
+        val epoch = source.cacheEpoch()
+        cache.clearAll()
+        assertFailsWith<IllegalStateException> { source.cacheFreshChapter(url, old, epoch) }
+        assertEquals(null, cache.read("book", url))
+        assertTrue(marked.isEmpty())
+    }
+
+
+    @Test
+    fun `预取期间清理缓存不写回旧正文`() = runBlocking {
+        val release = holdResponse(MockResponse().setBody("<div id='content'><p>预取正文</p></div>"))
+        val pending = async(Dispatchers.IO) { source.prefetchChapter(0) }
+        assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null)
+        cache.clearAll()
+        release.countDown()
+        pending.await()
+        assertEquals(null, cache.read("book", url))
+        assertTrue(marked.isEmpty())
+    }
+
+    @Test
+    fun `清理后的新请求不合并进旧请求且旧响应不能覆盖新缓存`() = runBlocking {
+        val release = CountDownLatch(1)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val first = requests.incrementAndGet() == 1
+                if (first) check(release.await(5, TimeUnit.SECONDS))
+                return MockResponse().setBody("<div id='content'><p>${if (first) "旧响应" else "新响应"}</p></div>")
+            }
+        }
+        val first = async(Dispatchers.IO) { source.loadChapter(0) }
+        assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null)
+        cache.clear("book")
+        val second = source.loadChapter(0)
+        release.countDown()
+        first.await()
+        assertEquals(listOf(ContentElement.Paragraph("新响应")), second.elements)
+        assertEquals(second, cache.read("book", url))
+        assertEquals(2, requests.get())
+        assertEquals(listOf(url), marked)
+    }
+
+    private fun holdResponse(response: MockResponse): CountDownLatch {
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                check(release.await(5, TimeUnit.SECONDS)) { "测试没有放行响应" }
+                return response
+            }
+        }
+        return release
+    }
+
 }

@@ -34,7 +34,7 @@ import com.radium.inkwell.data.db.entity.ReadingStatEntity
         RssArticleEntity::class,
     ],
     version = 22,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class InkwellDb : RoomDatabase() {
     abstract fun bookDao(): BookDao
@@ -343,5 +343,29 @@ abstract class InkwellDb : RoomDatabase() {
                 connection.execSQL("ALTER TABLE book_source ADD COLUMN checkedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
+        /** 运行时注册与升级回归共用这条链，避免测试了迁移却忘了注册到应用。 */
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+        )
     }
 }

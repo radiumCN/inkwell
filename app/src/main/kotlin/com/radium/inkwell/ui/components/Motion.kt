@@ -4,7 +4,6 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
@@ -20,7 +19,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -55,13 +54,6 @@ object Motion {
      * 与 [AppMotionScheme.Instant] 行为一致。
      */
     fun <T> instantSpec(): FiniteAnimationSpec<T> = tween(0)
-
-    /** 系统关动画时的页面转场（瞬间淡变，避免残留位移）。 */
-    fun instantPageTransform(): ContentTransform =
-        ContentTransform(
-            fadeIn(instantSpec()),
-            fadeOut(instantSpec()),
-        )
 
     /**
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
@@ -167,7 +159,7 @@ fun rememberAnimatorDurationScale(): Float {
     fun read(): Float =
         Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
 
-    var scale by remember { mutableStateOf(read()) }
+    var scale by remember { mutableFloatStateOf(read()) }
     DisposableEffect(resolver) {
         val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {

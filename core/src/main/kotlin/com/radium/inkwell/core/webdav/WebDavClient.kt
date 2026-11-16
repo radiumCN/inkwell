@@ -59,6 +59,37 @@ class WebDavClient(
         }
     }
 
+    /** 文件与版本必须来自同一次 GET，不能拿另一次 HEAD 的版本给这份正文作担保。 */
+    data class Snapshot(val bytes: ByteArray, val etag: String?)
+
+    suspend fun getSnapshot(path: String): Snapshot? {
+        execute(request(path).get().build()).use { response ->
+            return when {
+                response.code == 404 || response.code == 409 -> null
+                response.isSuccessful -> withContext(Dispatchers.IO) {
+                    Snapshot(response.body.bytes(), response.strongEtag())
+                }
+                else -> throw WebDavException(response.code, "GET 失败: ${response.code}")
+            }
+        }
+    }
+
+    /**
+     * 创建用 If-None-Match:*，更新用 GET 返回的强 ETag；412 交给上层重读并合并。
+     * 返回值只认这次 PUT 自己的响应头。随后 HEAD 可能看到别的设备的上传，不能记作已同步。
+     */
+    suspend fun putConditional(path: String, bytes: ByteArray, etag: String?): String? {
+        val builder = request(path).put(bytes.toRequestBody("application/gzip".toMediaType()))
+        if (etag == null) builder.header("If-None-Match", "*") else builder.header("If-Match", etag)
+        execute(builder.build()).use { response ->
+            if (!response.isSuccessful) throw WebDavException(response.code, "PUT 失败: ${response.code}")
+            return response.strongEtag()
+        }
+    }
+
+    private fun Response.strongEtag(): String? = header("ETag")
+        ?.trim()?.takeIf { it.startsWith('"') && it.endsWith('"') && it.length >= 2 }
+
     /**
      * 取文件；不存在返回 null。
      *

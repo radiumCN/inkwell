@@ -414,7 +414,7 @@ fun ReplaceRuleScreen(
         AppAlertDialog(
             onDismissRequest = { confirmBatchDelete = false },
             title = "删除规则",
-            text = "删除选中的 $count 条规则？已缓存的章节不会重新净化，需要清除正文缓存后重读。",
+            text = "删除选中的 $count 条规则？网络书已缓存章节中的通用净化结果会保留，可在阅读菜单重新获取本章。",
             confirmText = "删除",
             onConfirm = {
                 confirmBatchDelete = false
@@ -585,6 +585,9 @@ private fun Editor(
             label = "作用范围",
             modifier = field,
             placeholder = "留空 = 所有来源；否则填来源名或域名，逗号分隔",
+            supportingText = if (draft.bookId.isEmpty())
+                "网络书已缓存的章节需在阅读菜单重新获取本章，才会应用通用规则的改动。"
+                else "本书专属规则会在阅读时应用，也对已缓存章节生效。",
             singleLine = true,
         )
 

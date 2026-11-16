@@ -31,29 +31,7 @@ import org.koin.dsl.module
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), InkwellDb::class.java, "inkwell.db")
-            .addMigrations(
-                InkwellDb.MIGRATION_1_2,
-                InkwellDb.MIGRATION_2_3,
-                InkwellDb.MIGRATION_3_4,
-                InkwellDb.MIGRATION_4_5,
-                InkwellDb.MIGRATION_5_6,
-                InkwellDb.MIGRATION_6_7,
-                InkwellDb.MIGRATION_7_8,
-                InkwellDb.MIGRATION_8_9,
-                InkwellDb.MIGRATION_9_10,
-                InkwellDb.MIGRATION_10_11,
-                InkwellDb.MIGRATION_11_12,
-                InkwellDb.MIGRATION_12_13,
-                InkwellDb.MIGRATION_13_14,
-                InkwellDb.MIGRATION_14_15,
-                InkwellDb.MIGRATION_15_16,
-                InkwellDb.MIGRATION_16_17,
-                InkwellDb.MIGRATION_17_18,
-                InkwellDb.MIGRATION_18_19,
-                InkwellDb.MIGRATION_19_20,
-                InkwellDb.MIGRATION_20_21,
-                InkwellDb.MIGRATION_21_22,
-            )
+            .addMigrations(*InkwellDb.ALL_MIGRATIONS)
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
             .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)

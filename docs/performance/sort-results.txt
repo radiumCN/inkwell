@@ -1,0 +1,8 @@
+n=500 sources=3 sort=words mode=current median_ms=26.551 parser_calls=23064
+n=500 sources=3 sort=words mode=precomputed median_ms=6.347 parser_calls=1500
+n=500 sources=3 sort=date mode=current median_ms=18.784 parser_calls=23004
+n=500 sources=3 sort=date mode=precomputed median_ms=1.176 parser_calls=1500
+n=2000 sources=3 sort=words mode=current median_ms=115.207 parser_calls=116220
+n=2000 sources=3 sort=words mode=precomputed median_ms=12.143 parser_calls=6000
+n=2000 sources=3 sort=date mode=current median_ms=84.300 parser_calls=116136
+n=2000 sources=3 sort=date mode=precomputed median_ms=4.085 parser_calls=6000

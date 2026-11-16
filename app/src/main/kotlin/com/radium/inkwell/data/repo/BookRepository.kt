@@ -45,10 +45,6 @@ class BookRepository(
      */
     fun chapterTableChanges(): Flow<Unit> = db.invalidationTracker.createFlow("chapter").map { }
 
-    /** 书架上已有书的 (书名, 作者) 键集合，用来判断某本网络书是否已在书架 */
-    val shelfKeys: Flow<Set<Pair<String, String>>> =
-        books.map { list -> list.mapTo(HashSet()) { bookKey(it.title, it.author) } }
-
     suspend fun getBook(id: String): BookEntity? = bookDao.getById(id)
 
     /** 单本书的实时流。详情页追更后封面/章数/简介会变，订阅它 UI 才跟得上。 */
@@ -89,10 +85,7 @@ class BookRepository(
      */
     private suspend fun shelfLocalBookByKey(title: String, author: String?, includeRemoved: Boolean = false): BookEntity? {
         val key = bookKey(title, author)
-        val matches = (if (includeRemoved) bookDao.getAll() else bookDao.getAllVisible()).filter {
-            !it.deleted && (it.inShelf || (includeRemoved && it.removedFromShelf)) &&
-                it.type != BookType.NET && bookKey(it.title, it.author) == key
-        }
+        val matches = bookDao.findLocalBooks(key.first, key.second, includeRemoved, BOOK_KEY_WHITESPACE)
         return matches.firstOrNull { it.inShelf && it.hasLocalFile() }
             ?: matches.firstOrNull { it.inShelf }
             ?: matches.firstOrNull { it.hasLocalFile() } ?: matches.firstOrNull()
@@ -488,3 +481,8 @@ sealed interface LocalImportResult {
     data class Added(override val bookId: String) : LocalImportResult
     data class AlreadyOnShelf(override val bookId: String) : LocalImportResult
 }
+
+/** SQLite 默认 trim 只认普通空格；这里与 bookKey 的 Kotlin Char.isWhitespace 保持完全相同。 */
+internal const val BOOK_KEY_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f\u0020" +
+    "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a" +
+    "\u2028\u2029\u202f\u205f\u3000"

@@ -76,6 +76,11 @@ data class BackupRssSource(
     val updatedAt: Long = 0,
     /** 软删除墓碑，语义见 [BackupBook.deleted] */
     val deleted: Boolean = false,
+    /** null 表示旧备份没有提供；空字符串才是用户主动清空分组。 */
+    val groupName: String? = null,
+    val sortOrder: Int? = null,
+    val icon: String? = null,
+    val converterVersion: Int? = null,
 )
 
 @Serializable
@@ -170,7 +175,9 @@ object BackupCodec {
 
     fun decode(bytes: ByteArray): BackupPayload {
         val raw = GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
-        return json.decodeFromString(BackupPayload.serializer(), String(raw, Charsets.UTF_8))
+        return json.decodeFromString(BackupPayload.serializer(), String(raw, Charsets.UTF_8)).also {
+            require(it.version in 1..2) { "远端备份版本不受支持，请升级应用后再同步" }
+        }
     }
 }
 
@@ -259,7 +266,16 @@ object BackupMerger {
             when {
                 l == null -> r!!
                 r == null -> l
-                else -> if (r.updatedAt > l.updatedAt) r else l
+                else -> {
+                    val (newer, older) = if (r.updatedAt > l.updatedAt) r to l else l to r
+                    // 旧客户端也可能产生较新的启停记录，但它不认识的字段不能随之清空。
+                    newer.copy(
+                        groupName = newer.groupName ?: older.groupName,
+                        sortOrder = newer.sortOrder ?: older.sortOrder,
+                        icon = newer.icon ?: older.icon,
+                        converterVersion = newer.converterVersion ?: older.converterVersion,
+                    )
+                }
             }
         }
         val changedRss = mergedRss.filter { it != localRss[it.id] }

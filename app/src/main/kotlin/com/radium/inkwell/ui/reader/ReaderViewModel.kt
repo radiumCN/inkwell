@@ -905,6 +905,7 @@ class ReaderViewModel(
         val chapterIndex = state.chapterIndex
         val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
         val generation = tocGeneration
+        val cacheEpoch = src.cacheEpoch()
         stopAutoFlip()
         _state.update { it.copy(refreshingChapter = true, chapterRefreshFailed = false) }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -924,7 +925,7 @@ class ReaderViewModel(
                     val result = ensurePaginated(chapterIndex, notifyAfterChar = offset, replacement = raw)
                         ?: error("新正文暂时无法排版，请重试")
                     try {
-                        src.cacheFreshChapter(url, raw)
+                        src.cacheFreshChapter(url, raw, cacheEpoch)
                     } catch (e: Exception) {
                         if (source === src && tocGeneration == generation) {
                             if (previous != null) paginated[chapterIndex] = previous else paginated.remove(chapterIndex)
