@@ -6,6 +6,7 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Transaction
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.TocRow
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -20,6 +21,10 @@ interface ChapterDao {
      */
     @Query("SELECT * FROM chapter WHERE bookId = :bookId ORDER BY `index`")
     fun observeByBook(bookId: String): Flow<List<ChapterEntity>>
+
+    /** 目录的轻量投影（见 [TocRow]）：阅读页每次 chapter 表有写入后读它，而不是整行 */
+    @Query("SELECT `index`, title, url, variable, isCached FROM chapter WHERE bookId = :bookId ORDER BY `index`")
+    suspend fun getTocRows(bookId: String): List<TocRow>
 
     @Query("SELECT * FROM chapter WHERE bookId = :bookId AND `index` = :index")
     suspend fun get(bookId: String, index: Int): ChapterEntity?
@@ -45,6 +50,9 @@ interface ChapterDao {
     /** 按章节 URL 标记：正文缓存本身就是按 URL 存的，同 URL 的行共用同一份缓存 */
     @Query("UPDATE chapter SET isCached = :cached WHERE bookId = :bookId AND url = :url")
     suspend fun markCachedByUrl(bookId: String, url: String, cached: Boolean)
+
+    @Query("UPDATE chapter SET isCached = 0 WHERE bookId = :bookId")
+    suspend fun markAllUncached(bookId: String)
 
     @Query("DELETE FROM chapter WHERE bookId = :bookId")
     suspend fun deleteByBook(bookId: String)

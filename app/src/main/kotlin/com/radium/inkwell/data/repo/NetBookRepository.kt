@@ -163,6 +163,7 @@ class NetBookRepository(
                     newChapterCount = existing?.newChapterCount ?: 0,
                     deleted = flags.deleted,
                     inShelf = flags.inShelf,
+                    removedFromShelf = !flags.inShelf && (existing?.removedFromShelf == true),
                 )
             )
             replaceToc(bookId, entities)
@@ -213,7 +214,7 @@ class NetBookRepository(
             // 按旧目录对齐的进度写到新源的书行上，正文必然抓不出来 → 触发自动换源 → 又换一个源，来回乒乓。
             // 行没了（试读被丢弃）也一样：写下去就是一套没有书行的孤儿目录。
             // 身份变了就整趟作废，当成「没有新章节」—— 新源的目录由换源那条路径自己负责。
-            if (fresh == null || fresh.deleted ||
+            if (fresh == null || fresh.deleted || fresh.removedFromShelf ||
                 fresh.sourceId != book.sourceId || fresh.bookUrl != book.bookUrl || fresh.tocUrl != book.tocUrl
             ) {
                 return@withWriteTransaction

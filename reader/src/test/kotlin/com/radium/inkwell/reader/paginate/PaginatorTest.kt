@@ -110,14 +110,17 @@ class PaginatorTest {
 
     @Test
     fun `image never splits - pushed to next page`() {
-        // 9 行文本占 360px，剩 40px；图片占位高 225px 放不下 → 推第二页
+        // 9 行文本占 360px，剩 40px；图按原图 600x450 缩到正文宽 300x225，放不下 → 推第二页
         val content = ChapterContent(
             listOf(
                 ContentElement.Paragraph(cjk(135)), // 9 行
                 ContentElement.Image("img:1"),
             )
         )
-        val result = paginator.paginate(0, "", content, spec())
+        val result = paginator.paginate(
+            0, "", content, spec().copy(showImages = true),
+            images = { ImageInfo.Sized(600, 450) },
+        )
         assertEquals(2, result.chapter.pages.size)
         assertTrue(result.chapter.pages[1].items.single() is PageItem.ImageBox)
     }

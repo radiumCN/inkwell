@@ -42,3 +42,33 @@ data class RssArticleEntity(
     /** 读过的时刻；0 = 没读过 */
     val readAt: Long = 0,
 )
+
+/**
+ * 时间线上的一行：[RssArticleEntity] 去掉 [RssArticleEntity.description]。
+ *
+ * description 存的是全文（feed 的 content:encoded 优先，见 core 的 RssXmlParser），一篇几 KB 到几十 KB，
+ * 时间线的行却只显示标题、来源、时间和配图。从前列表查的是 `SELECT *`：表按整张失效，「全部」刷新 N 个源
+ * 就把所有源、所有缓存着的文章（撤下的还要留够清理天数）连同全文整读 N 遍 —— 几十个源攒上几千行，
+ * 每一遍就是几十 MB 的字符串。全文只在点开那一篇时按主键取（RssArticleDao.getDescription）。
+ */
+data class RssArticleRow(
+    val feed: String,
+    val articleKey: String,
+    val sourceId: String,
+    val title: String,
+    val link: String,
+    val image: String?,
+    val pubDate: String?,
+    val pubTime: Long,
+    val firstSeenAt: Long,
+    val lastSeenAt: Long,
+    val position: Int,
+    val readAt: Long = 0,
+)
+
+/** 合并新取到的一页时只要旧行的这几样（沿用第一次取到的时刻与读过的记号），见 RssFeedRepository.mergeFetched */
+data class RssArticleSeen(
+    val articleKey: String,
+    val firstSeenAt: Long,
+    val readAt: Long,
+)

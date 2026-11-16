@@ -7,6 +7,7 @@ import org.mozilla.javascript.NativeArray
 import org.mozilla.javascript.NativeJSON
 import org.mozilla.javascript.NativeObject
 import org.mozilla.javascript.Scriptable
+import org.mozilla.javascript.ScriptableObject
 
 /** JS 规则执行器抽象；不注入时含 js: 规则的求值会明确报不支持 */
 interface ScriptRuntime {
@@ -18,8 +19,38 @@ interface ScriptRuntime {
      */
     fun eval(script: String, bindings: Map<String, Any?>, jsLib: String? = null): String?
 
+    /**
+     * 同 [eval]，给列表规则（bookList / chapterList）用：脚本交回的是 Jsoup 替身的元素（`doc.select('tr#nr')`、
+     * `java.getElements(…)`）时交回元素本身，同 Legado 的 getElements 直接拿脚本返回的 Elements 当列表。
+     *
+     * 从前一律转成字符串：一组 `<tr>` 序列化成 HTML 再放进 body 里解析，表格的行、格被 HTML 解析器整个拆掉，
+     * 列表变成一堆散落的链接和字，`td:nth-of-type(1) a@text` 这种列规则一个也取不到（桔纸书屋的搜索就这么空的）
+     */
+    fun evalForList(script: String, bindings: Map<String, Any?>, jsLib: String? = null): ScriptValue =
+        ScriptValue.Text(eval(script, bindings, jsLib))
+
     /** 脚本里 `java.t2s` / `java.s2t` 用的繁简转换；平台没给就原样返回 */
     val chineseConverter: ChineseConverter get() = ChineseConverter.NONE
+
+    /**
+     * 脚本里 `java.androidId()` 给的设备号。app 给的是本机随机生成、只给来源脚本用的一串（不是系统的 ANDROID_ID，
+     * 换机、清数据就换一个）；第一次有脚本要时才去取。平台没给是空串
+     */
+    val androidId: String get() = ""
+}
+
+/**
+ * 交给脚本的一段 JSON（绑定的值）：脚本里拿到的既是字符串、又带着 JSON 的字段 —— 阅读交给脚本的是解析好的对象
+ * （Java 的 Map / List），来源照它写 `result.book_id`、`result.toArray()`；也有来源照字符串写 `JSON.parse(result)`、
+ * `result.match(…)`。两种都得认，见 RhinoScriptRuntime.jsonValue
+ */
+class ScriptJson(val text: String)
+
+/** [ScriptRuntime.evalForList] 的结果：元素，或同 [ScriptRuntime.eval] 的文本 */
+sealed interface ScriptValue {
+    data class Text(val text: String?) : ScriptValue
+
+    class Nodes(val elements: List<org.jsoup.nodes.Element>) : ScriptValue
 }
 
 /**
@@ -49,7 +80,10 @@ interface ChineseConverter {
 class RhinoScriptRuntime(
     private val maxInstructions: Long = 20_000_000L,
     override val chineseConverter: ChineseConverter = ChineseConverter.NONE,
+    private val deviceId: () -> String = { "" },
 ) : ScriptRuntime {
+
+    override val androidId: String get() = deviceId()
 
     private val factory = object : ContextFactory() {
         override fun makeContext(): Context {
@@ -81,13 +115,23 @@ class RhinoScriptRuntime(
 
     /**
      * 同一段 JS 规则会被每个列表项、每章正文反复 eval。opt=-1 不能出字节码，
-     * 但 compileString 仍能把源码变成 AST，免掉每次的解析。64 条 LRU 够覆盖
-     * 一个书源里常见的 search/detail/toc/content 脚本，又不会把超长动态脚本攒满。
+     * 但 compileString 仍能把源码变成 AST，免掉每次的解析。
+     *
+     * 按条数**和总字数**封顶（[CompiledScripts]）。从前只留 64 条：一个书源够用，可一次搜索要轮几百个书源，
+     * 每个源的地址脚本、列表脚本、字段脚本加起来远不止 64 条，一轮下来全被挤掉，下一轮搜索每段都重编一遍；
+     * 而光按条数放宽，几段内嵌 CryptoJS 的长脚本又会把内存撑大。
      */
-    private val compiledScripts = object : LinkedHashMap<String, org.mozilla.javascript.Script>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, org.mozilla.javascript.Script>?): Boolean =
-            size > 64
-    }
+    private val compiledScripts = CompiledScripts(maxEntries = 512, maxChars = 1_000_000)
+
+    /**
+     * 源的公共脚本库（jsLib）编译好的样子，**全局一份**、各线程共用（编译结果只读，同 [compiledScripts]）。
+     *
+     * 库的作用域是每线程的（[libScopesByThread]），从前作用域没命中就把整份库 evaluateString 一遍 ——
+     * 解析 + 编译占了大头。搜索时协程在 IO 线程之间换着跑（拼地址在一根上，网络回来解析列表常换到另一根），
+     * 每根线程只留 [LIB_SCOPES_PER_THREAD] 份作用域，几十个带库的源轮一遍几乎回回落空：
+     * 一个带 146KB 聚合库的源，一次搜索要把库从头解析两遍。现在落空也只是在新作用域上跑一遍库的顶层代码。
+     */
+    private val compiledLibs = CompiledScripts(maxEntries = 64, maxChars = 1_500_000)
 
     /**
      * 每线程一份 initSafeStandardObjects 原型。eval 只 newObject 挂绑定，
@@ -125,7 +169,9 @@ class RhinoScriptRuntime(
                 it.parentScope = null
                 // 库自己的顶层代码就用 JavaImporter / Packages 的，加载前先装上（替身无状态，按库缓存不串源）
                 if (JdkCompat.wanted(lib, null)) installJdkCompat(cx, it)
-                cx.evaluateString(it, lib, "jsLib.js", 1, null)
+                val compiled = compiledLibs.get(lib)
+                    ?: compiledLibs.put(lib, cx.compileString(lib, "jsLib.js", 1, null))
+                compiled.exec(cx, it)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 取消不是「库坏了」：不记，下次照常加载
@@ -137,7 +183,13 @@ class RhinoScriptRuntime(
         return scope
     }
 
-    override fun eval(script: String, bindings: Map<String, Any?>, jsLib: String?): String? {
+    override fun eval(script: String, bindings: Map<String, Any?>, jsLib: String?): String? =
+        (run(script, bindings, jsLib, keepNodes = false) as ScriptValue.Text).text
+
+    override fun evalForList(script: String, bindings: Map<String, Any?>, jsLib: String?): ScriptValue =
+        run(script, bindings, jsLib, keepNodes = true)
+
+    private fun run(script: String, bindings: Map<String, Any?>, jsLib: String?, keepNodes: Boolean): ScriptValue {
         // 嵌套求值（脚本里 java.getString("@js:…") 又回到这里）进的是同一个 Context：只在最外层清零
         // 指令计数。每进一层都清零的话，`while(true){ java.getString("@js:1") }` 永远撞不到上限
         val outermost = Context.getCurrentContext() == null
@@ -156,12 +208,15 @@ class RhinoScriptRuntime(
                 it.parentScope = null
             }
             bindings.forEach { (name, value) ->
-                holder.put(name, holder, Context.javaToJS(value, holder))
+                holder.put(name, holder, if (value is ScriptJson) jsonValue(cx, holder, value.text) else Context.javaToJS(value, holder))
             }
-            // 阅读来源直接拿 JDK 做加解密（JavaImporter / Packages.javax.crypto…）：装上替身，见 JdkCompat。
-            // 装在这一次的 holder 上，不进每线程共用的原型 —— 顶层 importPackage 导进来的名字不能串到别的来源
-            if (JdkCompat.wanted(script, jsLib)) installJdkCompat(cx, holder)
             val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it) }
+            // 阅读来源直接拿 JDK 做加解密（JavaImporter / Packages.javax.crypto…）：装上替身，见 JdkCompat。
+            // 装在这一次的 holder 上，不进每线程共用的原型 —— 顶层 importPackage 导进来的名字不能串到别的来源。
+            // 只看脚本自己：库用到替身的，库作用域加载时已经装过（[libScope]），脚本往上找先找到它。
+            // 从前连库一起看，库里有一个 Packages 就每次都重装一遍、每次都把整份库（光遇聚合 146KB）扫一遍 ——
+            // 一次调用从 7 微秒涨到近 90 微秒，一千八百章的目录每章两条脚本，光这一项就是几百毫秒（手机上翻几倍）
+            if (JdkCompat.wanted(script, null) && lib?.has(JDK_KEY, lib) != true) installJdkCompat(cx, holder)
             val scope: Scriptable = if (lib == null) holder else cx.newObject(proto).also {
                 it.prototype = lib
                 it.parentScope = null
@@ -173,20 +228,21 @@ class RhinoScriptRuntime(
             try {
                 // 锁里只查表，编译放在锁外：一段几十 KB 的脚本（内嵌 CryptoJS 的源不少）编译期间，
                 // 从前别的书源的 JS 求值 —— 连缓存命中的 —— 全排在这把锁上。重了也只是多编一次
-                val compiled = synchronized(compiledScripts) { compiledScripts[script] }
-                    ?: cx.compileString(script, "rule.js", 1, null).let { fresh ->
-                        synchronized(compiledScripts) { compiledScripts.getOrPut(script) { fresh } }
-                    }
+                val compiled = compiledScripts.get(script)
+                    ?: compiledScripts.put(script, cx.compileString(script, "rule.js", 1, null))
                 val result = compiled.exec(cx, scope)
-                return when {
-                    result == null || result === Context.getUndefinedValue() -> null
-                    // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，
-                    // 后续 JSONPath 全落空（JSON API 书源 `<js>JSON.parse(result).list</js>` 就死在这）。
-                    // 用 NativeJSON.stringify 序列化成合法 JSON，求值器再据 `[`/`{` 前缀接上 JSONPath。
-                    result is NativeArray || result is NativeObject ->
-                        stringifyJson(cx, scope, result) ?: Context.toString(result)
-                    else -> Context.toString(result)
-                }
+                if (keepNodes) elementsOf(result)?.let { return ScriptValue.Nodes(it) }
+                return ScriptValue.Text(
+                    when {
+                        result == null || result === Context.getUndefinedValue() -> null
+                        // JS 返回原生数组/对象时，Context.toString 会压成 "[object Object]" 或逗号串，
+                        // 后续 JSONPath 全落空（JSON API 书源 `<js>JSON.parse(result).list</js>` 就死在这）。
+                        // 用 NativeJSON.stringify 序列化成合法 JSON，求值器再据 `[`/`{` 前缀接上 JSONPath。
+                        result is NativeArray || result is NativeObject ->
+                            stringifyJson(cx, scope, result) ?: Context.toString(result)
+                        else -> Context.toString(result)
+                    },
+                )
             } finally {
                 if (lib != null) lib.prototype = outerHolder
             }
@@ -195,15 +251,91 @@ class RhinoScriptRuntime(
         }
     }
 
+    /**
+     * [ScriptJson] → 一个 String 对象，JSON 对象的字段挂在它上面：`result.book_id` 是字段，`JSON.parse(result)`、
+     * `result.match(…)`、`result == '[]'` 照旧是字符串的样子。JSON 数组另挂 `toArray()` / `size()` / `get(i)`（阅读那边是 Java 的 List）。
+     * 和字符串自己的成员同名的字段不挂（`length`、`replace`…），免得把字符串方法盖掉。解不开的原样给字符串
+     */
+    private fun jsonValue(cx: Context, scope: Scriptable, text: String): Any {
+        val parsed = runCatching {
+            val json = ScriptableObject.getProperty(scope, "JSON") as Scriptable
+            ScriptableObject.callMethod(cx, json, "parse", arrayOf<Any>(text))
+        }.getOrNull()
+        if (parsed !is NativeObject && parsed !is NativeArray) return text
+        val str = cx.newObject(scope, "String", arrayOf<Any>(text))
+        if (parsed is NativeArray) {
+            str.put("toArray", str, ScriptFunction { parsed })
+            str.put("size", str, ScriptFunction { parsed.length.toInt() })
+            str.put("get", str, ScriptFunction { args -> parsed.get((args.firstOrNull() as? Number)?.toInt() ?: 0, parsed) })
+        } else if (parsed is Scriptable) {
+            for (id in parsed.ids) {
+                val name = id as? String ?: continue
+                if (ScriptableObject.hasProperty(str, name)) continue
+                str.put(name, str, parsed.get(name, parsed))
+            }
+        }
+        return str
+    }
+
+    /** 挂在 [jsonValue] 上的小函数 */
+    private class ScriptFunction(private val body: (Array<out Any?>) -> Any?) : org.mozilla.javascript.BaseFunction() {
+        override fun call(cx: Context?, scope: Scriptable?, thisObj: Scriptable?, args: Array<out Any?>): Any? = body(args)
+    }
+
+    /**
+     * 脚本交回的 Jsoup 替身里的元素：一组元素（`doc.select(…)`）、单个元素、全是元素的 JS 数组（`els.toArray().filter(…)`）。
+     * 混着文字节点的、别的值返回 null，照旧按文本走
+     */
+    private fun elementsOf(result: Any?): List<org.jsoup.nodes.Element>? {
+        // NativeArray 当 java.util.List 读时自己已经解开了包装，别的地方拿到的还是包装
+        fun unwrap(v: Any?): Any? = if (v is org.mozilla.javascript.Wrapper) v.unwrap() else v
+        return when (val v = unwrap(result)) {
+            is JsElements -> v.elementList()
+            is JsElement -> v.element?.let(::listOf)
+            else -> (result as? NativeArray)?.takeIf { it.isNotEmpty() }?.map { item ->
+                (unwrap(item) as? JsElement)?.element ?: return null
+            }
+        }
+    }
+
     @Volatile
     private var compiledPrelude: org.mozilla.javascript.Script? = null
 
     /** 在 [target] 上装 JDK 替身（[JdkCompat.PRELUDE]）；替身脚本只编译一次 */
     private fun installJdkCompat(cx: Context, target: Scriptable) {
-        target.put("__inkwellJdk", target, Context.javaToJS(JdkCompat(), target))
+        target.put(JDK_KEY, target, Context.javaToJS(JdkCompat(), target))
         val prelude = compiledPrelude
             ?: cx.compileString(JdkCompat.PRELUDE, "jdk-compat.js", 1, null).also { compiledPrelude = it }
         prelude.exec(cx, target)
+    }
+
+    /**
+     * 编译好的脚本，按原文认，最久没用的先淘汰；条数和原文总字数各有上限（编译结果的体积大致跟着原文走）。
+     * 只在查表、入表时持锁，编译在锁外（见 [run]）。比任何一个上限都大的单段脚本照样交回、只是不留。
+     */
+    internal class CompiledScripts(private val maxEntries: Int, private val maxChars: Long) {
+        private val map = LinkedHashMap<String, org.mozilla.javascript.Script>(64, 0.75f, true)
+        private var chars = 0L
+
+        @Synchronized
+        fun get(source: String): org.mozilla.javascript.Script? = map[source]
+
+        /** 记下 [fresh]；别的线程抢先编好了同一段就交回那一份 */
+        @Synchronized
+        fun put(source: String, fresh: org.mozilla.javascript.Script): org.mozilla.javascript.Script {
+            map[source]?.let { return it }
+            if (source.length > maxChars) return fresh
+            map[source] = fresh
+            chars += source.length
+            val eldest = map.entries.iterator()
+            while ((map.size > maxEntries || chars > maxChars) && eldest.hasNext()) {
+                val e = eldest.next()
+                if (e.key === source) break // 走到刚放进去的这条了（它在最末），前面的已经清完
+                chars -= e.key.length
+                eldest.remove()
+            }
+            return fresh
+        }
     }
 
     /** 用 Rhino 内置的 JSON.stringify 序列化原生数组/对象；失败返回 null 交调用方兜底。 */
@@ -214,6 +346,9 @@ class RhinoScriptRuntime(
 
     private companion object {
         val KEY_COUNT = Any()
+
+        /** 替身装在哪个作用域上，那里就有这个名字（PRELUDE 从它取 JdkCompat） */
+        const val JDK_KEY = "__inkwellJdk"
 
         /** 每线程留几份库的作用域：同时在用的通常就是正在抓的那一两个源 */
         const val LIB_SCOPES_PER_THREAD = 8

@@ -58,7 +58,8 @@ data class BookPreviewUiState(
 )
 
 /**
- * 换源候选的进程内暂存。与 RssArticleContent 同一套办法，理由也一样。
+ * 换源候选的进程内暂存（大 payload 不进路由参数，CLAUDE.md「导航」一节）。
+ * 订阅文章的全文从前也这么存，后来改成从订阅缓存表里取（见 RssArticleArgs）；这里没有现成的表可取，仍是暂存。
  *
  * 一本热门书能在几十甚至上百个书源里搜到，整份 `List<SearchResult>` 里最占地方的是每条各自的
  * `intro`（一整段简介）。这份数据从前是塞在导航参数里的，而路由参数会随返回栈进

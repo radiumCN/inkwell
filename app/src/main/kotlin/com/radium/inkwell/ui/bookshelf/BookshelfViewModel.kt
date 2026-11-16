@@ -233,6 +233,19 @@ class BookshelfViewModel(
             appPrefs.bookshelfLayoutState.value ?: BookshelfLayout.GRID,
         )
 
+    /** 网格每行几本（见 [ShelfColumns]）。初值同上，别让每行 4 本的人先看一帧 3 本 */
+    val columns: StateFlow<Int> = appPrefs.bookshelfColumnsState
+        .map { it ?: ShelfColumns.DEFAULT }
+        .stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            appPrefs.bookshelfColumnsState.value ?: ShelfColumns.DEFAULT,
+        )
+
+    /** 书架上捏合换了一档 */
+    fun setColumns(columns: Int) {
+        viewModelScope.launch { appPrefs.setBookshelfColumns(columns) }
+    }
+
     /**
      * Room 送来的书架；null = 第一帧还没到。
      *
@@ -581,6 +594,21 @@ class BookshelfViewModel(
     }
 
     // ---- 单本操作（长按菜单） ----
+
+    fun removeBooks(ids: List<String>, clearFiles: Boolean) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                bookRepo.removeFromShelf(ids, clearFiles)
+                clearSelection()
+                messages.emit("已移出书架${if (ids.size > 1) " ${ids.size} 本" else ""}，阅读记录已保留")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit("移出书架或清理文件失败：${e.message ?: "请重试"}")
+            }
+        }
+    }
 
     fun deleteBook(id: String) {
         viewModelScope.launch { bookRepo.deleteBook(id) }

@@ -223,6 +223,38 @@ class SourceHttpClient(
     }
 
     /**
+     * 取二进制（正文里的插图）。和 [fetch] 同一个客户端：Cookie、私网防护、超时、取消即掐断都是同一套 ——
+     * 图的地址同样出自书源规则，不可信。不重试、不限速：图是正文已经抓回来以后才取的，取不到由阅读页显示「点按重试」。
+     * 上限 [maxBytes]：插图再大也就几 MB，规则写错指到大文件直链时别把进程打 OOM。
+     */
+    @Throws(IOException::class)
+    suspend fun fetchBytes(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        maxBytes: Long = MAX_IMAGE_BYTES,
+    ): ByteArray {
+        val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
+        val request = buildRequest(httpUrl, "GET", null, headers, null)
+        val startNs = System.nanoTime()
+        val response = try {
+            execute(client.newCall(request))
+        } catch (e: IOException) {
+            logger.log(true, "GET $url（图片）请求失败（${elapsedMs(startNs)}ms）: ${e.describe()}", e)
+            throw e
+        }
+        response.use { resp ->
+            if (!resp.isSuccessful) {
+                logger.log(true, "GET $url（图片）→ HTTP ${resp.code}", null)
+                throw HttpStatusException(resp.code, url)
+            }
+            return withContext(Dispatchers.IO) { readBounded(resp, url, maxBytes) }
+        }
+    }
+
+    /** 服务端回了错误码（不是超时、断网）：取图时据此决定要不要带 Referer 再试一次 */
+    class HttpStatusException(val code: Int, url: String) : IOException("HTTP $code: $url")
+
+    /**
      * 发请求，**取消立刻掐掉 Call**。
      *
      * 从前是 `withContext(IO) { call.execute() }` 配 `Job.invokeOnCompletion { call.cancel() }`。
@@ -272,15 +304,15 @@ class SourceHttpClient(
      * 放一个 gzip 炸弹（透明解压后体积不受 Content-Length 约束），`bytes()` 整读会把进程
      * 直接打 OOM —— 后面还要 `String(bytes)` 与 Jsoup 各复制一份。正文页再长也远够不着这个数。
      */
-    private fun readBounded(resp: Response, url: String): ByteArray {
+    private fun readBounded(resp: Response, url: String, maxBytes: Long = MAX_BODY_BYTES): ByteArray {
         val declared = resp.body.contentLength()
-        if (declared > MAX_BODY_BYTES) throw IOException("响应过大（${declared shr 20} MB）: $url")
+        if (declared > maxBytes) throw IOException("响应过大（${declared shr 20} MB）: $url")
         val source = resp.body.source()
         val sink = Buffer()
         while (true) {
             val read = source.read(sink, READ_CHUNK)
             if (read == -1L) break
-            if (sink.size > MAX_BODY_BYTES) throw IOException("响应过大（超过 ${MAX_BODY_BYTES shr 20} MB）: $url")
+            if (sink.size > maxBytes) throw IOException("响应过大（超过 ${maxBytes shr 20} MB）: $url")
         }
         return sink.readByteArray()
     }
@@ -396,6 +428,9 @@ class SourceHttpClient(
          * 目录页最长的一类（几千章一页列完）约 1～2 MB；16 MB 是十倍余量，见 [readBounded]。
          */
         private const val MAX_BODY_BYTES = 16L * 1024 * 1024
+
+        /** 一张插图的上限。小说里的插画大的也就两三 MB（扫描版轻小说的彩页），留出余量 */
+        const val MAX_IMAGE_BYTES = 12L * 1024 * 1024
         private const val READ_CHUNK = 64L * 1024
 
         /**

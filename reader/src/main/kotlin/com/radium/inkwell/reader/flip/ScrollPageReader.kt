@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -30,8 +31,10 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.drawPageItems
+import com.radium.inkwell.reader.render.imageAt
 
 /**
  * 滚动阅读：与仿真/覆盖同一套分页，用 [pageOffset] 在 prev/cur/next 三页上滑。
@@ -53,9 +56,17 @@ fun ScrollPageReader(
     onFlip: (FlipDirection) -> Unit,
     onCenterTap: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 点在一张图上（含没取到的那条提示）。返回 true = 这一下处理掉了（点提示条重试），不再翻页 / 开菜单；
+     * 点在真图上照旧翻页 / 开菜单，由调用方返回 false。
+     */
+    onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
+    /** 长按一张图（看大图）。null = 不接长按 */
+    onImageLongPress: ((PageItem.ImageBox) -> Unit)? = null,
 ) {
     val offset = remember { mutableFloatStateOf(0f) }
     var size by remember { mutableStateOf(IntSize.Zero) }
+    // 翻页已经要了、新页还没进组合（非 null 期间滚动只攒进 leftover，见滚动回调开头）；新页进来那一帧据它接上 leftover
     var pendingFlip by remember { mutableStateOf<FlipDirection?>(null) }
     // pendingFlip 是否已经交给 onFlip。滚动回调/点按当场就翻了，pendingFlip 只是让换页那帧接上 leftover；
     // 只有换页当帧算出的「连翻」才要下面的 LaunchedEffect 代发。不分开的话，重组先看到 pendingFlip、
@@ -73,9 +84,13 @@ fun ScrollPageReader(
     val tapZonesLatest = rememberUpdatedState(tapZones)
     // 与 onFlip 一样取最新：点按的 pointerInput 不以回调为 key，直接捕获会一直拿着第一次组合时的那个
     val onCenterTapLatest = rememberUpdatedState(onCenterTap)
+    val onImageTapLatest = rememberUpdatedState(onImageTap)
+    val onImageLongPressLatest = rememberUpdatedState(onImageLongPress)
 
     val leftover = remember { mutableFloatStateOf(0f) }
     var leftoverChain by remember { mutableIntStateOf(0) }
+    // 翻页交出去以后、新页进组合之前，滚动回调攒了几下位移（见回调开头）。只在回调和换页那帧里读写，不必是状态
+    val heldDeltas = remember { intArrayOf(0) }
     val pageKey = current?.spec?.chapterIndex to current?.spec?.pageIndexInChapter
     var seenPageKey by remember { mutableStateOf(pageKey) }
     if (pageKey != seenPageKey) {
@@ -85,6 +100,7 @@ fun ScrollPageReader(
         val incoming = pendingFlip
         leftover.floatValue = 0f
         pendingFlip = null
+        heldDeltas[0] = 0
         if (incoming == null || extra == 0f) {
             offset.floatValue = 0f
         } else if (leftoverChain >= 8) {
@@ -119,13 +135,31 @@ fun ScrollPageReader(
             return@LaunchedEffect
         }
         leftoverChain++
-        pendingFlip = null
+        // pendingFlip 留着、只记「已交出」：新页进来那一帧照它接上 leftover，等新页期间的滚动也照它攒着（见滚动回调开头）。
+        // 从前这里先清掉它，连翻落地时当成「不是滚过来的」，攒下的那截位移整个丢掉、新页从页顶开始
+        pendingDispatched = true
+        heldDeltas[0] = 0
         onFlipLatest.value(chained)
     }
 
     val scrollableState = rememberScrollableState { composeDelta ->
         // scrollable 默认 reverseDirection=false：正 delta = 手指下滑，与 pageOffset 同号。
         val drag = composeDelta
+        // 翻页已经交出去、新页还没进组合：手里的 current / prev / next 和 offset 还是翻之前那一窗的，
+        // 这时再按它们算，越过的还是同一条页界 —— 又翻一页，ViewModel 已经在新页上了，于是直接跳到下下页，
+        // 中间那页整个没露面（被反馈过「滚动时会自己往上跳几行」）。惯性快滑必中：新页要等下一帧重组才进来，
+        // 而下一帧惯性的那一下位移是在重组**之前**送到的（同一帧里先推动画、后重组）。
+        // 所以先把位移攒进 leftover、画面停在页界上（这时看到的正是新页的页顶），新页进来那一帧一并接上。
+        if (pendingFlip != null) {
+            if (++heldDeltas[0] <= FLIP_PENDING_MAX_DELTAS) {
+                leftover.floatValue += drag
+                // 照单全收：返回少了，惯性当成撞墙就停了
+                return@rememberScrollableState composeDelta
+            }
+            // 攒了这么多下新页还没来：这一下 ViewModel 没接（本章还在往后排，翻不过去），别把画面一直冻在页界上
+            pendingFlip = null
+            leftover.floatValue = 0f
+        }
         val spec = layoutLatest.value
         val curH = scrollPageHeight(currentLatest.value).let {
             if (it <= 0f) 1f else it
@@ -149,6 +183,7 @@ fun ScrollPageReader(
             leftover.floatValue = step.leftover
             pendingFlip = step.flip
             pendingDispatched = true
+            heldDeltas[0] = 0
             onFlipLatest.value(step.flip)
             return@rememberScrollableState composeDelta
         }
@@ -163,10 +198,26 @@ fun ScrollPageReader(
             FlipDirection.FORWARD -> hasNextLatest.value
         }
         if (can) {
+            // 点一下翻的是整页：新页从页顶开始，不接上一次滚动剩下的零头
+            leftover.floatValue = 0f
             pendingFlip = dir
             pendingDispatched = true
+            heldDeltas[0] = 0
             onFlipLatest.value(dir)
         }
+    }
+
+    /** 触点落在三页里哪张图上：三页叠着、跟着 [offset] 挪，和 [ScrollPageLayer] 画的位置算法一致 */
+    fun imageUnder(x: Float, y: Float): PageItem.ImageBox? {
+        val spec = layoutLatest.value
+        val top = scrollContentTop(spec)
+        if (y < top || y > scrollContentBottom(spec)) return null
+        val cur = currentLatest.value ?: return null
+        val curHeight = scrollPageHeight(cur).let { if (it <= 0f) 1f else it }
+        val shift = offset.floatValue
+        return cur.imageAt(x, y, spec, originY = top + shift)
+            ?: nextLatest.value?.imageAt(x, y, spec, originY = top + curHeight + shift)
+            ?: prevLatest.value?.let { p -> p.imageAt(x, y, spec, originY = top - scrollPageHeight(p) + shift) }
     }
 
     val contentTop = scrollContentTop(layout)
@@ -195,9 +246,16 @@ fun ScrollPageReader(
                 // 默认 false：正 delta = 手指下滑，和 pageOffset 同号。verticalScroll 会把这个翻掉，这里别学。
                 reverseDirection = false,
             )
-            .pointerInput(gesturesEnabled, size, clickToFlip) {
+            .pointerInput(gesturesEnabled, size, clickToFlip, onImageLongPress != null) {
                 if (!gesturesEnabled) return@pointerInput
-                detectTapGestures { pos ->
+                // 不接长按时别挂：挂上了，按久一点再松手就不算点按，开不了菜单
+                val longPress: ((Offset) -> Unit)? = if (onImageLongPressLatest.value == null) null else ({ pos: Offset ->
+                    val hit = imageUnder(pos.x, pos.y)
+                    if (hit != null && !hit.failed) onImageLongPressLatest.value?.invoke(hit)
+                })
+                detectTapGestures(onLongPress = longPress) { pos ->
+                    val image = onImageTapLatest.value?.let { imageUnder(pos.x, pos.y) }
+                    if (image != null && onImageTapLatest.value?.invoke(image) == true) return@detectTapGestures
                     tapAction(
                         pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
                         tapZonesLatest.value, enabled = clickToFlipLatest.value,
@@ -247,7 +305,14 @@ private fun ScrollPageLayer(
             .fillMaxSize()
             .graphicsLayer { translationY = baseY + offset.floatValue }
             .drawBehind {
-                drawPageItems(page, layout, theme, originY = 0f, collapseMissingImages = true)
+                drawPageItems(page, layout, theme, originY = 0f)
             },
     )
 }
+
+/**
+ * 翻页交出去以后，最多替它攒几下滚动位移。正常一两下新页就进来了（ViewModel 同步换页，下一帧重组）；
+ * 攒到这么多还没来，是 ViewModel 没接这一下（本章还在往后排），放手、照常滚。
+ * 按下数而不按毫秒：主线程卡一下（GC）时一帧能拖几百毫秒，按时间算会在新页进来前放手，又翻出第二页。
+ */
+private const val FLIP_PENDING_MAX_DELTAS = 8

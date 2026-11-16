@@ -46,4 +46,18 @@ class LenientRuleSetTest {
         assertNull(rule.ruleToc)
         assertTrue(!rule.toJson().contains("ruleSearch"))
     }
+
+    /** 合集里 header 直接写成 JSON 对象（思兔小说）：照收，按 JSON 原文存；登录脚本、登录界面一并留着给脚本读 */
+    @Test
+    fun `header 写成对象也能导入，登录脚本和界面留着`() {
+        val rule = BookSourceRule.fromJson(
+            """{"bookSourceUrl":"https://a.com","header":{"User-Agent":"UA","Referer":"https://a.com/"},
+               "loginUrl":"function login(){}","loginUi":[{"name":"账号","type":"text"}]}""",
+        )
+        assertEquals(mapOf("User-Agent" to "UA", "Referer" to "https://a.com/"), rule.headers)
+        assertEquals("function login(){}", rule.loginUrl)
+        assertEquals("""[{"name":"账号","type":"text"}]""", rule.loginUi)
+        // 写出去是字符串（阅读的格式），再读回来不变
+        assertEquals(rule, BookSourceRule.fromJson(rule.toJson()))
+    }
 }

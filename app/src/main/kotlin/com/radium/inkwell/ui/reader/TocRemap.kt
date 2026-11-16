@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.TocRow
 import com.radium.inkwell.data.repo.TitleMatch
 import com.radium.inkwell.reader.api.ReadPosition
 
@@ -51,6 +52,18 @@ internal class TocRemap(
  * isCached 这类状态位边读边变，预取每落一章都会让目录流再发一次 —— 那些不算目录变了。
  */
 internal fun sameReadingToc(a: List<ChapterEntity>, b: List<ChapterEntity>): Boolean {
+    if (a.size != b.size) return false
+    for (i in a.indices) {
+        val x = a[i]
+        val y = b[i]
+        if (x.url != y.url || x.title != y.title || x.variable != y.variable) return false
+    }
+    return true
+}
+
+/** 同上，拿会话手里的目录和库里读回的轻量投影比：一样就不必把整行读出来（见 ReaderViewModel.observeToc） */
+@JvmName("sameReadingTocRows") // 和上面那个擦除后签名相同
+internal fun sameReadingToc(a: List<ChapterEntity>, b: List<TocRow>): Boolean {
     if (a.size != b.size) return false
     for (i in a.indices) {
         val x = a[i]

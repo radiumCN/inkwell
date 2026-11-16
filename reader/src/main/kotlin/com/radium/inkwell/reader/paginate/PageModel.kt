@@ -19,6 +19,13 @@ data class LayoutSpec(
     val fontId: String = "system",
     val justify: Boolean = true,
     val letterSpacingEm: Float = 0f,
+    /**
+     * 正文里的图排不排（阅读设置「正文显示图片」，默认关）。放进排版指纹：开关一拨，分页缓存整体作废、
+     * 按同一个字符偏移重排 —— 图在字符流里恒占 1 个偏移（排不排都占），进度不会因为开关挪位置。
+     */
+    val showImages: Boolean = false,
+    /** 1dp 合多少 px。图按「原图一像素 = 1dp」排（见 [fitImage]），和订阅文章同一条规则 */
+    val density: Float = 1f,
 ) {
     val contentWidthPx: Int get() = (viewportWidthPx - marginLeftPx - marginRightPx).toInt()
     val contentHeightPx: Float get() =
@@ -58,6 +65,11 @@ sealed interface PageItem {
         val lineRange: IntRange get() = startLine..endLine
     }
 
+    /**
+     * 一张图占的框，宽高已按原图比例算好（见 [fitImage]），渲染层把图画满这个框。
+     * [failed]：图没取到，这里排的是一条「图片没加载出来 · 点按重试」（字的测量结果在 measured[elementIndex]），
+     * 不是一个永远等不来图的空框 —— 空框只会让人以为还在加载。
+     */
     data class ImageBox(
         val elementIndex: Int,
         val resourceId: String,
@@ -65,6 +77,7 @@ sealed interface PageItem {
         val top: Float,
         val width: Float,
         val height: Float,
+        val failed: Boolean = false,
     ) : PageItem
 }
 

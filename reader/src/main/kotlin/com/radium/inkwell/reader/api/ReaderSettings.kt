@@ -59,6 +59,11 @@ data class ReaderSettings(
      * 滚动翻页模式下不生效：上下滑在那里是翻页本身。
      */
     val edgeBrightness: Boolean = true,
+    /**
+     * 正文里的插图排不排。**默认关** —— 和 0.2.9 以来一样只排文字；网上的书开了要另外下载图片、多费流量。
+     * 书里的图解析时一律收下（见 core 的 HtmlToElements），这里只决定阅读页排不排，开关一拨就地重排、不用重抓。
+     */
+    val showImages: Boolean = false,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */

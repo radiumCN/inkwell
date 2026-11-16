@@ -1,0 +1,94 @@
+package com.radium.inkwell.data.repo
+
+import com.radium.inkwell.core.model.ChapterContent
+import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.source.BookSourceEngine
+import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.data.db.dao.ChapterDao
+import com.radium.inkwell.data.db.entity.ChapterEntity
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import java.lang.reflect.Proxy
+import java.nio.file.Files
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class NetReaderRefreshTest {
+    private val root = Files.createTempDirectory("refresh-test").toFile()
+    private val cache = ChapterContentCache(root)
+    private val server = MockWebServer().also { it.start() }
+    private val url = server.url("/chapter").toString()
+    private val old = ChapterContent(listOf(ContentElement.Paragraph("原来的正文")))
+    private val marked = mutableListOf<String>()
+    private val dao = Proxy.newProxyInstance(
+        ChapterDao::class.java.classLoader, arrayOf(ChapterDao::class.java),
+    ) { _, method, args ->
+        check(method.name == "markCachedByUrl") { "Unexpected DAO call: ${method.name}" }
+        marked += args!![1] as String
+        Unit
+    } as ChapterDao
+    private val source by lazy {
+        NetReaderBookSource(
+            "book", listOf(ChapterEntity("book", 0, "第一章", url)),
+            BookSourceRule.fromJson("""{
+                "bookSourceUrl":"${server.url("/")}","bookSourceName":"测试",
+                "ruleContent":{"content":"id.content@html"}
+            }"""),
+            BookSourceEngine(SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true)),
+            cache, dao,
+        )
+    }
+
+    @AfterTest
+    fun close() {
+        server.shutdown()
+        root.deleteRecursively()
+    }
+
+    @Test
+    fun `手动获取绕过原文缓存且提交之前原文仍可阅读`() = runBlocking {
+        cache.write("book", url, old)
+        server.enqueue(MockResponse().setBody("<div id='content'><p>更新后的正文</p></div>"))
+        assertEquals(old, source.loadChapter(0))
+        assertEquals(0, server.requestCount)
+
+        val fresh = source.fetchFreshChapter(0)
+        assertEquals(1, server.requestCount)
+        assertEquals(listOf(ContentElement.Paragraph("更新后的正文")), fresh.elements)
+        assertEquals(old, cache.read("book", url))
+        assertTrue(marked.isEmpty())
+
+        source.cacheFreshChapter(url, fresh)
+        assertEquals(fresh, source.loadChapter(0))
+        assertEquals(listOf(url), marked)
+    }
+
+    @Test
+    fun `获取失败不回退成伪成功且原缓存不变`() = runBlocking {
+        cache.write("book", url, old)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(404)
+        }
+        assertFailsWith<Exception> { source.fetchFreshChapter(0) }
+        assertEquals(old, cache.read("book", url))
+        assertEquals(old, source.loadChapter(0))
+        assertTrue(marked.isEmpty())
+    }
+
+    @Test
+    fun `换源期间不能提交旧源的新正文`() = runBlocking {
+        cache.write("book", url, old)
+        source.cacheWritesHeld = true
+        assertFailsWith<IllegalStateException> { source.cacheFreshChapter(url, old) }
+        assertEquals(old, cache.read("book", url))
+        assertTrue(marked.isEmpty())
+    }
+}

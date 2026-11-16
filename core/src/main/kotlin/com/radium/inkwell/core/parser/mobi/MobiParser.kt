@@ -10,6 +10,7 @@ import com.radium.inkwell.core.model.ImageBlob
 import com.radium.inkwell.core.model.TocEntry
 import com.radium.inkwell.core.parser.html.HtmlToElements
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 import java.io.File
 
 /**
@@ -53,12 +54,36 @@ private class MobiBookHandle(
     override val toc: List<TocEntry>,
     /** 每个物理章节的 html 串（已解码） */
     private val chapterHtml: List<String>,
+    /** MOBI7 的 recindex=1 对应的 PDB 记录号 */
+    private val mobi7ImageBase: Long,
+    /** KF8 的 kindle:embed 资源 1 对应的 PDB 记录号 */
+    private val kf8ResourceBase: Long,
 ) : BookHandle {
 
     override fun loadChapter(index: Int): ChapterContent {
         val html = chapterHtml.getOrNull(index) ?: return ChapterContent(emptyList())
         val doc = Jsoup.parse(html)
-        return ChapterContent(HtmlToElements().convert(doc.body()))
+        // 插图照收（阅读页显示不显示是阅读设置的事，见 HtmlToElements）
+        val converter = HtmlToElements(keepImages = true, keepBlocks = false, resolveImage = ::resolveImage)
+        return ChapterContent(converter.convert(doc.body()))
+    }
+
+    /** img 的 recindex（MOBI7）或 kindle:embed 地址（KF8）→ `rec:<PDB 记录号>`，[loadResource] 认这个 */
+    private fun resolveImage(img: Element): String? {
+        val recindex = img.attr("recindex").trim()
+        if (recindex.isNotEmpty()) {
+            val n = recindex.toLongOrNull() ?: return null
+            if (n <= 0) return null
+            return "rec:${mobi7ImageBase + n - 1}"
+        }
+        val src = img.attr("src").ifBlank { img.attr("xlink:href") }.ifBlank { img.attr("href") }
+        if (src.startsWith("kindle:embed:")) {
+            val token = src.removePrefix("kindle:embed:").takeWhile { it.isLetterOrDigit() }
+            val n = mobiBase32(token) ?: return null
+            if (n <= 0) return null
+            return "rec:${kf8ResourceBase + n - 1}"
+        }
+        return null
     }
 
     override fun loadResource(resourceId: String): ImageBlob? {
@@ -133,7 +158,10 @@ private class MobiBookHandle(
             val toc = result.toc.ifEmpty { chapters.map { TocEntry(it.title, it.index) } }
             val cover = findCover(pdb, h6, if (boundary > 0) h6.firstImageIndex else kf8ResourceBase)
             val metadata = BookMetadata(title, h6.author, h6.description, language, h6.isbn, cover)
-            return MobiBookHandle(pdb, metadata, chapters, toc, result.chapterHtml)
+            // combo 文件（MOBI7 + KF8 两份）的 MOBI7 部分有自己的图片区，recindex 按它数
+            val mobi7ImageBase =
+                if (boundary > 0 && h6.firstImageIndex != NULL_INDEX) h6.firstImageIndex else kf8ResourceBase
+            return MobiBookHandle(pdb, metadata, chapters, toc, result.chapterHtml, mobi7ImageBase, kf8ResourceBase)
         }
 
         // ---- MOBI7 路径 ----
@@ -194,7 +222,7 @@ private class MobiBookHandle(
             return MobiBookHandle(
                 pdb, metadata, chapters,
                 toc.ifEmpty { chapters.map { TocEntry(it.title, it.index) } },
-                chapterHtml,
+                chapterHtml, imageBase, imageBase,
             )
         }
 

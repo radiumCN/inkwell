@@ -52,6 +52,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_18_19,
                 InkwellDb.MIGRATION_19_20,
                 InkwellDb.MIGRATION_20_21,
+                InkwellDb.MIGRATION_21_22,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
@@ -93,10 +94,12 @@ val appModule = module {
             },
         )
     }
-    // Rhino 解释执行 JS 规则（与 Legado 同引擎）；脚本里的繁简转换用系统 ICU
+    // Rhino 解释执行 JS 规则（与 Legado 同引擎）；脚本里的繁简转换用系统 ICU，java.androidId() 给本机随机的设备号
     single<com.radium.inkwell.core.source.js.ScriptRuntime> {
+        val deviceId = com.radium.inkwell.data.source.ScriptDeviceId(androidContext())
         com.radium.inkwell.core.source.js.RhinoScriptRuntime(
             chineseConverter = com.radium.inkwell.data.source.IcuChineseConverter(),
+            deviceId = deviceId::get,
         )
     }
     // JS 渲染回退：静态 HTML 解析不出内容时用 WebView 执行页面 JS 再试（详情/目录/正文三级）
@@ -191,6 +194,6 @@ val appModule = module {
         com.radium.inkwell.ui.rss.RssWebViewModel(sourceId, get(), url.ifBlank { null }, title.ifBlank { null })
     }
     viewModel { (args: com.radium.inkwell.ui.rss.RssArticleArgs) ->
-        com.radium.inkwell.ui.rss.RssArticleViewModel(args, get())
+        com.radium.inkwell.ui.rss.RssArticleViewModel(args, get(), get())
     }
 }

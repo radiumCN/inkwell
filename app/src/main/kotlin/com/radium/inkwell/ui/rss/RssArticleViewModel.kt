@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.source.rss.RssArticle
 import com.radium.inkwell.core.source.rss.RssEngine
+import com.radium.inkwell.data.repo.RssFeedRepository
 import com.radium.inkwell.data.repo.RssRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -16,31 +17,24 @@ import kotlinx.serialization.Serializable
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
-/** 导航参数：文章本身随导航带过来，省得为了看一篇文章把整个列表再抓一遍 */
+/**
+ * 导航参数：只带短字段。文章的全文（description，不少源就是全文）**不进参数** ——
+ * 导航返回栈会被 onSaveInstanceState 序列化进 Bundle，全文（几十 KB）叠上几层就撑爆 Binder 事务上限（~1MB），
+ * 直接 TransactionTooLargeException 崩溃。它在订阅缓存里（rss_article），文章页按 [feed] + [articleKey] 取。
+ *
+ * 从前取全文走的是一张进程内的表（按链接暂存、只进不出）：点开一篇就在内存里多攒一份全文，攒到进程结束，
+ * 进程被杀之后又取不回来。缓存表里本来就有，用不着另存一份。
+ */
 @Serializable
 data class RssArticleArgs(
     val sourceId: String,
     val title: String,
     val link: String,
-    val description: String? = null,
     val pubDate: String? = null,
+    /** 这篇在订阅缓存里的主键（RssArticleEntity 的 feed + articleKey）；不是从时间线点进来的为 null */
+    val feed: String? = null,
+    val articleKey: String? = null,
 )
-
-/**
- * 文章正文（description，不少源就是全文）的**进程内**暂存。
- *
- * 从前 description 连同其它字段一起 Base64 塞进导航参数 —— 而导航返回栈会被 onSaveInstanceState
- * 序列化进 Bundle，全文正文（几十 KB）叠上几层就撑爆 Binder 事务上限（~1MB），直接
- * TransactionTooLargeException 崩溃。改为只在内存里按链接暂存，导航参数只带短字段（标题/链接/日期）。
- * 进程被杀后暂存丢失也无妨：正文会按链接重新抓，或退化为「用浏览器打开原文」。
- */
-object RssArticleContent {
-    private val map = java.util.concurrent.ConcurrentHashMap<String, String>()
-    fun put(link: String, description: String?) {
-        if (!description.isNullOrEmpty()) map[link] = description
-    }
-    fun get(link: String): String? = map[link]
-}
 
 data class RssArticleUiState(
     val title: String = "",
@@ -68,6 +62,7 @@ data class RssArticleUiState(
 class RssArticleViewModel(
     private val args: RssArticleArgs,
     private val repo: RssRepository,
+    private val feeds: RssFeedRepository,
 ) : ViewModel(), KoinComponent {
 
     private val engine: RssEngine by inject()
@@ -105,11 +100,17 @@ class RssArticleViewModel(
                 _state.value = _state.value.copy(loading = false, error = "订阅源不存在")
                 return@launch
             }
+            // 缓存里没有（刚被清理掉）就当 feed 没给全文：有正文规则的照常抓，没有的去原网页整理
+            val description = if (args.feed != null && args.articleKey != null) {
+                feeds.description(args.feed, args.articleKey)
+            } else {
+                null
+            }
             val article = RssArticle(
                 sourceId = args.sourceId,
                 title = args.title,
                 link = args.link,
-                description = args.description,
+                description = description,
                 pubDate = args.pubDate,
             )
             val content = try {

@@ -187,6 +187,9 @@ interface JsRuleQuery {
      * getElements 拿到的元素就落在那个元素上）。起点、来看文学重新 ajax 一遍页面再接着抽；优特逐个元素抽字段
      */
     fun withContent(content: Any?, baseUrl: String?): JsRuleQuery = this
+
+    /** `getString(规则, 内容, true)` 的「是地址」：按当前页补成绝对地址 */
+    fun absoluteUrl(url: String): String = url
 }
 
 
@@ -221,7 +224,31 @@ class JsCache {
     }
 
     fun delete(key: String) {
-        synchronized(lock) { map.remove(key) }
+        synchronized(lock) {
+            map.remove(key)
+            memory.remove(key)
+        }
+    }
+
+    // 阅读的 putMemory / getFromMemory：存的是脚本里的对象本身（不转字符串），进程内、不过期，攒满了挤掉最久没用的。
+    // 八叉书库拿它记下解过一次的站点列表
+
+    private val memory = object : LinkedHashMap<String, Any?>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any?>?): Boolean = size > MEMORY_ENTRIES
+    }
+
+    fun putMemory(key: String, value: Any?) {
+        synchronized(lock) { memory[key] = value }
+    }
+
+    fun getFromMemory(key: String): Any? = synchronized(lock) { memory[key] }
+
+    fun deleteMemory(key: String) {
+        synchronized(lock) { memory.remove(key) }
+    }
+
+    private companion object {
+        const val MEMORY_ENTRIES = 64
     }
 
     private fun evictExpired() {
@@ -242,19 +269,48 @@ class JsCache {
  * 阅读交给脚本的 `source` 是书源对象本身，脚本会直接读它的字段：`source.bookSourceUrl` 拼 Referer，
  * 还有一批来源把公用函数写在「来源说明」里、规则开头 `eval(String(source.bookSourceComment))` 加载 ——
  * 没有这个字段，eval 的是字符串 "undefined"，后面一调那些函数就 ReferenceError，整条规则落空。
+ * 写在登录脚本里、`eval(String(source.loginUrl))` 加载的同理；别的字段见 [SourceFacts]。
  */
 class SourceBridge(
     private val key: String,
     private val store: MutableMap<String, String> = ConcurrentHashMap(),
-    @JvmField val bookSourceName: String = "",
-    @JvmField val bookSourceComment: String = "",
+    private val facts: SourceFacts = SourceFacts(),
 ) {
     @JvmField val bookSourceUrl: String = key
+    @JvmField val bookSourceName: String = facts.name
+    @JvmField val bookSourceComment: String = facts.comment
+    @JvmField val bookSourceGroup: String = facts.group
+    @JvmField val bookSourceType: Int = facts.type
+    @JvmField val loginUrl: String? = facts.loginUrl
+    @JvmField val header: String? = facts.header
+    @JvmField val jsLib: String? = facts.jsLib
+    @JvmField val searchUrl: String? = facts.searchUrl
+    @JvmField val exploreUrl: String? = facts.exploreUrl
 
     // 订阅源在阅读里是 RssSource，字段名不带 book：`source.sourceUrl` 拼 Referer（翻译类订阅源的 header 脚本、登录界面都这么写）
     @JvmField val sourceUrl: String = key
-    @JvmField val sourceName: String = bookSourceName
-    @JvmField val sourceComment: String = bookSourceComment
+    @JvmField val sourceName: String = facts.name
+    @JvmField val sourceComment: String = facts.comment
+
+    /**
+     * 阅读的 BaseSource.loginUi() 是个**方法**（把登录界面的 JSON 解成一排控件），同名的字段被它盖住 ——
+     * 所以在阅读里 `typeof source.loginUi == 'function'`。书山聚合、大灰狼聚合、光遇聚合、魔丸这一批聚合源
+     * 靠这一句认「是不是官方阅读」：不是函数就当成某个改版 App，搜索、目录走另一套接口，在我们这儿一章目录都解不出来。
+     * 我们不画登录界面，返回界面的原文
+     */
+    fun loginUi(): String? = facts.loginUi
+
+    // 规则集：`source.ruleSearch.author` 拿搜索列表的作者规则，脚本里 java.getString 再跑一遍（八叉书库）。
+    // 用 getter 而不是字段：只有读到的那一个才建表
+    fun getRuleSearch(): JsStringMap? = facts.ruleSets["ruleSearch"]?.let(::JsStringMap)
+
+    fun getRuleExplore(): JsStringMap? = facts.ruleSets["ruleExplore"]?.let(::JsStringMap)
+
+    fun getRuleBookInfo(): JsStringMap? = facts.ruleSets["ruleBookInfo"]?.let(::JsStringMap)
+
+    fun getRuleToc(): JsStringMap? = facts.ruleSets["ruleToc"]?.let(::JsStringMap)
+
+    fun getRuleContent(): JsStringMap? = facts.ruleSets["ruleContent"]?.let(::JsStringMap)
 
     fun getKey(): String = key
 
@@ -319,6 +375,25 @@ class SourceBridge(
     }
 }
 
+/**
+ * 来源对象上脚本会直接读的字段（阅读交给脚本的 `source` 就是来源对象本身），每个来源算一次
+ * （BookSourceRule.scriptFacts），每次求值新建的 [SourceBridge] 共用它。订阅源只给名字。
+ */
+class SourceFacts(
+    val name: String = "",
+    val comment: String = "",
+    val group: String = "",
+    val type: Int = 0,
+    val loginUrl: String? = null,
+    val loginUi: String? = null,
+    val header: String? = null,
+    val jsLib: String? = null,
+    val searchUrl: String? = null,
+    val exploreUrl: String? = null,
+    /** 规则集按阅读的字段名：`ruleSearch` → { bookList, name, … }；没写的规则集、规则不在里面 */
+    val ruleSets: Map<String, Map<String, String>> = emptyMap(),
+)
+
 /** Cookie，脚本里是 `cookie` */
 class CookieBridge(private val http: JsHttp?) {
     fun getCookie(url: String): String = http?.cookieOf(url).orEmpty()
@@ -342,6 +417,11 @@ class CookieBridge(private val http: JsHttp?) {
  * 书籍/章节上下文，脚本里是 `book` / `chapter`。
  * 字段用 @JvmField 暴露成公开字段，Rhino 才能像 `book.name` 那样直接读写。
  */
+/**
+ * 脚本里的 `book`。阅读交给脚本的是书对象本身，字段照它的 Book 起名、都能改：聚合源在目录脚本里写
+ * `book.type = 8`（按书的类型选接口），一个字段不存在，赋值就抛错、整条目录规则落空（书山聚合、大灰狼、魔丸）。
+ * 改了只在这一次抓取里有效，不回写书架；阅读设置类的方法（`setUseReplaceRule`、`setReverseToc`…）是空的。
+ */
 class BookBridge(
     @JvmField var name: String = "",
     @JvmField var author: String = "",
@@ -350,7 +430,24 @@ class BookBridge(
     @JvmField var kind: String = "",
     @JvmField var intro: String = "",
     @JvmField var coverUrl: String = "",
+    /** 来源地址 / 名字（阅读的 origin / originName） */
+    @JvmField var origin: String = "",
+    @JvmField var originName: String = "",
 ) {
+    /** 阅读的 BookType：8 是文字书（音频 32、图片 64），来源脚本按它挑接口 */
+    @JvmField var type: Int = 8
+    @JvmField var wordCount: String? = null
+    @JvmField var latestChapterTitle: String? = null
+    @JvmField var totalChapterNum: Int = 0
+    @JvmField var durChapterTitle: String? = null
+    @JvmField var durChapterIndex: Int = 0
+    @JvmField var durChapterPos: Int = 0
+    @JvmField var customTag: String? = null
+    @JvmField var customCoverUrl: String? = null
+    @JvmField var customIntro: String? = null
+    @JvmField var charset: String? = null
+    @JvmField var canUpdate: Boolean = true
+
     private val variables = ConcurrentHashMap<String, String>()
 
     fun putVariable(key: String, value: String?): String {
@@ -359,13 +456,55 @@ class BookBridge(
     }
 
     fun getVariable(key: String): String = variables[key].orEmpty()
+
+    /** 阅读的「自定义变量」就是键 custom 的那个变量 */
+    fun putCustomVariable(value: String?) {
+        putVariable("custom", value)
+    }
+
+    fun getCustomVariable(): String = getVariable("custom")
+
+    fun getRealAuthor(): String = author
+
+    fun getDisplayCover(): String = customCoverUrl?.takeIf { it.isNotEmpty() } ?: coverUrl
+
+    fun getDisplayIntro(): String = customIntro?.takeIf { it.isNotEmpty() } ?: intro
+
+    // 阅读里改的是这本书的阅读设置；我们的设置不归来源管，照阅读的默认值回答
+
+    fun setUseReplaceRule(useReplaceRule: Boolean) = Unit
+
+    fun getUseReplaceRule(): Boolean = true
+
+    fun setReverseToc(reverseToc: Boolean) = Unit
+
+    fun getReverseToc(): Boolean = false
+
+    fun setReSegment(reSegment: Boolean) = Unit
+
+    fun getReSegment(): Boolean = false
+
+    fun setImageStyle(imageStyle: String?) = Unit
+
+    fun getImageStyle(): String? = null
+
+    fun setSplitLongChapter(splitLongChapter: Boolean) = Unit
+
+    fun getSplitLongChapter(): Boolean = true
 }
 
+/** 脚本里的 `chapter`，字段照阅读的 BookChapter */
 class ChapterBridge(
     @JvmField var title: String = "",
     @JvmField var url: String = "",
     @JvmField var index: Int = 0,
 ) {
+    @JvmField var bookUrl: String = ""
+    @JvmField var baseUrl: String = ""
+    /** 阅读里是更新时间这类附加信息 */
+    @JvmField var tag: String? = null
+    @JvmField var wordCount: String? = null
+
     private val variables = ConcurrentHashMap<String, String>()
 
     fun putVariable(key: String, value: String?): String {
@@ -386,6 +525,8 @@ class JavaBridge(
     private val vars: MutableMap<String, String>,
     private val query: JsRuleQuery? = null,
     private val chinese: ChineseConverter = ChineseConverter.NONE,
+    /** [androidId] 给的设备号，见 [ScriptRuntime.androidId] */
+    private val deviceId: () -> String = { "" },
 ) {
 
     /** getString / getElement 落在哪份内容上；[setContent] 换掉它 */
@@ -453,6 +594,12 @@ class JavaBridge(
 
     fun getVerificationCode(url: String): String = ""
 
+    // 阅读里是拉起浏览器 / 别的 App 打开链接（目录的章节地址、简介里的「打开网页」都有这么写的）；后台抓取没有界面可拉
+
+    fun openUrl(url: String) = Unit
+
+    fun openUrl(url: String, mimeType: String?) = Unit
+
     // 阅读的 get / post / head 走 Jsoup、**不跟随重定向**：书仓网、来看文学 POST 搜索后读 `.header("Location")`
     // 拿结果页地址。从前跟着跳了过去，拿到的是结果页本身，Location 是空的，搜索地址拼成「站点/null」。
     // 带超时的那几个重载（第三、四个参数是毫秒）照样认，超时用我们自己的
@@ -476,7 +623,32 @@ class JavaBridge(
 
     fun getString(rule: String): String = content?.getString(rule).orEmpty()
 
+    // 阅读的 getString / getStringList 带两个可省的参数：在哪份内容上取（`java.getString('.content_txt@html', html)`，
+    // 爱丽丝书屋的正文这么写）、取到的是不是地址（是就补成绝对地址）。从前只有一个参数的，两个参数一调就找不到方法
+    fun getString(rule: String, content: Any?): String = on(content)?.getString(rule).orEmpty()
+
+    fun getString(rule: String, content: Any?, isUrl: Boolean): String {
+        val q = on(content) ?: return ""
+        val s = q.getString(rule)
+        return if (isUrl && s.isNotEmpty()) q.absoluteUrl(s) else s
+    }
+
+    /** 阅读的 `getString(规则, unescape)`：第二个参数是「要不要反转义 HTML」，我们取到的本来就是文字 */
+    fun getString(rule: String, unescape: Boolean): String = getString(rule)
+
     fun getStringList(rule: String): Array<String> = content?.getStringList(rule) ?: emptyArray()
+
+    fun getStringList(rule: String, content: Any?): Array<String> = on(content)?.getStringList(rule) ?: emptyArray()
+
+    fun getStringList(rule: String, content: Any?, isUrl: Boolean): Array<String> {
+        val q = on(content) ?: return emptyArray()
+        val list = q.getStringList(rule)
+        return if (isUrl) list.map { if (it.isEmpty()) it else q.absoluteUrl(it) }.toTypedArray() else list
+    }
+
+    /** 传了内容就落在那份内容上（不改 [setContent] 设下的当前内容），没传落在当前内容上 */
+    private fun on(content: Any?): JsRuleQuery? =
+        if (content == null) this.content else (this.content ?: query)?.withContent(content, null)
 
     fun getElement(rule: String): JsElement? = content?.getElement(rule)
 
@@ -506,6 +678,9 @@ class JavaBridge(
     fun get(key: String): String = vars[key].orEmpty()
 
     fun getCookie(url: String): String = http?.cookieOf(url).orEmpty()
+
+    /** 阅读的 `java.getCookie(地址, 名字)`：只要其中一个 Cookie 的值；名字给 null 同一个参数的。光遇聚合的目录每章都这么取一次 */
+    fun getCookie(url: String, key: String?): String = key?.let { CookieBridge(http).getKey(url, it) } ?: getCookie(url)
 
     // ---- 编解码 ----
 
@@ -597,6 +772,15 @@ class JavaBridge(
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date(time))
 
+    /**
+     * 阅读的 `java.timeFormatUTC(毫秒, 格式, 偏移)`：偏移照阅读当**毫秒**（SimpleTimeZone 的 rawOffset）——
+     * 有来源写成 `8`（想的是 8 小时），照阅读出的就是 UTC 时间，规则是照那个结果写的。格式写错同阅读抛出去
+     */
+    fun timeFormatUTC(time: Long, format: String, sh: Int): String =
+        java.text.SimpleDateFormat(format, java.util.Locale.getDefault())
+            .apply { timeZone = java.util.SimpleTimeZone(sh, "UTC") }
+            .format(java.util.Date(time))
+
     fun htmlFormat(str: String): String = org.jsoup.Jsoup.parse(str).text()
 
     /** 繁体 → 简体（阅读的 `java.t2s`）；平台没给转换器时原样返回，见 [ChineseConverter] */
@@ -619,6 +803,15 @@ class JavaBridge(
     }
 
     fun randomUUID(): String = UUID.randomUUID().toString()
+
+    /**
+     * 设备号（阅读的 `java.androidId()`，那边给系统的 ANDROID_ID）：接口源拿它当 deviceid 放进请求头（Lofter），
+     * 从前没有这个方法，header 脚本一调就 ReferenceError，这个来源的请求一个也发不出去。给的是什么见 [ScriptRuntime.androidId]。
+     *
+     * **别加 `java.deviceID()`**：那是 iOS 上的阅读类 App 才有的方法，聚合源拿「调不调得通它」认 App ——
+     * 加上就被当成 iOS，搜索、目录走苹果那套接口
+     */
+    fun androidId(): String = deviceId()
 
     /**
      * 阅读给的是系统 WebView 的 UA；我们抓取、渲染一律用 [SourceHttpClient.DEFAULT_UA]（站点按 UA 给不同的页面，

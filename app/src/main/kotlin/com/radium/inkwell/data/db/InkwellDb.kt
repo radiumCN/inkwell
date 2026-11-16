@@ -33,7 +33,7 @@ import com.radium.inkwell.data.db.entity.ReadingStatEntity
         ReadingStatEntity::class,
         RssArticleEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -47,6 +47,12 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun rssArticleDao(): RssArticleDao
 
     companion object {
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN removedFromShelf INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /**
          * 书源脚本的变量落库（Legado 的 book.variable / chapter.variable）：
          * 目录规则 @put 存的参数，正文规则 @get 要取得到。

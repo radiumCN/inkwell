@@ -69,7 +69,14 @@ private class EpubBookHandle(
         val bytes = readEntry(path) ?: return ChapterContent(emptyList())
         // 内容文件用 html 模式解析（容错非良构 XHTML）
         val doc = Jsoup.parse(bytes.inputStream(), null, "")
-        return ChapterContent(HtmlToElements().convert(doc.body()))
+        // 插图照收（阅读页显示不显示是阅读设置的事，见 HtmlToElements）。地址是相对本章文件的包内路径，
+        // svg 包着的整页插画写在 xlink:href 上
+        val dir = path.substringBeforeLast('/', "")
+        val converter = HtmlToElements(keepImages = true, keepBlocks = false, resolveImage = { img ->
+            val src = img.attr("src").ifBlank { img.attr("xlink:href") }.ifBlank { img.attr("href") }.trim()
+            if (src.isEmpty() || src.startsWith("data:", ignoreCase = true)) null else resolvePath(dir, src)
+        })
+        return ChapterContent(converter.convert(doc.body()))
     }
 
     override fun loadResource(resourceId: String): ImageBlob? {

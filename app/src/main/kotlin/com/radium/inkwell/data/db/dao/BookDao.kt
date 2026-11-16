@@ -45,6 +45,9 @@ interface BookDao {
     @Query("UPDATE book SET deleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: String, now: Long)
 
+    @Query("UPDATE book SET inShelf = 0, removedFromShelf = 1, newChapterCount = 0, updatedAt = :now WHERE id = :id AND deleted = 0")
+    suspend fun removeFromShelf(id: String, now: Long)
+
     /** 真删，只给「导入失败回滚」用：那行从没成功存在过，留墓碑会同步出一条凭空的删除 */
     @Query("DELETE FROM book WHERE id = :id")
     suspend fun hardDelete(id: String)

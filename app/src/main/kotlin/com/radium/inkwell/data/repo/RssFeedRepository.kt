@@ -9,6 +9,8 @@ import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.RssArticleDao
 import com.radium.inkwell.data.db.entity.RssArticleEntity
+import com.radium.inkwell.data.db.entity.RssArticleRow
+import com.radium.inkwell.data.db.entity.RssArticleSeen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
 /** 订阅页要取的一条列表：某个源的某个分类 */
@@ -30,7 +33,8 @@ data class RssFeed(val rule: RssSourceRule, val sort: RssSort) {
  *
  * - **取过就不再取**：这次打开 App 里某条列表取成功过，再进订阅页直接显示缓存，下拉才重取（[refresh] 的 force）。
  *   记在进程里（[fetchedThisSession]）：App 被杀、重开就是新的一次。
- * - **先显示上次的**：文章存在库里（[RssArticleEntity]），页面订阅 [observe]，取回来的写进库、页面跟着变。
+ * - **先显示上次的**：文章存在库里（[RssArticleEntity]），页面订阅 [observe]（不带全文，见 [RssArticleRow]），
+ *   取回来的写进库、页面跟着变；点开一篇再按主键取全文（[description]）。
  * - **读没读**在同一行上（[markRead]）。
  * - **清理**跟着「自动清理已读缓存」的天数（[prune]，冷启动在后台跑）。
  */
@@ -41,7 +45,13 @@ class RssFeedRepository(
 ) {
     private val fetchedThisSession: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    fun observe(feeds: List<String>): Flow<List<RssArticleEntity>> = dao.observeByFeeds(feeds)
+    /** 这次打开 App 里取失败过的列表（成功一次就去掉）：再取时排到最后，见 [refresh] */
+    private val failedThisSession: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    fun observe(feeds: List<String>): Flow<List<RssArticleRow>> = dao.observeRowsByFeeds(feeds)
+
+    /** 一篇的全文（时间线的行里没有它）。不在库里了（刚被清理掉）是 null，文章页照常按链接抓 */
+    suspend fun description(feed: String, articleKey: String): String? = dao.getDescription(feed, articleKey)
 
     /** 这条列表这次打开 App 里取成功过没有 */
     fun fetchedThisSession(feed: String): Boolean = feed in fetchedThisSession
@@ -49,20 +59,29 @@ class RssFeedRepository(
     /**
      * 把 [feeds] 取一遍、写进库。[force] = false 时跳过这次已经取过的。几个源一起取（最多 [CONCURRENCY] 个），
      * 一个源坏了不耽误别的：返回取失败的（源 id → 原因），没失败的不在里面。
+     *
+     * 坏源别占着名额让好源干等（同搜索的 SearchScheduling，这里只做最要紧的两样）：
+     * - 每个源最多等 [FEED_TIMEOUT_MS]。从前没有单源的总闸，一个吊死的源要等满 HTTP 的 45 秒 callTimeout
+     *   （连接被掐断的还会整个再试一次）—— 四个名额被几个死源占满，后面的健康源一篇都出不来；
+     * - 这次打开 App 里失败过的排到最后：下拉刷新时，上回就没取下来的别又抢在最前面。
      */
     suspend fun refresh(feeds: List<RssFeed>, force: Boolean): Map<String, String> = coroutineScope {
-        val todo = if (force) feeds else feeds.filter { it.key !in fetchedThisSession }
+        val todo = (if (force) feeds else feeds.filter { it.key !in fetchedThisSession })
+            .sortedBy { it.key in failedThisSession } // 稳定排序：同档照订阅源原来的顺序
         val gate = Semaphore(CONCURRENCY)
         todo.map { feed ->
             async {
                 gate.withPermit {
-                    try {
-                        fetchOne(feed)
-                        null
+                    // 用 OrNull 而不是 withTimeout：后者抛的超时是 CancellationException，下面原样往外抛，
+                    // 会把整轮刷新连同别的源一起取消掉
+                    val failure: String? = try {
+                        if (withTimeoutOrNull(FEED_TIMEOUT_MS) { fetchOne(feed) } == null) TIMEOUT_TEXT else null
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
-                        feed.rule.id to failureText(e)
+                        failureText(e)
                     }
+                    if (failure == null) failedThisSession -= feed.key else failedThisSession += feed.key
+                    failure?.let { feed.rule.id to it }
                 }
             }
         }.awaitAll().filterNotNull().toMap()
@@ -74,7 +93,7 @@ class RssFeedRepository(
         withContext(Dispatchers.IO) {
             // 读旧行和写新行在一个事务里：两次取同一条列表叠在一起时，后写的不会拿着过期的旧行把读过的记号盖掉
             db.withWriteTransaction {
-                val existing = dao.getByFeed(feed.key)
+                val existing = dao.getSeenByFeed(feed.key)
                 dao.upsertAll(mergeFetched(feed.key, feed.rule.id, existing, page.items, now))
             }
         }
@@ -88,6 +107,7 @@ class RssFeedRepository(
     suspend fun deleteBySource(sourceId: String) {
         dao.deleteBySource(sourceId)
         fetchedThisSession.removeIf { it.startsWith(sourceId + FEED_SEPARATOR) }
+        failedThisSession.removeIf { it.startsWith(sourceId + FEED_SEPARATOR) }
     }
 
     /**
@@ -102,6 +122,12 @@ class RssFeedRepository(
 
     companion object {
         private const val CONCURRENCY = 4
+        /**
+         * 一个源（取列表 + 跑规则）最多等多久。健康的 feed 几秒就回来；比这还慢的，页面上照常写一行
+         * 「没更新上（连接超时）」、可以重试，缓存里上次的文章照旧显示
+         */
+        private const val FEED_TIMEOUT_MS = 25_000L
+        private const val TIMEOUT_TEXT = "连接超时"
         private const val DAY_MS = 86_400_000L
         private const val FEED_SEPARATOR = "\n"
 
@@ -118,7 +144,7 @@ class RssFeedRepository(
         internal fun mergeFetched(
             feed: String,
             sourceId: String,
-            existing: List<RssArticleEntity>,
+            existing: List<RssArticleSeen>,
             fetched: List<RssArticle>,
             now: Long,
         ): List<RssArticleEntity> {
@@ -147,7 +173,7 @@ class RssFeedRepository(
         internal fun failureText(e: Throwable): String {
             val chain = generateSequence(e) { it.cause }.toList()
             return when {
-                chain.any { it is java.net.SocketTimeoutException || it is java.io.InterruptedIOException } -> "连接超时"
+                chain.any { it is java.net.SocketTimeoutException || it is java.io.InterruptedIOException } -> TIMEOUT_TEXT
                 chain.any { it is java.net.UnknownHostException } -> "连不上网络"
                 chain.any { it is java.net.ConnectException || it is javax.net.ssl.SSLException } -> "连不上服务器"
                 else -> HTTP_CODE.find(e.message.orEmpty())?.let { "HTTP ${it.groupValues[1]}" } ?: "取不到文章"

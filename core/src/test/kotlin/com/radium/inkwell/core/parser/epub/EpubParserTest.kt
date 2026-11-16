@@ -127,4 +127,27 @@ class EpubParserTest {
         assertEquals("OEBPS/Text/chapter+1.xhtml", resolvePath("OEBPS/Text", "chapter+1.xhtml"))
         assertEquals("OEBPS/Text/a b.xhtml", resolvePath("OEBPS/Text", "a%20b.xhtml"))
     }
+
+    /**
+     * 插图照收（阅读页显示不显示是阅读设置的事）：地址按本章文件换成包内路径，loadResource 认得它。
+     * svg 包着的整页插画（xlink:href）也收；图夹在两段之间，顺序不乱
+     */
+    @Test
+    fun `插图按包内路径收进正文，读得出字节`() {
+        val f = temp()
+        EpubFixture.minimalEpub(f, withImages = true)
+        EpubParser().open(f).use { book ->
+            val elements = book.loadChapter(0).elements
+            val images = elements.filterIsInstance<ContentElement.Image>()
+            assertEquals(
+                listOf(ContentElement.Image("OEBPS/images/a.png", "插图"), ContentElement.Image("OEBPS/images/b.jpg")),
+                images,
+            )
+            val first = elements.indexOfFirst { it is ContentElement.Image }
+            assertTrue(elements[first - 1] is ContentElement.Paragraph)
+            assertTrue(elements.last() is ContentElement.Paragraph)
+            assertEquals("PNG-A", String(book.loadResource(images[0].resourceId)!!.data))
+            assertEquals("JPG-B", String(book.loadResource(images[1].resourceId)!!.data))
+        }
+    }
 }

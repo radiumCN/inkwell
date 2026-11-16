@@ -7,6 +7,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertTrue
 
 /**
  * `JavaImporter` / `Packages` 的替身（JdkCompat）：阅读来源直接拿 JDK 做加解密的脚本能跑，沙箱照旧封着。
@@ -210,6 +211,51 @@ class JdkCompatTest {
                 "var i = new JavaImporter(Packages.android.util, Packages.java.util); " +
                     "with (i) { typeof Base64.getDecoder + ' ' + typeof Base64.encodeToString }",
                 emptyMap(),
+            ),
+        )
+    }
+
+    /** 八叉书库在请求之间随机停一会儿：照停，太长的封顶；URLEncoder 按给的编码转 */
+    @Test
+    fun `Thread sleep 照停，URLEncoder 认编码`() {
+        val t0 = System.currentTimeMillis()
+        runtime.eval("Packages.java.lang.Thread.sleep(120)", emptyMap())
+        assertTrue(System.currentTimeMillis() - t0 >= 100)
+        assertEquals(
+            "%D6%D8%C9%FA|重生",
+            runtime.eval(
+                "var e = Packages.java.net.URLEncoder.encode('重生', 'GBK'); e + '|' + Packages.java.net.URLDecoder.decode(e, 'GBK')",
+                emptyMap(),
+            ),
+        )
+    }
+
+    /** 七猫接口源：MD5 签名、`new String(字节, 起点, 长度, 编码)` 从 zip 里切文件名、Inflater 解压正文 */
+    @Test
+    fun `MessageDigest、Inflater、四参数的 String 照 JDK`() {
+        fun eval(expr: String) = runtime.eval(expr, emptyMap())
+        assertEquals(
+            "e10adc3949ba59abbe56e057f20f883e",
+            eval(
+                "var b = Packages.java.security.MessageDigest.getInstance('MD5').digest(new Packages.java.lang.String('123456').getBytes('UTF-8'));" +
+                    "var h = ''; for (var i = 0; i < b.length; i++) { var x = (b[i] & 0xff).toString(16); h += (x.length < 2 ? '0' : '') + x; } h",
+            ),
+        )
+        assertEquals("七猫", eval("var b = new Packages.java.lang.String('xx七猫yy').getBytes('UTF-8'); new Packages.java.lang.String(b, 2, 6, 'UTF-8')"))
+        val text = "第一章 正文".repeat(20)
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.DEFAULT_COMPRESSION, true)
+        deflater.setInput(text.toByteArray())
+        deflater.finish()
+        val buf = ByteArray(1024)
+        val packed = buf.copyOf(deflater.deflate(buf))
+        val size = text.toByteArray().size
+        assertEquals(
+            text,
+            runtime.eval(
+                "var inf = new Packages.java.util.zip.Inflater(true); inf.setInput(packed, 0, packed.length);" +
+                    "var out = Packages.java.util.Arrays.copyOf(packed, $size); inf.inflate(out); inf.end();" +
+                    "String(new Packages.java.lang.String(out, 'UTF-8'))",
+                mapOf("packed" to packed),
             ),
         )
     }

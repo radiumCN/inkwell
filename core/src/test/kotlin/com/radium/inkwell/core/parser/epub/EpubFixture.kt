@@ -22,6 +22,8 @@ object EpubFixture {
         ncxAnchors: Boolean = false,
         /** nav.xhtml 里目录前面先放 landmarks 与 page-list 两个 nav（文档顺序在前） */
         navExtrasFirst: Boolean = false,
+        /** 第一章夹一张 img 插图、一张 svg 包着的整页插画（EPUB 的标准写法），图放在 OEBPS/images/ 下 */
+        withImages: Boolean = false,
     ) {
         ZipOutputStream(file.outputStream()).use { zip ->
             fun put(name: String, content: String) {
@@ -77,7 +79,18 @@ object EpubFixture {
                 </package>""",
             )
 
+            if (withImages) {
+                put("OEBPS/images/a.png", "PNG-A")
+                put("OEBPS/images/b.jpg", "JPG-B")
+            }
             for (i in 1..chapterCount) {
+                val pictures = if (withImages && i == 1) {
+                    """<p><img src="../images/a.png" alt="插图"/></p>
+                      <div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 600 800">
+                        <image width="600" height="800" xlink:href="../images/b.jpg"/></svg></div>"""
+                } else {
+                    ""
+                }
                 put(
                     "OEBPS/$chapterDir/ch$i.xhtml",
                     """<?xml version="1.0" encoding="utf-8"?>
@@ -85,6 +98,7 @@ object EpubFixture {
                     <body>
                       <h2>第${i}章 起承转合</h2>
                       <p>　　这是第${i}章的第一段，讲述了一些故事。</p>
+                      $pictures
                       <p>　　这是第${i}章的<b>第二段</b>，有强调文本。</p>
                     </body></html>""",
                 )

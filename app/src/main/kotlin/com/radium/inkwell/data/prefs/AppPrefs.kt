@@ -12,6 +12,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.radium.inkwell.ui.bookshelf.BookshelfLayout
+import com.radium.inkwell.ui.bookshelf.ShelfColumns
+import com.radium.inkwell.ui.bookshelf.ShelfGridCells
 import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.theme.ThemeConfig
 import com.radium.inkwell.ui.theme.ThemeMode
@@ -60,6 +62,8 @@ class AppPrefs(private val context: Context) {
         /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
         val TOC_REVERSED = booleanPreferencesKey("toc_reversed")
         val BOOKSHELF_LAYOUT = stringPreferencesKey("bookshelf_layout")
+        /** 书架网格每行几本（见 [ShelfColumns]）。进备份，同「书架显示」 */
+        val BOOKSHELF_COLUMNS = intPreferencesKey("bookshelf_columns")
         val HIDDEN_REQUIRE_AUTH = booleanPreferencesKey("hidden_require_auth")
         val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
         /** 搜索历史，新的在前，换行分隔（关键词入库前已把换行压成空格，见 [pushSearchHistory]） */
@@ -129,6 +133,7 @@ class AppPrefs(private val context: Context) {
                 "auto_check_update" to (p[Keys.AUTO_CHECK_UPDATE] ?: true).toString(),
                 "search_history_enabled" to (p[Keys.SEARCH_HISTORY_ENABLED] ?: true).toString(),
                 "bookshelf_layout" to (p[Keys.BOOKSHELF_LAYOUT] ?: BookshelfLayout.GRID.name),
+                "bookshelf_columns" to ShelfColumns.sanitize(p[Keys.BOOKSHELF_COLUMNS]).toString(),
                 "cache_auto_prune_days" to (p[Keys.CACHE_AUTO_PRUNE_DAYS] ?: DEFAULT_CACHE_AUTO_PRUNE_DAYS).toString(),
                 "theme_mode" to theme.mode.name,
                 "theme_light" to theme.lightPreset,
@@ -173,6 +178,9 @@ class AppPrefs(private val context: Context) {
             v["bookshelf_layout"]
                 ?.takeIf { name -> BookshelfLayout.entries.any { it.name == name } }
                 ?.let { p[Keys.BOOKSHELF_LAYOUT] = it }
+            v["bookshelf_columns"]?.toIntOrNull()
+                ?.takeIf { it in ShelfColumns.OPTIONS }
+                ?.let { p[Keys.BOOKSHELF_COLUMNS] = it }
             v["cache_auto_prune_days"]?.toIntOrNull()
                 ?.takeIf { it in CACHE_AUTO_PRUNE_DAYS_OPTIONS }
                 ?.let { p[Keys.CACHE_AUTO_PRUNE_DAYS] = it }
@@ -403,6 +411,15 @@ class AppPrefs(private val context: Context) {
         editTouched { it[Keys.BOOKSHELF_LAYOUT] = layout.name }
     }
 
+    /** 书架网格每行几本（手机竖屏上的本数，宽屏见 [ShelfGridCells]）。默认 3，就是加这项设置之前的样子 */
+    val bookshelfColumns: Flow<Int> = context.appDataStore.data.map { p ->
+        ShelfColumns.sanitize(p[Keys.BOOKSHELF_COLUMNS])
+    }
+
+    suspend fun setBookshelfColumns(columns: Int) {
+        editTouched { it[Keys.BOOKSHELF_COLUMNS] = ShelfColumns.sanitize(columns) }
+    }
+
     /**
      * 已读章节正文缓存自动清理保留天数。
      *
@@ -575,6 +592,7 @@ class AppPrefs(private val context: Context) {
     val autoCheckUpdateState: StateFlow<Boolean?> = autoCheckUpdate.warm()
     val searchHistoryEnabledState: StateFlow<Boolean?> = searchHistoryEnabled.warm()
     val bookshelfLayoutState: StateFlow<BookshelfLayout?> = bookshelfLayout.warm()
+    val bookshelfColumnsState: StateFlow<Int?> = bookshelfColumns.warm()
     val cacheAutoPruneDaysState: StateFlow<Int?> = cacheAutoPruneDays.warm()
     val developerModeState: StateFlow<Boolean?> = developerMode.warm()
     val updateChannelState: StateFlow<UpdateChannel?> = updateChannel.warm()

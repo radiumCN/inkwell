@@ -10,15 +10,21 @@ import org.jsoup.nodes.TextNode
  * HTML → 段落流转换器。EPUB 章节、MOBI 正文、书源抓取的正文三方共用。
  * CSS 全部丢弃，只保留段落 / 标题 / 分隔线。
  *
- * `<img>` / `<image>` / svg 内嵌图直接抹掉：产品只排文本，收进来会让分页按
- * 整栏宽 4:3 留空框，滚动时半页空白。封面走元数据，不走正文元素。
+ * [keepImages] 关着（默认）时 `<img>` / `<image>` / svg 内嵌图直接抹掉。
  *
- * [keepImages] 只给订阅文章开：文章页是滚动着看的（不分页），图是文章的一部分。
- * 从前订阅也共用不收图的这一版，文章页写好的显示图片那段代码一张图都没等到过。
+ * 开着时收成 [ContentElement.Image]：订阅文章（滚动着看，图是文章的一部分）、书（EPUB、MOBI、来源正文）都开。
+ * 书里的图收不收和「阅读页显示不显示」是两件事：解析一律收下，显示与否是阅读设置里的开关，由阅读页在排版时决定 ——
+ * 解析结果要进正文缓存，开关一拨就得重抓一遍的话，离线缓存的书就看不了了。
+ * 0.2.9 到 0.5.8 之间书一律不收图：那时阅读页不画图，分页却按整栏宽 4:3 给图留框，滚动时半页空白。
+ *
+ * [resolveImage] 只给 EPUB、MOBI：图的地址不是网址，是包里的路径（`../Images/1.jpg`）或记录号（`recindex`、
+ * `kindle:embed`），交给解析器自己换成它认得的资源 id。有它时 svg 里包着的 `<image>` 也收 —— 那是 EPUB 整页插画
+ * 的标准写法（svg 只是为了按页面等比缩放）；网页上的 svg 多是图标，订阅照旧整块丢掉。
+ * 没有它时按网页的规矩取地址（懒加载属性、相对地址按页面地址补全，见 [imageOf]）。
  *
  * 表情图（WordPress 的 wp-smiley 之类）不管收不收图，一律换回它的 alt 那个字、留在段落里（见 [emojiText]）。
  *
- * [keepBlocks]（默认跟 [keepImages] 一起，也就是只给订阅文章开）：代码块、列表、引用各成一种元素
+ * [keepBlocks]（默认跟 [keepImages] 一起；书显式关掉，等于只给订阅文章开）：代码块、列表、引用各成一种元素
  * （[ContentElement.Code] / [ContentElement.ListItem] / [ContentElement.Quote]），文章页按各自的样子排。
  * 从前它们全压成普通段落：代码块的换行、缩进一个不剩，挤成一行（「她和她的猫」那篇被反馈过）；
  * 列表没有圆点，引用和正文一个样。书不开 —— 阅读器只排段落，书里的这些照旧当段落。
@@ -26,6 +32,7 @@ import org.jsoup.nodes.TextNode
 class HtmlToElements(
     private val keepImages: Boolean = false,
     private val keepBlocks: Boolean = keepImages,
+    private val resolveImage: ((Element) -> String?)? = null,
 ) {
 
     fun convert(body: Element): List<ContentElement> {
@@ -115,8 +122,12 @@ class HtmlToElements(
                             }
                         }
                     }
-                    // svg 整块丢掉（里面的 image 也不收）
-                    "script", "style", "head", "svg" -> Unit
+                    // svg 整块丢掉；书（有 resolveImage）收里面包着的 image —— EPUB 的整页插画就是这么写的
+                    "svg" -> if (keepImages && resolveImage != null) {
+                        flushText()
+                        node.select("image, img").forEach { img -> imageOf(img)?.let { out += it } }
+                    }
+                    "script", "style", "head" -> Unit
                     else -> node.childNodes().forEach(::walk)
                 }
             }
@@ -158,7 +169,7 @@ class HtmlToElements(
          * 引用里再套代码块、列表的极少，按普通段落收进引用的字里。
          */
         private fun quote(blockquote: Element) {
-            val inner = HtmlToElements(keepImages = keepImages, keepBlocks = false).convert(blockquote)
+            val inner = HtmlToElements(keepImages = keepImages, keepBlocks = false, resolveImage = resolveImage).convert(blockquote)
             val text = inner
                 .filter { it is ContentElement.Paragraph || it is ContentElement.Heading }
                 .mapNotNull { it.textOrNull }
@@ -264,10 +275,14 @@ class HtmlToElements(
      * `data-src` / `data-original` 这类属性上；`src` 像真图就用它（少数派的 `src` 是按手机宽度缩过的版本，
      * `data-original` 是原图，动辄几 MB）。相对地址按页面地址补全，补不全的不要。
      * 一两像素的统计像素（feed 里常夹一个）也不要。
+     * 有 [resolveImage]（EPUB、MOBI）时地址交给它，上面这套网页的规矩不用。
      */
     private fun imageOf(img: Element): ContentElement.Image? {
         val tiny = sequenceOf("width", "height").any { img.attr(it).trim().toIntOrNull()?.let { n -> n <= TRACKING_PIXEL } == true }
         if (tiny) return null
+        resolveImage?.let { resolve ->
+            return resolve(img)?.let { ContentElement.Image(it, img.attr("alt").trim().ifEmpty { null }) }
+        }
         fun usable(name: String) = img.attr(name).trim().let { it.isNotEmpty() && !it.startsWith("data:", ignoreCase = true) }
         val lazy = LAZY_SRC_ATTRS.firstOrNull(::usable)
         // 有懒加载属性、src 又像占位图时才换：占位图的判断只看名字，没有别的地址可换时宁可信 src

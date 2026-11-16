@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.data.db.entity.ChapterEntity
+import com.radium.inkwell.data.db.entity.TocRow
 import com.radium.inkwell.reader.api.ReadPosition
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -78,5 +79,21 @@ class TocRemapTest {
         assertTrue(sameReadingToc(a, b))
         assertFalse(sameReadingToc(a, toc("第一章", "第二章", "第三章")))
         assertFalse(sameReadingToc(a, listOf(a[0], a[1].copy(variable = "{\"k\":1}"))))
+    }
+
+    /**
+     * 阅读页拿会话手里的整行目录和库里读回的轻量投影比（ReaderViewModel.observeToc）：
+     * 判断标准必须和整行那版一模一样 —— 投影版说「一样」，会话就不会去对齐，追更后点第 i 章打开的是旧目录的第 i 章。
+     */
+    @Test
+    fun `和投影比：标准同整行那版`() {
+        val a = toc("第一章", "第二章")
+        fun rows(list: List<ChapterEntity>) = list.map { TocRow(it.index, it.title, it.url, it.variable, it.isCached) }
+
+        assertTrue(sameReadingToc(a, rows(a.map { it.copy(isCached = true) })))
+        assertFalse(sameReadingToc(a, rows(toc("第一章", "第二章", "第三章"))))
+        assertFalse(sameReadingToc(a, rows(listOf(a[0], a[1].copy(variable = "{\"k\":1}")))))
+        assertFalse(sameReadingToc(a, rows(listOf(a[0], a[1].copy(url = "u/改了")))))
+        assertFalse(sameReadingToc(a, rows(listOf(a[0], a[1].copy(title = "第二章（修订）")))))
     }
 }

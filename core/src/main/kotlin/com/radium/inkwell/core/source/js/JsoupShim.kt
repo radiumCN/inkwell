@@ -323,6 +323,9 @@ class JsElements internal constructor(private val nodes: List<Node>) : JsArrayLi
 
     private fun wrapped(): List<JsElement> = nodes.map(::JsElement)
 
+    /** 全是元素时的那组元素（列表规则拿脚本交回的它们当节点，见 ScriptRuntime.evalForList）；混着文字节点为 null */
+    internal fun elementList(): List<Element>? = elements
+
     override fun size(): Int = nodes.size
 
     override fun get(index: Int): JsElement = JsElement(nodes[index])

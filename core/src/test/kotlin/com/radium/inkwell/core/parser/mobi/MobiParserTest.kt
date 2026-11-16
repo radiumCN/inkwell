@@ -3,7 +3,6 @@ package com.radium.inkwell.core.parser.mobi
 import com.radium.inkwell.core.model.ContentElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import java.io.File
@@ -29,7 +28,7 @@ class MobiParserTest {
             assertEquals(expectTitle, book.metadata.title)
             assertTrue(book.chapters.size > 5, "$name 章节数只有 ${book.chapters.size}")
             assertTrue(book.toc.isNotEmpty(), "$name 目录为空")
-            // 首尾章在 Gutenberg KF8 里常是整页插图，抹掉后允许空；能 load 不炸即可
+            // 首尾章在 Gutenberg KF8 里常是整页插图（只有一张图、没有字）；能 load 不炸即可
             book.loadChapter(0)
             book.loadChapter(book.chapters.lastIndex)
             // 至少有一章有实际文本段落
@@ -60,14 +59,31 @@ class MobiParserTest {
     }
 
     @Test
-    fun `kf8 cover loads and chapter images are dropped`() {
+    fun `kf8 cover loads and chapter images resolve to pdb records`() {
         MobiParser().open(fixture("pg11-kf8.mobi")).use { book ->
             assertNotNull(book.metadata.cover, "封面缺失")
             assertTrue(book.metadata.cover!!.data.size > 100)
-            val hasInlineImage = (0 until book.chapters.size).any { idx ->
-                book.loadChapter(idx).elements.any { it is ContentElement.Image }
+            val image = (0 until book.chapters.size).firstNotNullOfOrNull { idx ->
+                book.loadChapter(idx).elements.filterIsInstance<ContentElement.Image>().firstOrNull()
             }
-            assertFalse(hasInlineImage, "正文里不应再留下插图元素")
+            assertNotNull(image, "全书未解析出插图")
+            assertTrue(image.resourceId.startsWith("rec:"), image.resourceId)
+            val blob = assertNotNull(book.loadResource(image.resourceId), "插图 ${image.resourceId} 读不出来")
+            assertTrue(blob.mimeType!!.startsWith("image/"))
+        }
+    }
+
+    @Test
+    fun `mobi7 recindex images resolve to pdb records`() {
+        MobiParser().open(fixture("pg1342.mobi")).use { book ->
+            val images = (0 until book.chapters.size).flatMap { idx ->
+                book.loadChapter(idx).elements.filterIsInstance<ContentElement.Image>()
+            }
+            // 这本 MOBI7 带插图（Gutenberg 的插图版）；每一张都得读得出字节、是图片
+            images.forEach { img ->
+                val blob = assertNotNull(book.loadResource(img.resourceId), "插图 ${img.resourceId} 读不出来")
+                assertTrue(blob.mimeType!!.startsWith("image/"))
+            }
         }
     }
 

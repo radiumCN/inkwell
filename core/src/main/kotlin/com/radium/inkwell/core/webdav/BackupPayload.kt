@@ -137,6 +137,8 @@ data class BackupBook(
      * 老备份没有这个键 → 默认 false，读起来还是活的，不影响。
      */
     val deleted: Boolean = false,
+    /** 主动移出书架；保留阅读记录，不触发远端文件删除。 */
+    val removedFromShelf: Boolean = false,
 )
 
 @Serializable

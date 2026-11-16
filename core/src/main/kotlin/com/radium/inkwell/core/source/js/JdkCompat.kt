@@ -1,6 +1,8 @@
 package com.radium.inkwell.core.source.js
 
+import java.security.MessageDigest
 import java.util.Base64
+import java.util.zip.Inflater
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
@@ -17,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
  *
  * 我们的脚本沙箱只放行桥对象所在的包（[RhinoScriptRuntime.BRIDGE_ONLY]），`Packages`、`JavaImporter` 根本不存在，
  * 这类来源的正文一律是空的。**不放宽沙箱**：真把 JDK 类交给脚本，`getClass()`、反射、`Runtime` 的口子就又开了。
- * 改成在这个包里照 JDK 的样子写几样**纯计算**的替身 —— Base64、Arrays、String、Cipher 和三种密钥 / 参数规格，
+ * 改成在这个包里照 JDK 的样子写几样**纯计算**的替身 —— Base64、Arrays、String、Cipher 和三种密钥 / 参数规格、MessageDigest、Inflater、Thread.sleep，
  * 方法名、参数照 JDK，脚本不用改；真正的 JDK 对象都攥在这些类的私有字段里，不交给脚本。
  * 阅读跑在 Android 上，另有一批来源（连城读书、书耽、柚免费耽美……）导的是 `Packages.android.util`，
  * Base64 用的是 Android 那套 `decode(字节, 2)` / `encodeToString(字节, NO_WRAP)`，也照它做了（[AndroidBase64]）。
@@ -39,6 +41,38 @@ class JdkCompat {
     }
 
     fun string(bytes: ByteArray, charset: String): String = String(bytes, charset(charset))
+
+    /** `new String(字节, 起点, 长度, 编码)`：七猫接口源从 epub 的 zip 里一段一段切出文件名、正文 */
+    fun string(bytes: ByteArray, offset: Int, length: Int, charset: String): String =
+        String(bytes, offset, length, charset(charset))
+
+    /** `java.security.MessageDigest`：接口源拿它算签名（七猫的 MD5） */
+    fun messageDigest(algorithm: String): MessageDigestShim = MessageDigestShim(MessageDigest.getInstance(algorithm))
+
+    /** `java.util.zip.Inflater`：七猫接口源的正文是一份 epub，脚本自己读 zip 目录、逐个文件解压 */
+    fun inflater(nowrap: Boolean): InflaterShim = InflaterShim(Inflater(nowrap))
+
+    /** `java.net.URLEncoder` / `URLDecoder`：来源拿它按 GBK 转关键词、解开地址里的参数 */
+    fun urlEncode(text: String, charset: String): String = java.net.URLEncoder.encode(text, charset(charset))
+
+    fun urlDecode(text: String, charset: String): String = java.net.URLDecoder.decode(text, charset(charset))
+
+    /**
+     * `java.lang.Thread.sleep(毫秒)`：来源在两次请求之间随机停一会儿，免得被站点限流（八叉书库的目录）。
+     * 照停，但一次最多 [MAX_SLEEP_MS]；每 100 毫秒看一眼调用方还在不在 —— 脚本睡着时指令计数不走，
+     * 离开页面、换源取消了也得能停下（同 RhinoScriptRuntime 的取消检查）
+     */
+    fun sleep(ms: Long) {
+        var left = ms.coerceIn(0, MAX_SLEEP_MS)
+        while (left > 0) {
+            if (EngineJsHttp.currentJob()?.isActive == false) {
+                throw kotlinx.coroutines.CancellationException("脚本所在的引擎调用已取消")
+            }
+            val step = minOf(left, SLEEP_STEP_MS)
+            Thread.sleep(step)
+            left -= step
+        }
+    }
 
     fun base64Decoder(): Base64DecoderShim = Base64DecoderShim(Base64.getDecoder())
 
@@ -93,6 +127,11 @@ class JdkCompat {
          */
         val COMPAT_TRIGGERS = listOf("Packages", "JavaImporter", "importPackage", "importClass", "org.jsoup")
 
+        /** [sleep] 一次最多停多久：来源写的都是一秒以内的随机数，再长就是写错了 */
+        const val MAX_SLEEP_MS = 3_000L
+
+        private const val SLEEP_STEP_MS = 100L
+
         fun wanted(script: String, jsLib: String?): Boolean =
             COMPAT_TRIGGERS.any { script.contains(it) || jsLib?.contains(it) == true }
 
@@ -110,7 +149,11 @@ class JdkCompat {
     if (statics) for (var k in statics) f[k] = statics[k];
     return f;
   }
-  var Str = cls('String', function (a, b) { return arguments.length > 1 ? jdk.string(a, b) : jdk.string(a); });
+  var Str = cls('String', function (a, b, c, d) {
+    if (arguments.length > 3) return jdk.string(a, b | 0, c | 0, String(d));
+    if (arguments.length > 2) return jdk.string(a, b | 0, c | 0, 'UTF-8');
+    return arguments.length > 1 ? jdk.string(a, b) : jdk.string(a);
+  });
   // java.util.Base64 与 android.util.Base64 是同一个对象：两边的静态方法名不重叠，
   // 脚本把两个包都导进同一个 JavaImporter 时，谁后导进来都不会把另一套方法盖掉
   function slice(b, off, len) { return jdk.copyOfRange(b, off, off + len); }
@@ -146,6 +189,11 @@ class JdkCompat {
     return arguments.length > 1 ? jdk.iv(b, off, len) : jdk.iv(b);
   });
   var Gcm = cls('GCMParameterSpec', function (bits, b) { return jdk.gcm(bits, b); });
+  var Md = cls('MessageDigest', null, { getInstance: function (alg) { return jdk.messageDigest(String(alg)); } });
+  var Infl = cls('Inflater', function (nowrap) { return jdk.inflater(!!nowrap); });
+  var Thr = cls('Thread', null, { sleep: function (ms) { jdk.sleep(Number(ms) || 0); } });
+  var UrlEnc = cls('URLEncoder', null, { encode: function (s, enc) { return jdk.urlEncode(str(s), enc == null ? 'UTF-8' : String(enc)); } });
+  var UrlDec = cls('URLDecoder', null, { decode: function (s, enc) { return jdk.urlDecode(str(s), enc == null ? 'UTF-8' : String(enc)); } });
   // org.jsoup：Parser 只是个记号，parse 认出 xmlParser 就按 XML 解析
   function str(v) { return v == null ? '' : String(v); }
   function isParser(p) { return !!(p && p.__inkwellParser); }
@@ -167,7 +215,8 @@ class JdkCompat {
   var TxtNode = cls('TextNode', function (t) { return jdk.jsoupTextNode(str(t)); });
   var Elem = cls('Element', function (tag) { return jdk.jsoupElement(String(tag)); });
   var pkgs = {
-    java: { lang: { String: Str }, util: { Base64: B64, Arrays: Arr } },
+    java: { lang: { String: Str, Thread: Thr }, util: { Base64: B64, Arrays: Arr, zip: { Inflater: Infl } }, security: { MessageDigest: Md },
+      net: { URLEncoder: UrlEnc, URLDecoder: UrlDec } },
     javax: { crypto: { Cipher: Ciph, spec: { SecretKeySpec: Key, IvParameterSpec: Iv, GCMParameterSpec: Gcm } } },
     android: { util: { Base64: B64 } },
     org: { jsoup: { Jsoup: Jsp, Connection: Conn, nodes: { TextNode: TxtNode, Element: Elem }, parser: { Parser: Prs } } }
@@ -226,6 +275,60 @@ class GcmParameterShim internal constructor(private val tagBits: Int, private va
     fun getTLen(): Int = tagBits
 
     fun getIV(): ByteArray = iv.copyOf()
+}
+
+/** `MessageDigest`：只转交算摘要的几个方法 */
+class MessageDigestShim internal constructor(private val digest: MessageDigest) {
+    fun update(bytes: ByteArray) {
+        digest.update(bytes)
+    }
+
+    fun update(bytes: ByteArray, offset: Int, length: Int) {
+        digest.update(bytes, offset, length)
+    }
+
+    fun digest(): ByteArray = digest.digest()
+
+    fun digest(bytes: ByteArray): ByteArray = digest.digest(bytes)
+
+    fun reset() {
+        digest.reset()
+    }
+
+    fun getAlgorithm(): String = digest.algorithm
+}
+
+/** `Inflater`：解压到脚本给的字节数组里（脚本先 `Arrays.copyOf` 出一块，解完读它），方法同 JDK */
+class InflaterShim internal constructor(private val inflater: Inflater) {
+    fun setInput(bytes: ByteArray) {
+        inflater.setInput(bytes)
+    }
+
+    fun setInput(bytes: ByteArray, offset: Int, length: Int) {
+        inflater.setInput(bytes, offset, length)
+    }
+
+    fun inflate(out: ByteArray): Int = inflater.inflate(out)
+
+    fun inflate(out: ByteArray, offset: Int, length: Int): Int = inflater.inflate(out, offset, length)
+
+    fun finished(): Boolean = inflater.finished()
+
+    fun needsInput(): Boolean = inflater.needsInput()
+
+    fun getRemaining(): Int = inflater.remaining
+
+    fun getTotalIn(): Int = inflater.totalIn
+
+    fun getTotalOut(): Int = inflater.totalOut
+
+    fun reset() {
+        inflater.reset()
+    }
+
+    fun end() {
+        inflater.end()
+    }
 }
 
 /** `javax.crypto.Cipher`：真的那个攥在私有字段里，只转交加解密这几个方法 */
