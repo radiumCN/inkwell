@@ -474,8 +474,8 @@ fun BookshelfScreen(
                 }
                 add(
                     AppMenuItem(
-                        "从书架删除",
-                        summary = "本地文件与缓存将一并删除",
+                        "移出书架",
+                        summary = if (book.type == com.radium.inkwell.data.db.entity.BookType.NET) "保留阅读记录，可选清除章节缓存" else "保留本地文件",
                         onClick = { deleteTarget = book },
                     ),
                 )
@@ -638,7 +638,7 @@ fun BookshelfScreen(
                         add(BatchAction(MiuixIcons.Hide, "隐藏", onClick = { viewModel.setHiddenSelected(true) }))
                         add(BatchAction(MiuixIcons.Show, "取消隐藏", onClick = { viewModel.setHiddenSelected(false) }))
                     }
-                    add(BatchAction(MiuixIcons.Delete, "删除", onClick = { confirmBatchDelete = true }, destructive = true))
+                    add(BatchAction(MiuixIcons.Delete, "移出书架", onClick = { confirmBatchDelete = true }))
                 },
                 onHeightChange = { batchBarHeight = it },
             )
@@ -961,13 +961,11 @@ fun BookshelfScreen(
     }
 
     deleteTarget?.takeIf { it.stillVisible() }?.let { book ->
-        AppAlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = "删除书籍",
-            text = "确定从书架删除《${book.title}》吗？本地文件与缓存将一并删除。",
-            confirmText = "删除",
-            onConfirm = {
-                viewModel.deleteBook(book.id)
+        RemoveFromShelfDialog(
+            books = listOf(book),
+            onDismiss = { deleteTarget = null },
+            onRemove = { clearFiles ->
+                viewModel.removeBooks(listOf(book.id), clearFiles)
                 deleteTarget = null
             },
         )
@@ -1006,13 +1004,11 @@ fun BookshelfScreen(
     }
 
     if (confirmBatchDelete) {
-        AppAlertDialog(
-            onDismissRequest = { confirmBatchDelete = false },
-            title = "删除书籍",
-            text = "确定从书架删除选中的 ${selected.size} 本吗？本地文件与缓存将一并删除。",
-            confirmText = "删除",
-            onConfirm = {
-                viewModel.deleteSelected()
+        RemoveFromShelfDialog(
+            books = allBooks.filter { it.id in selected && it.stillVisible() },
+            onDismiss = { confirmBatchDelete = false },
+            onRemove = { clearFiles ->
+                viewModel.removeBooks(selected.toList(), clearFiles)
                 confirmBatchDelete = false
             },
         )

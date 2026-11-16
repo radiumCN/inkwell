@@ -10,6 +10,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -768,7 +769,8 @@ fun ReaderScreen(
         Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = Dimens.touchTarget)
+                .then(if (overlay.menuVisible) Modifier.statusBarsPadding() else Modifier)
+                .padding(top = if (overlay.menuVisible) Dimens.toolbarHeight + Dimens.gapS else Dimens.touchTarget)
                 .semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             AnimatedVisibility(
@@ -802,6 +804,7 @@ fun ReaderScreen(
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },
+            onRefreshChapter = { viewModel.refreshCurrentChapter() },
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onDismiss = { viewModel.toggleMenu() },
             onSwipePage = { dir ->

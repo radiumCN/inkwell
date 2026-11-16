@@ -52,6 +52,7 @@ val appModule = module {
                 InkwellDb.MIGRATION_18_19,
                 InkwellDb.MIGRATION_19_20,
                 InkwellDb.MIGRATION_20_21,
+                InkwellDb.MIGRATION_21_22,
             )
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。

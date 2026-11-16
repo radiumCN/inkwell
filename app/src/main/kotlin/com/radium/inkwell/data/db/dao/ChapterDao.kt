@@ -51,6 +51,9 @@ interface ChapterDao {
     @Query("UPDATE chapter SET isCached = :cached WHERE bookId = :bookId AND url = :url")
     suspend fun markCachedByUrl(bookId: String, url: String, cached: Boolean)
 
+    @Query("UPDATE chapter SET isCached = 0 WHERE bookId = :bookId")
+    suspend fun markAllUncached(bookId: String)
+
     @Query("DELETE FROM chapter WHERE bookId = :bookId")
     suspend fun deleteByBook(bookId: String)
 }

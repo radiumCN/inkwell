@@ -15,6 +15,34 @@ import kotlin.test.assertTrue
  */
 class SyncedBookTest {
 
+    @Test
+    fun `移出书架同步保留文件与阅读记录且不当成远端删除`() {
+        val existing = local(readChapter = 12).copy(localPath = "/books/kept.txt")
+        val synced = applySyncedBook(existing, remote(updatedAt = 200).copy(removedFromShelf = true))
+        assertFalse(synced.entity.inShelf)
+        assertTrue(synced.entity.removedFromShelf)
+        assertFalse(synced.deletedRemotely)
+        assertEquals(existing.localPath, synced.entity.localPath)
+        assertEquals(12, synced.entity.readChapterIndex)
+    }
+
+    @Test
+    fun `主动移出不属于试读且不能被旧备份重新上架`() {
+        val existing = local(updatedAt = 200, readChapter = 12, inShelf = false).copy(removedFromShelf = true)
+        val synced = applySyncedBook(existing, remote(updatedAt = 100))
+        assertFalse(synced.entity.inShelf)
+        assertTrue(synced.entity.removedFromShelf)
+        assertEquals(12, synced.entity.readChapterIndex)
+    }
+
+    @Test
+    fun `另一台重新加入后可以同步恢复到书架`() {
+        val existing = local(updatedAt = 100, inShelf = false).copy(removedFromShelf = true)
+        val synced = applySyncedBook(existing, remote(updatedAt = 200))
+        assertTrue(synced.entity.inShelf)
+        assertFalse(synced.entity.removedFromShelf)
+    }
+
     private fun local(
         source: String = "s",
         readChapter: Int = 0,

@@ -595,6 +595,21 @@ class BookshelfViewModel(
 
     // ---- 单本操作（长按菜单） ----
 
+    fun removeBooks(ids: List<String>, clearFiles: Boolean) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                bookRepo.removeFromShelf(ids, clearFiles)
+                clearSelection()
+                messages.emit("已移出书架${if (ids.size > 1) " ${ids.size} 本" else ""}，阅读记录已保留")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit("移出书架或清理文件失败：${e.message ?: "请重试"}")
+            }
+        }
+    }
+
     fun deleteBook(id: String) {
         viewModelScope.launch { bookRepo.deleteBook(id) }
     }

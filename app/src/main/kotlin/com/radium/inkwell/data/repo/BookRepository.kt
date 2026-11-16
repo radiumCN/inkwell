@@ -87,12 +87,15 @@ class BookRepository(
      * 同 [shelfLocalBookIdByKey]，有本机文件的那本优先 —— 同名的既有真书、又有同步来的占位时，
      * 导入该撞上真书（跳过），而不是去补那条占位。
      */
-    private suspend fun shelfLocalBookByKey(title: String, author: String?): BookEntity? {
+    private suspend fun shelfLocalBookByKey(title: String, author: String?, includeRemoved: Boolean = false): BookEntity? {
         val key = bookKey(title, author)
-        val matches = bookDao.getAllVisible().filter {
-            it.type != BookType.NET && bookKey(it.title, it.author) == key
+        val matches = (if (includeRemoved) bookDao.getAll() else bookDao.getAllVisible()).filter {
+            !it.deleted && (it.inShelf || (includeRemoved && it.removedFromShelf)) &&
+                it.type != BookType.NET && bookKey(it.title, it.author) == key
         }
-        return matches.firstOrNull { it.hasLocalFile() } ?: matches.firstOrNull()
+        return matches.firstOrNull { it.inShelf && it.hasLocalFile() }
+            ?: matches.firstOrNull { it.inShelf }
+            ?: matches.firstOrNull { it.hasLocalFile() } ?: matches.firstOrNull()
     }
 
     /** 本机有这本书的文件。WebDAV 同步来的本地书只有书行（文件不进备份），localPath 为 null */
@@ -203,13 +206,15 @@ class BookRepository(
             }.ifBlank { "未命名" }
             val author = book.metadata.author ?: ""
 
-            shelfLocalBookByKey(title, author)?.let { existing ->
+            shelfLocalBookByKey(title, author, includeRemoved = true)?.let { existing ->
                 if (existing.hasLocalFile()) {
+                    if (existing.removedFromShelf) commitToShelf(existing.id)
                     // 刚才 open 时 txt 已按 dest 写了解析缓存；dest 是这次导入的新路径，删了就是孤儿
                     parserRegistry.evictCaches(dest)
                     dest.delete()
                     coverFile?.delete()
-                    return@use LocalImportResult.AlreadyOnShelf(existing.id)
+                    return@use if (existing.removedFromShelf) LocalImportResult.Added(existing.id)
+                    else LocalImportResult.AlreadyOnShelf(existing.id)
                 }
                 // 书架上那本只是**占位**：别的设备同步来的本地书只有书行，文件不进备份。
                 // 「换设备后本地书需要重新导入」说的就是这一步 —— 从前这里当成「已在书架」跳过、
@@ -219,6 +224,9 @@ class BookRepository(
                 // 只改本机才有意义的列，不动 updatedAt：书名/分组这些同步元数据没变，
                 // 盖新时间戳只会让这台设备在下次合并里无故「赢」一回。
                 val relinked = fresh.copy(
+                    inShelf = true,
+                    removedFromShelf = false,
+                    updatedAt = if (fresh.removedFromShelf) now else fresh.updatedAt,
                     type = type,
                     localPath = dest.absolutePath,
                     coverPath = coverPath,
@@ -263,7 +271,7 @@ class BookRepository(
         val fresh = bookDao.getById(id) ?: return
         if (fresh.inShelf && !fresh.deleted) return
         bookDao.update(
-            fresh.copy(inShelf = true, deleted = false, updatedAt = System.currentTimeMillis()),
+            fresh.copy(inShelf = true, deleted = false, removedFromShelf = false, updatedAt = System.currentTimeMillis()),
         )
     }
 
@@ -275,6 +283,8 @@ class BookRepository(
     suspend fun discardUnshelved(id: String) = withContext(Dispatchers.IO) {
         val book = bookDao.getById(id) ?: return@withContext
         if (book.inShelf) return@withContext
+        // 移出后的再次试读不加入，仍保留用户原有文件与阅读记录。
+        if (book.removedFromShelf) return@withContext
         deleteLocalFiles(book)
         val now = System.currentTimeMillis()
         db.withWriteTransaction {
@@ -286,6 +296,31 @@ class BookRepository(
     }
 
     suspend fun deleteBook(id: String) = deleteBooks(listOf(id))
+
+    /** 移出与删除分开：目录、阅读记录和书内规则始终保留，可选清理本机文件/缓存。 */
+    suspend fun removeFromShelf(ids: Collection<String>, clearFiles: Boolean = false) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        db.withWriteTransaction {
+            ids.distinct().forEach { id ->
+                val book = bookDao.getById(id) ?: return@forEach
+                if (!book.deleted) bookDao.removeFromShelf(id, now)
+            }
+        }
+        if (clearFiles) {
+            ids.distinct().forEach { id ->
+                val book = bookDao.getById(id)?.takeIf { it.removedFromShelf && !it.inShelf } ?: return@forEach
+                if (book.type == BookType.NET) cache.clear(id) else deleteLocalFiles(book)
+                db.withWriteTransaction {
+                    chapterDao.markAllUncached(id)
+                    if (book.type != BookType.NET) {
+                        bookDao.getById(id)?.takeIf { it.removedFromShelf && !it.inShelf }?.let {
+                            bookDao.update(it.copy(localPath = null, coverPath = null))
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * 删一批书。书架多选删除走这里：从前逐本调 [deleteBook]，每本一个事务，

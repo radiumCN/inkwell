@@ -222,9 +222,12 @@ class ChapterContentCache(private val root: File) {
         val tmp = File.createTempFile("tmp", ".part", target.parentFile)
         try {
             tmp.writeText(text)
-            if (!tmp.renameTo(target)) {
-                target.delete()
-                if (!tmp.renameTo(target)) target.writeText(text)
+            // 刷新失败时必须留住原文，不能先删目标再重试改名。
+            try {
+                java.nio.file.Files.move(tmp.toPath(), target.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(tmp.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             }
         } finally {
             if (tmp.exists()) tmp.delete()

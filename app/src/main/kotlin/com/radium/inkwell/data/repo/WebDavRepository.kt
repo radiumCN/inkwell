@@ -236,7 +236,7 @@ class WebDavRepository(
         // 试读未上架不进备份：从没成为用户书架上的书，同步出去只会在别的设备
         // 冒出一本看不见的书，或在用户点「不加入」之后变成凭空墓碑。
         // 墓碑仍要带走（inShelf 可能是 false —— 删过又试读过），合并靠它表达「删过」。
-        books = bookDao.getAll().filter { it.inShelf || it.deleted }.map { b ->
+        books = bookDao.getAll().filter { it.inShelf || it.deleted || it.removedFromShelf }.map { b ->
             BackupBook(
                 id = b.id, type = b.type, title = b.title, author = b.author,
                 intro = b.intro,
@@ -250,6 +250,7 @@ class WebDavRepository(
                 groupName = b.groupName,
                 hidden = b.hidden,
                 deleted = b.deleted,
+                removedFromShelf = b.removedFromShelf,
             )
         },
         // 逐条取完整行：SELECT * 全表会把大 JSON 塞进 CursorWindow（~2MB）直接闪退。
@@ -377,7 +378,8 @@ class WebDavRepository(
                         groupName = b.groupName, hidden = b.hidden,
                         // 墓碑也要落地：别把别的设备删掉的书当成新书插回来
                         deleted = b.deleted,
-                        inShelf = !b.deleted,
+                        inShelf = !b.deleted && !b.removedFromShelf,
+                        removedFromShelf = b.removedFromShelf,
                     )
                 )
                 applied++
@@ -444,7 +446,7 @@ internal fun applySyncedBook(existing: BookEntity, b: BackupBook): SyncedBook {
     // 这台只是之后点开看了一眼。试读行的 updatedAt 是点开那一刻盖的，按 LWW 它永远比远端新 ——
     // 这本书在这台设备上就一直看不见，每次同步还都报「合并了 1 项远端更新」。
     // 试读不算用户对「在不在架」表过态，在架状态与元数据直接听远端的。
-    val previewOnly = !existing.inShelf && !existing.deleted && !b.deleted
+    val previewOnly = !existing.inShelf && !existing.deleted && !existing.removedFromShelf && !b.deleted
     val takeMeta = previewOnly || b.updatedAt > existing.updatedAt
     val sameSource = existing.sourceId == b.sourceId && existing.bookUrl == b.bookUrl
     // 书源身份跟进度绑在一起裁：章号只在记下它的那个源的目录里有意义，不能拿 A 源的章号配 B 源的目录。
@@ -467,7 +469,8 @@ internal fun applySyncedBook(existing: BookEntity, b: BackupBook): SyncedBook {
             deleted = b.deleted,
             // 备份里的都是真正上过架的书（或墓碑）。本地若还是试读行，
             // 被远端一份活书盖过来时必须上架，否则书架上永远看不见。
-            inShelf = !b.deleted,
+            inShelf = !b.deleted && !b.removedFromShelf,
+            removedFromShelf = b.removedFromShelf,
         )
     } else {
         existing

@@ -65,6 +65,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import com.radium.inkwell.ui.components.AppFilterChip
 import com.radium.inkwell.ui.components.AppIconButton
+import com.radium.inkwell.ui.components.AppDropdownMenu
+import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppSlider
 import androidx.compose.animation.AnimatedVisibility
 import com.radium.inkwell.ui.components.SheetPageHeader
@@ -154,6 +156,7 @@ import org.koin.compose.koinInject
 import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Sort
+import top.yukonga.miuix.kmp.icon.extended.More
 
 @Composable
 fun ReaderMenu(
@@ -171,6 +174,7 @@ fun ReaderMenu(
     onSetTextSelection: (Boolean) -> Unit,
     typography: TypographyActions,
     onSearchSources: () -> Unit,
+    onRefreshChapter: () -> Unit,
     onToggleAutoFlip: () -> Unit,
     onDismiss: () -> Unit,
     onSwipePage: (FlipDirection) -> Unit,
@@ -180,6 +184,7 @@ fun ReaderMenu(
 ) {
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
 
     // 菜单现在常驻组合（为了能播退场动画），所以关菜单时得把面板一起收掉 ——
     // 否则下次呼出菜单，上回没关的目录会自己冒出来
@@ -187,6 +192,7 @@ fun ReaderMenu(
         if (!visible) {
             showToc = false
             showSettings = false
+            showMore = false
         }
     }
     LaunchedEffect(showToc, showSettings) {
@@ -283,6 +289,39 @@ fun ReaderMenu(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            if (overlay.refreshingChapter || overlay.chapterRefreshFailed) {
+                                Text(
+                                    if (overlay.refreshingChapter) "正在重新获取本章…" else "获取失败，原内容已保留 · 更多中重试",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = scheme.onSurfaceVariantSummary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (session.isNetBook) {
+                            Box {
+                                AppIconButton(onClick = { showMore = true }) {
+                                    Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
+                                }
+                                AppDropdownMenu(
+                                    expanded = showMore,
+                                    onDismissRequest = { showMore = false },
+                                    items = listOf(
+                                        AppMenuItem(
+                                            text = when {
+                                                overlay.refreshingChapter -> "正在重新获取本章…"
+                                                overlay.chapterRefreshFailed -> "重试获取本章"
+                                                else -> "重新获取本章"
+                                            },
+                                            summary = "从当前书源获取最新内容",
+                                            enabled = !overlay.refreshingChapter && !overlay.changingSource &&
+                                                !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
+                                            onClick = onRefreshChapter,
+                                        ),
+                                    ),
+                                )
+                            }
                         }
                     }
                 }

@@ -85,4 +85,6 @@ data class BookEntity(
      * 默认 true：老数据、导入、显式加架都是真正在架上的书。只有预览直读会写成 false。
      */
     val inShelf: Boolean = true,
+    /** 用户主动移出书架，保留文件、目录与进度；与从未加入的试读区分，参与同步。 */
+    val removedFromShelf: Boolean = false,
 )

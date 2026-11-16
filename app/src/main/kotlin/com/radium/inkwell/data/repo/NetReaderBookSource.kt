@@ -76,6 +76,27 @@ class NetReaderBookSource(
      */
     private val loads = SingleFlight<String, ChapterContent>(Dispatchers.IO)
 
+    /** 显式刷新必须绕过磁盘缓存和正在进行的普通加载；抓取失败不触碰原文。 */
+    suspend fun fetchFreshChapter(index: Int): ChapterContent {
+        val toc = toc
+        val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
+        val url = chapter.url ?: error("章节缺少地址")
+        val remote = engine.getContent(
+            rule, url, toc.urls,
+            chapterVariable = chapter.variable,
+            chapterTitle = chapter.title.orEmpty(),
+            chapterIndex = index,
+            variables = bookVariables,
+        )
+        return ChapterContent(remote.elements)
+    }
+
+    /** 新正文成功排版后才替换缓存，URL 在发起请求时固定，目录插章不会写错章。 */
+    suspend fun cacheFreshChapter(url: String, content: ChapterContent) {
+        check(!cacheWritesHeld) { "正在切换书源" }
+        store(url, content)
+    }
+
     override suspend fun loadChapter(index: Int): ChapterContent {
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
