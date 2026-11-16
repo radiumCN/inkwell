@@ -5,10 +5,11 @@ agp = "9.5.0"
 kotlin = "2.4.21"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
 # 2.3.10 起已兼容 Kotlin 2.4 的默认 module name（`${group}:${name}` 里的冒号）。
-# 复核过（2026-09-16）：KSP 最新仍是 2.3.12，没有 2.4.x 号；跟 Kotlin 2.4.2x 搭配即可。
-ksp = "2.3.12"
+# 2.3.14 修复并发执行时库符号丢失的回归，跳过有该问题的 2.3.13；继续搭配 Kotlin 2.4.2x。
+ksp = "2.3.14"
 coroutines = "1.11.0"
-serialization = "1.12.0"
+# 1.13.0 撤回 1.12.0 对序列化异常的包装行为，并改善 JsonElement.toString 性能。
+serialization = "1.13.0"
 # **稳定的 compose-bom**（Compose 1.12.x）。从前用 compose-bom-alpha（1.13 beta）是为了 M3 Expressive，
 # 那批 API 只活在 material3 alpha 通道；UI 换成 Miuix、material3 删掉之后这条理由没了。
 # 回稳定版的直接理由：Miuix 0.9.4 是对着 Compose 1.12 构建的，跑在 1.13 beta 上等于拿它没测过的二进制组合碰运气。
