@@ -5,6 +5,10 @@ import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.RandomAccessFile
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,6 +120,62 @@ class RunLogRecorder(private val context: Context) {
             tmp.delete()
         }
         out
+    }
+
+    /** A separate, bounded export for feedback; never uploads the raw developer export. */
+    suspend fun exportForFeedback(): File = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "feedback").apply { mkdirs() }
+        dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > TimeUnit.DAYS.toMillis(1) }
+            ?.forEach { it.delete() }
+        val out = File.createTempFile("feedback-", ".zip", dir)
+        val snapshot = File.createTempFile("snapshot-", ".txt", dir)
+        var process: Process? = null
+        try {
+            process = ProcessBuilder(
+                "logcat", "-d", "-t", "1500", "-b", "main,system,crash", "-v", "threadtime",
+                "--pid=${android.os.Process.myPid()}",
+            ).redirectErrorStream(true).redirectOutput(snapshot).start()
+            check(process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0) { "无法获取当前运行日志" }
+            coroutineContext.ensureActive()
+            var remaining = 2 * 1024 * 1024
+            ZipOutputStream(out.outputStream().buffered()).use { zip ->
+                fun add(name: String, text: String) {
+                    zip.putNextEntry(ZipEntry(name))
+                    zip.write(FeedbackLogSanitizer.sanitize(text).toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+                add("device.txt", deviceInfo() + "\n日志经过裁剪及基础脱敏，可能仍包含书名等信息。\n")
+                // Read file tails: recent errors and the previous crash matter most. Files may be rotating.
+                val files = listOf(snapshot) + logFiles().sortedWith(
+                    compareByDescending<File> { it.name.endsWith(".crash") }.thenByDescending { it.lastModified() },
+                )
+                for (file in files) {
+                    coroutineContext.ensureActive()
+                    if (remaining <= 0) break
+                    val text = runCatching {
+                        RandomAccessFile(file, "r").use { input ->
+                            val count = minOf(input.length(), 256L * 1024, remaining.toLong()).toInt()
+                            val offset = input.length() - count
+                            input.seek(offset)
+                            val bytes = ByteArray(count)
+                            input.readFully(bytes)
+                            remaining -= count
+                            val raw = bytes.toString(Charsets.UTF_8)
+                            if (offset > 0) "[仅保留文件末尾]\n" + raw.substringAfter('\n', "") else raw
+                        }
+                    }.getOrElse { if (file == snapshot) throw it else "[文件已轮转，未能读取]\n" }
+                    add(if (file == snapshot) "logcat-snapshot.txt" else file.name, text)
+                }
+            }
+            check(out.length() <= 5L * 1024 * 1024) { "日志附件超过 5MB" }
+            out
+        } catch (e: Throwable) {
+            out.delete()
+            throw e
+        } finally {
+            process?.destroyForcibly()
+            snapshot.delete()
+        }
     }
 
     /**

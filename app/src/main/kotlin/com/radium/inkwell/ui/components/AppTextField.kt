@@ -185,6 +185,7 @@ fun CompactTextField(
     modifier: Modifier = Modifier,
     label: String? = null,
     onDone: (() -> Unit)? = null,
+    readOnly: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val style = rememberFieldStyle(interactionSource)
@@ -193,6 +194,7 @@ fun CompactTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
+        readOnly = readOnly,
         textStyle = textStyle,
         cursorBrush = SolidColor(style.cursor),
         interactionSource = interactionSource,
@@ -242,6 +244,7 @@ fun CompactTextArea(
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supportingText: String? = null,
+    readOnly: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val style = rememberFieldStyle(interactionSource, isError = isError)
@@ -251,6 +254,7 @@ fun CompactTextArea(
             value = value,
             onValueChange = onValueChange,
             singleLine = false,
+            readOnly = readOnly,
             textStyle = textStyle,
             cursorBrush = SolidColor(style.cursor),
             interactionSource = interactionSource,
