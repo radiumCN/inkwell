@@ -176,8 +176,14 @@ fun PageFlipContainer(
 
     fun resetFlipState() {
         direction = null
-        offset.floatValue = 0f
         settling = false
+    }
+
+    // direction 在组合阶段切换图层，offset 则由 graphicsLayer 延后读取。收尾时立刻归零，
+    // 旧的动画图层可能还没被移除，就先回到原位，把已经滑走的旧页闪回来一帧。
+    // 等静止页的组合成功提交、动画图层卸下后再清位移；新手势仍在起手时自行设初值。
+    SideEffect {
+        if (direction == null) offset.floatValue = 0f
     }
 
     fun holdAfterCommit(dir: FlipDirection) {
