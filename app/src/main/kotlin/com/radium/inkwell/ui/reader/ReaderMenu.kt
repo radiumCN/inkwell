@@ -432,6 +432,7 @@ fun ReaderMenu(
                 dragging = dragging,
                 onDragging = { dragging = it },
                 settings = session.settings,
+                isNetBook = session.isNetBook,
                 onUpdate = onUpdateSettings,
                 onPreview = onPreviewSettings,
                 onCommit = onCommitSettings,
@@ -949,6 +950,7 @@ private fun TypographyPanel(
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
     settings: ReaderSettings,
+    isNetBook: Boolean,
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
@@ -1006,7 +1008,7 @@ private fun TypographyPanel(
                         TypesetTab(settings, onUpdate)
                     }
                     SettingsPage.Flip -> FlipTab(settings, onUpdate)
-                    SettingsPage.More -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+                    SettingsPage.More -> MoreTab(settings, isNetBook, onUpdate, textSelectionEnabled, onTextSelectionChange)
                 }
             }
         }
@@ -1650,19 +1652,21 @@ private val TAP_ZONE_POSITIONS = listOf(
 @Composable
 private fun MoreTab(
     settings: ReaderSettings,
+    isNetBook: Boolean,
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
-    // 默认关、和从前一样只排文字。开了就地重排（停在同一个字上），说明随开关换：
-    // 关着说开了会怎样；开着提醒流量，顺带交代长按看大图（不说没人知道）
+    // 本地书默认显示，在线书默认关闭；两个开关各自记忆，调整后按同一字符位置重排。
     ReaderGroup("图片") {
         SwitchRow(
             title = "正文显示图片",
-            subtitle = if (settings.showImages) {
-                "在线书的图片要另外下载，会多用一些流量。长按图片可以看大图"
+            subtitle = if (isNetBook) {
+                if (settings.showImages) "在线书图片需要下载，会使用流量。长按图片可以看大图"
+                else "当前只显示文字。打开后显示在线书插图，会使用流量"
             } else {
-                "关着时只排文字。打开后，书里和在线章节里的插图排进正文"
+                if (settings.showImages) "显示本地书插图，无需联网。长按图片可以看大图"
+                else "当前只显示文字。打开后显示本地书插图，无需联网"
             },
             checked = settings.showImages,
             onCheckedChange = { onUpdate(settings.copy(showImages = it)) },

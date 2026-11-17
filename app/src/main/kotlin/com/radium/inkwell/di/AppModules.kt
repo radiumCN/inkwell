@@ -135,6 +135,7 @@ val appModule = module {
     single { BookSourceRepository(get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { com.radium.inkwell.data.repo.LocalFolderScanner(androidContext()) }
+    single { com.radium.inkwell.data.repo.LocalFolderLibrary(androidContext(), get(), get()) }
     single { NetBookRepository(get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
@@ -142,7 +143,7 @@ val appModule = module {
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
-    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
         ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }

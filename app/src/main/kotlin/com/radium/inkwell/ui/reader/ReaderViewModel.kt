@@ -373,7 +373,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             loadSession()
             readerPrefs.settings.collect { s ->
-                _state.value = _state.value.copy(settings = s)
+                _state.value = _state.value.copy(settings = settingsForBook(s))
             }
         }
         viewModelScope.launch {
@@ -517,6 +517,7 @@ class ReaderViewModel(
             // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
             _state.value = _state.value.copy(
+                settings = settingsForBook(readerPrefs.settings.value),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -576,6 +577,7 @@ class ReaderViewModel(
                 progressHeld = b.type == BookType.NET
             }
             _state.value = _state.value.copy(
+                settings = settingsForBook(readerPrefs.settings.value),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -760,8 +762,15 @@ class ReaderViewModel(
     /** UI 层按 App 主题模式 + 系统日夜算出后调这个，阅读纸张随之切日/夜槽 */
     fun setDarkActive(dark: Boolean) = readerPrefs.setDarkActive(dark)
 
+    private fun settingsForBook(settings: ReaderSettings): ReaderSettings =
+        if (book != null && book?.type != BookType.NET) settings.copy(showImages = settings.localShowImages) else settings
+
+    private suspend fun persistSettings(settings: ReaderSettings) {
+        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET)
+    }
+
     fun updateSettings(settings: ReaderSettings) {
-        viewModelScope.launch { readerPrefs.update(settings) }
+        viewModelScope.launch { persistSettings(settings) }
     }
 
     /**
@@ -789,7 +798,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             fontStore.import(uri)
                 .onSuccess { font ->
-                    readerPrefs.update(_state.value.settings.copy(fontId = font.id))
+                    persistSettings(_state.value.settings.copy(fontId = font.id))
                     messageBus.emit("已导入字体「${font.label}」")
                 }
                 .onFailure { messageBus.emit("导入失败：${it.message ?: "未知错误"}") }
@@ -801,7 +810,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             val current = _state.value.settings
             if (current.fontId == font.id) {
-                readerPrefs.update(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
+                persistSettings(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
             }
             fontStore.delete(font)
             messageBus.emit("已删除字体「${font.label}」")

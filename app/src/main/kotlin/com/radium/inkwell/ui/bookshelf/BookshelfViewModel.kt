@@ -56,6 +56,7 @@ class BookshelfViewModel(
     private val sourceRepo: com.radium.inkwell.data.repo.BookSourceRepository,
     private val chapterDao: com.radium.inkwell.data.db.dao.ChapterDao,
     private val folderScanner: LocalFolderScanner,
+    private val folderLibrary: com.radium.inkwell.data.repo.LocalFolderLibrary,
     private val rssRepo: com.radium.inkwell.data.repo.RssRepository,
 ) : ViewModel() {
 
@@ -348,11 +349,9 @@ class BookshelfViewModel(
      */
     private val collapseHiddenOnBackground = object : DefaultLifecycleObserver {
         override fun onStop(owner: LifecycleOwner) = collapseHiddenAll()
+        override fun onStart(owner: LifecycleOwner) { scanWatchedFolders() }
     }
 
-    init {
-        ProcessLifecycleOwner.get().lifecycle.addObserver(collapseHiddenOnBackground)
-    }
 
     override fun onCleared() {
         ProcessLifecycleOwner.get().lifecycle.removeObserver(collapseHiddenOnBackground)
@@ -637,7 +636,7 @@ class BookshelfViewModel(
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
 
     fun importBooks(uris: List<Uri>) {
-        if (uris.isEmpty()) return
+        if (uris.isEmpty() || _importing.value) return
         viewModelScope.launch {
             _importing.value = true
             var ok = 0
@@ -667,6 +666,55 @@ class BookshelfViewModel(
         }
     }
 
+    val watchedFolders = folderLibrary.folders
+    private var watchedScanJob: Job? = null
+    private val _scanningFolders = MutableStateFlow(false)
+    val scanningFolders = _scanningFolders.asStateFlow()
+    fun scanWatchedFolders(manual: Boolean = false) {
+        if (watchedScanJob?.isActive == true) return
+        watchedScanJob = viewModelScope.launch {
+            _scanningFolders.value = true
+            try {
+                val results = folderLibrary.scan()
+                results.forEach(messages::emit)
+                if (manual && results.isEmpty()) messages.emit("扫描完成，没有新书")
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { messages.emit("扫描目录失败：${e.message?.take(80)}")
+            } finally { _scanningFolders.value = false }
+        }
+    }
+    init {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(collapseHiddenOnBackground)
+    }
+
+    fun setWatchedFolderEnabled(uri: String, on: Boolean) {
+        viewModelScope.launch {
+            runCatching { folderLibrary.setEnabled(uri, on) }
+                .onSuccess { if (on) scanWatchedFolders() }
+                .onFailure { if (it is CancellationException) throw it; messages.emit("保存目录设置失败") }
+        }
+    }
+    fun removeWatchedFolder(uri: String) {
+        viewModelScope.launch {
+            runCatching { folderLibrary.remove(uri) }
+                .onFailure { if (it is CancellationException) throw it; messages.emit("移除目录失败") }
+        }
+    }
+    fun importFolder(state: FolderImportState.Ready, grouped: Boolean, watch: Boolean) {
+        if (_importing.value) return
+        _importing.value = true
+        viewModelScope.launch {
+            try {
+                val selected = state.books.filter { it.uri in state.selected }
+                val result = folderLibrary.importSelection(state.treeUri, state.folderName, selected, state.books, grouped, watch)
+                messages.emit(result.message + if (watch) "；已开启目录自动扫描" else "")
+                if (watch) scanWatchedFolders()
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { messages.emit("导入目录失败：${e.message?.take(80)}")
+            } finally { _importing.value = false }
+        }
+    }
+
     // ---------- 选文件夹导入 ----------
 
     private val _folderImport = MutableStateFlow<FolderImportState?>(null)
@@ -677,9 +725,7 @@ class BookshelfViewModel(
     /**
      * 选好文件夹：先开面板转圈（「正在查找… 已找到 N 本」），找完列出来让人勾。
      *
-     * 「已在书架」按文件名和书架上本地书的书名比（[FolderBooks.titleKey]），比上的默认不勾。只是预判：
-     * EPUB 的书名在文件里、比不出来也不要紧，真正导入时照旧按「书名 + 作者」再挡一次（见 BookRepository.importLocalBook）。
-     * **隐藏的书不拿来比**：面板上标一个「已在书架」等于说出了「这本藏起来了」（同书架别处，平时一个字不提隐藏）。
+     * 预览不靠文件名判断重复：确认后由仓库按书名与作者判断，避免误跳过尚未导入的 EPUB。
      */
     fun scanFolder(treeUri: Uri) {
         folderScanJob?.cancel()
@@ -690,11 +736,13 @@ class BookshelfViewModel(
                     // 在 IO 线程上回调；面板已经关了（值不再是 Scanning）就别再把它开回来
                     _folderImport.update { if (it is FolderImportState.Scanning) FolderImportState.Scanning(found) else it }
                 }
-                val shelfKeys = allBooks.value
-                    .filter { it.type != BookType.NET && !it.hidden }
-                    .mapTo(HashSet()) { FolderBooks.titleKey(it.title) }
-                val onShelf = scan.books.filter { FolderBooks.titleKey(it.name) in shelfKeys }.mapTo(HashSet()) { it.uri }
+                // EPUB 文件名未必等于元数据书名，单靠文件名也无法确认作者。
+                // 不在预览里把疑似同名书默认排除，实际导入时由仓库按书名与作者去重。
+                val onShelf = emptySet<Uri>()
                 _folderImport.value = FolderImportState.Ready(
+                    treeUri = treeUri,
+                    autoScan = watchedFolders.value.any { it.uri == treeUri.toString() && it.enabled },
+                    groupByFolder = watchedFolders.value.firstOrNull { it.uri == treeUri.toString() }?.groupByFolder ?: true,
                     folderName = scan.folderName,
                     books = scan.books,
                     onShelf = onShelf,
@@ -737,10 +785,13 @@ sealed interface FolderImportState {
     data class Scanning(val found: Int) : FolderImportState
 
     /**
-     * @param onShelf 文件名和书架上的书对得上的（默认不勾）
+     * @param onShelf 预览阶段已确认在架的文件；无法确认时留空，导入时按元数据去重
      * @param truncated 书太多，只列了前 [LocalFolderScanner.MAX_BOOKS] 本
      */
     data class Ready(
+        val treeUri: Uri,
+        val autoScan: Boolean = false,
+        val groupByFolder: Boolean = true,
         val folderName: String,
         val books: List<FolderBook>,
         val onShelf: Set<Uri>,

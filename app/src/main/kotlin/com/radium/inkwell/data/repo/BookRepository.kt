@@ -21,6 +21,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.UUID
 
@@ -34,6 +36,9 @@ class BookRepository(
     private val parserRegistry: BookParserRegistry,
     private val cache: ChapterContentCache,
 ) {
+
+    // 前台选文件与目录自动扫描可能同时导入，元数据去重与插入必须串行。
+    private val localImportMutex = Mutex()
 
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
@@ -104,11 +109,11 @@ class BookRepository(
      * 同一本本地书（书名+作者）已在书架则跳过，不另建副本 —— 以前每次导入都 new UUID，
      * 同一文件选两遍书架上就会出现两本一模一样的。
      */
-    suspend fun importLocalBook(uri: Uri): Result<LocalImportResult> = withContext(Dispatchers.IO) {
+    suspend fun importLocalBook(uri: Uri, initialGroup: String? = null): Result<LocalImportResult> = withContext(Dispatchers.IO) {
         try {
             val displayName = queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
             Result.success(
-                importCopy(displayName) { dest ->
+                importCopy(displayName, initialGroup) { dest ->
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { input.copyTo(it) }
                     } ?: error("无法读取所选文件")
@@ -140,13 +145,13 @@ class BookRepository(
      * 复制进私有目录 → 解析 → 入库。中途任何一步失败（含取消）都回滚这次复制出来的书文件和封面 ——
      * 从前复制失败留半截文件、封面在哪条失败路径上都没删过，books/ covers/ 里越攒越多没人认领的文件。
      */
-    private suspend fun importCopy(displayName: String, copy: (File) -> Unit): LocalImportResult {
+    private suspend fun importCopy(displayName: String, initialGroup: String? = null, copy: (File) -> Unit): LocalImportResult = localImportMutex.withLock {
         val bookId = UUID.randomUUID().toString()
         val ext = displayName.substringAfterLast('.', "txt").lowercase()
         val dest = File(booksDir(), "$bookId.$ext")
         try {
             copy(dest)
-            return insertCopiedLocal(dest, displayName, bookId, ext)
+            insertCopiedLocal(dest, displayName, bookId, ext, initialGroup)
         } catch (e: Exception) {
             // 回滚本身要写库，取消之后的挂起调用会直接抛 —— 不顶住的话一样什么都没清
             withContext(NonCancellable) { rollbackImport(dest, bookId) }
@@ -174,6 +179,7 @@ class BookRepository(
         displayName: String,
         bookId: String,
         ext: String,
+        initialGroup: String?,
     ): LocalImportResult {
         val handle = parserRegistry.open(dest)
         return handle.use { book ->
@@ -235,8 +241,10 @@ class BookRepository(
                 return@use LocalImportResult.Added(fresh.id)
             }
 
+            // 目录归属只用于新书，与书行一起提交；补本地文件或恢复已有书时保留用户原分组。
             val entity = BookEntity(
                 id = bookId,
+                groupName = initialGroup.orEmpty(),
                 type = type,
                 title = title,
                 author = author,

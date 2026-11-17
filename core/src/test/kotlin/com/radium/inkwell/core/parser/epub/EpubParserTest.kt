@@ -150,4 +150,42 @@ class EpubParserTest {
             assertEquals("JPG-B", String(book.loadResource(images[1].resourceId)!!.data))
         }
     }
+
+    @Test
+    fun `内嵌图片以及表格中的图片保留顺序和资源`() {
+        val f = temp()
+        EpubFixture.minimalEpub(f, withImages = true, firstChapterExtra = """
+            <p>表前</p><table><tr><td><p>单元格前</p>
+            <img src="data:image/png;base64,UE5HLURBVEE="/>
+            <img src="../images/a.png#fragment"/><p>单元格后</p></td></tr></table><p>表后</p>
+        """)
+        EpubParser().open(f).use { book ->
+            val elements = book.loadChapter(0).elements
+            val embedded = elements.filterIsInstance<ContentElement.Image>().first { it.resourceId.startsWith("data:") }
+            assertEquals("PNG-DATA", String(book.loadResource(embedded.resourceId)!!.data))
+            val position = elements.indexOf(embedded)
+            assertEquals(ContentElement.Paragraph("单元格前"), elements[position - 1])
+            assertEquals("PNG-A", String(book.loadResource((elements[position + 1] as ContentElement.Image).resourceId)!!.data))
+            assertEquals(ContentElement.Paragraph("单元格后"), elements[position + 2])
+            assertEquals(ContentElement.Paragraph("表后"), elements[position + 3])
+        }
+    }
+
+    @Test
+    fun `空的EPUB3目录回退NCX`() {
+        val f = temp()
+        EpubFixture.minimalEpub(f, withNav = true, emptyNav = true)
+        EpubParser().open(f).use { book ->
+            assertEquals("第1章 起承转合", book.toc.first().title)
+            assertEquals(3, book.toc.size)
+        }
+    }
+
+    @Test
+    fun `内嵌图片容错及百分号编码`() {
+        assertEquals("PNG+", String(decodeImageDataUri("data:image/png,%50%4E%47+")!!.data))
+        assertEquals(null, decodeImageDataUri("data:image/png;base64,!!invalid!!"))
+        assertEquals(null, decodeImageDataUri("data:text/html;base64,UE5H"))
+        assertEquals(null, decodeImageDataUri("data:image/png,%broken"))
+    }
 }

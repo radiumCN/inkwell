@@ -17,6 +17,7 @@ import org.jsoup.parser.Parser
 import java.io.File
 import java.net.URLDecoder
 import java.util.zip.ZipFile
+import java.util.Base64
 
 /**
  * 自研 EPUB 解析：zip + container.xml + OPF + nav.xhtml/NCX。
@@ -74,12 +75,18 @@ private class EpubBookHandle(
         val dir = path.substringBeforeLast('/', "")
         val converter = HtmlToElements(keepImages = true, keepBlocks = false, resolveImage = { img ->
             val src = img.attr("src").ifBlank { img.attr("xlink:href") }.ifBlank { img.attr("href") }.trim()
-            if (src.isEmpty() || src.startsWith("data:", ignoreCase = true)) null else resolvePath(dir, src)
+            when {
+                src.isEmpty() -> null
+                src.startsWith("data:image/", ignoreCase = true) -> src
+                src.startsWith("data:", ignoreCase = true) -> null
+                else -> resolvePath(dir, src.substringBefore('#').substringBefore('?'))
+            }
         })
         return ChapterContent(converter.convert(doc.body()))
     }
 
     override fun loadResource(resourceId: String): ImageBlob? {
+        if (resourceId.startsWith("data:", ignoreCase = true)) return decodeImageDataUri(resourceId)
         val bytes = readEntry(resourceId) ?: return null
         return ImageBlob(bytes, guessMime(resourceId))
     }
@@ -169,15 +176,13 @@ private class EpubBookHandle(
             // 目录：EPUB3 nav 优先，回退 NCX
             val spineIndexByPath = spinePaths.withIndex().associate { (i, p) -> p.lowercase() to i }
             val navItem = manifest.values.firstOrNull { it.properties.split(' ').contains("nav") }
-            val toc: List<TocEntry> = when {
-                navItem != null -> parseNav(read(itemPath(navItem)), itemPath(navItem), spineIndexByPath)
-                else -> {
-                    val ncxId = opf.select("spine").attr("toc").ifBlank { null }
-                    val ncxItem = ncxId?.let { manifest[it] }
-                        ?: manifest.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }
-                    ncxItem?.let { parseNcx(readXml(itemPath(it)), itemPath(it), spineIndexByPath) }
-                        ?: emptyList()
-                }
+            val navToc = navItem?.let { parseNav(read(itemPath(it)), itemPath(it), spineIndexByPath) }.orEmpty()
+            val toc: List<TocEntry> = navToc.ifEmpty {
+                val ncxId = opf.select("spine").attr("toc").ifBlank { null }
+                val ncxItem = ncxId?.let { manifest[it] }
+                    ?: manifest.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }
+                ncxItem?.let { parseNcx(readXml(itemPath(it)), itemPath(it), spineIndexByPath) }
+                    ?: emptyList()
             }
 
             // 章节标题：TOC 覆盖到的用 TOC 标题，未覆盖的沿用最近一条。
@@ -308,3 +313,32 @@ internal fun guessMime(path: String): String? = when (path.substringAfterLast('.
     "svg" -> "image/svg+xml"
     else -> null
 }
+
+
+/** 包内 data URI 图片不走网络。限制编码长度，避免异常书籍造成大块内存分配。 */
+internal fun decodeImageDataUri(uri: String): ImageBlob? = runCatching {
+    if (uri.length > 16 * 1024 * 1024) return null
+    val comma = uri.indexOf(',')
+    if (comma < 0) return null
+    val header = uri.substring(5, comma)
+    val mime = header.substringBefore(';').lowercase()
+    if (!mime.startsWith("image/")) return null
+    val payload = uri.substring(comma + 1)
+    val bytes = if (header.split(';').any { it.equals("base64", true) }) {
+        Base64.getDecoder().decode(payload.filterNot { it.isWhitespace() })
+    } else {
+        // URI 数据中的 + 是字面加号；按字节解码，不能把二进制图片转成 UTF-8 字符串。
+        val out = java.io.ByteArrayOutputStream()
+        var i = 0
+        while (i < payload.length) {
+            if (payload[i] == '%') {
+                out.write(payload.substring(i + 1, i + 3).toInt(16)); i += 3
+            } else {
+                require(payload[i].code <= 127)
+                out.write(payload[i].code); i++
+            }
+        }
+        out.toByteArray()
+    }
+    bytes.takeIf { it.isNotEmpty() }?.let { ImageBlob(it, mime) }
+}.getOrNull()

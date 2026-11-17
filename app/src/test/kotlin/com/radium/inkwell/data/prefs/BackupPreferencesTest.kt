@@ -67,4 +67,15 @@ class BackupPreferencesTest {
         assertEquals("custom", p[keys.THEME_LIGHT])
         assertFalse(p.contains(keys.SEARCH_HISTORY))
     }
+
+    @Test fun `local and online image preferences remain independent across backup versions`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf(keys.LOCAL_SHOW_IMAGES to false, keys.SHOW_IMAGES to false)
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(100, mapOf("show_images" to "true"))) { true })
+        assertEquals(false, p[keys.LOCAL_SHOW_IMAGES])
+        assertEquals(true, p[keys.SHOW_IMAGES])
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, mapOf("local_show_images" to "true", "show_images" to "false"))) { true })
+        assertEquals(true, p[keys.LOCAL_SHOW_IMAGES])
+        assertEquals(false, p[keys.SHOW_IMAGES])
+    }
 }

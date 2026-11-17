@@ -60,10 +60,12 @@ data class ReaderSettings(
      */
     val edgeBrightness: Boolean = true,
     /**
-     * 正文里的插图排不排。**默认关** —— 和 0.2.9 以来一样只排文字；网上的书开了要另外下载图片、多费流量。
+     * 在线书的插图开关，默认关闭，开启后需要额外下载图片。阅读会话里此字段表示当前书籍的有效开关。
      * 书里的图解析时一律收下（见 core 的 HtmlToElements），这里只决定阅读页排不排，开关一拨就地重排、不用重抓。
      */
     val showImages: Boolean = false,
+    /** 本地书无需下载图片，默认显示；与在线书的开关分别记忆。 */
+    val localShowImages: Boolean = true,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */

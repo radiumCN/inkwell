@@ -76,6 +76,7 @@ class ReaderPrefs(
         val PINCH_FONT_SIZE = booleanPreferencesKey("pinch_font_size")
         val EDGE_BRIGHTNESS = booleanPreferencesKey("edge_brightness")
         val SHOW_IMAGES = booleanPreferencesKey("show_images")
+        val LOCAL_SHOW_IMAGES = booleanPreferencesKey("local_show_images")
         /** 九宫格点击分区，见 [TapZones.encode] */
         val TAP_ZONES = stringPreferencesKey("tap_zones")
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
@@ -149,13 +150,14 @@ class ReaderPrefs(
             pinchFontSize = p[Keys.PINCH_FONT_SIZE] ?: true,
             edgeBrightness = p[Keys.EDGE_BRIGHTNESS] ?: true,
             showImages = p[Keys.SHOW_IMAGES] ?: false,
+            localShowImages = p[Keys.LOCAL_SHOW_IMAGES] ?: true,
             tapZones = TapZones.decode(p[Keys.TAP_ZONES]),
             autoFlipSeconds = p[Keys.AUTO_FLIP_SECONDS] ?: 15,
             preloadChapters = p[Keys.PRELOAD_CHAPTERS] ?: 3,
         )
     }
 
-    suspend fun update(settings: ReaderSettings) {
+    suspend fun update(settings: ReaderSettings, localBook: Boolean = false) {
         context.readerDataStore.edit { p ->
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
             p[Keys.FONT_SIZE] = settings.fontSizeSp
@@ -193,7 +195,9 @@ class ReaderPrefs(
             p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
             p[Keys.PINCH_FONT_SIZE] = settings.pinchFontSize
             p[Keys.EDGE_BRIGHTNESS] = settings.edgeBrightness
-            p[Keys.SHOW_IMAGES] = settings.showImages
+            // 按当前书籍类型只写对应槽，避免本地书调整排版时覆盖在线书的图片选择。
+            if (localBook) p[Keys.LOCAL_SHOW_IMAGES] = settings.showImages
+            else p[Keys.SHOW_IMAGES] = settings.showImages
             p[Keys.TAP_ZONES] = settings.tapZones.encode()
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
@@ -275,6 +279,7 @@ class ReaderPrefs(
                 "pinch_font_size" to s.pinchFontSize.toString(),
                 "edge_brightness" to s.edgeBrightness.toString(),
                 "show_images" to s.showImages.toString(),
+                "local_show_images" to s.localShowImages.toString(),
                 "tap_zones" to s.tapZones.encode(),
                 "auto_flip_seconds" to s.autoFlipSeconds.toString(),
                 "preload_chapters" to s.preloadChapters.toString(),
@@ -327,7 +332,7 @@ internal object ReaderBackupImport {
         }
         listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.VOLUME_KEY_FLIP,
             keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
-            keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES).forEach { key ->
+            keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES, keys.LOCAL_SHOW_IMAGES).forEach { key ->
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }
         }
         v["font_id"]?.takeIf(fontAvailable)?.let { p[keys.FONT_ID] = it }

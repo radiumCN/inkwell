@@ -57,6 +57,8 @@ class AppPrefs(private val context: Context) {
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val RSS_ENTRY_ENABLED = booleanPreferencesKey("rss_entry_enabled")
+        /** 根页面返回桌面前的确认，只属于本机。 */
+        val CONFIRM_EXIT = booleanPreferencesKey("confirm_exit")
         /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
         val ONBOARDED = booleanPreferencesKey("onboarded")
         /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
@@ -601,6 +603,14 @@ class AppPrefs(private val context: Context) {
     val developerModeState: StateFlow<Boolean?> = developerMode.warm()
     val updateChannelState: StateFlow<UpdateChannel?> = updateChannel.warm()
     val updateSourceState: StateFlow<UpdateSource?> = updateSource.warm()
+
+    /** 仅本机的防误触偏好，默认关闭。 */
+    val confirmExit: Flow<Boolean> = context.appDataStore.data.map { it[Keys.CONFIRM_EXIT] ?: false }.distinctUntilChanged()
+    val confirmExitState: StateFlow<Boolean?> = confirmExit.warm()
+
+    suspend fun setConfirmExit(on: Boolean) {
+        context.appDataStore.edit { it[Keys.CONFIRM_EXIT] = on }
+    }
 
     companion object {
         const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14

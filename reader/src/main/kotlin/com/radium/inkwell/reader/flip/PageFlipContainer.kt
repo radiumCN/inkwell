@@ -694,15 +694,20 @@ private fun CurlLayer(
  * 光比 [PageSpec] 不够：改了净化规则后重排，同一页的 spec 可能一模一样（行数、偏移都没变），字却换过了。
  * 那时 measured 一定是新的一份（每次分页都新建），所以再按引用比一次 measured。
  * 同一份分页结果里的页共用同一个 measured，翻页挪槽时照样认得出来。
+ * 图片异步解码后 spec 和 measured 不变，必须同时比较 images，避免复用带占位框的旧快照。
  */
-private class CurlPageKey(val spec: PageSpec, val measured: Map<Int, MeasuredParagraph>) {
+internal class CurlPageKey(
+    val spec: PageSpec,
+    val measured: Map<Int, MeasuredParagraph>,
+    val images: Map<Int, androidx.compose.ui.graphics.ImageBitmap>,
+) {
     override fun equals(other: Any?): Boolean =
-        other is CurlPageKey && other.measured === measured && other.spec == spec
+        other is CurlPageKey && other.measured === measured && other.spec == spec && other.images == images
 
     override fun hashCode(): Int = spec.hashCode()
 }
 
-private fun RenderablePage.curlKey() = CurlPageKey(spec, measured)
+private fun RenderablePage.curlKey() = CurlPageKey(spec, measured, images)
 
 private fun RenderablePage?.matches(key: CurlPageKey?): Boolean =
     if (this == null) key == null else key == curlKey()

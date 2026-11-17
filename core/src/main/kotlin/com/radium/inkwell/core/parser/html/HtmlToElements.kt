@@ -115,10 +115,13 @@ class HtmlToElements(
                             flushText()
                             codeTable(node)
                         } else {
-                            // table 退化为逐格文本
-                            node.select("td, th").forEach { cell ->
-                                val t = cell.text().trim()
-                                if (t.isNotEmpty()) out += ContentElement.Paragraph(t)
+                            // 按单元格顺序保留段落与图片。直接取 text() 会吞掉插图，并把表格前的文字挪到后面。
+                            flushText()
+                            node.select("td, th").filter { cell ->
+                                cell.parents().firstOrNull { it.tagName() == "table" } === node
+                            }.forEach { cell ->
+                                cell.childNodes().forEach(::walk)
+                                flushText()
                             }
                         }
                     }
