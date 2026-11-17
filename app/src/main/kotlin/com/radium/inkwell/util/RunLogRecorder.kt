@@ -18,9 +18,9 @@ import java.util.zip.ZipOutputStream
 /**
  * 开发者模式下的运行日志记录：起一个只盯本进程的 `logcat` 子进程，直接写进 `filesDir/logs/`。
  *
- * 为什么是 logcat 而不是自己包一层 Logger：要的是「完整运行日志」—— 系统替我们打的
+ * 系统日志使用 logcat：系统替我们打的
  * （Activity 生命周期、OkHttp/Coil 的报错、StrictMode、AndroidRuntime 的崩溃堆栈）
- * 一样有价值，自己的 Logger 只收得到自己写的那几行。`--pid` 从 Android 7 起就有（minSdk 33），
+ * 一样有价值；关键操作另由 UsageLog 主动记录，logcat 本身不会自动记录业务操作。`--pid` 从 Android 7 起就有（minSdk 33），
  * 读本进程的日志也不需要任何权限。
  *
  * 「从启动起」靠的是 logcat 的默认行为：不带 `-d` 时先把缓冲区里已有的内容吐出来再跟着往下流。
@@ -75,13 +75,16 @@ class RunLogRecorder(private val context: Context) {
     /** 已保存的日志：次数与总字节数，给设置页的副标题用 */
     suspend fun summary(): Pair<Int, Long> = withContext(Dispatchers.IO) {
         val files = logFiles()
-        files.map { sessionOf(it.name) }.distinct().size to files.sumOf { it.length() }
+        val usage = File(logDir, "usage").listFiles()?.filter { it.isFile }.orEmpty()
+        (files.map { sessionOf(it.name) }.distinct().size + if (usage.isEmpty()) 0 else 1) to
+            (files.sumOf { it.length() } + usage.sumOf { it.length() })
     }
 
     /** 删掉除当前录制以外的全部日志 */
     suspend fun clear(): Unit = withContext(Dispatchers.IO) {
         val current = synchronized(lock) { currentBase }
         logFiles().filter { sessionOf(it.name) != current }.forEach { it.delete() }
+        UsageLog.clear()
     }
 
     /**
@@ -95,7 +98,11 @@ class RunLogRecorder(private val context: Context) {
         val out = File(dir, "$EXPORT_PREFIX${stamp()}.zip")
         val tmp = File.createTempFile("logs", ".tmp", dir)
         try {
+            val usage = UsageLog.snapshot()
             ZipOutputStream(tmp.outputStream().buffered()).use { zip ->
+                zip.putNextEntry(ZipEntry("usage-events.jsonl"))
+                zip.write(usage.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
                 zip.putNextEntry(ZipEntry("device.txt"))
                 zip.write(deviceInfo().toByteArray())
                 zip.closeEntry()
@@ -131,11 +138,17 @@ class RunLogRecorder(private val context: Context) {
         val snapshot = File.createTempFile("snapshot-", ".txt", dir)
         var process: Process? = null
         try {
+            // Snapshot drains the operation queue first, including actions just before "Submit".
+            val usage = UsageLog.snapshot()
             process = ProcessBuilder(
                 "logcat", "-d", "-t", "1500", "-b", "main,system,crash", "-v", "threadtime",
                 "--pid=${android.os.Process.myPid()}",
             ).redirectErrorStream(true).redirectOutput(snapshot).start()
-            check(process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0) { "无法获取当前运行日志" }
+            val logcatAvailable = process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
+            if (!logcatAvailable) {
+                process.destroyForcibly()
+                process.waitFor(1, TimeUnit.SECONDS)
+            }
             coroutineContext.ensureActive()
             var remaining = 2 * 1024 * 1024
             ZipOutputStream(out.outputStream().buffered()).use { zip ->
@@ -144,9 +157,16 @@ class RunLogRecorder(private val context: Context) {
                     zip.write(FeedbackLogSanitizer.sanitize(text).toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
                 }
-                add("device.txt", deviceInfo() + "\n日志经过裁剪及基础脱敏，可能仍包含书名等信息。\n")
+                add("device.txt", deviceInfo() + "\n包含最近的操作事件，采用有界滚动保存，并非全部历史。\n日志经过裁剪及基础脱敏，可能仍包含书名等信息。\n")
+                // Already sanitized field-by-field; sanitizing the serialized JSON could break its syntax.
+                zip.putNextEntry(ZipEntry("usage-events.jsonl"))
+                zip.write(usage.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+                if (!logcatAvailable) add("logcat-status.txt", "无法获取系统日志快照，已附带本地操作日志。\n")
                 // Read file tails: recent errors and the previous crash matter most. Files may be rotating.
-                val files = listOf(snapshot) + logFiles().sortedWith(
+                val files = (if (logcatAvailable) listOf(snapshot) else emptyList()) + logFiles()
+                    .filter { System.currentTimeMillis() - it.lastModified() <= TimeUnit.DAYS.toMillis(3) }
+                    .sortedWith(
                     compareByDescending<File> { it.name.endsWith(".crash") }.thenByDescending { it.lastModified() },
                 )
                 for (file in files) {

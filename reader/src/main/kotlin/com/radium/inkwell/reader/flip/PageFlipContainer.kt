@@ -116,7 +116,12 @@ fun PageFlipContainer(
      * 点在真图上照旧按点击分区走，由调用方返回 false。
      */
     onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
+    onTrace: (ReaderTrace) -> Unit = {},
 ) {
+    val traceLatest = rememberUpdatedState(onTrace)
+    fun trace(action: ReaderTrace.Action, dir: FlipDirection? = null) {
+        traceLatest.value(ReaderTrace(action, dir))
+    }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
@@ -164,6 +169,11 @@ fun PageFlipContainer(
         return (maxMs - (maxMs - minMs) * t).toInt()
     }
 
+    fun commitFlip(dir: FlipDirection) {
+        trace(ReaderTrace.Action.COMMIT, dir)
+        onCommit(dir)
+    }
+
     fun resetFlipState() {
         direction = null
         offset.floatValue = 0f
@@ -187,7 +197,7 @@ fun PageFlipContainer(
         inFlightCommitDir[0] = null
         holdAfterCommit(dir)
         if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        onCommit(dir)
+        commitFlip(dir)
     }
 
     suspend fun settle(commit: Boolean, velocity: Float = 0f, gen: Int = settleGen[0]) {
@@ -223,8 +233,9 @@ fun PageFlipContainer(
             inFlightCommitDir[0] = null
             holdAfterCommit(dir)
             if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onCommit(dir)
+            commitFlip(dir)
         }
+        if (!commit) trace(ReaderTrace.Action.ROLLBACK, dir)
         } finally {
             // 只复位自己这一轮。新一轮 settle 已经加过 gen 的话，这里动 direction 会把新动画掐死
             if (gen == settleGen[0]) {
@@ -235,6 +246,7 @@ fun PageFlipContainer(
     }
 
     fun launchSettle(commit: Boolean, velocity: Float = 0f) {
+        trace(ReaderTrace.Action.ANIMATION_START, direction)
         consumeInFlightCommit()
         settleGen[0] += 1
         val gen = settleGen[0]
@@ -245,6 +257,7 @@ fun PageFlipContainer(
 
     /** 下一刀接手：该翻过去的立刻提交，再清动画。只清不提交会把纸弹回来。 */
     fun interruptSettle() {
+        if (settling || inFlightCommitDir[0] != null) trace(ReaderTrace.Action.INTERRUPTED, direction)
         consumeInFlightCommit()
         settleGen[0] += 1
         settleJob[0]?.cancel()
@@ -253,13 +266,14 @@ fun PageFlipContainer(
 
     fun startProgrammaticFlip(dir: FlipDirection) {
         if (!canFlip(dir)) {
+            trace(ReaderTrace.Action.BLOCKED, dir)
             interruptSettle()
-            if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
+            if (dir == FlipDirection.FORWARD) commitFlip(dir) // 让上层弹"最后一页"提示
             return
         }
         if (effectiveAnim == FlipAnimation.NONE) {
             interruptSettle()
-            onCommit(dir)
+            commitFlip(dir)
             return
         }
         interruptSettle()
@@ -290,7 +304,10 @@ fun PageFlipContainer(
             // 这条路从前却不看：选区和工具条还亮着，底下那页先翻走了，「复制」「净化」拿到的是上一页的字。
             // 这里**不**看 gesturesEnabled —— 菜单上滑动翻页是先关菜单再发请求，请求到的那一刻
             // gesturesEnabled 还没跟上，按它拦就把这一下吞了。
-            if (selectionLatest.value != null) return@collect
+            if (selectionLatest.value != null) {
+                trace(ReaderTrace.Action.BLOCKED, dir)
+                return@collect
+            }
             programmaticFlip(dir)
         }
     }
@@ -306,7 +323,7 @@ fun PageFlipContainer(
             .readerPageSemantics(
                 page = current,
                 canFlip = { gesturesEnabled && canFlip(it) },
-                onFlip = { programmaticFlip(it) },
+                onFlip = { trace(ReaderTrace.Action.ACCESSIBILITY, it); programmaticFlip(it) },
                 onMenu = onCenterTap,
             )
             .pointerInput(gesturesEnabled, effectiveAnim, flipSlopPx) {
@@ -409,6 +426,7 @@ fun PageFlipContainer(
                             if (!change.pressed) break
                         }
                     } catch (e: CancellationException) {
+                        trace(ReaderTrace.Action.SWIPE_CANCELLED, direction)
                         // pointerInput 被掐时别把 direction 晾着：仿真会停在半页，此后点击也不翻。
                         if (following && direction != null && !settling) {
                             val dir = direction
@@ -424,7 +442,7 @@ fun PageFlipContainer(
                                     )
                                 ) {
                                     holdAfterCommit(dir)
-                                    onCommit(dir)
+                                    commitFlip(dir)
                                 }
                             }
                             resetFlipState()
@@ -432,6 +450,7 @@ fun PageFlipContainer(
                         throw e
                     }
                     if (cancelled) {
+                        trace(ReaderTrace.Action.SWIPE_CANCELLED, direction)
                         // 跟手到一半被收走：弹回当前页，不提交
                         if (following) launchSettle(commit = false)
                         return@awaitEachGesture
@@ -445,6 +464,7 @@ fun PageFlipContainer(
                         when (action) {
                             is FlipReleaseBeforeSlop.Flick -> {
                                 interruptSettle()
+                                trace(ReaderTrace.Action.SWIPE_RELEASE, action.direction)
                                 startProgrammaticFlip(action.direction)
                             }
                             FlipReleaseBeforeSlop.Tap -> {
@@ -457,7 +477,10 @@ fun PageFlipContainer(
                                             down.position.x, down.position.y,
                                             size.width.toFloat(), size.height.toFloat(),
                                             tapZonesLatest.value,
-                                        ).dispatch(onMenu = onCenterTap, onFlip = ::startProgrammaticFlip)
+                                        ).dispatch(
+                                            onMenu = { trace(ReaderTrace.Action.TAP); onCenterTap() },
+                                            onFlip = { trace(ReaderTrace.Action.TAP, it); startProgrammaticFlip(it) },
+                                        )
                                     }
                                 }
                             }
@@ -466,16 +489,18 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir
+                    trace(ReaderTrace.Action.SWIPE_RELEASE, dir)
                     val flippable = canFlip(dir)
                     val width = size.width.toFloat()
                     if (!flippable) {
+                        trace(ReaderTrace.Action.BLOCKED, dir)
                         // 书首/书末：无动画，前翻到底时提示
-                        if (dir == FlipDirection.FORWARD) onCommit(dir)
+                        if (dir == FlipDirection.FORWARD) commitFlip(dir)
                         if (following) resetFlipState()
                         return@awaitEachGesture
                     }
                     if (effectiveAnim == FlipAnimation.NONE) {
-                        onCommit(dir)
+                        commitFlip(dir)
                         return@awaitEachGesture
                     }
                     val velocity = tracker.calculateVelocity().x

@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.bookshelf
 
 import android.net.Uri
+import com.radium.inkwell.util.UsageLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -91,6 +92,7 @@ class BookshelfViewModel(
      * 隐藏区开着时它们本来就在眼前，和别的书一样计数。
      */
     fun refreshAll() {
+        UsageLog.event("ui.click", "action" to "bookshelf.refresh")
         refreshJob?.cancel()
         _refreshing.value = true
         _refreshProgress.value = BookshelfRefreshProgress()
@@ -595,6 +597,7 @@ class BookshelfViewModel(
     // ---- 单本操作（长按菜单） ----
 
     fun removeBooks(ids: List<String>, clearFiles: Boolean) {
+        UsageLog.event("bookshelf.remove", "count" to ids.size, "clear_files" to clearFiles)
         if (ids.isEmpty()) return
         viewModelScope.launch {
             try {
@@ -636,6 +639,7 @@ class BookshelfViewModel(
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
 
     fun importBooks(uris: List<Uri>) {
+        UsageLog.event("bookshelf.import.request", "count" to uris.size)
         if (uris.isEmpty() || _importing.value) return
         viewModelScope.launch {
             _importing.value = true
@@ -654,6 +658,7 @@ class BookshelfViewModel(
                     .onFailure { failed++; lastError = it.message }
             }
             _importing.value = false
+            UsageLog.event("bookshelf.import.end", "added" to ok, "skipped" to skipped, "failed" to failed)
             messages.emit(
                 when {
                     failed == 0 && skipped == 0 -> "已导入 $ok 本"
@@ -671,6 +676,7 @@ class BookshelfViewModel(
     private val _scanningFolders = MutableStateFlow(false)
     val scanningFolders = _scanningFolders.asStateFlow()
     fun scanWatchedFolders(manual: Boolean = false) {
+        UsageLog.event("bookshelf.folder_scan", "manual" to manual)
         if (watchedScanJob?.isActive == true) return
         watchedScanJob = viewModelScope.launch {
             _scanningFolders.value = true

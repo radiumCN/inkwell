@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.ui.components.blockTouchesBelow
 import com.radium.inkwell.ui.components.sheetBottomInset
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -557,27 +558,27 @@ private fun MenuActions(
         BarAction(
             icon = MiuixIcons.ListView,
             label = "目录",
-            onClick = onShowToc,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.toc"); onShowToc() },
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = MiuixIcons.Replace,
             label = "换源",
-            onClick = onSearchSources,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.source"); onSearchSources() },
             enabled = session.isNetBook,
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = if (overlay.autoFlipping) MiuixIcons.Pause else MiuixIcons.Play,
             label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
-            onClick = onToggleAutoFlip,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.auto_flip"); onToggleAutoFlip() },
             enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = MiuixIcons.Tune,
             label = "设置",
-            onClick = onShowSettings,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.settings"); onShowSettings() },
             modifier = Modifier.weight(1f),
         )
     }

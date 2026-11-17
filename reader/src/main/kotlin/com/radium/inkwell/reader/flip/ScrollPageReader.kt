@@ -63,7 +63,13 @@ fun ScrollPageReader(
     onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
     /** 长按一张图（看大图）。null = 不接长按 */
     onImageLongPress: ((PageItem.ImageBox) -> Unit)? = null,
+    onTrace: (ReaderTrace) -> Unit = {},
 ) {
+    val traceLatest = rememberUpdatedState(onTrace)
+    fun trace(action: ReaderTrace.Action, dir: FlipDirection? = null) {
+        traceLatest.value(ReaderTrace(action, dir))
+    }
+
     val offset = remember { mutableFloatStateOf(0f) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     // 翻页已经要了、新页还没进组合（非 null 期间滚动只攒进 leftover，见滚动回调开头）；新页进来那一帧据它接上 leftover
@@ -139,6 +145,7 @@ fun ScrollPageReader(
         // 从前这里先清掉它，连翻落地时当成「不是滚过来的」，攒下的那截位移整个丢掉、新页从页顶开始
         pendingDispatched = true
         heldDeltas[0] = 0
+        trace(ReaderTrace.Action.SCROLL_BOUNDARY, chained)
         onFlipLatest.value(chained)
     }
 
@@ -184,6 +191,7 @@ fun ScrollPageReader(
             pendingFlip = step.flip
             pendingDispatched = true
             heldDeltas[0] = 0
+            trace(ReaderTrace.Action.SCROLL_BOUNDARY, step.flip)
             onFlipLatest.value(step.flip)
             return@rememberScrollableState composeDelta
         }
@@ -204,6 +212,8 @@ fun ScrollPageReader(
             pendingDispatched = true
             heldDeltas[0] = 0
             onFlipLatest.value(dir)
+        } else {
+            trace(ReaderTrace.Action.BLOCKED, dir)
         }
     }
 
@@ -236,7 +246,7 @@ fun ScrollPageReader(
                 canFlip = { dir ->
                     gesturesEnabled && if (dir == FlipDirection.BACKWARD) hasPrev else hasNext
                 },
-                onFlip = ::flipBy,
+                onFlip = { trace(ReaderTrace.Action.ACCESSIBILITY, it); flipBy(it) },
                 onMenu = { onCenterTapLatest.value() },
             )
             .scrollable(
@@ -259,7 +269,10 @@ fun ScrollPageReader(
                     tapAction(
                         pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
                         tapZonesLatest.value, enabled = clickToFlipLatest.value,
-                    ).dispatch(onMenu = { onCenterTapLatest.value() }) { dir -> flipBy(dir) }
+                    ).dispatch(onMenu = { trace(ReaderTrace.Action.TAP); onCenterTapLatest.value() }) { dir ->
+                        trace(ReaderTrace.Action.TAP, dir)
+                        flipBy(dir)
+                    }
                 }
             },
     ) {

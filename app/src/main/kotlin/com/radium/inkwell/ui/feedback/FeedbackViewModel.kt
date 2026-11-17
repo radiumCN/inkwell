@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import com.radium.inkwell.util.RunLogRecorder
+import com.radium.inkwell.util.UsageLog
 import java.io.File
 import java.util.UUID
 
@@ -68,6 +69,7 @@ class FeedbackViewModel(
 
     fun setAttachLogs(v: Boolean) {
         if (_state.value.submitting || _state.value.pending || _state.value.attachLogs == v) return
+        UsageLog.event("feedback.attach_logs", "enabled" to v)
         _state.value = _state.value.copy(attachLogs = v, requestId = UUID.randomUUID().toString())
     }
 
@@ -75,6 +77,7 @@ class FeedbackViewModel(
         val s = _state.value
         // 双击会建出两个 issue，而且是在公开仓库里 —— 拦住
         if (!s.canSubmit) return
+        UsageLog.event("ui.click", "action" to "feedback.submit", "attach_logs" to s.attachLogs)
         _state.value = s.copy(submitting = true)
         viewModelScope.launch {
             var logs: File? = null
@@ -86,6 +89,7 @@ class FeedbackViewModel(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
+                        UsageLog.event("feedback.collect.failed", "error" to e.javaClass.simpleName)
                         messages.emit("日志收集失败，可取消勾选后提交反馈")
                         return@launch
                     } finally {
@@ -102,6 +106,13 @@ class FeedbackViewModel(
                     requestId = s.requestId,
                     logs = logs,
                 )
+                UsageLog.event("feedback.result", "outcome" to when (result) {
+                    is FeedbackResult.Success -> "success"
+                    FeedbackResult.Pending -> "pending"
+                    is FeedbackResult.NetworkError -> "network_error"
+                    is FeedbackResult.RateLimited -> "rate_limited"
+                    else -> "rejected"
+                })
                 when (result) {
                     is FeedbackResult.Success ->
                         _state.value = _state.value.copy(successUrl = result.url)

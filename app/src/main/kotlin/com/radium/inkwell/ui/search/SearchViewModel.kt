@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.search
 
 import android.util.Log
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -347,6 +348,7 @@ class SearchViewModel(
         // 与历史同一个规范形（见 normalizeSearchKeyword），点历史重搜才是同一个词
         val keyword = normalizeSearchKeyword(_state.value.query)
         if (keyword.isEmpty()) return
+        UsageLog.event("ui.click", "action" to "search.submit")
         // 单独起协程、不挂在 searchJob 上：紧接着再搜一次会 cancel 掉 searchJob，这条历史不该跟着丢。
         // 没有可用书源也照记 —— 用户导好书源回来，正好点历史重搜。
         // 指向上锁隐藏书的词不记（见 revealsHiddenBook）：搜索页不经验证就能打开
@@ -422,6 +424,7 @@ class SearchViewModel(
      * 不自动 resume：详情页还在加载，后台接着搜会跟它抢网。
      */
     fun pauseSearch() {
+        UsageLog.event("search.pause")
         val s = _state.value
         if (!s.searching && !s.loadingMore) return
         val remaining = roundRules.filter { it.id in pendingIds }
@@ -461,6 +464,7 @@ class SearchViewModel(
     }
 
     fun resumeSearch() {
+        UsageLog.event("search.resume")
         val p = paused ?: return
         paused = null
         // 点了「继续搜索」就是要全量结果：别搜两下又提前结束一次
@@ -737,6 +741,10 @@ class SearchViewModel(
     }
 
     private fun logSummary(keyword: String, how: String) {
+        UsageLog.event("search.round.end", "sources" to _state.value.sourceCount,
+            "done" to doneCounter.get(), "timeouts" to timeoutCount.get(), "failures" to failCount.get(),
+            "duration_ms" to nowMs() - searchStartedAt)
+
         val first = if (firstResultAt > 0) "${firstResultAt - searchStartedAt}ms" else "无"
         Log.i(
             TAG,

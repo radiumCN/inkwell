@@ -29,6 +29,8 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
@@ -100,6 +102,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun InkwellNavDisplay() {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
+    LaunchedEffect(backStack) {
+        snapshotFlow { backStack.lastOrNull() }.collect { route ->
+            UsageLog.screenVisible(route.diagnosticName(), backStack.size)
+        }
+    }
 
     val confirmExit = koinInject<AppPrefs>().confirmExitState.collectAsStateWithLifecycle().value ?: false
     val activity = LocalActivity.current

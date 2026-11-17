@@ -85,7 +85,7 @@ fun DeveloperSettingsScreen(
             SettingGroup {
                 SwitchRow(
                     title = "日志记录",
-                    subtitle = "记录应用启动后的完整运行日志，用于定位问题。会持续写入存储，排查完建议关闭",
+                    subtitle = "持续保存当前进程的系统运行日志，用于定位问题。会持续写入存储，排查完建议关闭；最近操作日志会独立限量保存在本机",
                     checked = recording,
                     onCheckedChange = viewModel::setLogRecording,
                     position = SettingGroupPosition.First,
