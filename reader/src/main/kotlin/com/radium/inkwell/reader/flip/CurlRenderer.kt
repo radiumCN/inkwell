@@ -84,6 +84,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         touchY: Float,
         cornerBottom: Boolean,
         paperColor: Int,
+        drawLiveUnder: (() -> Unit)? = null,
     ) {
         this.paperColor = paperColor
         cornerX = width
@@ -106,7 +107,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         // 拖动帧也画三片阴影：关掉会变成「纸片平移」，不像在卷。跟手靠触点只在
         // drawBehind 里读，不靠少画阴影。
         drawCurrentPageArea(canvas, front)
-        drawNextPageAreaAndShadow(canvas, under)
+        drawNextPageAreaAndShadow(canvas, under, drawLiveUnder)
         drawCurrentPageShadow(canvas)
         drawCurrentBackArea(canvas, front)
     }
@@ -121,12 +122,12 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 下页露出区 + 翻起页投在下页上的阴影（legado 的 backShadow，宽 = 触角距/4） */
-    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?) {
+    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?, drawLiveUnder: (() -> Unit)?) {
         canvas.save()
         canvas.clipPath(pathFront)
         canvas.clipPath(pathUnder)
         // 没有底页就露纸色（已铺）；投影照画，否则卷起来像纸片平移
-        if (under != null) canvas.drawBitmap(under, 0f, 0f, null)
+        if (under != null) canvas.drawBitmap(under, 0f, 0f, null) else drawLiveUnder?.invoke()
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val w = (touchToCornerDis / 4f)

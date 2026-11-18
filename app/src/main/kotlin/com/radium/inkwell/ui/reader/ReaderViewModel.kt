@@ -696,9 +696,15 @@ class ReaderViewModel(
     }
 
     fun traceInteraction(event: com.radium.inkwell.reader.flip.ReaderTrace) {
+        val diagnostics = listOfNotNull(
+            event.flipId?.let { "flip_id" to it },
+            event.render?.let { "render" to it.name },
+            event.reason?.let { "reason" to it },
+            event.settleMs?.let { "settle_ms" to it },
+        )
         trace("input", "action" to event.action.name, "direction" to event.direction?.name,
             "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter,
-            "animation" to _state.value.settings.flipAnimation.name)
+            "animation" to _state.value.settings.flipAnimation.name, *diagnostics.toTypedArray())
     }
 
     fun flip(direction: FlipDirection) {

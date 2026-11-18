@@ -19,6 +19,13 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 | `reader.session.load.* / menu.toggle / sheet / settings.apply / source.* / auto_flip.*` | 进书、阅读面板、设置、换源与自动翻页状态 |
 | `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项和反馈结果，不记录输入值 |
 
+横向翻页的 `flip_id` 在当前翻页容器内递增，用于关联同一次翻页的渲染、收尾和提交。
+仿真模式的 `RENDER_SELECTED` 在选择或更换渲染方式时记录，`render` 区分双位图卷页、
+直接绘制底页、底页尚不可用时露纸色，以及被卷页位图缺失时的平移。`reason` 记录降级或中断原因。
+`ANIMATION_START` 的 `settle_ms` 是计划时长，`INTERRUPTED`、`COMMIT` 和 `ROLLBACK` 中同一字段是
+从请求收尾到该事件的实际耗时。直接切页或取消手势时，提交原因也会记录。
+这些事件描述应用选择的渲染路径和状态变化，无法确认设备实际呈现了多少帧。
+
 章节、页码和字符偏移从 **0** 开始。`page.shown` 是最终位置记录；一次 `TAP` 或 `SWIPE_RELEASE`
 并不等于翻页成功，需要结合 `COMMIT`、`page.shown` 或 `blocked` 判断。
 滚动阅读只在跨越分页边界时记录，不逐帧记录位移。未接入的按钮、系统手势不会自动成为业务操作事件。
