@@ -389,7 +389,7 @@ fun ReaderScreen(
         // 点在图上：没取到的那条提示是「点按重试」，点了就重取、不翻页；点在真图上照旧翻页 / 开菜单
         val onImageTap: (PageItem.ImageBox) -> Boolean = { box ->
             if (box.failed) {
-                viewModel.retryImage(box.resourceId)
+                viewModel.retryImage(box)
                 true
             } else {
                 false

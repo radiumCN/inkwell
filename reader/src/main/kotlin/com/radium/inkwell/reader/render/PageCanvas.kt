@@ -47,6 +47,7 @@ class RenderablePage(
     val images: Map<Int, ImageBitmap> = emptyMap(),
     val header: String = "",
     val footer: String = "",
+    val failedImages: Set<Int> = emptySet(),
 )
 
 /**
@@ -106,7 +107,7 @@ fun DrawScope.drawPageItems(
                 val dst = Rect(Offset(contentLeft + item.left, originY + item.top), Size(item.width, item.height))
                 val radius = IMAGE_CORNER_DP.dp.toPx()
                 when {
-                    item.failed -> drawFailedImageRow(
+                    item.failed || item.elementIndex in page.failedImages -> drawFailedImageRow(
                         dst, radius, theme,
                         page.measured[item.elementIndex]?.renderHandle as? TextLayoutResult,
                     )
@@ -317,7 +318,7 @@ internal fun DrawScope.drawFittedImage(bitmap: ImageBitmap, dst: Rect) {
 fun RenderablePage.accessibleText(): String = buildString {
     for (item in spec.items) {
         val piece = when (item) {
-            is PageItem.ImageBox -> if (item.failed) IMAGE_FAILED_LABEL else "插图"
+            is PageItem.ImageBox -> if (item.failed || item.elementIndex in failedImages) IMAGE_FAILED_LABEL else "插图"
             is PageItem.TextSlice -> {
                 val layout = measured[item.elementIndex]?.renderHandle as? TextLayoutResult ?: continue
                 val text = layout.layoutInput.text.text

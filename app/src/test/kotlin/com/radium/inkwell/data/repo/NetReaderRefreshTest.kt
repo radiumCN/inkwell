@@ -92,6 +92,34 @@ class NetReaderRefreshTest {
     }
 
     @Test
+    fun `旧文字首屏和预取不联网，后台补全在响应到达后才更新缓存`() = runBlocking {
+        cache.write("book", url, old)
+        root.resolve("book").listFiles()!!.single().writeText("\u0001V4\n原来的正文")
+        val imageUrl = server.url("/illustration.png").toString()
+        val release = holdResponse(
+            MockResponse().setBody("<div id='content'><p>原来的正文</p><img src='$imageUrl'></div>"),
+        )
+        val timing = NetReaderBookSource.LoadTiming()
+        assertEquals(old, source.loadChapter(0, timing))
+        assertEquals("text_only_hit", timing.cacheState)
+        source.prefetchChapter(0)
+        assertEquals(0, server.requestCount)
+
+        val upgrade = async(Dispatchers.IO) { source.upgradeTextOnlyChapter(0) {} }
+        try {
+            assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null)
+            assertEquals(old, source.loadChapter(0))
+            assertEquals("skipped", source.upgradeTextOnlyChapter(0) {})
+            assertEquals(1, server.requestCount)
+        } finally {
+            release.countDown()
+        }
+        assertEquals("ready", upgrade.await())
+        assertTrue(source.loadChapter(0).elements.any { it is ContentElement.Image && it.resourceId == imageUrl })
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `换源期间不能提交旧源的新正文`() = runBlocking {
         cache.write("book", url, old)
         source.cacheWritesHeld = true

@@ -71,7 +71,7 @@ class ChapterContentCacheTest {
 
     /**
      * v4 是只收字的那一版（0.2.9 ~ 0.5.8 书不收图）。升级后照样认，不然离线缓存了整本的书一升级就读不了；
-     * 但标明它没有图：开着「正文显示图片」、又联网时，阅读页拿它当过期的重抓一份带图的
+     * 可选的后台补全只在仍是旧格式时写回。
      */
     @Test
     fun `只有字的 v4 缓存照样能读，标明没收过图`() {
@@ -86,9 +86,39 @@ class ChapterContentCacheTest {
             listOf(ContentElement.Paragraph("正文第一段。"), ContentElement.Divider, ContentElement.Paragraph("正文第二段。")),
             entry.content.elements,
         )
-        // 预取问「还要不要抓」：不要图时 v4 算有；要图时得重抓
         assertTrue(cache.hasCurrent("b1", url))
-        assertFalse(cache.hasCurrent("b1", url, needImages = true))
+    }
+
+    @Test
+    fun `旧缓存补图退避不会挡正文，且不覆盖先完成的刷新`() {
+        val url = "https://ex.com/1.html"
+        cache.write("b1", url, content)
+        File(root, "b1").listFiles()!!.single().writeText("\u0001V4\n旧正文")
+        val epoch = cache.epoch("b1")
+
+        assertTrue(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 0))
+        assertFalse(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 1000))
+        assertEquals(listOf(ContentElement.Paragraph("旧正文")), cache.read("b1", url)?.elements)
+        assertTrue(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 600_000))
+
+        val manual = ChapterContent(listOf(ContentElement.Paragraph("手动刷新后的正文")))
+        cache.write("b1", url, manual)
+        assertFalse(cache.writeIfEpoch("b1", url, content, epoch, onlyTextOnly = true))
+        assertEquals(manual.elements, cache.read("b1", url)?.elements)
+    }
+
+    @Test
+    fun `旧缓存补图成功后使用新版，清理后旧任务不能重新写入`() {
+        val url = "https://ex.com/1.html"
+        cache.write("b1", url, content)
+        File(root, "b1").listFiles()!!.single().writeText("\u0001V4\n旧正文")
+        val epoch = cache.epoch("b1")
+        assertTrue(cache.writeIfEpoch("b1", url, content, epoch, onlyTextOnly = true))
+        assertEquals(content.elements, cache.read("b1", url)?.elements)
+        assertFalse(cache.claimTextOnlyUpgrade("b1", url, epoch))
+        cache.clear("b1")
+        assertFalse(cache.writeIfEpoch("b1", url, content, epoch, onlyTextOnly = true))
+        assertNull(cache.read("b1", url))
     }
 
     @Test

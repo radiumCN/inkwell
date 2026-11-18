@@ -10,6 +10,7 @@ import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.util.SingleFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.time.TimeSource
 
@@ -57,13 +58,6 @@ class NetReaderBookSource(
      */
     @Volatile
     var cacheWritesHeld: Boolean = false
-
-    /**
-     * 阅读设置「正文显示图片」开着没有，由阅读页跟着设置改。开着时，升级前缓存的只有字的那一版（v4，见
-     * [ChapterContentCache.TEXT_ONLY_VERSION]）算过期：读到时重抓一份带图的；抓不到（没网）照旧读那份字。
-     */
-    @Volatile
-    var imagesWanted: Boolean = false
 
     override val chapterCount: Int get() = toc.chapters.size
 
@@ -140,12 +134,11 @@ class NetReaderBookSource(
         } finally {
             if (cacheStarted != null) timing.cacheReadMs = cacheStarted.elapsedNow().inWholeMilliseconds
         }
-        if (cached != null && (cached.withImages || !imagesWanted)) {
-            timing?.cacheState = "hit"
+        if (cached != null) {
+            timing?.cacheState = if (cached.withImages) "hit" else "text_only_hit"
             return cached.content
         }
         timing?.cacheState = when {
-            cached != null -> "text_only_refresh"
             incompatible -> "incompatible"
             else -> "miss"
         }
@@ -165,16 +158,23 @@ class NetReaderBookSource(
                 timing.cacheWritten = fetched.cacheWritten
             }
             fetched.chapter
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // 为了图去重抓只有字的旧缓存，没抓到（离线、来源抽风）：先读那份字，别让升级前缓存好的书读不了
-            if (cached == null) throw e
-            timing?.cacheState = "text_only_fallback"
-            cached.content
         } finally {
             if (fetchWaitStarted != null) timing.fetchWaitMs = fetchWaitStarted.elapsedNow().inWholeMilliseconds
         }
+    }
+
+    internal suspend fun upgradeTextOnlyChapter(index: Int, onStage: (String) -> Unit): String {
+        val toc = toc
+        val chapter = toc.chapters.getOrNull(index) ?: return "skipped"
+        val url = chapter.url ?: return "skipped"
+        val epoch = cacheEpoch()
+        if (cacheWritesHeld || !withContext(Dispatchers.IO) { cache.claimTextOnlyUpgrade(bookId, url, epoch) }) {
+            return "skipped"
+        }
+        onStage("fetch")
+        val content = fetchChapter(index, chapter, url, toc.urls)
+        onStage("write")
+        return if (store(url, content, epoch, onlyTextOnly = true)) "ready" else "discarded"
     }
 
     override suspend fun prefetchChapter(index: Int) {
@@ -183,7 +183,7 @@ class NetReaderBookSource(
         val url = chapter.url ?: return
         val epoch = cacheEpoch()
         // 只问「有没有」，别 read：命中时整章读进来解析一遍再扔掉，每到章首章尾都要这样过几章（见 hasCurrent）
-        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url, needImages = imagesWanted) }) return
+        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url) }) return
         // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
         // 静态抓不到就放弃，等用户真翻到这一章再走 loadChapter 的渲染回退。
         val remote = engine.getContent(
@@ -204,10 +204,18 @@ class NetReaderBookSource(
      * 旧序号上躺着的是另一章，打错了标记，目录里没缓存的章亮着、缓存了的反倒灭着。
      * 一条按 URL 的 UPDATE 搞定：先查后改的两步之间目录照样可能被换掉。
      */
-    private suspend fun store(url: String, content: ChapterContent, epoch: Long): Boolean {
+    private suspend fun store(
+        url: String,
+        content: ChapterContent,
+        epoch: Long,
+        onlyTextOnly: Boolean = false,
+    ): Boolean {
         if (cacheWritesHeld) return false
         return withContext(Dispatchers.IO) {
-            if (cacheWritesHeld || !cache.writeIfEpoch(bookId, url, content, epoch)) return@withContext false
+            ensureActive()
+            if (cacheWritesHeld || !cache.writeIfEpoch(bookId, url, content, epoch, onlyTextOnly)) {
+                return@withContext false
+            }
             // 文件写入后可能已经被清理；不要给旧请求打新目录的缓存标记。
             if (cacheEpoch() == epoch) {
                 chapterDao.markCachedByUrl(bookId, url, true)
@@ -221,18 +229,6 @@ class NetReaderBookSource(
 
     /** 同一张图同时只取一次：本章排版、邻章预载、看大图可能一起要它 */
     private val imageLoads = SingleFlight<Pair<String, Long>, ByteArray?>(Dispatchers.IO)
-
-    /**
-     * 往后预取时顺带把这一章的图取进缓存（开着「正文显示图片」时），翻到时不用再等。
-     * 只看已经缓存好的正文（[prefetchChapter] 刚取过），不为了它去抓正文 —— 那条路可能开 WebView，预取不许。
-     */
-    suspend fun prefetchImages(index: Int) {
-        val url = toc.chapters.getOrNull(index)?.url ?: return
-        val entry = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) } ?: return
-        for (el in entry.content.elements) {
-            if (el is ContentElement.Image) loadImage(el.resourceId)
-        }
-    }
 
     /**
      * 正文插图：先看缓存（离线也看得到读过的图），没有再经引擎取 —— 带上来源的请求头、防盗链时补 Referer、

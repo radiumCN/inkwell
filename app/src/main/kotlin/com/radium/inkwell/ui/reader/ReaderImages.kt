@@ -23,9 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * 阅读页的正文插图（阅读设置「正文显示图片」开着时才用得上）。三件事：
  *
- * - **排版前量尺寸**（[measure]）：分页要先知道图多高才知道这一页装不装得下。不量就排，只能先按固定比例留框、
- *   图来了再重排 —— 读着读着字整页往下跳。所以带图的章先把图取下来量好再排；量不出来的记成没取到
- *   （[ImageInfo.Failed]），分页排一条「点按重试」。
+ * - **本地书排版前量尺寸**（[measure]）。网络书先排固定框，当前页附近的插图再按需取。
  * - **画的时候解码**（[bitmap] / [decode]）：按页上的框解一张正好大小的位图，放进按字节数算的 LRU。
  *   位图一律软件位图（ARGB_8888）：仿真翻页要把整页画进软件画布（renderPageBitmap），硬件位图画不进去，会崩。
  * - **看大图**（[decodeForViewer]）：长按时另解一张大一些的，给双指放大留余量，不进 LRU。
@@ -95,12 +93,26 @@ internal class ReaderImages {
     fun isUndecodable(resourceId: String, width: Int, height: Int): Boolean =
         key(resourceId, width, height) in undecodable
 
+    fun allowRetry(resourceId: String, width: Int, height: Int) {
+        undecodable.remove(key(resourceId, width, height))
+    }
+
     /** 按页上的框解一张：先按 2 的幂降采样到不小于框，再缩到正好框的大小（框的比例就是原图的比例） */
-    suspend fun decode(src: ReaderBookSource, resourceId: String, width: Int, height: Int): ImageBitmap? {
+    suspend fun decode(
+        src: ReaderBookSource,
+        resourceId: String,
+        width: Int,
+        height: Int,
+        fit: Boolean,
+    ): ImageBitmap? {
         val key = key(resourceId, width, height)
         bitmaps.get(key)?.let { return it }
-        val bytes = loadBytes(src, resourceId)
-        val bmp = bytes?.let { withContext(Dispatchers.Default) { decodeSampled(it, width, height, exact = true) } }
+        val bytes = withTimeoutOrNull(IMAGE_TIMEOUT_MS) { loadBytes(src, resourceId) }
+        val bmp = bytes?.let {
+            withContext(Dispatchers.Default) {
+                if (fit) decodeFitted(it, width, height) else decodeSampled(it, width, height, exact = true)
+            }
+        }
         if (bmp == null) {
             undecodable += key
             return null
@@ -150,6 +162,17 @@ internal class ReaderImages {
             val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
             return if (o.outWidth > 0 && o.outHeight > 0) ImageInfo.Sized(o.outWidth, o.outHeight) else ImageInfo.Failed
+        }
+
+        fun decodeFitted(bytes: ByteArray, width: Int, height: Int): Bitmap? {
+            val bounds = boundsOf(bytes) as? ImageInfo.Sized ?: return null
+            val scale = minOf(1f, width.toFloat() / bounds.width, height.toFloat() / bounds.height)
+            return decodeSampled(
+                bytes,
+                (bounds.width * scale).toInt().coerceAtLeast(1),
+                (bounds.height * scale).toInt().coerceAtLeast(1),
+                exact = true,
+            )
         }
 
         /**

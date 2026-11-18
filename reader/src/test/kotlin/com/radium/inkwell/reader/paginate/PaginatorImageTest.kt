@@ -137,6 +137,26 @@ class PaginatorImageTest {
         assertEquals(IMAGE_FAILED_LABEL, assertNotNull(result.measured[row.elementIndex]).text)
     }
 
+    @Test
+    fun `在线图片失败后原位可重试，文字位置和阅读偏移保持稳定`() {
+        val layout = spec()
+        val result = paginator.paginate(
+            0, "", ChapterContent(listOf(ContentElement.Paragraph(cjk(15)), pic, ContentElement.Paragraph(cjk(15)))),
+            layout, images = { ImageInfo.Reserved(illustrationOnly = false) },
+        )
+        val page = result.chapter.pages.single()
+        val image = page.items[1] as PageItem.ImageBox
+        val x = image.left + image.width / 2
+        val y = image.top + image.height / 2
+        val pending = RenderablePage(page, result.measured)
+        val failed = RenderablePage(page, result.measured, failedImages = setOf(image.elementIndex))
+        assertFalse(assertNotNull(pending.imageAt(x, y, layout)).failed)
+        assertTrue(assertNotNull(failed.imageAt(x, y, layout)).failed)
+        assertEquals(image.top + image.height, (page.items[2] as PageItem.TextSlice).yTopInPage)
+        assertEquals(30, result.chapter.totalChars)
+        assertEquals(IMAGE_FAILED_LABEL, assertNotNull(result.measured[image.elementIndex]).text)
+    }
+
     // ---- 翻页模式的「整页一张图」居中，与命中测试 ----
 
     @Test

@@ -26,6 +26,7 @@ class CurlPageKeyTest {
         val bitmap = image()
         val decoded = CurlPageKey(spec, measured, mapOf(1 to bitmap))
         assertNotEquals(placeholder, decoded)
+        assertNotEquals(placeholder, CurlPageKey(spec, measured, emptyMap(), failedImages = setOf(1)))
         assertEquals(decoded, CurlPageKey(spec, measured, mapOf(1 to bitmap)))
         assertNotEquals(decoded, CurlPageKey(spec, measured, mapOf(1 to image())))
         assertNotEquals(decoded, CurlPageKey(spec, HashMap(measured), mapOf(1 to bitmap)))

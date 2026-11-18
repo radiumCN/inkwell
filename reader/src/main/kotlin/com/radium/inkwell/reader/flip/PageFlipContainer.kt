@@ -798,14 +798,16 @@ internal class CurlPageKey(
     val spec: PageSpec,
     val measured: Map<Int, MeasuredParagraph>,
     val images: Map<Int, androidx.compose.ui.graphics.ImageBitmap>,
+    val failedImages: Set<Int> = emptySet(),
 ) {
     override fun equals(other: Any?): Boolean =
-        other is CurlPageKey && other.measured === measured && other.spec == spec && other.images == images
+        other is CurlPageKey && other.measured === measured && other.spec == spec &&
+            other.images == images && other.failedImages == failedImages
 
     override fun hashCode(): Int = spec.hashCode()
 }
 
-private fun RenderablePage.curlKey() = CurlPageKey(spec, measured, images)
+private fun RenderablePage.curlKey() = CurlPageKey(spec, measured, images, failedImages)
 
 private fun RenderablePage?.matches(key: CurlPageKey?): Boolean =
     if (this == null) key == null else key == curlKey()
