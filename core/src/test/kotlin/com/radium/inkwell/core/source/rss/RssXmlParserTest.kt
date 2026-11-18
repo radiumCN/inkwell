@@ -9,6 +9,13 @@ import kotlin.test.assertTrue
 class RssXmlParserTest {
 
     @Test
+    fun `空 feed 返回空列表，HTML 中的 feed 字样不会被识别为订阅`() {
+        assertEquals(emptyList(), RssXmlParser.parse("s", """<rss version="2.0"><channel><title>订阅</title></channel></rss>"""))
+        assertEquals(emptyList(), RssXmlParser.parse("s", """<feed xmlns="http://www.w3.org/2005/Atom"><title>订阅</title></feed>"""))
+        assertNull(RssXmlParser.parse("s", "<html><!-- <rss> --><body>网页</body></html>"))
+    }
+
+    @Test
     fun `RSS 2_0`() {
         val xml = """
         <?xml version="1.0"?>

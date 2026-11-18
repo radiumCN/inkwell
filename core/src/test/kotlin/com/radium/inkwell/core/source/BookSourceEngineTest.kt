@@ -954,7 +954,8 @@ class BookSourceEngineTest {
         const val BLEED_2 = """<html><body><div id="content"><p>第二章内容。</p></div></body></html>"""
 
         // 上下两处导航各有一个「下一页」，且指向同一地址
-        const val DUP_NAV = """<html><body><a id="next" href="/dup/2">下一页</a>
+        const val DUP_NAV = """<html><body><a id="next" href="#">下一页占位</a>
+            <a id="next" href="/dup/2">下一页</a>
             <div id="content"><p>重复导航页。</p></div>
             <a id="next" href="/dup/2">下一页</a></body></html>"""
 

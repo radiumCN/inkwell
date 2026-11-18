@@ -3,6 +3,7 @@ package com.radium.inkwell.core.source
 import com.jayway.jsonpath.Configuration
 import com.jayway.jsonpath.JsonPath
 import com.jayway.jsonpath.Option
+import com.radium.inkwell.core.source.rss.RssXmlParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -916,7 +917,8 @@ internal fun parsePage(text: String, baseUrl: String): Document =
     else Jsoup.parse(text, baseUrl)
 
 private fun isXmlText(text: String): Boolean =
-    text.removePrefix("\uFEFF").startsWith("<?xml", ignoreCase = true)
+    text.trimStart('\uFEFF', ' ', '\t', '\r', '\n').startsWith("<?xml", ignoreCase = true) ||
+        RssXmlParser.looksLikeFeed(text)
 
 // ---- JSON 工具 ----
 

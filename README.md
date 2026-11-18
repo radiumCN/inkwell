@@ -117,7 +117,7 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 
 面向文本类规则。支持的子集包括：
 
-- 默认 Jsoup 层级（`class.foo.0@tag.a@href`）、`@css:`、JSONPath（`$.`）、`:正则`、XPath（`@XPath:` / `//`）；以 `<?xml` 开头的内容（RSS / Atom feed）按 XML 解析，`link@text` 取得到
+- 默认 Jsoup 层级（`class.foo.0@tag.a@href`）、`@css:`、JSONPath（`$.`）、`:正则`、XPath（`@XPath:` / `//`）；有 XML 声明的内容和标准 RSS / Atom feed 按 XML 解析，`link@text` 可读取 RSS 文章链接
 - `||` 回退、`&&` 拼接、`##正则##替换` 净化、`replaceRegex`
 - JS 规则（`<js>` / `@js:` / 部分 `{{表达式}}`），由 Rhino 执行；引擎带沙箱与超时，禁止访问本地私网等危险能力。列表规则可以写成「脚本 + 尾规则」（`<js>…</js>` 换行接 CSS / XPath / JSONPath），尾规则在脚本的产物上取节点
 - 脚本里常用的加解密与签名：`java.createSymmetricCrypto`（AES / DES / DESede）、`aes*` / `des*`、`HMacHex` / `HMacBase64`；直接调 JDK 的写法（`JavaImporter` / `Packages`）只给 Base64（含 `android.util.Base64`）、Cipher 与密钥规格这几样替身，不开放其他 Java 类

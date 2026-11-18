@@ -210,6 +210,11 @@ fun PageFlipContainer(
         val dir = direction ?: return
         settling = true
         val width = size.width.toFloat()
+        val targetOffset = when {
+            !commit -> 0f
+            dir == FlipDirection.FORWARD -> -width
+            else -> width
+        }
         try {
         if (effectiveAnim == FlipAnimation.CURL) {
             // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
@@ -220,17 +225,17 @@ fun PageFlipContainer(
                 else -> downX - width * 0.3f                             // 回滚：重新折叠到屏外
             }
             val dur = if (commit) settleDuration(velocity, 200, 320) else settleDuration(velocity, 160, 240)
+            val startOffset = offset.floatValue
+            val startTouchX = touchX.floatValue
             // 减速曲线（≈DecelerateInterpolator）：纸张甩出后自然减速停下
-            animate(touchX.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
-                touchX.floatValue = v
+            animate(0f, 1f, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { progress, _ ->
+                touchX.floatValue = startTouchX + (target - startTouchX) * progress
+                // 位图未就绪时仍会画平移层，两条路径都要完成收尾。
+                offset.floatValue = startOffset + (targetOffset - startOffset) * progress
             }
         } else {
-            val target = when {
-                commit -> if (dir == FlipDirection.FORWARD) -width else width
-                else -> 0f
-            }
             val dur = if (commit) settleDuration(velocity, 180, 260) else settleDuration(velocity, 140, 200)
-            animate(offset.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
+            animate(offset.floatValue, targetOffset, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
                 offset.floatValue = v
             }
         }
@@ -689,9 +694,10 @@ private fun CurlLayer(
     }
     // 手里的位图必须正是**眼前这几页**：连翻、跳目录、拖进度、改字号/纸色之后，新图还在 Default 上烤，
     // 这份可能还是上一页的。从前只看「有没有」不看「是不是」，卷起来的就是刚翻过去的那页，
-    // 几帧之后才突然换成对的。对不上就先平移跟手（画面不冻住、也不画错页），等新图交上来再卷。
+    // 几帧之后才突然换成对的。起手时对不上的这一刀保持平移，避免手势中途切换动画。
     val pair = bitmaps?.curlPair(direction, request)
-    if (pair == null) {
+    val startedWithBitmaps = remember(direction, current?.spec) { pair != null }
+    if (pair == null || !startedWithBitmaps) {
         SlideLayers(
             selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
         )
