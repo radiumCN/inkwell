@@ -87,6 +87,7 @@ import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.util.RepeatedTitle
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
 data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
@@ -243,6 +244,15 @@ private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
  * 「书源网络很差」这个场景需要一个明确的放弃点。
  */
 private class ContentTimeoutException : Exception("正文加载超时")
+
+private inline fun <T> measureChapterStage(record: (Long) -> Unit, block: () -> T): T {
+    val started = TimeSource.Monotonic.markNow()
+    try {
+        return block()
+    } finally {
+        record(started.elapsedNow().inWholeMilliseconds)
+    }
+}
 
 /**
  * 网上的书、关着「正文显示图片」时，这一章只有图没有字。从前解析时就抹掉了图，这种章是一章空正文、
@@ -1670,12 +1680,7 @@ class ReaderViewModel(
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
      * 本地书没有「抓取时」，通用规则也只能在这里跑。
      */
-    private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int, replacement: ChapterContent? = null): ChapterContent {
-        // 慢到这个份上的源基本没救（正常源 1-3 秒）。用 withTimeoutOrNull 而不是 withTimeout：
-        // 后者抛的是 CancellationException，会被下游的 catch(Exception) 吞掉，还会跟"协程被正常
-        // 取消"混为一谈 —— 翻页时取消上一次加载也会被当成超时，进而触发自动换源。
-        val raw = replacement ?: withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
-            ?: throw ContentTimeoutException()
+    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int): ChapterContent {
         // 本地书不经过引擎，通用规则从前一条都不跑（从阅读导进来一批去广告的规则，本地书毫无反应），在这里和书内规则一起跑。
         // 网上的书不加：通用规则在抓取时已经跑过、结果进了缓存，这里再跑一遍，「a → ab」这种规则会替换两次
         val b = book
@@ -1835,15 +1840,31 @@ class ReaderViewModel(
         // 发起这次加载的协程（跳章时就是 navJob）。部分结果的 showPage 是另投递到主线程的，
         // 不随它取消 —— 这一跳已经被下一次取代的话，别再把人拽回被放弃的那一章
         val caller = currentCoroutineContext()[Job]
-        val loadStarted = System.nanoTime()
+        val loadId = chapterLoadSequence.incrementAndGet()
+        val loadStarted = TimeSource.Monotonic.markNow()
         var loadOutcome = "discarded"
-        trace("chapter.load.start", "chapter" to chapterIndex, "user_facing" to userFacing)
+        var acquireMs: Long? = null
+        var purifyMs: Long? = null
+        var imageMeasureMs: Long? = null
+        var paginateWaitMs: Long? = null
+        var paginateMs: Long? = null
+        val netTiming = if (userFacing && replacement == null && src is NetReaderBookSource) {
+            NetReaderBookSource.LoadTiming()
+        } else null
+        trace("chapter.load.start", "chapter" to chapterIndex, "user_facing" to userFacing, "load_id" to loadId)
         return try {
             val title = src.chapterTitle(chapterIndex) ?: ""
             // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
             // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
             // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
-            val purified = loadPurified(src, chapterIndex, replacement)
+            val raw = replacement ?: measureChapterStage({ acquireMs = it }) {
+                // 只把本次超时当成加载失败，正常取消仍须向上传递。
+                withTimeoutOrNull(CONTENT_TIMEOUT_MS) {
+                    if (src is NetReaderBookSource) src.loadChapter(chapterIndex, netTiming)
+                    else src.loadChapter(chapterIndex)
+                } ?: throw ContentTimeoutException()
+            }
+            val purified = measureChapterStage({ purifyMs = it }) { loadPurified(raw, chapterIndex) }
             // 关着图时，网上的书只有图没有字的章照旧当读不出来（见 ImageOnlyChapterException）。
             // 看的是去掉重复标题**之前**：那一行标题也是字，从前它在时这一章不算空
             if (!spec.showImages && book?.type == BookType.NET &&
@@ -1855,49 +1876,59 @@ class ReaderViewModel(
                 elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()),
             )
             // 开着图：排版前先把这一章的图量好（要知道多高才知道这一页装不装得下），见 ReaderImages.measure
-            if (spec.showImages) readerImages.measure(src, content)
+            if (spec.showImages) {
+                measureChapterStage({ imageMeasureMs = it }) { readerImages.measure(src, content) }
+            }
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
             fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
-            val result = measureMutex.withLock {
-                if (replacement == null) paginated[chapterIndex]?.let {
-                    if (it.complete) {
-                        loadOutcome = "cached"
-                        return it
+            val waitStarted = TimeSource.Monotonic.markNow()
+            val result = try {
+                measureMutex.withLock {
+                    paginateWaitMs = waitStarted.elapsedNow().inWholeMilliseconds
+                    if (replacement == null) paginated[chapterIndex]?.let {
+                        if (it.complete) {
+                            loadOutcome = "cached"
+                            return it
+                        }
+                    }
+                    // 排队等锁期间条件已经变了：别再按旧参数整章排一遍、占着锁让新字号干等。
+                    // 连点几下 A+ 时，每一档排在锁上的邻章预载都会走到这里
+                    if (stale()) return null
+                    measureChapterStage({ paginateMs = it }) {
+                        withContext(Dispatchers.Default) {
+                            val job = coroutineContext[Job]
+                            Paginator(facade).paginate(
+                                chapterIndex, title, content, spec,
+                                notifyAfterChar = notifyAfterChar,
+                                images = { readerImages.info(it.resourceId) },
+                                // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
+                                isAbandoned = { job?.isActive == false || stale() },
+                                onPartial = { partial ->
+                                    if (replacement != null) return@paginate
+                                    // 排到一半视口/字号已经换了：这份是按旧 spec 排的，别塞进缓存；源换了、目录换过同理
+                                    if (stale()) return@paginate
+                                    paginated[chapterIndex] = partial
+                                    if (userFacing) {
+                                        val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
+                                            partial.chapter.pages.lastIndex
+                                        } else {
+                                            partial.chapter.pageIndexFor(notifyAfterChar)
+                                        }
+                                        // 这个回调跑在 Default 上：showPage 读改写 _state / position / 预取 Job，
+                                        // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
+                                        // 排版完成后的那次 showPage 之前，先出的仍是这一屏
+                                        viewModelScope.launch(Dispatchers.Main) {
+                                            if (caller?.isActive == false || gen != tocGeneration) return@launch
+                                            showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
+                                        }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
-                // 排队等锁期间条件已经变了：别再按旧参数整章排一遍、占着锁让新字号干等。
-                // 连点几下 A+ 时，每一档排在锁上的邻章预载都会走到这里
-                if (stale()) return null
-                withContext(Dispatchers.Default) {
-                    val job = coroutineContext[Job]
-                    Paginator(facade).paginate(
-                        chapterIndex, title, content, spec,
-                        notifyAfterChar = notifyAfterChar,
-                        images = { readerImages.info(it.resourceId) },
-                        // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
-                        isAbandoned = { job?.isActive == false || stale() },
-                        onPartial = { partial ->
-                            if (replacement != null) return@paginate
-                            // 排到一半视口/字号已经换了：这份是按旧 spec 排的，别塞进缓存；源换了、目录换过同理
-                            if (stale()) return@paginate
-                            paginated[chapterIndex] = partial
-                            if (userFacing) {
-                                val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
-                                    partial.chapter.pages.lastIndex
-                                } else {
-                                    partial.chapter.pageIndexFor(notifyAfterChar)
-                                }
-                                // 这个回调跑在 Default 上：showPage 读改写 _state / position / 预取 Job，
-                                // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
-                                // 排版完成后的那次 showPage 之前，先出的仍是这一屏
-                                viewModelScope.launch(Dispatchers.Main) {
-                                    if (caller?.isActive == false || gen != tocGeneration) return@launch
-                                    showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
-                                }
-                            }
-                        },
-                    )
-                }
+            } finally {
+                if (paginateWaitMs == null) paginateWaitMs = waitStarted.elapsedNow().inWholeMilliseconds
             }
             // 排版中途被 isAbandoned 叫停的半截结果：不能当缓存。下面三道检查拦不住它 ——
             // 连点 A+、A- 回到原字号时，作废的条件到这里又不成立了，半截结果会被当成整章写进去
@@ -1927,7 +1958,8 @@ class ReaderViewModel(
             loadOutcome = "failed"
             // 预取失败（userFacing=false）不打扰用户，但**必须留痕**：从前这里把 e 整个丢掉，
             // 结果"预加载为什么没成功"在应用内外都查不到任何线索，只能看着转圈干瞪眼。
-            trace("chapter.load.failed", "chapter" to chapterIndex, "user_facing" to userFacing, "error" to e.javaClass.simpleName)
+            trace("chapter.load.failed", "chapter" to chapterIndex, "user_facing" to userFacing,
+                "load_id" to loadId, "error" to e.javaClass.simpleName)
             Log.w(TAG, "第 $chapterIndex 章分页失败（userFacing=$userFacing）", e)
             if (userFacing) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
@@ -1939,7 +1971,15 @@ class ReaderViewModel(
             null
         } finally {
             trace("chapter.load.end", "chapter" to chapterIndex, "user_facing" to userFacing,
-                "outcome" to loadOutcome, "duration_ms" to (System.nanoTime() - loadStarted) / 1_000_000)
+                "load_id" to loadId, "outcome" to loadOutcome, "duration_ms" to loadStarted.elapsedNow().inWholeMilliseconds,
+                "acquire_ms" to acquireMs, "purify_ms" to purifyMs, "image_measure_ms" to imageMeasureMs,
+                "paginate_wait_ms" to paginateWaitMs, "paginate_ms" to paginateMs)
+            if (netTiming != null) {
+                trace("chapter.load.network", "chapter" to chapterIndex, "load_id" to loadId,
+                    "cache_state" to netTiming.cacheState, "cache_read_ms" to netTiming.cacheReadMs,
+                    "fetch_wait_ms" to netTiming.fetchWaitMs, "fetch_ms" to netTiming.fetchMs,
+                    "cache_write_ms" to netTiming.cacheWriteMs, "cache_written" to netTiming.cacheWritten)
+            }
         }
     }
 
@@ -2157,6 +2197,7 @@ class ReaderViewModel(
     }
 
     private companion object {
+        val chapterLoadSequence = AtomicInteger()
         const val TAG = "ReaderViewModel"
 
 

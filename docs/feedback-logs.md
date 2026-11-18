@@ -16,6 +16,7 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 | `reader.input.volume / auto / menu_swipe` | 音量键、自动翻页和菜单滑动的程序化请求 |
 | `reader.flip.commit_requested / blocked / page.shown` | 翻页提交请求、无法翻页的原因及最终显示的章节、页码和字符偏移 |
 | `reader.chapter.request / seek / chapter.load.start / chapter.load.end / chapter.load.failed` | 跳章、拖动进度及章节加载（含预取）的结果与耗时 |
+| `reader.chapter.load.network` | 前台网络章节的缓存读取、书源获取和落盘诊断 |
 | `reader.session.load.* / menu.toggle / sheet / settings.apply / source.* / auto_flip.*` | 进书、阅读面板、设置、换源与自动翻页状态 |
 | `reader.settings.paper_selected / paper_applied` | 接收到的纸张选择与实际生效的主题切换，只记录主题 ID |
 | `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项和反馈结果，不记录输入值 |
@@ -34,6 +35,16 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 章节、页码和字符偏移从 **0** 开始。`page.shown` 是最终位置记录；一次 `TAP` 或 `SWIPE_RELEASE`
 并不等于翻页成功，需要结合 `COMMIT`、`page.shown` 或 `blocked` 判断。
 滚动阅读只在跨越分页边界时记录，不逐帧记录位移。未接入的按钮、系统手势不会自动成为业务操作事件。
+
+章节加载可在同一进程内按 `load_id` 关联。加载结束记录以毫秒为单位的取正文（`acquire_ms`）、
+阅读器净化（`purify_ms`）、图片尺寸测量（`image_measure_ms`）、等待分页锁（`paginate_wait_ms`）
+和分页（`paginate_ms`）。取消或失败时也记录已经进入的阶段。内存分页已命中时可以直接复用，
+无需发起章节加载。分页可先交付目标页，因此 `page.shown` 可能早于章节加载结束，也不能用于测量真实显示帧。
+
+前台网络章节另记缓存读取耗时和状态（命中、未找到、格式不兼容、仅文字缓存需重抓、重抓失败回退到仅文字，
+或读取未完成）。`fetch_wait_ms` 包含等待共享抓取和写缓存的时间，包含在 `acquire_ms` 内。
+共享抓取成功返回时另记书源获取耗时（含抓取、解析和书源净化）、落盘耗时与是否写入。
+未执行或未取得结果的字段为 `null`，不同于不足 1 毫秒的 `0`。新增字段只记录耗时、状态和进程内编号。
 
 ## 时间与完整性
 

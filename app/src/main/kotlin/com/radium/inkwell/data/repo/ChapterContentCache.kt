@@ -119,7 +119,7 @@ class ChapterContentCache(private val root: File) {
 
     fun read(bookId: String, chapterUrl: String): ChapterContent? = readEntry(bookId, chapterUrl)?.content
 
-    fun readEntry(bookId: String, chapterUrl: String): Entry? {
+    fun readEntry(bookId: String, chapterUrl: String, onIncompatible: (() -> Unit)? = null): Entry? {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return null
         val lines = f.readLines()
@@ -128,7 +128,10 @@ class ChapterContentCache(private val root: File) {
         // 跟着变好。没有这道校验的话，用户已经读过（也就是最想看到修复效果）的章节
         // 会永远停在旧解析上，升级完一看一模一样。见 [FORMAT_VERSION]。
         val version = lines.firstOrNull()
-        if (!version.isUsable(needImages = false)) return null
+        if (!version.isUsable(needImages = false)) {
+            onIncompatible?.invoke()
+            return null
+        }
         val elements = lines.drop(1).mapNotNull { line ->
             when {
                 // 转义过的普通段落：它本来长得像标记行（H1:/IMG:/---），存时加了前缀，这里先剥掉。

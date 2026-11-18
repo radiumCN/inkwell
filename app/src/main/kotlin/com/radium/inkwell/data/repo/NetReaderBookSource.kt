@@ -11,6 +11,7 @@ import com.radium.inkwell.util.SingleFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.time.TimeSource
 
 /** 网络书的阅读数据源：磁盘缓存优先，未命中走书源引擎抓取并落盘 */
 class NetReaderBookSource(
@@ -75,7 +76,23 @@ class NetReaderBookSource(
      * 调 loadChapter —— 不合并的话同一章被并发抓两到四遍：白耗流量不说，JS 源要在 WebView 渲染锁上
      * 排队、限速源要排令牌，用户正等着的那一章被这些重复请求挤到超时，随后误触发自动换源、清缓存。
      */
-    private val loads = SingleFlight<Pair<String, Long>, ChapterContent>(Dispatchers.IO)
+    private data class FetchedChapter(
+        val chapter: ChapterContent,
+        val fetchMs: Long,
+        val cacheWriteMs: Long,
+        val cacheWritten: Boolean,
+    )
+
+    private val loads = SingleFlight<Pair<String, Long>, FetchedChapter>(Dispatchers.IO)
+
+    internal class LoadTiming {
+        var cacheState = "unresolved"
+        var cacheReadMs: Long? = null
+        var fetchWaitMs: Long? = null
+        var fetchMs: Long? = null
+        var cacheWriteMs: Long? = null
+        var cacheWritten: Boolean? = null
+    }
 
     /** 显式刷新必须绕过磁盘缓存和正在进行的普通加载；抓取失败不触碰原文。 */
     suspend fun fetchFreshChapter(index: Int): ChapterContent {
@@ -106,26 +123,57 @@ class NetReaderBookSource(
         check(store(url, content, epoch)) { "来源或缓存已变化，请重新获取本章" }
     }
 
-    override suspend fun loadChapter(index: Int): ChapterContent {
+    override suspend fun loadChapter(index: Int): ChapterContent = loadChapter(index, null)
+
+    internal suspend fun loadChapter(index: Int, timing: LoadTiming?): ChapterContent {
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
         // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节。
         // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
-        val epoch = cacheEpoch()
-        val cached = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) }
-        if (cached != null && (cached.withImages || !imagesWanted)) return cached.content
+        val cacheStarted = timing?.let { TimeSource.Monotonic.markNow() }
+        val epoch: Long
+        var incompatible = false
+        val cached = try {
+            epoch = cacheEpoch()
+            withContext(Dispatchers.IO) { cache.readEntry(bookId, url) { incompatible = true } }
+        } finally {
+            if (cacheStarted != null) timing.cacheReadMs = cacheStarted.elapsedNow().inWholeMilliseconds
+        }
+        if (cached != null && (cached.withImages || !imagesWanted)) {
+            timing?.cacheState = "hit"
+            return cached.content
+        }
+        timing?.cacheState = when {
+            cached != null -> "text_only_refresh"
+            incompatible -> "incompatible"
+            else -> "miss"
+        }
+        val fetchWaitStarted = timing?.let { TimeSource.Monotonic.markNow() }
         return try {
-            loads.run(url to epoch) {
+            val fetched = loads.run(url to epoch) {
+                val fetchStarted = TimeSource.Monotonic.markNow()
                 val content = fetchChapter(index, chapter, url, toc.urls)
-                store(url, content, epoch)
-                content
+                val fetchMs = fetchStarted.elapsedNow().inWholeMilliseconds
+                val writeStarted = TimeSource.Monotonic.markNow()
+                val written = store(url, content, epoch)
+                FetchedChapter(content, fetchMs, writeStarted.elapsedNow().inWholeMilliseconds, written)
             }
+            if (timing != null) {
+                timing.fetchMs = fetched.fetchMs
+                timing.cacheWriteMs = fetched.cacheWriteMs
+                timing.cacheWritten = fetched.cacheWritten
+            }
+            fetched.chapter
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // 为了图去重抓只有字的旧缓存，没抓到（离线、来源抽风）：先读那份字，别让升级前缓存好的书读不了
-            cached?.content ?: throw e
+            if (cached == null) throw e
+            timing?.cacheState = "text_only_fallback"
+            cached.content
+        } finally {
+            if (fetchWaitStarted != null) timing.fetchWaitMs = fetchWaitStarted.elapsedNow().inWholeMilliseconds
         }
     }
 
