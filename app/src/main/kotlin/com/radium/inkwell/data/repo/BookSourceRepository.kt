@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap
 class BookSourceRepository(
     private val dao: BookSourceDao,
     private val hitDao: BookSourceHitDao,
+    private val readHealth: SourceReadHealth? = null,
 ) {
 
     private val json = Json {
@@ -182,6 +183,8 @@ class BookSourceRepository(
                     // 搜索测速同理：规则一变，旧规则攒下的快慢与连续失败就不作数了
                     searchMs = keepCheck?.searchMs ?: -1,
                     searchFails = keepCheck?.searchFails ?: 0,
+                    searchAt = keepCheck?.searchAt ?: 0,
+                    searchRetryAt = keepCheck?.searchRetryAt ?: 0,
                 )
                 if (existing == null) added++ else updated++
             } catch (e: Exception) {
@@ -344,9 +347,12 @@ class BookSourceRepository(
      * [getEnabledRules] 只给 rule，把 entity 上的 checkStatus/respondTime/sortOrder 全丢了 ——
      * 自动换源要靠这些决定先试谁（校验通过的、响应快的优先占住并发名额）。
      */
-    suspend fun getEnabledForSwitch(): List<EnabledSource> = withContext(Dispatchers.Default) {
+    suspend fun getEnabledForSwitch(ids: Set<String>? = null): List<EnabledSource> = withContext(Dispatchers.Default) {
+        val now = System.currentTimeMillis()
+        val health = readHealth?.snapshot(now).orEmpty()
         // 校验结果与测速每次现查（元数据投影），只有规则正文走解码缓存：它们改了不动 updatedAt
-        inLanes(dao.getEnabledMeta()) { meta: EnabledSourceMeta ->
+        val enabled = dao.getEnabledMeta()
+        inLanes(if (ids == null) enabled else enabled.filter { it.id in ids }) { meta: EnabledSourceMeta ->
             val rule = ruleAt(meta.id, meta.updatedAt) ?: return@inLanes null
             EnabledSource(
                 rule = rule,
@@ -355,6 +361,11 @@ class BookSourceRepository(
                 sortOrder = meta.sortOrder,
                 searchMs = meta.searchMs,
                 searchFails = meta.searchFails,
+                searchAt = meta.searchAt,
+                searchRetryAt = meta.searchRetryAt,
+                revision = meta.updatedAt,
+                readHealthScore = readingHealthScore(rule, health[rule.id].orEmpty(), now),
+                checkedAt = meta.checkedAt,
             )
         }.filterNotNull()
     }
@@ -367,6 +378,11 @@ class BookSourceRepository(
         /** 搜索测速，见 [BookSourceEntity.searchMs] / [BookSourceEntity.searchFails] */
         val searchMs: Long = -1,
         val searchFails: Int = 0,
+        val searchAt: Long = 0,
+        val searchRetryAt: Long = 0,
+        val revision: Long = 0,
+        val readHealthScore: Int = 0,
+        val checkedAt: Long = 0,
     )
 
     /**
@@ -374,7 +390,7 @@ class BookSourceRepository(
      * 一轮下来通常就几十条；而这个仓库不持有数据库句柄，单测靠假 DAO 跑，为它再引一个事务依赖不值。
      */
     suspend fun saveSearchStats(stats: Collection<EnabledSource>) {
-        for (s in stats) dao.saveSearchStats(s.rule.id, s.searchMs, s.searchFails)
+        for (s in stats) dao.saveSearchStats(s.rule.id, s.searchMs, s.searchFails, s.searchAt, s.searchRetryAt, s.revision)
     }
 
     fun parseRule(text: String): Result<BookSourceRule> =

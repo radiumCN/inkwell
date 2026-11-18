@@ -33,7 +33,7 @@ interface BookSourceDao {
      */
     @Query(
         """
-        SELECT id, updatedAt, checkStatus, respondTime, sortOrder, searchMs, searchFails
+        SELECT id, updatedAt, checkStatus, respondTime, sortOrder, searchMs, searchFails, searchAt, searchRetryAt, checkedAt
           FROM book_source
          WHERE enabled = 1 AND deleted = 0
          ORDER BY sortOrder, name
@@ -89,8 +89,14 @@ interface BookSourceDao {
     suspend fun saveCheck(id: String, status: Int, message: String, respondTime: Long, checkedAt: Long)
 
     /** 搜索测速。和 [saveCheck] 一样**不碰 updatedAt**：那是 WebDAV 合并的裁决依据，测速不是用户改了书源 */
-    @Query("UPDATE book_source SET searchMs = :searchMs, searchFails = :searchFails WHERE id = :id")
-    suspend fun saveSearchStats(id: String, searchMs: Long, searchFails: Int)
+    @Query("""
+        UPDATE book_source SET searchMs = :searchMs, searchFails = :searchFails,
+               searchAt = :searchAt, searchRetryAt = :searchRetryAt
+        WHERE id = :id AND updatedAt = :revision AND searchAt <= :searchAt AND deleted = 0
+    """)
+    suspend fun saveSearchStats(
+        id: String, searchMs: Long, searchFails: Int, searchAt: Long, searchRetryAt: Long, revision: Long,
+    )
 
     @Query("UPDATE book_source SET sortOrder = :sortOrder, updatedAt = :now WHERE id = :id")
     suspend fun setSortOrder(id: String, sortOrder: Int, now: Long)

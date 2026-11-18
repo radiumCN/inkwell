@@ -140,7 +140,8 @@ private fun FolderBookList(
     onConfirm: (FolderImportState.Ready, Boolean, Boolean) -> Unit,
 ) {
     var groupByFolder by remember(state.treeUri) { mutableStateOf(state.groupByFolder) }
-    var watch by remember(state.treeUri) { mutableStateOf(state.autoScan) }
+    var watchRequested by remember(state.treeUri) { mutableStateOf(state.autoScan) }
+    val watch = watchRequested && !state.truncated
     val groups = remember(state.books) { state.books.groupBy { it.folder }.toList() }
     val notOnShelf = remember(state.books, state.onShelf) { state.books.count { it.uri !in state.onShelf } }
     val chosen = state.books.filter { it.uri in state.selected }
@@ -154,8 +155,14 @@ private fun FolderBookList(
             )
             SwitchRow(
                 title = "自动扫描此目录",
-                subtitle = "回到应用时导入新书；本次未勾选和以后从书架删除的书不会自动加入",
-                checked = watch, onCheckedChange = { watch = it },
+                subtitle = when {
+                    state.truncated && state.autoScan -> "预览未完成，可在自动扫描目录列表中调整已开启的设置"
+                    state.truncated -> "预览未完成，请选择更小的子目录开启自动扫描"
+                    else -> "回到应用时导入新书；本次未勾选和以后从书架删除的书不会自动加入"
+                },
+                checked = if (state.truncated) state.autoScan else watch,
+                onCheckedChange = { watchRequested = it },
+                enabled = !state.truncated,
                 position = SettingGroupPosition.Last,
             )
         }

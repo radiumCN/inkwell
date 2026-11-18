@@ -4,12 +4,16 @@ import com.radium.inkwell.data.db.entity.CheckStatus
 import com.radium.inkwell.data.repo.BookSourceRepository.EnabledSource
 import com.radium.inkwell.data.repo.TitleMatch
 import kotlin.math.abs
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /** 单个书源这一次搜索的结局；取消不算结局（不计入测速），由调用方原样往外抛 */
 internal sealed interface SearchOutcome {
     data class Ok(val ms: Long) : SearchOutcome
     /** 等满了 [limitMs] 还没回来 */
     data class TimedOut(val limitMs: Long) : SearchOutcome
+    data class RateLimited(val retryAfter: String?) : SearchOutcome
     /** 网络 / 规则出错 */
     data object Failed : SearchOutcome
 }
@@ -38,10 +42,18 @@ internal object SearchScheduling {
     const val UNKNOWN_TIMEOUT_MS = 15_000L
     const val MIN_TIMEOUT_MS = 8_000L
     const val MAX_TIMEOUT_MS = 30_000L
+    const val MAX_SAMPLE_AGE_MS = 7L * 24 * 60 * 60 * 1000
+    const val RECOVERY_INTERVAL_MS = 15L * 60 * 1000
+    const val CONCURRENCY = 8
+    private const val PROBE_POSITION = 3
+    private const val DEFAULT_COOLDOWN_MS = 120_000L
+    private const val MIN_COOLDOWN_MS = 30_000L
+    private const val MAX_COOLDOWN_MS = 900_000L
+    private const val PERSIST_INTERVAL_MS = 60L * 60 * 1000
     private const val TIMEOUT_FACTOR = 3
 
     /**
-     * 提前结束：书名与关键词完全一致的结果已经来自这么多个书源，剩下的就先不搜了（界面上可「继续搜索」）。
+     * 提前结束：同一本精确命中的书已有这么多个独立站点，剩下的就先不搜了（界面上可「继续搜索」）。
      * 绝大多数搜索是奔着某一本书去的；五个源都有了，预览页换源也够用，再等几百个源回来只是让用户干等。
      */
     const val EARLY_STOP_SOURCES = 5
@@ -50,14 +62,34 @@ internal object SearchScheduling {
     const val EARLY_STOP_MIN_SOURCES = 20
 
     /** 排队顺序：没被降级的在前；同档按估计耗时从快到慢；再同则保持书源管理里的手动顺序（稳定排序） */
-    fun order(sources: List<EnabledSource>): List<EnabledSource> = sources.sortedWith(
-        compareBy<EnabledSource>({ demoted(it) }, { latencyEstimate(it) ?: UNKNOWN_LATENCY_MS }, { it.sortOrder }),
-    )
+    fun order(sources: List<EnabledSource>, now: Long = System.currentTimeMillis()): List<EnabledSource> {
+        val ranked = sources.sortedWith(compareBy<EnabledSource>(
+            { coolingDown(it, now) }, { demoted(it, now) },
+            { latencyEstimate(it, now) ?: UNKNOWN_LATENCY_MS }, { it.sortOrder },
+        ))
+        // 每轮最多把一个过了冷静期的失败源放进首批；留前三个位置优先服务健康源。
+        val probe = ranked.asSequence().filter {
+            !coolingDown(it, now) && demoted(it, now) && age(it.searchAt, now) >= RECOVERY_INTERVAL_MS
+        }.minByOrNull { it.searchAt } ?: return ranked
+        val index = ranked.indexOf(probe)
+        return if (index <= PROBE_POSITION) ranked else ranked.toMutableList().apply {
+            add(PROBE_POSITION, removeAt(index))
+        }
+    }
+
+    fun coolingDown(source: EnabledSource, now: Long): Boolean = source.searchRetryAt - now in 1..MAX_COOLDOWN_MS
 
     /** 这个源这次最多等多久：历史耗时的三倍，夹在 [MIN_TIMEOUT_MS]..[MAX_TIMEOUT_MS] 之间 */
-    fun timeoutMs(source: EnabledSource?): Long {
-        val estimate = source?.let(::latencyEstimate) ?: return UNKNOWN_TIMEOUT_MS
-        return (estimate * TIMEOUT_FACTOR).coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+    fun timeoutMs(source: EnabledSource?, now: Long = System.currentTimeMillis()): Long {
+        if (source == null) return UNKNOWN_TIMEOUT_MS
+        val current = latencyEstimate(source, now)
+        if (current != null) return (current * TIMEOUT_FACTOR).coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+        // 过期记录不再抢首批槽位，但已知快源首轮不必为它重新付出完整冷启动超时。
+        // 若实际超时，next 会把本次上限记作新观测，再给恢复的慢源更宽的时限。
+        if (source.searchAt > 0 && source.searchMs >= 0) {
+            return (source.searchMs * TIMEOUT_FACTOR).coerceIn(MIN_TIMEOUT_MS, UNKNOWN_TIMEOUT_MS)
+        }
+        return UNKNOWN_TIMEOUT_MS
     }
 
     /**
@@ -66,19 +98,48 @@ internal object SearchScheduling {
      * 超时不是「没有数据」：它说明这个源至少要这么久。把估计抬到不低于这次的上限，下回的超时就随之放宽
      * （8 秒超时 → 估计 8 秒 → 下回等 24 秒）。否则一个变慢了的源会每次都在同一个上限上超时，永远翻不了身。
      */
-    fun next(source: EnabledSource, outcome: SearchOutcome): EnabledSource = when (outcome) {
-        is SearchOutcome.Ok -> source.copy(
-            // 滑动平均（新样本权重 0.3）：偶尔一次网络抖动不至于把一个快源打成慢源
-            searchMs = if (source.searchMs < 0) outcome.ms else (source.searchMs * 7 + outcome.ms * 3) / 10,
-            searchFails = 0,
-        )
-        is SearchOutcome.TimedOut -> source.copy(
-            searchMs = maxOf(source.searchMs, outcome.limitMs),
-            searchFails = (source.searchFails + 1).coerceAtMost(MAX_FAILS),
-        )
-        SearchOutcome.Failed -> source.copy(
-            searchFails = (source.searchFails + 1).coerceAtMost(MAX_FAILS),
-        )
+    fun next(
+        source: EnabledSource,
+        outcome: SearchOutcome,
+        now: Long = System.currentTimeMillis(),
+    ): EnabledSource {
+        val recent = hasRecentSample(source, now)
+        val failures = if (recent) source.searchFails else 0
+        val observedAt = maxOf(now, source.searchAt + 1)
+        return when (outcome) {
+            is SearchOutcome.Ok -> source.copy(
+                // 普通波动用滑动平均；恢复的源按这次实际耗时重新估计。
+                searchMs = if (!recent || source.searchMs < 0 || failures >= DEMOTE_AFTER_FAILS) outcome.ms
+                    else (source.searchMs * 7 + outcome.ms * 3) / 10,
+                searchFails = 0,
+                searchAt = observedAt,
+                searchRetryAt = 0,
+            )
+            is SearchOutcome.TimedOut -> source.copy(
+                searchMs = if (recent) maxOf(source.searchMs, outcome.limitMs) else outcome.limitMs,
+                searchFails = (failures + 1).coerceAtMost(MAX_FAILS),
+                searchAt = observedAt,
+            )
+            SearchOutcome.Failed -> source.copy(
+                searchMs = if (recent) source.searchMs else -1,
+                searchFails = (failures + 1).coerceAtMost(MAX_FAILS),
+                searchAt = observedAt,
+            )
+            is SearchOutcome.RateLimited -> source.copy(
+                searchRetryAt = now + retryDelay(outcome.retryAfter, now),
+            )
+        }
+    }
+
+    private fun retryDelay(header: String?, now: Long): Long {
+        val value = header?.trim() ?: return DEFAULT_COOLDOWN_MS
+        val delay = value.toLongOrNull()?.let { it.coerceIn(0L, MAX_COOLDOWN_MS / 1000) * 1000 }
+            ?: try {
+                ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() - now
+            } catch (_: DateTimeParseException) {
+                DEFAULT_COOLDOWN_MS
+            }
+        return delay.coerceIn(MIN_COOLDOWN_MS, MAX_COOLDOWN_MS)
     }
 
     /**
@@ -86,6 +147,8 @@ internal object SearchScheduling {
      * 才落库 —— 小抖动只活在这一轮的内存里，省掉成百上千次无意义的 UPDATE。
      */
     fun worthPersisting(before: EnabledSource, after: EnabledSource): Boolean {
+        if (before.searchRetryAt != after.searchRetryAt) return true
+        if (after.searchAt > 0 && (before.searchAt == 0L || after.searchAt - before.searchAt >= PERSIST_INTERVAL_MS)) return true
         if (before.searchFails != after.searchFails) return true
         if (before.searchMs < 0) return after.searchMs >= 0
         return abs(after.searchMs - before.searchMs) >= maxOf(200L, before.searchMs / 10)
@@ -93,19 +156,30 @@ internal object SearchScheduling {
 
     /** 书名与关键词归一化后完全一致（剥书名号与空白，同 [TitleMatch.normalize]） */
     fun isExactTitle(title: String, normalizedKeyword: String): Boolean =
-        normalizedKeyword.isNotEmpty() && TitleMatch.normalize(title) == normalizedKeyword
+        normalizedKeyword.isNotEmpty() && TitleMatch.normalize(title).equals(normalizedKeyword, ignoreCase = true)
 
     /**
      * 有搜索自己的数据就只信它：校验失败可能败在正文那一步，而搜索一直好好的，不该因此排到最后。
      * 从没搜过时才看校验结论。
      */
-    private fun demoted(s: EnabledSource): Boolean =
-        if (s.searchMs >= 0 || s.searchFails > 0) s.searchFails >= DEMOTE_AFTER_FAILS
-        else s.checkStatus == CheckStatus.FAILED
+    private fun demoted(s: EnabledSource, now: Long): Boolean =
+        if (hasRecentSample(s, now)) s.searchFails >= DEMOTE_AFTER_FAILS
+        else hasRecentCheck(s, now) && s.checkStatus == CheckStatus.FAILED
 
-    private fun latencyEstimate(s: EnabledSource): Long? = when {
-        s.searchMs >= 0 -> s.searchMs
-        s.checkStatus == CheckStatus.OK && s.respondTime > 0 -> s.respondTime
+    private fun hasRecentSample(s: EnabledSource, now: Long): Boolean =
+        s.searchAt > 0 && age(s.searchAt, now) < MAX_SAMPLE_AGE_MS
+
+    private fun age(at: Long, now: Long): Long = (now - at).coerceAtLeast(0)
+
+    private fun hasRecentCheck(s: EnabledSource, now: Long): Boolean =
+        s.checkedAt == 0L || age(s.checkedAt, now) < MAX_SAMPLE_AGE_MS
+
+    private fun latencyEstimate(s: EnabledSource, now: Long): Long? = when {
+        hasRecentSample(s, now) && s.searchMs >= 0 -> {
+            val age = age(s.searchAt, now)
+            (s.searchMs * (MAX_SAMPLE_AGE_MS - age) + UNKNOWN_LATENCY_MS * age) / MAX_SAMPLE_AGE_MS
+        }
+        s.checkStatus == CheckStatus.OK && s.respondTime > 0 && !hasRecentSample(s, now) && hasRecentCheck(s, now) -> s.respondTime
         else -> null
     }
 

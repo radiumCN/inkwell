@@ -20,6 +20,7 @@ class NetReaderBookSource(
     private val engine: BookSourceEngine,
     private val cache: ChapterContentCache,
     private val chapterDao: ChapterDao,
+    private val readHealth: SourceReadHealth,
     /** 详情页存下的书级变量（BookEntity.variable 解出来的）；正文规则 @get 取不到本章变量时落到这里 */
     private val bookVariables: Map<String, String> = emptyMap(),
 ) : ReaderBookSource {
@@ -81,13 +82,19 @@ class NetReaderBookSource(
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
-        val remote = engine.getContent(
-            rule, url, toc.urls,
-            chapterVariable = chapter.variable,
-            chapterTitle = chapter.title.orEmpty(),
-            chapterIndex = index,
-            variables = bookVariables,
-        )
+        return fetchChapter(index, chapter, url, toc.urls)
+    }
+
+    private suspend fun fetchChapter(index: Int, chapter: ChapterEntity, url: String, chapterUrls: Set<String>): ChapterContent {
+        val remote = readHealth.measure(rule, ReadStage.CONTENT, usable = { it.elements.isNotEmpty() }) {
+            engine.getContent(
+                rule, url, chapterUrls,
+                chapterVariable = chapter.variable,
+                chapterTitle = chapter.title.orEmpty(),
+                chapterIndex = index,
+                variables = bookVariables,
+            )
+        }
         return ChapterContent(remote.elements)
     }
 
@@ -110,15 +117,7 @@ class NetReaderBookSource(
         if (cached != null && (cached.withImages || !imagesWanted)) return cached.content
         return try {
             loads.run(url to epoch) {
-                // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
-                val remote = engine.getContent(
-                    rule, url, toc.urls,
-                    chapterVariable = chapter.variable,
-                    chapterTitle = chapter.title.orEmpty(),
-                    chapterIndex = index,
-                    variables = bookVariables,
-                )
-                val content = ChapterContent(remote.elements)
+                val content = fetchChapter(index, chapter, url, toc.urls)
                 store(url, content, epoch)
                 content
             }

@@ -712,7 +712,9 @@ class BookshelfViewModel(
         viewModelScope.launch {
             try {
                 val selected = state.books.filter { it.uri in state.selected }
-                val result = folderLibrary.importSelection(state.treeUri, state.folderName, selected, state.books, grouped, watch)
+                val result = folderLibrary.importSelection(
+                    state.treeUri, state.folderName, selected, state.books, grouped, watch, state.truncated,
+                )
                 messages.emit(result.message + if (watch) "；已开启目录自动扫描" else "")
                 if (watch) scanWatchedFolders()
             } catch (e: CancellationException) { throw e
@@ -792,7 +794,7 @@ sealed interface FolderImportState {
 
     /**
      * @param onShelf 预览阶段已确认在架的文件；无法确认时留空，导入时按元数据去重
-     * @param truncated 书太多，只列了前 [LocalFolderScanner.MAX_BOOKS] 本
+     * @param truncated 扫描触及书籍数量或目录深度上限
      */
     data class Ready(
         val treeUri: Uri,

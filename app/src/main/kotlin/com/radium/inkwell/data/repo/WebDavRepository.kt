@@ -7,6 +7,7 @@ import com.radium.inkwell.core.webdav.BackupMerger
 import com.radium.inkwell.core.webdav.BackupPayload
 import com.radium.inkwell.core.webdav.BackupReplaceRule
 import com.radium.inkwell.core.webdav.BackupRssSource
+import com.radium.inkwell.core.webdav.mergeBackupRssSource
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
 import androidx.room3.withWriteTransaction
@@ -213,14 +214,7 @@ class WebDavRepository(
                 sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
             )
         },
-        rssSources = rssDao.getAll().map { r ->
-            BackupRssSource(
-                id = r.id, name = r.name, enabled = r.enabled, json = r.json,
-                sourceJson = r.sourceJson, updatedAt = r.updatedAt, deleted = r.deleted,
-                groupName = r.groupName, sortOrder = r.sortOrder, icon = r.icon,
-                converterVersion = r.converterVersion,
-            )
-        },
+        rssSources = rssDao.getAll().map { it.toBackupRssSource() },
         readerSettings = readerPrefs.exportForBackup(),
         appSettings = appPrefs.exportForBackup(),
         readingStats = readingStats.exportForBackup(),
@@ -326,13 +320,13 @@ class WebDavRepository(
         merged.changedSources.forEach { s ->
             // 与 importJson 一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
             if (!isTextNovelSourceJson(s.json)) return@forEach
-            // 校验结果（checkStatus/checkMessage/respondTime/checkedAt）是本地专属、不跨设备同步的列 ——
-            // 整行 REPLACE 会把它们清空。读旧行、只覆盖同步字段（含分组），本地校验结果原样保留。
+            // 本地测速和校验只适用于当前这份规则。规则相同的启停/分组改动保留它们。
             val existing = sourceDao.getById(s.id)
             // 同 applyBooks：本地在拍快照之后又改过（启停/分组/删除），保留本地的
             if (existing != null && s.updatedAt <= existing.updatedAt) return@forEach
             sourceDao.upsert(
-                (existing ?: BookSourceEntity(id = s.id, name = s.name, json = s.json, updatedAt = s.updatedAt))
+                (existing?.takeIf { it.json == s.json }
+                    ?: BookSourceEntity(id = s.id, name = s.name, json = s.json, updatedAt = s.updatedAt))
                     .copy(
                         name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
                         json = s.json, updatedAt = s.updatedAt, groupName = s.groupName,
@@ -446,12 +440,19 @@ internal fun applySyncedRule(existing: ReplaceRuleEntity?, r: BackupReplaceRule)
 internal fun applySyncedRss(
     existing: com.radium.inkwell.data.db.entity.RssSourceEntity?, r: BackupRssSource,
 ): com.radium.inkwell.data.db.entity.RssSourceEntity? {
-    if (existing != null && existing.updatedAt >= r.updatedAt) return null
+    if (existing != null && existing.updatedAt > r.updatedAt) return null
+    val incoming = if (existing == null) r else mergeBackupRssSource(existing.toBackupRssSource(), r)
     val base = existing ?: com.radium.inkwell.data.db.entity.RssSourceEntity(id = r.id, name = r.name, json = r.json)
     return base.copy(
-        name = r.name, enabled = r.enabled, json = r.json, sourceJson = r.sourceJson,
-        updatedAt = r.updatedAt, deleted = r.deleted,
-        groupName = r.groupName ?: base.groupName, sortOrder = r.sortOrder ?: base.sortOrder,
-        icon = r.icon ?: base.icon, converterVersion = r.converterVersion ?: base.converterVersion,
-    )
+        name = incoming.name, enabled = incoming.enabled, json = incoming.json, sourceJson = incoming.sourceJson,
+        updatedAt = incoming.updatedAt, deleted = incoming.deleted,
+        groupName = incoming.groupName ?: base.groupName, sortOrder = incoming.sortOrder ?: base.sortOrder,
+        icon = incoming.icon ?: base.icon, converterVersion = incoming.converterVersion ?: base.converterVersion,
+    ).takeUnless { it == existing }
 }
+
+private fun com.radium.inkwell.data.db.entity.RssSourceEntity.toBackupRssSource() = BackupRssSource(
+    id = id, name = name, enabled = enabled, json = json, sourceJson = sourceJson,
+    updatedAt = updatedAt, deleted = deleted, groupName = groupName, sortOrder = sortOrder,
+    icon = icon, converterVersion = converterVersion,
+)

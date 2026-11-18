@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.db.entity
 
 import androidx.room3.Entity
+import androidx.room3.ColumnInfo
 import androidx.room3.Index
 import androidx.room3.PrimaryKey
 
@@ -27,7 +28,7 @@ import androidx.room3.PrimaryKey
         Index(
             value = [
                 "enabled", "deleted", "sortOrder", "name", "id", "updatedAt",
-                "checkStatus", "respondTime", "searchMs", "searchFails",
+                "checkStatus", "respondTime", "searchMs", "searchFails", "searchAt", "searchRetryAt", "checkedAt",
             ],
             name = "idx_book_source_enabled",
         ),
@@ -67,6 +68,8 @@ data class BookSourceEntity(
     val searchFails: Int = 0,
     /** 软删除墓碑，语义见 [BookEntity.deleted] */
     val deleted: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val searchAt: Long = 0,
+    @ColumnInfo(defaultValue = "0") val searchRetryAt: Long = 0,
 )
 
 object CheckStatus {

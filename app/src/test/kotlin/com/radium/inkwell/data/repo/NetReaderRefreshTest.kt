@@ -10,6 +10,8 @@ import com.radium.inkwell.data.db.entity.ChapterEntity
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -32,6 +34,7 @@ class NetReaderRefreshTest {
     private val url = server.url("/chapter").toString()
     private val old = ChapterContent(listOf(ContentElement.Paragraph("原来的正文")))
     private val marked = mutableListOf<String>()
+    private val healthScope = CoroutineScope(Dispatchers.Unconfined)
     private val dao = Proxy.newProxyInstance(
         ChapterDao::class.java.classLoader, arrayOf(ChapterDao::class.java),
     ) { _, method, args ->
@@ -47,12 +50,13 @@ class NetReaderRefreshTest {
                 "ruleContent":{"content":"id.content@html"}
             }"""),
             BookSourceEngine(SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true)),
-            cache, dao,
+            cache, dao, SourceReadHealth(InMemorySourceReadHealthDao(), healthScope),
         )
     }
 
     @AfterTest
     fun close() {
+        healthScope.cancel()
         server.shutdown()
         root.deleteRecursively()
     }

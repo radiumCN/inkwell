@@ -17,7 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** v1 夹具取自 be399b89 的三个实体；实际执行应用注册的整条迁移，再与 Room 导出的 v22 结构核对。 */
+/** v1 夹具取自 be399b89 的三个实体；实际执行应用注册的整条迁移，再与 Room 导出的 v23 结构核对。 */
 class MigrationChainTest {
     private fun SQLiteConnection.seedV1() {
         execSQL("""CREATE TABLE book (
@@ -46,9 +46,17 @@ class MigrationChainTest {
         BundledSQLiteDriver().open(":memory:").use { db ->
             db.seedV1()
             val chain = InkwellDb.ALL_MIGRATIONS
-            assertEquals((1 until 22).toList(), chain.map { it.startVersion })
-            assertEquals((2..22).toList(), chain.map { it.endVersion })
+            assertEquals((1 until 23).toList(), chain.map { it.startVersion })
+            assertEquals((2..23).toList(), chain.map { it.endVersion })
             chain.forEach { migration ->
+                if (migration.startVersion == 22) {
+                    db.execSQL("""
+                        INSERT INTO book_source
+                        (id, name, enabled, sortOrder, json, updatedAt, groupName, checkStatus, checkMessage,
+                         respondTime, checkedAt, searchMs, searchFails, deleted)
+                        VALUES ('kept', '当前格式来源', 1, 8, '{}', 100, '藏书', 1, '', 400, 90, 500, 2, 0)
+                    """.trimIndent())
+                }
                 migration.migrate(db)
                 if (migration.endVersion == 9) {
                     db.execSQL("INSERT INTO rss_source (id, name, json, groupName, icon, sortOrder) VALUES ('rss', '订阅', '{}', '技术', 'icon.png', 7)")
@@ -78,15 +86,23 @@ class MigrationChainTest {
                 assertEquals(0L, it.getLong(3))
             }
             // v11→12 是已发布的来源格式切换，明确清空旧格式来源；这不是本轮新增的数据删除。
-            db.prepare("SELECT COUNT(*) FROM book_source").use { assertTrue(it.step()); assertEquals(0L, it.getLong(0)) }
+            db.prepare("SELECT COUNT(*) FROM book_source WHERE id = 'legacy'").use {
+                assertTrue(it.step())
+                assertEquals(0L, it.getLong(0))
+            }
+            db.prepare("SELECT groupName, sortOrder, searchMs, searchFails, searchAt, searchRetryAt FROM book_source WHERE id = 'kept'").use {
+                assertTrue(it.step())
+                assertEquals("藏书", it.getText(0))
+                assertEquals(listOf(8L, 500L, 2L, 0L, 0L), (1..5).map(it::getLong))
+            }
             db.validateCurrentSchema()
         }
     }
 
     private fun SQLiteConnection.validateCurrentSchema() {
-        val schema = Json.parseToJsonElement(File("schemas/com.radium.inkwell.data.db.InkwellDb/22.json").readText())
+        val schema = Json.parseToJsonElement(File("schemas/com.radium.inkwell.data.db.InkwellDb/23.json").readText())
             .jsonObject.getValue("database").jsonObject
-        assertEquals(22, schema.getValue("version").jsonPrimitive.int)
+        assertEquals(23, schema.getValue("version").jsonPrimitive.int)
         val entities = schema.getValue("entities").jsonArray.map { it.jsonObject }
         val expectedTables = entities.map { it.string("tableName") }.toSet()
         val actualTables = prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").use { st ->

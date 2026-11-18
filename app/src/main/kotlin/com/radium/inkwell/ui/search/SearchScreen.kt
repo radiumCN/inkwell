@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -250,7 +251,7 @@ fun SearchScreen(
                         onRetry = viewModel::retrySearch,
                         modifier = Modifier.padding(padding),
                     )
-                } else if (state.searchId > 0 && !cleared) {
+                } else if (state.searchId > 0 && state.sourceCount > 0 && !cleared) {
                     // 搜完了一本没有。从前这里落回进页时那句「按已启用的规则搜索」，
                     // 看起来像什么都没发生 —— 用户分不清是没搜、还是搜了没有。
                     EmptyState(
@@ -272,6 +273,7 @@ fun SearchScreen(
                 // edge-to-edge 下让结果列表底部让开键盘，不然最后几条被盖住也滚不出来。
                 // 结果拼成一张卡（HyperOS 的灰底白卡），行间不留缝 —— 留了卡就断开
                 val resultCount = state.results.size
+                val resultSearchId = state.searchId
                 LazyColumn(
                     state = listState,
                     modifier = listModifier,
@@ -317,6 +319,7 @@ fun SearchScreen(
                             },
                             // 关了系统动画就传 null（这个 API 的「不动画」写法），同书架
                             modifier = Modifier
+                                .onPlaced { viewModel.noteFirstResultPlaced(resultSearchId) }
                                 .animateItem(
                                     fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
                                     placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,

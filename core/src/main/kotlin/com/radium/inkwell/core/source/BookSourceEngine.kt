@@ -48,6 +48,7 @@ data class SearchResult(
      * 不交回去，后面每一步都少了请求头（七猫的接口源就是这样 401 的）。
      */
     val variables: Map<String, String> = emptyMap(),
+    val updateTime: String? = null,
 )
 
 data class SearchPage(
@@ -229,6 +230,7 @@ class BookSourceEngine(
         r.lastChapter?.let { put("latestChapter", it) }
         r.wordCount?.let { put("wordCount", it) }
         r.kind?.let { put("kind", it) }
+        r.updateTime?.let { put("updateTime", it) }
     }
 
     /**
@@ -935,6 +937,7 @@ class BookSourceEngine(
                 sourceId = source.id,
                 sourceName = source.name,
                 variables = itemCtx.js.scriptVars.toMap(),
+                updateTime = evalField(stage, "updateTime", fields["updateTime"], itemCtx),
             )
         }
         // nextPage 规则命中即可继续；书源没有该规则时，只要地址模板带 page 且这一页有结果，

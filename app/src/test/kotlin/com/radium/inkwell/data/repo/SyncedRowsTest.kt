@@ -47,4 +47,13 @@ class SyncedRowsTest {
         assertEquals(4, actual.sortOrder)
         assertEquals(3, actual.converterVersion)
     }
+
+    @Test fun `equal revision fills legacy defaults without rewriting unchanged rows`() {
+        val restored = rss.copy(groupName = "", icon = "", sortOrder = 0, converterVersion = 0)
+        val complete = remote.copy(name = rss.name, updatedAt = rss.updatedAt,
+            groupName = rss.groupName, icon = rss.icon, sortOrder = rss.sortOrder, converterVersion = rss.converterVersion)
+        assertEquals(rss, applySyncedRss(restored, complete))
+        assertNull(applySyncedRss(rss, complete))
+        assertNull(applySyncedRss(restored.copy(deleted = true), complete))
+    }
 }

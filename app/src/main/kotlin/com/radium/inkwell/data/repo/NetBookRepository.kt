@@ -28,6 +28,7 @@ class NetBookRepository(
     private val chapterDao: ChapterDao,
     private val engine: BookSourceEngine,
     private val cache: ChapterContentCache,
+    private val readHealth: SourceReadHealth,
 ) {
 
     /** 详情 + 目录。加书架/换源/预览页/书源测试全都走这里，避免各写一份兜底逻辑写出分歧 */
@@ -39,19 +40,26 @@ class NetBookRepository(
          * java.put 下签名用的请求头，详情、目录地址再 java.get 拼上 —— 不交，后面每一步都少了请求头
          */
         variables: Map<String, String> = emptyMap(),
+        trackReadHealth: Boolean = true,
         /** 详情页拿到了、开始取目录时调一下。书源校验靠它分清坏在详情页还是目录 */
         onDetailFetched: () -> Unit = {},
     ): Pair<RemoteBookDetail, List<RemoteChapter>> {
-        val detail = engine.getDetail(rule, bookUrl, variables)
+        suspend fun detail() = engine.getDetail(rule, bookUrl, variables)
+        val detail = if (trackReadHealth) readHealth.measure(rule, ReadStage.DETAIL) { detail() } else detail()
         onDetailFetched()
-        val toc = engine.getToc(
+        suspend fun toc() = engine.getToc(
             rule, detail.tocUrl.ifBlank { bookUrl },
             bookUrl = bookUrl, bookTitle = detail.title, bookAuthor = detail.author.orEmpty(),
             // 详情页 @put 下的书号之类，目录接口地址要拼它（Legado 挂在 Book 上的那张变量表）
             variables = detail.variables,
         )
+        val toc = if (trackReadHealth) {
+            readHealth.measure(rule, ReadStage.TOC, usable = List<RemoteChapter>::isNotEmpty) { toc() }
+        } else toc()
         return detail to toc
     }
+
+    fun recordReadTimeout(rule: BookSourceRule, stage: ReadStage) = readHealth.record(rule, stage, false)
 
     /** 搜索结果 → 详情 + 目录 → 入库，返回 bookId */
     suspend fun addToShelf(result: SearchResult, rule: BookSourceRule): Result<String> = try {

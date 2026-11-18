@@ -17,7 +17,7 @@ class SearchOrderingTest {
         mergeSearchResults(hits, listOf(result("s2", "书", "3万", "2026-01-01")))
         val updated = hits.values.single()
         assertEquals(30000L, updated.wordCount)
-        assertEquals(parseUpdateEpoch("2026-01-01"), updated.updateEpoch)
+        assertEquals(searchUpdateEpoch(listOf(result("s2", date = "2026-01-01"))), updated.updateEpoch)
         assertEquals(10000L, old.wordCount)
         assertEquals(oldDate, old.updateEpoch)
     }
@@ -32,7 +32,7 @@ class SearchOrderingTest {
         for (sort in listOf(SearchSort.WORD_COUNT, SearchSort.UPDATE_TIME)) {
             val collator = java.text.Collator.getInstance(java.util.Locale.CHINA).apply { strength = java.text.Collator.PRIMARY }
             val original = input.sortedWith(compareByDescending<SearchHit> { hit ->
-                hit.results.maxOf { r -> if (sort == SearchSort.WORD_COUNT) parseWordCount(r.wordCount) else parseUpdateEpoch(r.kind, r.intro) }
+                if (sort == SearchSort.WORD_COUNT) hit.results.maxOf { parseWordCount(it.wordCount) } else searchUpdateEpoch(hit.results)
             }.thenBy(collator) { it.result.title })
             assertEquals(original, orderSearchHits(input, "", sort))
             assertEquals(original, orderSearchHits(input, "", sort))

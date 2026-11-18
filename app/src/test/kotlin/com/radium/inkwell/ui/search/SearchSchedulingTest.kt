@@ -22,6 +22,7 @@ class SearchSchedulingTest {
         sortOrder: Int = 0,
         searchMs: Long = -1,
         searchFails: Int = 0,
+        searchAt: Long = if (searchMs >= 0 || searchFails > 0) System.currentTimeMillis() else 0,
     ) = EnabledSource(
         rule = BookSourceRule(
             bookSourceUrl = id,
@@ -34,6 +35,7 @@ class SearchSchedulingTest {
         sortOrder = sortOrder,
         searchMs = searchMs,
         searchFails = searchFails,
+        searchAt = searchAt,
     )
 
     private fun ids(list: List<EnabledSource>) = list.map { it.rule.id }
@@ -86,7 +88,7 @@ class SearchSchedulingTest {
         val first = SearchScheduling.next(src("x"), SearchOutcome.Ok(1_000))
         assertEquals(1_000, first.searchMs)
 
-        val smoothed = SearchScheduling.next(src("x", searchMs = 1_000, searchFails = 2), SearchOutcome.Ok(2_000))
+        val smoothed = SearchScheduling.next(src("x", searchMs = 1_000, searchFails = 1), SearchOutcome.Ok(2_000))
         assertEquals(1_300, smoothed.searchMs)
         assertEquals(0, smoothed.searchFails)
 
@@ -126,5 +128,41 @@ class SearchSchedulingTest {
         assertTrue(SearchScheduling.isExactTitle(" 诡秘 之主 ", kw))
         assertFalse(SearchScheduling.isExactTitle("诡秘之主同人", kw))
         assertFalse(SearchScheduling.isExactTitle("诡秘之主", ""))
+    }
+
+    @Test
+    fun `only the oldest failed source gets an early recovery probe and stale checks expire`() {
+        val now = 2_000_000_000_000L
+        val fast = (1..8).map { src("fast$it", searchMs = 500, searchAt = now) }
+        val recent = src("recent", searchMs = 100, searchFails = 2, searchAt = now - 1_000)
+        val eligible = src("probe", searchMs = 100, searchFails = 2, searchAt = now - 1_000_000)
+        val other = src("other", searchMs = 100, searchFails = 2, searchAt = now - 950_000)
+        val stale = src("stale", status = CheckStatus.FAILED, searchMs = 100, searchFails = 8,
+            searchAt = now - SearchScheduling.MAX_SAMPLE_AGE_MS).copy(checkedAt = now - SearchScheduling.MAX_SAMPLE_AGE_MS)
+        val ranked = SearchScheduling.order(fast + listOf(recent, eligible, other, stale), now)
+        assertEquals("probe", ranked[3].rule.id)
+        assertTrue(ranked.indexOf(stale) < ranked.indexOf(other))
+        val staleTimeout = SearchScheduling.timeoutMs(stale, now)
+        assertEquals(SearchScheduling.MIN_TIMEOUT_MS, staleTimeout)
+        val timedOut = SearchScheduling.next(stale, SearchOutcome.TimedOut(staleTimeout), now)
+        assertTrue(SearchScheduling.timeoutMs(timedOut, now) > staleTimeout)
+        val recovered = SearchScheduling.next(eligible, SearchOutcome.Ok(300), now)
+        assertEquals(0, recovered.searchFails)
+        assertEquals(300L, recovered.searchMs)
+        assertEquals(now, recovered.searchAt)
+    }
+
+    @Test
+    fun `retry-after cools down without increasing failures or renewing stale success`() {
+        val now = 2_000_000_000_000L
+        val before = src("limited", searchMs = 550, searchFails = 1, searchAt = now - 2_000)
+        val limited = SearchScheduling.next(before, SearchOutcome.RateLimited("60"), now)
+        assertEquals(before.searchFails, limited.searchFails)
+        assertEquals(before.searchAt, limited.searchAt)
+        assertEquals(now + 60_000, limited.searchRetryAt)
+        assertTrue(SearchScheduling.coolingDown(limited, now + 59_000))
+        assertFalse(SearchScheduling.coolingDown(limited, now + 60_000))
+        assertTrue(SearchScheduling.worthPersisting(before, limited))
+        assertEquals(listOf("normal", "limited"), ids(SearchScheduling.order(listOf(limited, src("normal")), now)))
     }
 }

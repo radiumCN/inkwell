@@ -22,7 +22,7 @@ data class FolderBook(
 )
 
 /**
- * @param truncated 书太多，只列了前 [LocalFolderScanner.MAX_BOOKS] 本
+ * @param truncated 扫描触及书籍数量或目录深度上限
  */
 data class FolderScan(
     val folderName: String,
@@ -49,9 +49,7 @@ class LocalFolderScanner(private val context: Context) {
         val folderName = displayName(DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId))
             ?: rootId.substringAfterLast(':').substringAfterLast('/').ifEmpty { "所选文件夹" }
         val books = ArrayList<FolderBook>()
-        var truncated = false
-
-        suspend fun walk(docId: String, path: List<String>) {
+        suspend fun visit(docId: String, path: List<String>): List<Pair<String, String>>? {
             currentCoroutineContext().ensureActive()
             val subDirs = ArrayList<Pair<String, String>>()
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
@@ -68,10 +66,7 @@ class LocalFolderScanner(private val context: Context) {
                             if (!name.startsWith('.')) subDirs += id to name
                         else -> {
                             val format = FolderBooks.formatOf(name) ?: continue
-                            if (books.size >= maxBooks) {
-                                truncated = true
-                                return
-                            }
+                            if (books.size >= maxBooks) return null
                             books += FolderBook(
                                 uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id),
                                 name = name,
@@ -84,18 +79,10 @@ class LocalFolderScanner(private val context: Context) {
                     }
                 }
             }
-            if (path.size >= maxDepth) {
-                if (subDirs.isNotEmpty()) truncated = true
-                return
-            }
-            // 先列完这一层的书，再进子文件夹：分组时所选文件夹自己的书排在最前
-            for ((id, name) in subDirs.sortedWith(compareBy(FolderBooks.NAME_ORDER) { it.second })) {
-                if (truncated) return
-                walk(id, path + name)
-            }
+            return subDirs
         }
 
-        walk(rootId, emptyList())
+        val truncated = walkFolderTree(rootId, maxDepth, ::visit)
         FolderScan(folderName, FolderBooks.sorted(books), truncated)
     }
 
@@ -118,6 +105,25 @@ class LocalFolderScanner(private val context: Context) {
             DocumentsContract.Document.COLUMN_SIZE,
         )
     }
+}
+
+/** visit 返回 null 表示书籍上限已耗尽，整轮停止；深度上限只截断当前子树。 */
+internal suspend fun walkFolderTree(
+    rootId: String,
+    maxDepth: Int,
+    visit: suspend (String, List<String>) -> List<Pair<String, String>>?,
+): Boolean {
+    var depthLimited = false
+    suspend fun walk(id: String, path: List<String>): Boolean {
+        val subDirs = visit(id, path) ?: return true
+        if (path.size >= maxDepth) {
+            depthLimited = depthLimited || subDirs.isNotEmpty()
+            return false
+        }
+        return subDirs.sortedWith(compareBy(FolderBooks.NAME_ORDER) { it.second })
+            .any { (childId, name) -> walk(childId, path + name) }
+    }
+    return walk(rootId, emptyList()) || depthLimited
 }
 
 /** 文件夹导入里不碰 Android 的那部分（认格式、排序、和书架比书名），单测见 FolderBooksTest */

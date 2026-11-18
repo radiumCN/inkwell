@@ -83,6 +83,28 @@ data class BackupRssSource(
     val converterVersion: Int? = null,
 )
 
+/** 同一修订的默认值可能由旧客户端导入时补上，优先保留另一端已有的元数据。 */
+fun mergeBackupRssSource(local: BackupRssSource, remote: BackupRssSource): BackupRssSource {
+    val (newer, older) = if (remote.updatedAt > local.updatedAt) remote to local else local to remote
+    val sameRevision = newer.updatedAt == older.updatedAt &&
+        newer.name == older.name && newer.enabled == older.enabled &&
+        newer.json == older.json && newer.sourceJson == older.sourceJson && newer.deleted == older.deleted
+
+    fun <T> mergeField(current: T?, fallback: T?, default: T): T? = when {
+        current == null -> fallback
+        sameRevision && current == default && fallback != null -> fallback
+        else -> current
+    }
+
+    // 新版明确写下的清空操作（时间戳较新）仍由新版胜出。
+    return newer.copy(
+        groupName = mergeField(newer.groupName, older.groupName, ""),
+        sortOrder = mergeField(newer.sortOrder, older.sortOrder, 0),
+        icon = mergeField(newer.icon, older.icon, ""),
+        converterVersion = mergeField(newer.converterVersion, older.converterVersion, 0),
+    )
+}
+
 @Serializable
 data class BackupReplaceRule(
     val id: String,
@@ -266,16 +288,7 @@ object BackupMerger {
             when {
                 l == null -> r!!
                 r == null -> l
-                else -> {
-                    val (newer, older) = if (r.updatedAt > l.updatedAt) r to l else l to r
-                    // 旧客户端也可能产生较新的启停记录，但它不认识的字段不能随之清空。
-                    newer.copy(
-                        groupName = newer.groupName ?: older.groupName,
-                        sortOrder = newer.sortOrder ?: older.sortOrder,
-                        icon = newer.icon ?: older.icon,
-                        converterVersion = newer.converterVersion ?: older.converterVersion,
-                    )
-                }
+                else -> mergeBackupRssSource(l, r)
             }
         }
         val changedRss = mergedRss.filter { it != localRss[it.id] }

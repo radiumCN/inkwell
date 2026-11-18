@@ -40,6 +40,7 @@ class BookSourceImportTest {
                     id = it.id, updatedAt = it.updatedAt, checkStatus = it.checkStatus,
                     respondTime = it.respondTime, sortOrder = it.sortOrder,
                     searchMs = it.searchMs, searchFails = it.searchFails,
+                    searchAt = it.searchAt, searchRetryAt = it.searchRetryAt,
                 )
             }
         override suspend fun getById(id: String) = store[id].also { getByIdCalls++ }
@@ -74,8 +75,10 @@ class BookSourceImportTest {
             }
         }
 
-        override suspend fun saveSearchStats(id: String, searchMs: Long, searchFails: Int) {
-            store[id]?.let { store[id] = it.copy(searchMs = searchMs, searchFails = searchFails) }
+        override suspend fun saveSearchStats(id: String, searchMs: Long, searchFails: Int, searchAt: Long, searchRetryAt: Long, revision: Long) {
+            store[id]?.takeIf { it.updatedAt == revision && it.searchAt <= searchAt && !it.deleted }?.let {
+                store[id] = it.copy(searchMs = searchMs, searchFails = searchFails, searchAt = searchAt, searchRetryAt = searchRetryAt)
+            }
         }
 
         override suspend fun setSortOrder(id: String, sortOrder: Int, now: Long) {
@@ -191,15 +194,17 @@ class BookSourceImportTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
         repo.importJson(groupedSource("玄幻")).getOrThrow()
-        dao.saveSearchStats("https://g.com", searchMs = 1_200, searchFails = 1)
+        dao.saveSearchStats("https://g.com", 1_200, 1, 100, 200, dao.store.getValue("https://g.com").updatedAt)
 
         repo.importJson(groupedSource("玄幻")).getOrThrow()
         assertEquals(1_200, dao.store["https://g.com"]!!.searchMs)
         assertEquals(1, dao.store["https://g.com"]!!.searchFails)
+        assertEquals(200L, dao.store["https://g.com"]!!.searchRetryAt)
 
         repo.importJson(groupedSource("玄幻", search = "/search?q={{key}}")).getOrThrow()
         assertEquals(-1, dao.store["https://g.com"]!!.searchMs)
         assertEquals(0, dao.store["https://g.com"]!!.searchFails)
+        assertEquals(0L, dao.store["https://g.com"]!!.searchAt)
     }
 
     @Test

@@ -169,6 +169,7 @@ class AutoSourceSwitcher(
             .sortedWith(
                 compareBy(
                     { hitRank(bookHits[it.rule.id]) },
+                    { -it.readHealthScore },
                     { statusRank(it.checkStatus) },
                     { respondTimeKey(it.respondTime) },
                     { it.sortOrder },
@@ -181,8 +182,8 @@ class AutoSourceSwitcher(
          *
          * 同一本书多个源时，代表条目从前是「谁先搜回来谁排前」或「谁带了字数」——
          * 那个源常常是慢站或已失效，详情页和「加入」就会一直转圈。
-         * 这里复用自动换源同一套校验状态 + 响应耗时；这些源都已经搜到这本书了，
-         * 所以不再套 [hitRank]。
+         * 先看最近实际打开和阅读的结果，再用历史校验状态与响应耗时打破平局。
+         * 这些源都已经搜到这本书，不再套 [hitRank]。
          *
          * 库里没有元数据的源按未校验、未测速处理，而不是当成最快。
          */
@@ -203,6 +204,7 @@ class AutoSourceSwitcher(
             if (results.size <= 1) return results
             return results.sortedWith(
                 compareBy(
+                    { -(byId[it.sourceId]?.readHealthScore ?: 0) },
                     { statusRank(byId[it.sourceId]?.checkStatus ?: CheckStatus.UNCHECKED) },
                     { respondTimeKey(byId[it.sourceId]?.respondTime ?: -1L) },
                     { byId[it.sourceId]?.sortOrder ?: Int.MAX_VALUE },

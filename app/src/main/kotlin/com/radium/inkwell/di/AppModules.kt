@@ -14,6 +14,7 @@ import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
+import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.WebDavRepository
@@ -132,11 +133,12 @@ val appModule = module {
     single { com.radium.inkwell.update.UpdateNotifier(androidContext(), get(), get()) }
 
     single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get(), get()) }
-    single { BookSourceRepository(get(), get()) }
+    single { SourceReadHealth(get<InkwellDb>().sourceReadHealthDao()) }
+    single { BookSourceRepository(get(), get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { com.radium.inkwell.data.repo.LocalFolderScanner(androidContext()) }
     single { com.radium.inkwell.data.repo.LocalFolderLibrary(androidContext(), get(), get()) }
-    single { NetBookRepository(get(), get(), get(), get(), get()) }
+    single { NetBookRepository(get(), get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
     single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -145,7 +147,7 @@ val appModule = module {
 
     viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->

@@ -27,6 +27,7 @@ import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
+import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.TitleMatch
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -270,6 +271,7 @@ class ReaderViewModel(
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
     private val fontStore: ReaderFontStore,
     private val readingStats: ReadingStatsRepository,
+    private val readHealth: SourceReadHealth,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -558,7 +560,7 @@ class ReaderViewModel(
                     }
                 }
                 NetReaderBookSource(
-                    bookId, chapters, rule, engine, contentCache, chapterDao,
+                    bookId, chapters, rule, engine, contentCache, chapterDao, readHealth,
                     bookVariables = SourceVariables.decode(b.variable),
                 )
             } else {

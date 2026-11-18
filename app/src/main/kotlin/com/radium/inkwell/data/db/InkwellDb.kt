@@ -13,6 +13,7 @@ import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.dao.RssArticleDao
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.dao.ReadingStatDao
+import com.radium.inkwell.data.db.dao.SourceReadHealthDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
@@ -21,6 +22,7 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.db.entity.RssArticleEntity
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.data.db.entity.ReadingStatEntity
+import com.radium.inkwell.data.db.entity.SourceReadHealthEntity
 
 @Database(
     entities = [
@@ -32,8 +34,9 @@ import com.radium.inkwell.data.db.entity.ReadingStatEntity
         RssSourceEntity::class,
         ReadingStatEntity::class,
         RssArticleEntity::class,
+        SourceReadHealthEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = true,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -45,8 +48,25 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun rssSourceDao(): RssSourceDao
     abstract fun readingStatDao(): ReadingStatDao
     abstract fun rssArticleDao(): RssArticleDao
+    abstract fun sourceReadHealthDao(): SourceReadHealthDao
 
     companion object {
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN searchAt INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN searchRetryAt INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("DROP INDEX idx_book_source_enabled")
+                connection.execSQL("CREATE INDEX idx_book_source_enabled ON book_source (enabled, deleted, sortOrder, name, id, updatedAt, checkStatus, respondTime, searchMs, searchFails, searchAt, searchRetryAt, checkedAt)")
+                connection.execSQL("""
+                    CREATE TABLE IF NOT EXISTS source_read_health (
+                        sourceId TEXT NOT NULL, stage TEXT NOT NULL, ruleHash INTEGER NOT NULL,
+                        score INTEGER NOT NULL, samples INTEGER NOT NULL, observedAt INTEGER NOT NULL,
+                        PRIMARY KEY(sourceId, stage, ruleHash)
+                    )
+                """.trimIndent())
+            }
+        }
+
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("ALTER TABLE book ADD COLUMN removedFromShelf INTEGER NOT NULL DEFAULT 0")
@@ -366,6 +386,7 @@ abstract class InkwellDb : RoomDatabase() {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
+            MIGRATION_22_23,
         )
     }
 }

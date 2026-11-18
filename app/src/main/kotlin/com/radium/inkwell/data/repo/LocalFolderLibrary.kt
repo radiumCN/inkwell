@@ -68,8 +68,9 @@ class LocalFolderLibrary(
 
     suspend fun importSelection(
         tree: Uri, name: String, selected: List<FolderBook>, all: List<FolderBook>,
-        groupByFolder: Boolean, watch: Boolean,
+        groupByFolder: Boolean, watch: Boolean, truncated: Boolean,
     ): FolderImportSummary = withContext(Dispatchers.IO) {
+        require(!watch || !truncated) { "扫描未完成，请选择更小的子目录开启自动扫描" }
         mutex.withLock {
             val old = _folders.value.firstOrNull { it.uri == tree.toString() }
             if (watch) {
@@ -80,7 +81,7 @@ class LocalFolderLibrary(
                 val config = WatchedFolder(tree.toString(), name, groupByFolder,
                     seen = old?.seen.orEmpty() + ignored)
                 save(_folders.value.filterNot { it.uri == config.uri } + config)
-            } else if (old != null) {
+            } else if (old != null && !truncated) {
                 save(_folders.value.map { if (it.uri == old.uri) it.copy(enabled = false) else it })
             }
             val (summary, processed) = importBatch(name, selected, groupByFolder)

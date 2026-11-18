@@ -41,4 +41,13 @@ class BackupRssCompatibilityTest {
         val remote = current.copy(updatedAt = 200, groupName = "", icon = "", sortOrder = 0)
         assertEquals(remote, BackupMerger.merge(payload(current), payload(remote)).rssSources.single())
     }
+
+    @Test fun `defaults materialized by a legacy restore are filled on either side of an equal revision`() {
+        val restored = current.copy(groupName = "", sortOrder = 0, icon = "", converterVersion = 0)
+        for ((a, b) in listOf(restored to current, current to restored)) {
+            assertEquals(current, BackupMerger.merge(payload(a), payload(b)).rssSources.single())
+        }
+        val independentlyDisabled = restored.copy(enabled = false)
+        assertEquals(independentlyDisabled, BackupMerger.merge(payload(independentlyDisabled), payload(current)).rssSources.single())
+    }
 }
