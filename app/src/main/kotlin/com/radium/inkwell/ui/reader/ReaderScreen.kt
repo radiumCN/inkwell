@@ -808,6 +808,8 @@ fun ReaderScreen(
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },
             onCommitSettings = { viewModel.commitSettings() },
+            onSelectPaper = viewModel::selectPaper,
+            onCommitCustomPaper = viewModel::commitCustomPaper,
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },

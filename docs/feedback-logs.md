@@ -17,6 +17,7 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 | `reader.flip.commit_requested / blocked / page.shown` | 翻页提交请求、无法翻页的原因及最终显示的章节、页码和字符偏移 |
 | `reader.chapter.request / seek / chapter.load.start / chapter.load.end / chapter.load.failed` | 跳章、拖动进度及章节加载（含预取）的结果与耗时 |
 | `reader.session.load.* / menu.toggle / sheet / settings.apply / source.* / auto_flip.*` | 进书、阅读面板、设置、换源与自动翻页状态 |
+| `reader.settings.paper_selected / paper_applied` | 接收到的纸张选择与实际生效的主题切换，只记录主题 ID |
 | `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项和反馈结果，不记录输入值 |
 
 横向翻页的 `flip_id` 在当前翻页容器内递增，用于关联同一次翻页的渲染、收尾和提交。

@@ -66,6 +66,8 @@ data class ReaderSettings(
     val showImages: Boolean = false,
     /** 本地书无需下载图片，默认显示；与在线书的开关分别记忆。 */
     val localShowImages: Boolean = true,
+    /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
+    val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
@@ -175,6 +177,7 @@ data class ReaderTheme(
 
         /** 自定义纸张的 id；配色存在 ReaderPrefs 里，不在这张表上 */
         const val CUSTOM_ID = "custom"
+        val DEFAULT_CUSTOM = custom(PAPER.background, PAPER.textColor)
 
         /**
          * 由「纸色 + 字色」推导一整套。标题比正文再深/亮一档，页眉页脚则往纸色靠 ——

@@ -125,6 +125,7 @@ class ReaderPrefs(
     )
 
     private fun readSettings(p: Preferences, dark: Boolean): ReaderSettings {
+        val customPaper = ReaderPaperPrefs.custom(p, dark)
         return ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
@@ -138,7 +139,8 @@ class ReaderPrefs(
             firstLineIndentEm = p[Keys.FIRST_LINE_INDENT] ?: 2f,
             justify = p[Keys.JUSTIFY] ?: true,
             letterSpacingEm = p[Keys.LETTER_SPACING] ?: 0f,
-            theme = resolveActiveTheme(p, dark),
+            theme = ReaderPaperPrefs.active(p, dark, customPaper),
+            customPaper = customPaper,
             flipAnimation = p[Keys.FLIP]?.let { runCatching { FlipAnimation.valueOf(it) }.getOrNull() }
                 ?: FlipAnimation.COVER,
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
@@ -172,20 +174,6 @@ class ReaderPrefs(
             p[Keys.FIRST_LINE_INDENT] = settings.firstLineIndentEm
             p[Keys.JUSTIFY] = settings.justify
             p[Keys.LETTER_SPACING] = settings.letterSpacingEm
-            // 主题落到当前生效的槽（日/夜），另一个槽不动 —— 这就是"分别记住"
-            if (darkActive.value) {
-                p[Keys.THEME_NIGHT] = settings.theme.id
-                if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-                    p[Keys.CUSTOM_NIGHT_BG] = settings.theme.background
-                    p[Keys.CUSTOM_NIGHT_TEXT] = settings.theme.textColor
-                }
-            } else {
-                p[Keys.THEME_DAY] = settings.theme.id
-                if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
-                    p[Keys.CUSTOM_DAY_BG] = settings.theme.background
-                    p[Keys.CUSTOM_DAY_TEXT] = settings.theme.textColor
-                }
-            }
             p[Keys.FLIP] = settings.flipAnimation.name
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
@@ -204,23 +192,20 @@ class ReaderPrefs(
         }
     }
 
-    /**
-     * 按当前日夜取生效主题。日间槽为空时回落到老的单一 THEME 键（老用户升级迁移）；
-     * 夜间槽为空时回落到「夜色」预设，而不是暖纸 —— 夜里默认给深色纸才合理。
-     */
-    private fun resolveActiveTheme(p: Preferences, dark: Boolean): ReaderTheme = if (dark) {
-        resolveTheme(
-            p[Keys.THEME_NIGHT] ?: ReaderTheme.NIGHT.id,
-            p[Keys.CUSTOM_NIGHT_BG], p[Keys.CUSTOM_NIGHT_TEXT],
-            fallback = ReaderTheme.NIGHT,
-        )
-    } else {
-        resolveTheme(
-            p[Keys.THEME_DAY] ?: p[Keys.THEME],                       // 迁移：老单槽 → 日间
-            p[Keys.CUSTOM_DAY_BG] ?: p[Keys.CUSTOM_BG],
-            p[Keys.CUSTOM_DAY_TEXT] ?: p[Keys.CUSTOM_TEXT],
-            fallback = ReaderTheme.PAPER,
-        )
+    suspend fun selectPaper(themeId: String) {
+        val dark = darkActive.value
+        context.readerDataStore.edit { p ->
+            ReaderPaperPrefs.select(p, dark, themeId)
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+        }
+    }
+
+    suspend fun saveCustomPaper(theme: ReaderTheme) {
+        val dark = darkActive.value
+        context.readerDataStore.edit { p ->
+            ReaderPaperPrefs.saveCustom(p, dark, theme)
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+        }
     }
 
     /** 排版方案。跟阅读设置同一个 DataStore、同一个时间戳，WebDAV 里也随阅读设置整块走 */
@@ -297,22 +282,37 @@ class ReaderPrefs(
 
 }
 
+/** 日夜分别记当前主题和自定义配色；旧单槽只迁移到日间。 */
+internal object ReaderPaperPrefs {
+    private val keys = ReaderPrefs.Keys
+
+    fun custom(p: Preferences, dark: Boolean): ReaderTheme {
+        val bg = if (dark) p[keys.CUSTOM_NIGHT_BG] else p[keys.CUSTOM_DAY_BG] ?: p[keys.CUSTOM_BG]
+        val text = if (dark) p[keys.CUSTOM_NIGHT_TEXT] else p[keys.CUSTOM_DAY_TEXT] ?: p[keys.CUSTOM_TEXT]
+        return if (bg != null && text != null) ReaderTheme.custom(bg, text) else ReaderTheme.DEFAULT_CUSTOM
+    }
+
+    fun active(p: Preferences, dark: Boolean, custom: ReaderTheme = custom(p, dark)): ReaderTheme {
+        val id = if (dark) p[keys.THEME_NIGHT] else p[keys.THEME_DAY] ?: p[keys.THEME]
+        val fallback = if (dark) ReaderTheme.NIGHT else ReaderTheme.PAPER
+        if (id == ReaderTheme.CUSTOM_ID) return custom
+        return ReaderTheme.ALL.firstOrNull { it.id == id } ?: fallback
+    }
+
+    fun select(p: MutablePreferences, dark: Boolean, themeId: String) {
+        // 第一次启用时也保存完整配色，保证备份在另一台设备上能恢复同一张纸。
+        if (themeId == ReaderTheme.CUSTOM_ID) saveCustom(p, dark, custom(p, dark))
+        p[if (dark) keys.THEME_NIGHT else keys.THEME_DAY] = themeId
+    }
+
+    fun saveCustom(p: MutablePreferences, dark: Boolean, theme: ReaderTheme) {
+        p[if (dark) keys.CUSTOM_NIGHT_BG else keys.CUSTOM_DAY_BG] = theme.background
+        p[if (dark) keys.CUSTOM_NIGHT_TEXT else keys.CUSTOM_DAY_TEXT] = theme.textColor
+    }
+}
+
 /** 备份内容与时间戳来自同一次 DataStore 快照，避免 StateFlow 尚未追上新时间戳。 */
 suspend fun ReaderPrefs.exportForBackup(): BackupSettings = backupSnapshot()
-
-/**
- * id → 主题。自定义主题不在 ReaderTheme.ALL 那张表上（它的颜色是用户存的），
- * 所以按 id 查表这一步必须先把它摘出来 —— 否则自定义会被静默降级成"暖纸"。
- *
- * 读取、备份导入两处共用：各写一份的话，WebDAV 同步回来的自定义主题会丢色。
- */
-private fun resolveTheme(
-    id: String?, bg: Long?, text: Long?,
-    fallback: ReaderTheme = ReaderTheme.PAPER,
-): ReaderTheme = when {
-    id == ReaderTheme.CUSTOM_ID && bg != null && text != null -> ReaderTheme.custom(bg, text)
-    else -> ReaderTheme.ALL.firstOrNull { it.id == id } ?: fallback
-}
 
 suspend fun ReaderPrefs.importFromBackup(backup: BackupSettings): Boolean = restoreBackup(backup)
 

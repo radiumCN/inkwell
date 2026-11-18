@@ -34,6 +34,7 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReadPosition
 import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.reader.api.ReaderSettings
+import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.measure.TextMeasureFacade
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
@@ -379,7 +380,11 @@ class ReaderViewModel(
         viewModelScope.launch {
             loadSession()
             readerPrefs.settings.collect { s ->
+                val previous = _state.value.settings.theme.id
                 _state.value = _state.value.copy(settings = settingsForBook(s))
+                if (previous != s.theme.id) {
+                    trace("settings.paper_applied", "from_theme" to previous, "theme" to s.theme.id)
+                }
             }
         }
         viewModelScope.launch {
@@ -803,6 +808,18 @@ class ReaderViewModel(
     fun updateSettings(settings: ReaderSettings) {
         trace("settings.apply", "animation" to settings.flipAnimation.name, "font_size" to settings.fontSizeSp)
         viewModelScope.launch { persistSettings(settings) }
+    }
+
+    fun selectPaper(themeId: String) {
+        trace("settings.paper_selected", "from_theme" to _state.value.settings.theme.id, "theme" to themeId)
+        viewModelScope.launch { readerPrefs.selectPaper(themeId) }
+    }
+
+    fun commitCustomPaper() {
+        val theme = _state.value.settings.theme
+        if (theme.id == ReaderTheme.CUSTOM_ID) {
+            viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
+        }
     }
 
     /**

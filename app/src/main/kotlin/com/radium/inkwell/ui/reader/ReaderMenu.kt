@@ -61,6 +61,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
@@ -172,6 +176,8 @@ fun ReaderMenu(
     onUpdateSettings: (ReaderSettings) -> Unit,
     onPreviewSettings: (ReaderSettings) -> Unit,
     onCommitSettings: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
     typography: TypographyActions,
     onSearchSources: () -> Unit,
@@ -437,6 +443,8 @@ fun ReaderMenu(
                 onUpdate = onUpdateSettings,
                 onPreview = onPreviewSettings,
                 onCommit = onCommitSettings,
+                onSelectPaper = onSelectPaper,
+                onCommitCustomPaper = onCommitCustomPaper,
                 textSelectionEnabled = session.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
                 typography = typography,
@@ -955,6 +963,8 @@ private fun TypographyPanel(
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
@@ -999,6 +1009,8 @@ private fun TypographyPanel(
                         onUpdate = onUpdate,
                         onPreview = onPreview,
                         onCommit = onCommit,
+                        onSelectPaper = onSelectPaper,
+                        onCommitCustomPaper = onCommitCustomPaper,
                         typography = typography,
                         dragging = dragging,
                         onDragging = onDragging,
@@ -1150,6 +1162,8 @@ private fun MainPage(
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     typography: TypographyActions,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
@@ -1198,14 +1212,14 @@ private fun MainPage(
     Box(Modifier.alpha(shown)) {
         ReaderGroup {
             Column(Modifier.padding(vertical = Dimens.gapS)) {
-                ThemeSwatches(settings, onUpdate, horizontalPadding = Dimens.listHorizontal)
+                ThemeSwatches(settings, onSelectPaper, horizontalPadding = Dimens.listHorizontal)
                 // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
                 if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
                     Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
                         CustomPaperEditor(
                             theme = settings.theme,
                             onChange = { onPreview(settings.copy(theme = it)) },
-                            onChangeFinished = onCommit,
+                            onChangeFinished = onCommitCustomPaper,
                         )
                     }
                 }
@@ -1926,34 +1940,37 @@ private const val TRACK_STOPS = 6
 @Composable
 private fun ThemeSwatches(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
+    onSelect: (String) -> Unit,
     /** 左右内缩放在滚动内容里：色板随内容滚到分组卡的边缘，而不是在内缩线上被截断 */
     horizontalPadding: Dp = 0.dp,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = horizontalPadding),
+            // 手指松开就停，紧接着点色板不必先截停惯性滚动。
+            .horizontalScroll(rememberScrollState(), overscrollEffect = null, flingBehavior = PaperSwatchFling)
+            .padding(horizontal = horizontalPadding)
+            .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         ReaderTheme.ALL.forEach { theme ->
             ThemeSwatch(
                 theme = theme,
                 selected = theme.id == settings.theme.id,
-                onClick = { onUpdate(settings.copy(theme = theme)) },
+                onClick = { onSelect(theme.id) },
             )
         }
-        // 自定义纸张：颜色不在 ReaderTheme.ALL 那张表上，得从当前 settings 里取。
-        // 没调过就先给一份暖纸的底，用户点进去再改
-        val custom = if (settings.theme.id == ReaderTheme.CUSTOM_ID) settings.theme
-        else ReaderTheme.custom(ReaderTheme.PAPER.background, ReaderTheme.PAPER.textColor)
+        val custom = if (settings.theme.id == ReaderTheme.CUSTOM_ID) settings.theme else settings.customPaper
         ThemeSwatch(
             theme = custom,
             selected = settings.theme.id == ReaderTheme.CUSTOM_ID,
-            onClick = { onUpdate(settings.copy(theme = custom)) },
+            onClick = { onSelect(ReaderTheme.CUSTOM_ID) },
         )
     }
+}
+
+private object PaperSwatchFling : FlingBehavior {
+    override suspend fun ScrollScope.performFling(initialVelocity: Float): Float = initialVelocity
 }
 
 @Composable
@@ -1961,32 +1978,30 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
     // 按下色块微微沉下去（见 sinkOnPress）
     val press = remember { MutableInteractionSource() }
     Column(
+        modifier = Modifier.selectable(
+            selected = selected,
+            interactionSource = press,
+            indication = null,
+            role = Role.RadioButton,
+            onClick = onClick,
+        ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
     ) {
         Box(
             Modifier
-                // 色块 52dp（Dimens.swatch，与设置页色板同尺寸），仍 ≥48dp 触控下限；
-                // clip 必须在 selectable 之前 —— 否则按压反馈是方的，会溢出这个圆形色块的边界
                 .size(Dimens.swatch)
                 .sinkOnPress(press)
                 .clip(CircleShape)
                 .background(Color(theme.background))
+                .indication(press, LocalIndication.current)
                 .border(
                     width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
                     color = if (selected) MiuixTheme.colorScheme.primary
                     else MiuixTheme.colorScheme.dividerLine,
                     shape = CircleShape,
                 )
-                // 整块作为单选目标带上纸张名与选中态：否则读屏聚焦未选中色块只会念"文"，分不清是哪款
-                .selectable(
-                    selected = selected,
-                    interactionSource = press,
-                    indication = LocalIndication.current,
-                    role = Role.RadioButton,
-                    onClick = onClick,
-                )
-                .semantics { contentDescription = theme.label },
+                .clearAndSetSemantics {},
             contentAlignment = Alignment.Center,
         ) {
             // 选中的打勾；没选中的放一个"文"字，直接把这款纸的正文对比度演示出来 ——
