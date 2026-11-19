@@ -148,6 +148,37 @@ data object DisclaimerRoute : NavKey
 @Serializable
 data object DeveloperSettingsRoute : NavKey
 
+/** Stable names survive R8. Never log route.toString(): some routes carry queries, titles or URLs. */
+internal fun NavKey?.diagnosticName(): String = when (this) {
+    is BookshelfRoute -> "bookshelf"
+    is BookDetailRoute -> "book_detail"
+    is BookPreviewRoute -> "book_preview"
+    is ReaderRoute -> "reader"
+    is SearchRoute -> "search"
+    is ExploreRoute -> "explore"
+    is RssSourceRoute -> "rss_sources"
+    is RssTimelineRoute -> "rss_timeline"
+    is RssWebRoute -> "rss_web"
+    is RssArticleWebRoute -> "rss_article_web"
+    is RssArticleRoute -> "rss_article"
+    is ReplaceRuleRoute -> "replace_rules"
+    is SourceManageRoute -> "sources"
+    is SourceDetailRoute -> "source_detail"
+    is SourceWizardRoute -> "source_wizard"
+    is SettingsRoute -> "settings"
+    is ReadingStatsRoute -> "reading_stats"
+    is AppearanceSettingsRoute -> "appearance_settings"
+    is ReadingSettingsRoute -> "reading_settings"
+    is AboutSettingsRoute -> "about"
+    is ThemeSettingsRoute -> "theme_settings"
+    is WebDavSettingsRoute -> "webdav"
+    is FeedbackRoute -> "feedback"
+    is DisclaimerRoute -> "disclaimer"
+    is DeveloperSettingsRoute -> "developer_settings"
+    null -> "none"
+    else -> "unknown"
+}
+
 /**
  * 设置树里可作为 detail pane 的页面在树中的**层级**（`SettingsRoute` 自身算 1，非设置页为 null）。
  *

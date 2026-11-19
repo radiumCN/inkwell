@@ -1,12 +1,14 @@
 package com.radium.inkwell.reader.paginate
 
 /**
- * 分页时一张图的情况，由调用方（阅读页）在排版前量好交进来：分页要先知道图多高，才知道这一页装不装得下。
- * 不量就排，只能先按一个固定比例留框、图来了再重排 —— 读着读着字整页往下跳。
+ * 分页时一张图的尺寸或占位方式。版面在分页时确定，图晚到也不移动文字。
  */
 sealed interface ImageInfo {
     /** 原图的像素尺寸 */
     data class Sized(val width: Int, val height: Int) : ImageInfo
+
+    /** 在线图片按版面预留稳定的框，下载后等比填入。 */
+    data class Reserved(val illustrationOnly: Boolean) : ImageInfo
 
     /** 没取到（超时、来源拒绝、解不开）：排一条可以点按重试的提示，见 [PageItem.ImageBox.failed] */
     data object Failed : ImageInfo

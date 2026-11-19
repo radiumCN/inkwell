@@ -21,6 +21,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.state.ToggleableState
+import com.radium.inkwell.ui.components.ContentListItem
+import top.yukonga.miuix.kmp.basic.Checkbox
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -122,6 +126,7 @@ fun FeedbackScreen(
                             onValueChange = viewModel::setContent,
                             placeholder = "遇到了什么问题",
                             isError = state.overLimit,
+                            readOnly = state.submitting || state.pending,
                         )
                         // 字数实时可见，别等提交被拒才发现白写了。贴在框下靠右，不单独占一行
                         Text(
@@ -147,6 +152,7 @@ fun FeedbackScreen(
                         value = state.contact,
                         onValueChange = viewModel::setContact,
                         placeholder = "邮箱、QQ 等（选填）",
+                        readOnly = state.submitting || state.pending,
                     )
                 }
             }
@@ -163,8 +169,30 @@ fun FeedbackScreen(
                 },
             )
 
+            SectionHeader("问题定位")
+            SettingGroup {
+                ContentListItem(
+                    checked = state.attachLogs,
+                    onCheckedChange = viewModel::setAttachLogs,
+                    enabled = !state.submitting && !state.pending,
+                    leadingContent = {
+                        Checkbox(
+                            state = ToggleableState(state.attachLogs),
+                            onClick = null,
+                            modifier = Modifier.clearAndSetSemantics {},
+                        )
+                    },
+                ) {
+                    Text("附带运行日志，帮助定位问题")
+                }
+            }
+            SettingFootnote("包含最近的页面切换、关键操作、翻页及系统日志，经过基础脱敏，可能仍包含书名等信息；仅供开发者排查，不公开，上传后保留 30 天。本地操作日志限量保存最多 7 天；未开启日志记录时，系统日志仅提供当前可获取的快照。")
+            if (state.pending) {
+                SettingFootnote("提交结果待确认，请勿重复提交。请保留提交编号：${state.requestId}，供开发者排查。")
+            }
+
             PrimaryButton(
-                text = "提交",
+                text = if (state.collectingLogs) "正在收集日志" else if (state.submitting) "正在提交" else "提交",
                 onClick = viewModel::submit,
                 enabled = state.canSubmit,
                 loading = state.submitting,

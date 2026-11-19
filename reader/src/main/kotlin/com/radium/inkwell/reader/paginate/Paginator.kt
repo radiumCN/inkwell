@@ -41,8 +41,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
      *   是就立刻收手，返回 `complete = false` 的半截结果 —— 调用方得自己丢掉它，别当缓存。
      *   排版是纯 CPU 循环、没有挂起点，协程取消对它无效：不问这一句的话，连点几下 A+，
      *   每一档都要把整章排完、还一路占着测量锁，新字号排在它们后面干等。
-     * @param images 每张图的尺寸（只在 [LayoutSpec.showImages] 开着时问）。null = 不排这张；
-     *   要先量好再排，见 [ImageInfo]
+     * @param images 每张图的尺寸或占位方式（只在 [LayoutSpec.showImages] 开着时问）。null = 不排这张。
      */
     fun paginate(
         chapterIndex: Int,
@@ -68,7 +67,9 @@ class Paginator(private val measurer: TextMeasureFacade) {
         val bodyStyle = spec.bodyStyle()
         val titleStyle = spec.titleStyle()
         val headingStyle = spec.headingStyle()
-        val failedStyle by lazy(LazyThreadSafetyMode.NONE) { spec.failedLabelStyle() }
+        val failedImageLabel by lazy(LazyThreadSafetyMode.NONE) {
+            measurer.measureParagraph(IMAGE_FAILED_LABEL, spec.failedLabelStyle(), spec.contentWidthPx)
+        }
         var partialEmitted = false
         val partialCb = onPartial.takeIf { notifyAfterChar != Int.MAX_VALUE }
 
@@ -142,9 +143,18 @@ class Paginator(private val measurer: TextMeasureFacade) {
                                 onSeal = ::seal, currentCursor = { cursor })
                             cursor.addGap(spec.paragraphSpacingPx)
                         }
+                        is ImageInfo.Reserved -> {
+                            measured[idx] = failedImageLabel
+                            val width = spec.contentWidthPx.toFloat()
+                            val height = if (info.illustrationOnly) spec.contentHeightPx
+                                else minOf(width * 0.65f, spec.contentHeightPx)
+                            placeImage(idx, element, ImageSize(width, height), failed = false,
+                                spec, cursor, charOffset, onSeal = ::seal, currentCursor = { cursor })
+                            cursor.addGap(spec.paragraphSpacingPx)
+                        }
                         ImageInfo.Failed -> {
                             // 提示条的字和正文同一套测量，渲染层照段落的办法画（见 PageCanvas）
-                            val mp = measurer.measureParagraph(IMAGE_FAILED_LABEL, failedStyle, spec.contentWidthPx)
+                            val mp = failedImageLabel
                             measured[idx] = mp
                             val textH = mp.lineBottom(mp.lineCount - 1) - mp.lineTop(0)
                             val minH = IMAGE_FAILED_MIN_DP * spec.density
@@ -264,6 +274,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         firstLineIndentEm = firstLineIndentEm,
         justify = justify,
         letterSpacingEm = letterSpacingEm,
+        fontWeight = bodyFontWeight,
     )
 
     private fun LayoutSpec.titleStyle() = ResolvedTextStyle(

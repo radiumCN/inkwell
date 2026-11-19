@@ -21,15 +21,38 @@ object RssXmlParser {
         if (!looksLikeFeed(xml)) return null
         val doc = Jsoup.parse(xml, "", Parser.xmlParser())
         val items = doc.select("item, entry")
-        if (items.isEmpty()) return null
         return items.mapNotNull { item -> article(sourceId, item) }
     }
 
-    /** 开头几百字里有 `<rss` / `<feed` / `<rdf:RDF`：是 RSS 2.0 / Atom / RSS 1.0 */
+    /** 判断根标签，允许 XML 声明、样式表处理指令和注释出现在根标签前。 */
     fun looksLikeFeed(text: String): Boolean {
-        val head = text.trimStart().take(600)
-        return head.contains("<rss", true) || head.contains("<feed", true) || head.contains("<rdf:RDF", true)
+        var start = if (text.startsWith('\uFEFF')) 1 else 0
+        while (start < text.length) {
+            while (start < text.length && text[start].isWhitespace()) start++
+            val end = when {
+                text.startsWith("<?", start) -> "?>"
+                text.startsWith("<!--", start) -> "-->"
+                text.startsWith("<!DOCTYPE", start, ignoreCase = true) -> {
+                    var name = start + "<!DOCTYPE".length
+                    while (name < text.length && text[name].isWhitespace()) name++
+                    var endName = name
+                    while (endName < text.length && text[endName] !in " \t\r\n>[") endName++
+                    if (text.substring(name, endName).lowercase() !in FEED_TAGS) return false
+                    // 交给 XML 解析器跳过 DTD；声明里可能含有内嵌的标签和引号。
+                    val root = Jsoup.parse(text, "", Parser.xmlParser()).children().firstOrNull()
+                    return root?.tagName()?.lowercase() in FEED_TAGS
+                }
+                else -> return FEED_ROOT.matchesAt(text, start)
+            }
+            val close = text.indexOf(end, start)
+            if (close < 0) return false
+            start = close + end.length
+        }
+        return false
     }
+
+    private val FEED_TAGS = setOf("rss", "feed", "rdf:rdf")
+    private val FEED_ROOT = Regex("<(?:rss|feed|rdf:RDF)(?=[\\s/>])", RegexOption.IGNORE_CASE)
 
     /** feed 自己的标题。用户粘一个裸地址进来时拿它当订阅源的名字 */
     fun feedTitle(xml: String): String? = runCatching {

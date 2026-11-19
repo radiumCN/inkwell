@@ -2,11 +2,12 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.core.webdav.BackupBook
-import com.radium.inkwell.core.webdav.BackupCodec
+import com.radium.inkwell.core.webdav.BackupSync
 import com.radium.inkwell.core.webdav.BackupMerger
 import com.radium.inkwell.core.webdav.BackupPayload
 import com.radium.inkwell.core.webdav.BackupReplaceRule
 import com.radium.inkwell.core.webdav.BackupRssSource
+import com.radium.inkwell.core.webdav.mergeBackupRssSource
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
 import androidx.room3.withWriteTransaction
@@ -35,7 +36,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
-import java.io.IOException
 
 class WebDavRepository(
     private val db: InkwellDb,
@@ -125,70 +125,19 @@ class WebDavRepository(
         // MKCOL 是幂等的（已存在返回 405，客户端当成功）。
         client.mkcol(DIR)
 
-        // 远端版本在**下载之前**取：这一轮拿到的内容不会比它旧。从前是整轮同步走完再取 ——
-        // 合并几千个书源的那几秒里，另一台设备要是传了一版，它的版本会被当成「这一轮已经同步过」记下来，
-        // 之后的自动同步一直跳过，那一版（比如对面的阅读进度）永远拉不下来。
-        // 下载前后之间若有人上传：这里记的是更旧的版本，下次一比对不上就照常完整同步，不丢东西。
-        val remoteBefore = remoteVersion(client)
-
-        // 远端文件损坏（上传中断留半截、被别的客户端写坏）时 decode 会抛异常。若让它把整个 sync
-        // 拖垮，PUT 永远执行不到 → 损坏文件永远修不好、同步永久瘫痪。这里把损坏视作「远端没有可用备份」，
-        // 照常用本地覆盖上去，下一次同步就自愈了。
-        // 只认 Exception（gzip 截断、JSON 坏掉）：内存不够解不开**不是**文件坏了 —— 从前 runCatching 连 OOM
-        // 一起吞，当成「远端没有」，随后就拿本地把别的设备的整份数据盖掉。那种情况让这次同步失败、远端原样留着。
-        val remote = client.get(BACKUP)?.let { bytes ->
-            try {
-                BackupCodec.decode(bytes)
-            } catch (e: OutOfMemoryError) {
-                throw IOException("远端备份太大，本机内存不足以解析，本次同步已跳过", e)
-            } catch (_: Exception) {
-                null
-            }
-        }
-        // 本地快照在下载**之后**再拍：备份动辄几 MB，冷启动同步下载的那几秒里用户删书、隐藏、
-        // 改分组，按下载前的快照合并会把这些修改原样写回去（删掉的书复活）。
-        // 拍完到写回之间仍有一小段合并耗时，那段由 applyBooks / applySources 按时间戳兜住。
-        // 拍快照**之前**记下本地的「最新修改时间」，下次跳过的条件是它原样没变。
-        // 不拿墙钟时刻当基线：时间戳盖在快照之前、却在快照之后才提交的写入（导入大合集时先取 now、
-        // 好几秒后才落库，正赶上切到后台），既不在这次上传里、又不晚于基线 —— 会被永远当成已同步。
-        // 按「相等」比，那一笔一落库最新时间就变了，下次照常同步。
-        val localStamp = localChangeAt()
-        val local = buildLocalPayload()
-
-        val toUpload: BackupPayload
+        var localStamp = 0L
         var applied = 0
-        if (remote == null) {
-            toUpload = local
-        } else {
-            val merged = BackupMerger.merge(local, remote)
-            // 书目按真正写了库的条数算：合并说「变了」的，按事务里的最新行可能一条都不采纳
-            applied = applyToLocal(merged) +
-                merged.changedSources.size +
-                merged.changedReplaceRules.size +
-                merged.changedRssSources.size +
-                listOfNotNull(merged.readerSettings, merged.appSettings).size
-            toUpload = local.copy(
-                books = merged.books,
-                sources = merged.sources,
-                replaceRules = merged.replaceRules,
-                rssSources = merged.rssSources,
-                readerSettings = merged.mergedReaderSettings,
-                appSettings = merged.mergedAppSettings,
-                readingStats = merged.readingStats,
-            )
-        }
-
-        // 直接 PUT 覆盖。半截文件的风险由上面的「decode 失败即当远端没有、直接覆盖自愈」兜底，
-        // 不再用「PUT 临时名 + MOVE」——坚果云等服务器对 MOVE 回 409，反而把同步整个搞挂。
-        // 合并完跟远端一模一样（这次只有远端的更新要拉下来，或两边本来就一致）就不必再传一遍
-        val uploaded = remote == null || !sameContent(toUpload, remote)
-        if (uploaded) {
-            client.put(BACKUP, BackupCodec.encode(toUpload), contentType = "application/gzip")
-        }
+        val result = BackupSync(client).run(
+            BACKUP,
+            local = {
+                // 每次冲突重试都重新拍快照；先记修改标记，期间落库的新修改留给下次同步。
+                localStamp = localChangeAt()
+                buildLocalPayload()
+            },
+            apply = { merged -> applied += applyToLocal(merged) },
+        )
         prefs.markSynced(System.currentTimeMillis())
-        // 传了就紧接着取新版本（与 PUT 之间只隔一个请求）；没传，远端就还是下载前的那一版
-        val remoteAfter = if (uploaded) remoteVersion(client) else remoteBefore
-        prefs.saveSyncMark(localStamp, remoteAfter?.let { account + it })
+        prefs.saveSyncMark(localStamp, result.remoteVersion?.let { account + it })
         return if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"
     }
 
@@ -215,20 +164,6 @@ class WebDavRepository(
         } catch (_: Exception) {
             null
         }
-
-    /**
-     * 两份备份内容是否一致，不看导出时间与设备号。按 id 比，不看列表顺序：
-     * 远端那份是别的设备合并出来的，顺序跟这边从库里读出来的不一定一样。
-     */
-    private fun sameContent(a: BackupPayload, b: BackupPayload): Boolean =
-        a.version == b.version &&
-            a.books.associateBy { it.id } == b.books.associateBy { it.id } &&
-            a.sources.associateBy { it.id } == b.sources.associateBy { it.id } &&
-            a.replaceRules.associateBy { it.id } == b.replaceRules.associateBy { it.id } &&
-            a.rssSources.associateBy { it.id } == b.rssSources.associateBy { it.id } &&
-            a.readerSettings == b.readerSettings &&
-            a.appSettings == b.appSettings &&
-            a.readingStats.associateBy { it.key } == b.readingStats.associateBy { it.key }
 
     private suspend fun buildLocalPayload(): BackupPayload = BackupPayload(
         deviceId = prefs.deviceId(),
@@ -279,12 +214,7 @@ class WebDavRepository(
                 sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
             )
         },
-        rssSources = rssDao.getAll().map { r ->
-            BackupRssSource(
-                id = r.id, name = r.name, enabled = r.enabled, json = r.json,
-                sourceJson = r.sourceJson, updatedAt = r.updatedAt, deleted = r.deleted,
-            )
-        },
+        rssSources = rssDao.getAll().map { it.toBackupRssSource() },
         readerSettings = readerPrefs.exportForBackup(),
         appSettings = appPrefs.exportForBackup(),
         readingStats = readingStats.exportForBackup(),
@@ -314,26 +244,22 @@ class WebDavRepository(
         }
 
         // 几十条逐行写 + 三张表：中途被杀不留半套。远端设置的导入是 DataStore，在事务外。
-        val appliedBooks = db.withWriteTransaction {
-            val n = applyBooks(merged)
-            applySources(merged)
-            replaceRules.upsertAll(
-                merged.changedReplaceRules.map { r ->
-                    ReplaceRuleEntity(
-                        id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
-                        isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
-                        sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
-                    )
+        val appliedRows = db.withWriteTransaction {
+            var n = applyBooks(merged)
+            n += applySources(merged)
+            merged.changedReplaceRules.forEach { r ->
+                // 快照后用户刚禁用、编辑或删除的规则不能被旧合并结果盖掉。
+                applySyncedRule(replaceRules.getById(r.id), r)?.let {
+                    replaceRules.upsertAll(listOf(it))
+                    n++
                 }
-            )
-            rssDao.upsertAll(
-                merged.changedRssSources.map { r ->
-                    com.radium.inkwell.data.db.entity.RssSourceEntity(
-                        id = r.id, name = r.name, enabled = r.enabled, json = r.json,
-                        sourceJson = r.sourceJson, updatedAt = r.updatedAt, deleted = r.deleted,
-                    )
+            }
+            merged.changedRssSources.forEach { r ->
+                applySyncedRss(rssDao.getById(r.id), r)?.let {
+                    rssDao.upsertAll(listOf(it))
+                    n++
                 }
-            )
+            }
             n
         }
         if (remotelyDeleted.isNotEmpty()) {
@@ -342,11 +268,12 @@ class WebDavRepository(
                 remotelyDeleted.forEach { bookRepo.deleteLocalFiles(it) }
             }
         }
-        merged.readerSettings?.let { readerPrefs.importFromBackup(it) }
+        var appliedSettings = 0
+        merged.readerSettings?.let { if (readerPrefs.importFromBackup(it)) appliedSettings++ }
         // 别的设备的阅读时长、本机清数据前记下的时长。不计入「合并了几项更新」：那是给人看书架变化的
         readingStats.applySynced(merged.changedReadingStats)
-        merged.appSettings?.let { appPrefs.importFromBackup(it) }
-        return appliedBooks
+        merged.appSettings?.let { if (appPrefs.importFromBackup(it)) appliedSettings++ }
+        return appliedRows + appliedSettings
     }
 
     /** @return 真正写了库的书目数。合并结果里「变了」的条目，到了事务里按最新行可能一条都不采纳 */
@@ -388,24 +315,27 @@ class WebDavRepository(
         return applied
     }
 
-    private suspend fun applySources(merged: BackupMerger.MergeResult) {
+    private suspend fun applySources(merged: BackupMerger.MergeResult): Int {
+        var applied = 0
         merged.changedSources.forEach { s ->
             // 与 importJson 一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
             if (!isTextNovelSourceJson(s.json)) return@forEach
-            // 校验结果（checkStatus/checkMessage/respondTime/checkedAt）是本地专属、不跨设备同步的列 ——
-            // 整行 REPLACE 会把它们清空。读旧行、只覆盖同步字段（含分组），本地校验结果原样保留。
+            // 本地测速和校验只适用于当前这份规则。规则相同的启停/分组改动保留它们。
             val existing = sourceDao.getById(s.id)
             // 同 applyBooks：本地在拍快照之后又改过（启停/分组/删除），保留本地的
             if (existing != null && s.updatedAt <= existing.updatedAt) return@forEach
             sourceDao.upsert(
-                (existing ?: BookSourceEntity(id = s.id, name = s.name, json = s.json, updatedAt = s.updatedAt))
+                (existing?.takeIf { it.json == s.json }
+                    ?: BookSourceEntity(id = s.id, name = s.name, json = s.json, updatedAt = s.updatedAt))
                     .copy(
                         name = s.name, enabled = s.enabled, sortOrder = s.sortOrder,
                         json = s.json, updatedAt = s.updatedAt, groupName = s.groupName,
                         deleted = s.deleted,
                     )
             )
+            applied++
         }
+        return applied
     }
 
     /** 备份里的书源 JSON 是否为小说源；解析失败按「不是小说」丢掉，避免脏数据进库 */
@@ -495,3 +425,34 @@ internal fun applySyncedBook(existing: BookEntity, b: BackupBook): SyncedBook {
     )
     return SyncedBook(entity, sourceChanged, deletedRemotely)
 }
+
+/** 写事务内重读后的规则裁决；null 表示最新本地行胜出、不必写库。 */
+internal fun applySyncedRule(existing: ReplaceRuleEntity?, r: BackupReplaceRule): ReplaceRuleEntity? {
+    if (existing != null && existing.updatedAt >= r.updatedAt) return null
+    return ReplaceRuleEntity(
+        id = r.id, name = r.name, pattern = r.pattern, replacement = r.replacement,
+        isRegex = r.isRegex, scope = r.scope, bookId = r.bookId, enabled = r.enabled,
+        sortOrder = r.sortOrder, updatedAt = r.updatedAt, deleted = r.deleted,
+    )
+}
+
+/** 旧备份未携带的附属字段保留本地，显式空值则按远端更新。 */
+internal fun applySyncedRss(
+    existing: com.radium.inkwell.data.db.entity.RssSourceEntity?, r: BackupRssSource,
+): com.radium.inkwell.data.db.entity.RssSourceEntity? {
+    if (existing != null && existing.updatedAt > r.updatedAt) return null
+    val incoming = if (existing == null) r else mergeBackupRssSource(existing.toBackupRssSource(), r)
+    val base = existing ?: com.radium.inkwell.data.db.entity.RssSourceEntity(id = r.id, name = r.name, json = r.json)
+    return base.copy(
+        name = incoming.name, enabled = incoming.enabled, json = incoming.json, sourceJson = incoming.sourceJson,
+        updatedAt = incoming.updatedAt, deleted = incoming.deleted,
+        groupName = incoming.groupName ?: base.groupName, sortOrder = incoming.sortOrder ?: base.sortOrder,
+        icon = incoming.icon ?: base.icon, converterVersion = incoming.converterVersion ?: base.converterVersion,
+    ).takeUnless { it == existing }
+}
+
+private fun com.radium.inkwell.data.db.entity.RssSourceEntity.toBackupRssSource() = BackupRssSource(
+    id = id, name = name, enabled = enabled, json = json, sourceJson = sourceJson,
+    updatedAt = updatedAt, deleted = deleted, groupName = groupName, sortOrder = sortOrder,
+    icon = icon, converterVersion = converterVersion,
+)

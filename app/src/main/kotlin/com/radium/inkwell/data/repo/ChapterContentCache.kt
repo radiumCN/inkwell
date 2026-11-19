@@ -37,6 +37,32 @@ class ChapterContentCache(private val root: File) {
     private val epochLock = Any()
     private val bookEpochs = HashMap<String, Int>()
     private var allEpoch = 0
+    private data class UpgradeKey(val bookId: String, val chapterUrl: String, val epoch: Long)
+    private val recentUpgrades = LinkedHashMap<UpgradeKey, Long>()
+
+    /** 后台补图在多个阅读会话之间共用退避，只有仍在磁盘上的旧文字缓存才需要升级。 */
+    internal fun claimTextOnlyUpgrade(
+        bookId: String,
+        chapterUrl: String,
+        epoch: Long,
+        nowMs: Long = System.nanoTime() / 1_000_000,
+    ): Boolean = synchronized(epochLock) {
+        if (epoch(bookId) != epoch || !isTextOnly(bookId, chapterUrl)) return false
+        val key = UpgradeKey(bookId, chapterUrl, epoch)
+        val last = recentUpgrades[key]
+        if (last != null && nowMs - last < UPGRADE_INTERVAL_MS) return false
+        recentUpgrades.remove(key)
+        recentUpgrades[key] = nowMs
+        if (recentUpgrades.size > MAX_RECENT_UPGRADES) {
+            recentUpgrades.remove(recentUpgrades.keys.first())
+        }
+        true
+    }
+
+    private fun isTextOnly(bookId: String, chapterUrl: String): Boolean {
+        val file = file(bookId, chapterUrl)
+        return file.isFile && file.bufferedReader().use { it.readLine() } == TEXT_ONLY_VERSION
+    }
 
     /** 每本书上次清理（[pruneBehindProgress]）的时刻，只记在进程里，见 [claimPrune] */
     private val lastPrunedAt = ConcurrentHashMap<String, Long>()
@@ -107,10 +133,10 @@ class ChapterContentCache(private val root: File) {
      * 每到章首章尾都要把后面几章这样过一遍。只看 [has] 又不够 —— 旧版本格式的文件在，
      * read 却当没缓存，预取就该照抓。
      */
-    fun hasCurrent(bookId: String, chapterUrl: String, needImages: Boolean = false): Boolean {
+    fun hasCurrent(bookId: String, chapterUrl: String): Boolean {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return false
-        return runCatching { f.bufferedReader().use { it.readLine() }.isUsable(needImages) }
+        return runCatching { f.bufferedReader().use { it.readLine() }.isUsable() }
             .getOrDefault(false)
     }
 
@@ -119,7 +145,7 @@ class ChapterContentCache(private val root: File) {
 
     fun read(bookId: String, chapterUrl: String): ChapterContent? = readEntry(bookId, chapterUrl)?.content
 
-    fun readEntry(bookId: String, chapterUrl: String): Entry? {
+    fun readEntry(bookId: String, chapterUrl: String, onIncompatible: (() -> Unit)? = null): Entry? {
         val f = file(bookId, chapterUrl)
         if (!f.isFile) return null
         val lines = f.readLines()
@@ -128,7 +154,10 @@ class ChapterContentCache(private val root: File) {
         // 跟着变好。没有这道校验的话，用户已经读过（也就是最想看到修复效果）的章节
         // 会永远停在旧解析上，升级完一看一模一样。见 [FORMAT_VERSION]。
         val version = lines.firstOrNull()
-        if (!version.isUsable(needImages = false)) return null
+        if (!version.isUsable()) {
+            onIncompatible?.invoke()
+            return null
+        }
         val elements = lines.drop(1).mapNotNull { line ->
             when {
                 // 转义过的普通段落：它本来长得像标记行（H1:/IMG:/---），存时加了前缀，这里先剥掉。
@@ -157,9 +186,8 @@ class ChapterContentCache(private val root: File) {
         return Entry(ChapterContent(elements), withImages = version == FORMAT_VERSION)
     }
 
-    /** 首行版本号认不认：当前版本总认；只有字的 v4 在不要图时也认（离线缓存的书升级后照样能读） */
-    private fun String?.isUsable(needImages: Boolean): Boolean =
-        this == FORMAT_VERSION || (!needImages && this == TEXT_ONLY_VERSION)
+    /** 当前版本和旧文字版都能用于显示正文。 */
+    private fun String?.isUsable(): Boolean = this == FORMAT_VERSION || this == TEXT_ONLY_VERSION
 
     // ---- 正文插图 ----
 
@@ -190,6 +218,14 @@ class ChapterContentCache(private val root: File) {
             if (tmp.exists()) tmp.delete()
         }
     }
+
+    /** 与正文共享失效代数，清完缓存后旧图片请求也不能把目录重新建出来。 */
+    fun writeImageIfEpoch(bookId: String, imageUrl: String, bytes: ByteArray, epoch: Long): Boolean =
+        synchronized(epochLock) {
+            if (epoch(bookId) != epoch) return false
+            writeImage(bookId, imageUrl, bytes)
+            true
+        }
 
     /** 段落文本恰好长得像标记行时要转义，否则读回会被误解析 */
     private fun escapeIfAmbiguous(text: String): String {
@@ -239,9 +275,16 @@ class ChapterContentCache(private val root: File) {
     }
 
     /** 自 [epoch] 那一刻起这本书的缓存没被清过才写；返回写没写 */
-    fun writeIfEpoch(bookId: String, chapterUrl: String, content: ChapterContent, epoch: Long): Boolean =
+    fun writeIfEpoch(
+        bookId: String,
+        chapterUrl: String,
+        content: ChapterContent,
+        epoch: Long,
+        onlyTextOnly: Boolean = false,
+    ): Boolean =
         synchronized(epochLock) {
             if (epoch(bookId) != epoch) return false
+            if (onlyTextOnly && !isTextOnly(bookId, chapterUrl)) return false
             write(bookId, chapterUrl, content)
             true
         }
@@ -346,6 +389,8 @@ class ChapterContentCache(private val root: File) {
     }
 
     private companion object {
+        const val UPGRADE_INTERVAL_MS = 10 * 60 * 1000L
+        const val MAX_RECENT_UPGRADES = 256
         /** 同一本书两次清理之间至少隔多久，见 [claimPrune] */
         const val PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000L
 
@@ -373,8 +418,7 @@ class ChapterContentCache(private val root: File) {
 
         /**
          * v4 是**唯一**一个升级后照旧认的旧版本：v5 只是多收了图，字的解析和 v4 一模一样。
-         * 当没缓存的话，离线缓存了整本的书升级完就读不了了。只有开着「正文显示图片」、又联网时，
-         * 阅读页才拿它当过期的、重抓一份带图的（见 NetReaderBookSource），没网照旧读这份文字版。
+         * 阅读器先用这份缓存出字，开着「正文显示图片」时再单独尝试补全图片地址。
          */
         const val TEXT_ONLY_VERSION = "\u0001V4"
 

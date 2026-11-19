@@ -43,6 +43,11 @@ class RssRuleEngineTest {
                     </channel></rss>""",
                 )
                 "/p/1" -> MockResponse().setBody("<html><body><div class=\"c\">正文开头</div></body></html>")
+                "/feed-without-declaration" -> MockResponse().setBody(
+                    """<!-- feed metadata --><rss version="2.0"><channel>
+                        <item><title>第一篇</title><link>$base/p/1</link></item>
+                    </channel></rss>""",
+                )
                 "/part" -> MockResponse().setBody("后面一段")
                 else -> MockResponse().setResponseCode(404)
             }
@@ -60,6 +65,19 @@ class RssRuleEngineTest {
         SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
         RhinoScriptRuntime(),
     )
+
+    @Test
+    fun `没有 XML 声明的 RSS 规则也能取链接`() = runBlocking {
+        val rule = RssSourceRule(
+            id = base,
+            name = "无声明订阅",
+            articles = "<js>result</js>\n//item",
+            title = "title@text",
+            link = "link@text",
+        )
+        val page = engine().articles(rule, "$base/feed-without-declaration")
+        assertEquals("$base/p/1", page.items.single().link)
+    }
 
     @Test
     fun `feed 上的规则：脚本接 XPath、取 link，正文脚本能 ajax`() = runBlocking {

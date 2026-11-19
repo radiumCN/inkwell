@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.data.db.entity.StatsBook
 import com.radium.inkwell.data.repo.ReadingStatsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -34,12 +37,13 @@ class ReadingStatsViewModel(
 ) : ViewModel() {
 
     /** null = 还没读到第一份数据（与「读到了，但是空的」分开，别先闪一下空态） */
-    val state: StateFlow<ReadingStatsUi?> = stats.observeAll()
-        .map { rows ->
-            val today = LocalDate.now()
-            val summary = summarize(rows, today, topN = Int.MAX_VALUE)
-            ReadingStatsUi(today, summary, topBooks(summary))
-        }
+    val state: StateFlow<ReadingStatsUi?> = combine(
+        stats.observeAll(), bookDao.observeStatsBooks().distinctUntilChanged(),
+    ) { rows, books ->
+        val today = LocalDate.now()
+        val summary = summarize(rows, today, topN = Int.MAX_VALUE)
+        ReadingStatsUi(today, summary, topBooks(summary, books))
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -47,23 +51,15 @@ class ReadingStatsViewModel(
     val latestRead: StateFlow<LatestRead?> = bookDao.observeLatestRead()
         .map(::LatestRead)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+}
 
-    /**
-     * 「今年读得最多」。**隐藏的书不进这张榜**：隐藏区的存在本身就是秘密（设置页里一个字都不提），
-     * 榜上冒出一本书架上找不到的书，就等于把它说出来了。它的时长仍算在总数里 —— 总数看不出是哪本书。
-     * 删掉的书照常上榜：从书架删掉不等于没读过。书行都查不到的（试读完没加入书架）跳过。
-     */
-    private suspend fun topBooks(summary: ReadingSummary): List<TopBook> {
-        val result = ArrayList<TopBook>(TOP_BOOKS)
-        for ((id, millis) in summary.topBooks) {
-            if (result.size >= TOP_BOOKS) break
-            val book = bookDao.getById(id) ?: continue
-            if (!book.hidden) result += TopBook(book.title, book.author, millis)
-        }
-        return result
-    }
-
-    private companion object {
-        const val TOP_BOOKS = 5
-    }
+/**
+ * 今年读得最多的五本。隐藏书不露名但仍计入总时长，已删除的书保留历史书名，缺书行的跳过。
+ * 元数据一次查回，在内存选前五，不再为每条候选单独查库。
+ */
+internal fun topBooks(summary: ReadingSummary, books: List<StatsBook>): List<TopBook> {
+    val byId = books.associateBy { it.id }
+    return summary.topBooks.asSequence().mapNotNull { (id, millis) ->
+        byId[id]?.takeUnless { it.hidden }?.let { TopBook(it.title, it.author, millis) }
+    }.take(5).toList()
 }

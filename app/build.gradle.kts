@@ -59,6 +59,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
@@ -109,6 +110,15 @@ composeCompiler {
         reportsDestination = layout.buildDirectory.dir("compose_metrics")
         metricsDestination = layout.buildDirectory.dir("compose_metrics")
     }
+}
+
+// 留存数据库结构，升级测试将历史迁移结果与 Room 当前生成的结构逐表核对。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+tasks.withType<Test>().configureEach {
+    inputs.dir(layout.projectDirectory.dir("schemas")).withPropertyName("roomSchemas")
 }
 
 dependencies {

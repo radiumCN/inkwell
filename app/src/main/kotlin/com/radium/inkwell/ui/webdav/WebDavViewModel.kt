@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.webdav
 
+import com.radium.inkwell.util.UsageLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.net.OfficialWebDav
@@ -148,6 +149,7 @@ class WebDavViewModel(
     }
 
     fun sendCode() {
+        UsageLog.event("ui.click", "action" to "webdav.send_code")
         val s = _state.value
         if (s.busy || s.codeWait > 0) return
         val email = s.email.trim()
@@ -167,6 +169,7 @@ class WebDavViewModel(
     }
 
     fun submitOfficial() {
+        UsageLog.event("ui.click", "action" to "webdav.connect")
         val s = _state.value
         if (s.busy) return
         runAuth {
@@ -214,6 +217,7 @@ class WebDavViewModel(
     fun dismissDisconnect() = _state.update { it.copy(confirmDisconnect = false) }
 
     fun disconnectOfficial() {
+        UsageLog.event("ui.click", "action" to "webdav.disconnect")
         _state.update { it.copy(confirmDisconnect = false) }
         viewModelScope.launch {
             official.disconnect()
@@ -233,6 +237,7 @@ class WebDavViewModel(
     }
 
     fun testAndSave() {
+        UsageLog.event("ui.click", "action" to "webdav.test_save")
         val s = _state.value
         if (s.busy) return
         viewModelScope.launch {
@@ -262,6 +267,7 @@ class WebDavViewModel(
     }
 
     fun syncNow() {
+        UsageLog.event("ui.click", "action" to "webdav.sync")
         if (_state.value.busy) return
         viewModelScope.launch {
             _state.update { it.copy(syncing = true) }

@@ -79,9 +79,11 @@ class BookSourceEngineTest {
         assertEquals("$base/img/1.jpg", first.coverUrl)
         assertEquals("一个平凡少年的故事。", first.intro)
         assertEquals("第五章 大结局", first.latestChapter)
+        assertEquals("2025-02-04", first.updateTime)
         assertEquals(base, first.sourceId)
         assertEquals("仙路漫漫", result.items[1].title)
         assertNull(result.items[1].intro)
+        assertNull(result.items[1].updateTime)
 
         // 详情
         val detail = eng.getDetail(src, first.bookUrl)
@@ -868,7 +870,8 @@ class BookSourceEngineTest {
             "author": "span.author@text##作者[：:]",
             "coverUrl": "img@src",
             "intro": "p.intro@text",
-            "lastChapter": "span.latest@text"
+            "lastChapter": "span.latest@text",
+            "updateTime": "time.updated@text"
           },
           "ruleBookInfo": {
             "name": "h1@text",
@@ -901,6 +904,7 @@ class BookSourceEngineTest {
               <img src="/img/1.jpg">
               <p class="intro">一个平凡少年的故事。</p>
               <span class="latest">第五章 大结局</span>
+              <time class="updated">2025-02-04</time>
             </div>
             <div class="result">
               <h3><a href="/book/2">仙路漫漫</a></h3>
@@ -954,7 +958,8 @@ class BookSourceEngineTest {
         const val BLEED_2 = """<html><body><div id="content"><p>第二章内容。</p></div></body></html>"""
 
         // 上下两处导航各有一个「下一页」，且指向同一地址
-        const val DUP_NAV = """<html><body><a id="next" href="/dup/2">下一页</a>
+        const val DUP_NAV = """<html><body><a id="next" href="#">下一页占位</a>
+            <a id="next" href="/dup/2">下一页</a>
             <div id="content"><p>重复导航页。</p></div>
             <a id="next" href="/dup/2">下一页</a></body></html>"""
 

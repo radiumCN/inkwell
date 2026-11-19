@@ -17,9 +17,10 @@ fun RenderablePage.imageAt(
 ): PageItem.ImageBox? {
     val localX = x - layout.marginLeftPx
     val localY = y - originY
-    return spec.items.firstOrNull { item ->
+    val hit = spec.items.firstOrNull { item ->
         item is PageItem.ImageBox &&
             localX >= item.left && localX <= item.left + item.width &&
             localY >= item.top && localY <= item.top + item.height
-    } as PageItem.ImageBox?
+    } as PageItem.ImageBox? ?: return null
+    return if (hit.elementIndex in failedImages) hit.copy(failed = true) else hit
 }

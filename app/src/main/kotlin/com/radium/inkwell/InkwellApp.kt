@@ -13,6 +13,7 @@ import com.radium.inkwell.data.repo.RssRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.di.appModule
 import com.radium.inkwell.util.RunLogRecorder
+import com.radium.inkwell.util.UsageLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +42,10 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        UsageLog.initialize(
+            filesDir.resolve("logs/usage"),
+            runCatching { packageManager.getPackageInfo(packageName, 0).versionName.orEmpty() }.getOrDefault("unknown"),
+        )
         val koin = startKoin {
             androidContext(this@InkwellApp)
             modules(appModule)
@@ -113,7 +118,12 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
         // 换台设备接着读，进度还停在上次开 App 的位置。而"读完退出"恰恰是进度变化最大的时刻。
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    UsageLog.event("app.foreground")
+                }
+
                 override fun onStop(owner: LifecycleOwner) {
+                    UsageLog.event("app.background")
                     appScope.launch { autoSync(koin) }
                 }
             }

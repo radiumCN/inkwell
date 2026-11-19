@@ -92,6 +92,15 @@ class SourceHttpClientTest {
     }
 
     @Test
+    fun `honors retry-after on a rate limit without immediate retry`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "60"))
+        val error = assertFailsWith<SourceHttpClient.HttpStatusException> { client().fetch(server.url("/").toString()) }
+        assertEquals(429, error.code)
+        assertEquals("60", error.retryAfter)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `gives up after two retries on 403`() = runBlocking {
         repeat(3) { server.enqueue(MockResponse().setResponseCode(403)) }
         assertFailsWith<IOException> { client().fetch(server.url("/").toString()) }

@@ -11,6 +11,7 @@ import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.data.repo.ReadStage
 import com.radium.inkwell.ui.bookshelf.ShelfIndex
 import com.radium.inkwell.ui.bookshelf.searchableShelf
 import com.radium.inkwell.ui.components.MessageBus
@@ -170,7 +171,7 @@ class BookPreviewViewModel(
             if (!didRank) {
                 ordered = AutoSourceSwitcher.rankSearchResults(
                     candidates,
-                    sourceRepo.getEnabledForSwitch(),
+                    sourceRepo.getEnabledForSwitch(candidates.mapTo(HashSet()) { it.sourceId }),
                 )
                 didRank = true
                 current = 0
@@ -212,9 +213,12 @@ class BookPreviewViewModel(
                 // 丢到旁边的 async 里，超时只取消 await，页面立刻试下一个；
                 // TimeoutCancellationException 是 CancellationException 的子类，
                 // 当成整页取消往外抛会让 loading 停在 true（WebView 渲染超时就会这样）。
+                var pendingStage = ReadStage.DETAIL
                 val deferred = async {
                     try {
-                        Result.success(netBookRepo.fetchDetailAndToc(rule, r.bookUrl, r.variables))
+                        Result.success(netBookRepo.fetchDetailAndToc(rule, r.bookUrl, r.variables) {
+                            pendingStage = ReadStage.TOC
+                        })
                     } catch (e: TimeoutCancellationException) {
                         Result.failure(e)
                     } catch (e: CancellationException) {
@@ -226,6 +230,7 @@ class BookPreviewViewModel(
                 val outcome = withTimeoutOrNull(DETAIL_TIMEOUT_MS) { deferred.await() }
                 if (outcome == null) {
                     deferred.cancel()
+                    netBookRepo.recordReadTimeout(rule, pendingStage)
                     lastError = "来源响应超时"
                     continue
                 }

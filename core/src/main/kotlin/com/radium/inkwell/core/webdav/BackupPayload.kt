@@ -76,7 +76,34 @@ data class BackupRssSource(
     val updatedAt: Long = 0,
     /** 软删除墓碑，语义见 [BackupBook.deleted] */
     val deleted: Boolean = false,
+    /** null 表示旧备份没有提供；空字符串才是用户主动清空分组。 */
+    val groupName: String? = null,
+    val sortOrder: Int? = null,
+    val icon: String? = null,
+    val converterVersion: Int? = null,
 )
+
+/** 同一修订的默认值可能由旧客户端导入时补上，优先保留另一端已有的元数据。 */
+fun mergeBackupRssSource(local: BackupRssSource, remote: BackupRssSource): BackupRssSource {
+    val (newer, older) = if (remote.updatedAt > local.updatedAt) remote to local else local to remote
+    val sameRevision = newer.updatedAt == older.updatedAt &&
+        newer.name == older.name && newer.enabled == older.enabled &&
+        newer.json == older.json && newer.sourceJson == older.sourceJson && newer.deleted == older.deleted
+
+    fun <T> mergeField(current: T?, fallback: T?, default: T): T? = when {
+        current == null -> fallback
+        sameRevision && current == default && fallback != null -> fallback
+        else -> current
+    }
+
+    // 新版明确写下的清空操作（时间戳较新）仍由新版胜出。
+    return newer.copy(
+        groupName = mergeField(newer.groupName, older.groupName, ""),
+        sortOrder = mergeField(newer.sortOrder, older.sortOrder, 0),
+        icon = mergeField(newer.icon, older.icon, ""),
+        converterVersion = mergeField(newer.converterVersion, older.converterVersion, 0),
+    )
+}
 
 @Serializable
 data class BackupReplaceRule(
@@ -170,7 +197,9 @@ object BackupCodec {
 
     fun decode(bytes: ByteArray): BackupPayload {
         val raw = GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
-        return json.decodeFromString(BackupPayload.serializer(), String(raw, Charsets.UTF_8))
+        return json.decodeFromString(BackupPayload.serializer(), String(raw, Charsets.UTF_8)).also {
+            require(it.version in 1..2) { "远端备份版本不受支持，请升级应用后再同步" }
+        }
     }
 }
 
@@ -259,7 +288,7 @@ object BackupMerger {
             when {
                 l == null -> r!!
                 r == null -> l
-                else -> if (r.updatedAt > l.updatedAt) r else l
+                else -> mergeBackupRssSource(l, r)
             }
         }
         val changedRss = mergedRss.filter { it != localRss[it.id] }

@@ -40,6 +40,7 @@ class BookSourceImportTest {
                     id = it.id, updatedAt = it.updatedAt, checkStatus = it.checkStatus,
                     respondTime = it.respondTime, sortOrder = it.sortOrder,
                     searchMs = it.searchMs, searchFails = it.searchFails,
+                    searchAt = it.searchAt, searchRetryAt = it.searchRetryAt,
                 )
             }
         override suspend fun getById(id: String) = store[id].also { getByIdCalls++ }
@@ -74,8 +75,10 @@ class BookSourceImportTest {
             }
         }
 
-        override suspend fun saveSearchStats(id: String, searchMs: Long, searchFails: Int) {
-            store[id]?.let { store[id] = it.copy(searchMs = searchMs, searchFails = searchFails) }
+        override suspend fun saveSearchStats(id: String, searchMs: Long, searchFails: Int, searchAt: Long, searchRetryAt: Long, revision: Long) {
+            store[id]?.takeIf { it.updatedAt == revision && it.searchAt <= searchAt && !it.deleted }?.let {
+                store[id] = it.copy(searchMs = searchMs, searchFails = searchFails, searchAt = searchAt, searchRetryAt = searchRetryAt)
+            }
         }
 
         override suspend fun setSortOrder(id: String, sortOrder: Int, now: Long) {
@@ -167,6 +170,47 @@ class BookSourceImportTest {
     }
     """.trimIndent()
 
+    @Test
+    fun `预览只读，确认只给新增来源指定分组并保留更新项的最新分组`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        val first = groupedSource("玄幻")
+        val second = groupedSource("言情").replace("https://g.com", "https://new.com")
+        repo.importJson(first).getOrThrow()
+
+        val preview = repo.previewImport("[${groupedSource("合集新分组")},$second,$second,null]")
+        assertEquals(1, preview.added)
+        assertEquals(1, preview.updated)
+        assertEquals(2, preview.skipped.size)
+        assertEquals(listOf("https://g.com"), dao.store.keys.toList())
+        assertEquals(1, dao.upsertAllCalls)
+
+        repo.setGroup(listOf("https://g.com"), "本机分组")
+        val result = repo.confirmImport(preview, "待验证")
+        assertEquals(1, result.added)
+        assertEquals(1, result.updated)
+        assertEquals("本机分组", dao.store.getValue("https://g.com").groupName)
+        assertEquals("待验证", dao.store.getValue("https://new.com").groupName)
+        assertEquals(2, dao.upsertAllCalls)
+    }
+
+    @Test
+    fun `预览将墓碑算作新增，确认时可以明确不分组`() = runTest {
+        val dao = FakeDao()
+        val repo = BookSourceRepository(dao, FakeHitDao())
+        val source = groupedSource("作者分组")
+        repo.importJson(source).getOrThrow()
+        dao.softDeleteById("https://g.com", 100)
+
+        val preview = repo.previewImport(source)
+        assertEquals(1, preview.added)
+        assertEquals(0, preview.updated)
+        val result = repo.confirmImport(preview, "")
+        assertEquals(1, result.added)
+        assertEquals("", dao.store.getValue("https://g.com").groupName)
+        assertEquals(false, dao.store.getValue("https://g.com").deleted)
+    }
+
     /**
      * 同一份规则原样再导一遍不是「修改」—— 盖了新时间戳，这一行就会带着本机的旧启停/分组
      * 在 WebDAV 合并（按 updatedAt 做 LWW）里赢过别的设备刚做的修改。
@@ -191,15 +235,17 @@ class BookSourceImportTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
         repo.importJson(groupedSource("玄幻")).getOrThrow()
-        dao.saveSearchStats("https://g.com", searchMs = 1_200, searchFails = 1)
+        dao.saveSearchStats("https://g.com", 1_200, 1, 100, 200, dao.store.getValue("https://g.com").updatedAt)
 
         repo.importJson(groupedSource("玄幻")).getOrThrow()
         assertEquals(1_200, dao.store["https://g.com"]!!.searchMs)
         assertEquals(1, dao.store["https://g.com"]!!.searchFails)
+        assertEquals(200L, dao.store["https://g.com"]!!.searchRetryAt)
 
         repo.importJson(groupedSource("玄幻", search = "/search?q={{key}}")).getOrThrow()
         assertEquals(-1, dao.store["https://g.com"]!!.searchMs)
         assertEquals(0, dao.store["https://g.com"]!!.searchFails)
+        assertEquals(0L, dao.store["https://g.com"]!!.searchAt)
     }
 
     @Test

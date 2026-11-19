@@ -21,6 +21,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.UUID
 
@@ -35,6 +37,9 @@ class BookRepository(
     private val cache: ChapterContentCache,
 ) {
 
+    // 前台选文件与目录自动扫描可能同时导入，元数据去重与插入必须串行。
+    private val localImportMutex = Mutex()
+
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
     /**
@@ -44,10 +49,6 @@ class BookRepository(
      * 预取每落一章、离线缓存每存一章，就把整本目录重读一遍。只听这一声，读不读、读多少由订阅方自己定
      */
     fun chapterTableChanges(): Flow<Unit> = db.invalidationTracker.createFlow("chapter").map { }
-
-    /** 书架上已有书的 (书名, 作者) 键集合，用来判断某本网络书是否已在书架 */
-    val shelfKeys: Flow<Set<Pair<String, String>>> =
-        books.map { list -> list.mapTo(HashSet()) { bookKey(it.title, it.author) } }
 
     suspend fun getBook(id: String): BookEntity? = bookDao.getById(id)
 
@@ -89,10 +90,7 @@ class BookRepository(
      */
     private suspend fun shelfLocalBookByKey(title: String, author: String?, includeRemoved: Boolean = false): BookEntity? {
         val key = bookKey(title, author)
-        val matches = (if (includeRemoved) bookDao.getAll() else bookDao.getAllVisible()).filter {
-            !it.deleted && (it.inShelf || (includeRemoved && it.removedFromShelf)) &&
-                it.type != BookType.NET && bookKey(it.title, it.author) == key
-        }
+        val matches = bookDao.findLocalBooks(key.first, key.second, includeRemoved, BOOK_KEY_WHITESPACE)
         return matches.firstOrNull { it.inShelf && it.hasLocalFile() }
             ?: matches.firstOrNull { it.inShelf }
             ?: matches.firstOrNull { it.hasLocalFile() } ?: matches.firstOrNull()
@@ -111,11 +109,15 @@ class BookRepository(
      * 同一本本地书（书名+作者）已在书架则跳过，不另建副本 —— 以前每次导入都 new UUID，
      * 同一文件选两遍书架上就会出现两本一模一样的。
      */
-    suspend fun importLocalBook(uri: Uri): Result<LocalImportResult> = withContext(Dispatchers.IO) {
+    suspend fun importLocalBook(
+        uri: Uri,
+        initialGroup: String? = null,
+        selectedDisplayName: String? = null,
+    ): Result<LocalImportResult> = withContext(Dispatchers.IO) {
         try {
-            val displayName = queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
+            val displayName = selectedDisplayName ?: queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
             Result.success(
-                importCopy(displayName) { dest ->
+                importCopy(displayName, initialGroup) { dest ->
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         dest.outputStream().use { input.copyTo(it) }
                     } ?: error("无法读取所选文件")
@@ -127,6 +129,23 @@ class BookRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun externalBookDisplayName(uri: Uri, mimeType: String?): String = withContext(Dispatchers.IO) {
+        require(uri.scheme == "content")
+        val name = queryDisplayName(uri)?.takeIf(String::isNotBlank)
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.substringAfterLast('.', "").lowercase() in BOOK_FILE_EXTENSIONS }
+        val extension = name?.substringAfterLast('.', "").orEmpty().lowercase()
+        if (extension in BOOK_FILE_EXTENSIONS) return@withContext checkNotNull(name)
+        val inferred = when (mimeType ?: context.contentResolver.getType(uri)) {
+            "text/plain" -> "txt"
+            "application/epub+zip" -> "epub"
+            "application/x-mobipocket-ebook" -> "mobi"
+            "application/vnd.amazon.ebook", "application/x-mobi8-ebook" -> "azw3"
+            else -> null
+        }
+        require(extension.isEmpty() && inferred != null) { "请选择 TXT、EPUB、MOBI 或 AZW3 书籍文件。" }
+        "${name ?: "导入书籍"}.$inferred"
     }
 
     /**
@@ -147,13 +166,13 @@ class BookRepository(
      * 复制进私有目录 → 解析 → 入库。中途任何一步失败（含取消）都回滚这次复制出来的书文件和封面 ——
      * 从前复制失败留半截文件、封面在哪条失败路径上都没删过，books/ covers/ 里越攒越多没人认领的文件。
      */
-    private suspend fun importCopy(displayName: String, copy: (File) -> Unit): LocalImportResult {
+    private suspend fun importCopy(displayName: String, initialGroup: String? = null, copy: (File) -> Unit): LocalImportResult = localImportMutex.withLock {
         val bookId = UUID.randomUUID().toString()
         val ext = displayName.substringAfterLast('.', "txt").lowercase()
         val dest = File(booksDir(), "$bookId.$ext")
         try {
             copy(dest)
-            return insertCopiedLocal(dest, displayName, bookId, ext)
+            insertCopiedLocal(dest, displayName, bookId, ext, initialGroup)
         } catch (e: Exception) {
             // 回滚本身要写库，取消之后的挂起调用会直接抛 —— 不顶住的话一样什么都没清
             withContext(NonCancellable) { rollbackImport(dest, bookId) }
@@ -181,6 +200,7 @@ class BookRepository(
         displayName: String,
         bookId: String,
         ext: String,
+        initialGroup: String?,
     ): LocalImportResult {
         val handle = parserRegistry.open(dest)
         return handle.use { book ->
@@ -242,8 +262,10 @@ class BookRepository(
                 return@use LocalImportResult.Added(fresh.id)
             }
 
+            // 目录归属只用于新书，与书行一起提交；补本地文件或恢复已有书时保留用户原分组。
             val entity = BookEntity(
                 id = bookId,
+                groupName = initialGroup.orEmpty(),
                 type = type,
                 title = title,
                 author = author,
@@ -477,6 +499,7 @@ class BookRepository(
 
 /** 孤儿缓存目录至少多久没碰过才删（[BookRepository.sweepContentCache]）：刚加的书可能还没落库，别跟它抢 */
 private const val ORPHAN_GRACE_MS = 86_400_000L
+private val BOOK_FILE_EXTENSIONS = setOf("txt", "epub", "mobi", "azw", "azw3")
 
 /** 「同一本书」的判定键：书名 + 作者（去空白）。与搜索结果的合并键（SearchViewModel.merge）一致 */
 fun bookKey(title: String, author: String?): Pair<String, String> =
@@ -488,3 +511,8 @@ sealed interface LocalImportResult {
     data class Added(override val bookId: String) : LocalImportResult
     data class AlreadyOnShelf(override val bookId: String) : LocalImportResult
 }
+
+/** SQLite 默认 trim 只认普通空格；这里与 bookKey 的 Kotlin Char.isWhitespace 保持完全相同。 */
+internal const val BOOK_KEY_WHITESPACE = "\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f\u0020" +
+    "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a" +
+    "\u2028\u2029\u202f\u205f\u3000"

@@ -60,15 +60,26 @@ data class ReaderSettings(
      */
     val edgeBrightness: Boolean = true,
     /**
-     * 正文里的插图排不排。**默认关** —— 和 0.2.9 以来一样只排文字；网上的书开了要另外下载图片、多费流量。
+     * 在线书的插图开关，默认关闭，开启后需要额外下载图片。阅读会话里此字段表示当前书籍的有效开关。
      * 书里的图解析时一律收下（见 core 的 HtmlToElements），这里只决定阅读页排不排，开关一拨就地重排、不用重抓。
      */
     val showImages: Boolean = false,
+    /** 本地书无需下载图片，默认显示；与在线书的开关分别记忆。 */
+    val localShowImages: Boolean = true,
+    /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
+    val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
+    val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
         const val FONT_SIZE_MIN = 12f
         const val FONT_SIZE_MAX = 32f
+        const val FONT_SIZE_STEP = 0.5f
+
+        const val FONT_WEIGHT_LIGHT = 300
+        const val FONT_WEIGHT_NORMAL = 400
+        const val FONT_WEIGHT_BOLD = 700
+        val BODY_FONT_WEIGHTS = setOf(FONT_WEIGHT_LIGHT, FONT_WEIGHT_NORMAL, FONT_WEIGHT_BOLD)
 
         const val FONT_SYSTEM = "system"
         const val FONT_SERIF = "serif"
@@ -173,6 +184,7 @@ data class ReaderTheme(
 
         /** 自定义纸张的 id；配色存在 ReaderPrefs 里，不在这张表上 */
         const val CUSTOM_ID = "custom"
+        val DEFAULT_CUSTOM = custom(PAPER.background, PAPER.textColor)
 
         /**
          * 由「纸色 + 字色」推导一整套。标题比正文再深/亮一档，页眉页脚则往纸色靠 ——

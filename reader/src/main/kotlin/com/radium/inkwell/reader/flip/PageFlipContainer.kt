@@ -1,5 +1,6 @@
 package com.radium.inkwell.reader.flip
 
+import android.os.SystemClock
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -53,9 +54,11 @@ import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.imageAt
 import com.radium.inkwell.reader.render.renderPageBitmap
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -116,7 +119,9 @@ fun PageFlipContainer(
      * 点在真图上照旧按点击分区走，由调用方返回 false。
      */
     onImageTap: ((PageItem.ImageBox) -> Boolean)? = null,
+    onTrace: (ReaderTrace) -> Unit = {},
 ) {
+    val traceLatest = rememberUpdatedState(onTrace)
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
@@ -133,10 +138,12 @@ fun PageFlipContainer(
     // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
     var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
+    var flipId by remember { mutableStateOf(0) }
     var settling by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize.Zero) }
     val settleJob = remember { arrayOf<Job?>(null) }
     val settleGen = remember { intArrayOf(0) }
+    val settleStartedAt = remember { longArrayOf(0L) }
     // 收尾动画还在飞时下一刀按上屏幕：必须先把这一页提交掉。
     // 只 cancel + 复位的话，纸会弹回当前页，连翻就像翻不动。
     val inFlightCommitDir = remember { arrayOf<FlipDirection?>(null) }
@@ -144,6 +151,17 @@ fun PageFlipContainer(
     val currentLatest = rememberUpdatedState(current)
     val prevLatest = rememberUpdatedState(prev)
     val nextLatest = rememberUpdatedState(next)
+    val canFlipLatest by rememberUpdatedState(canFlip)
+    val onCommitLatest by rememberUpdatedState(onCommit)
+    fun trace(
+        action: ReaderTrace.Action,
+        dir: FlipDirection? = null,
+        reason: String? = null,
+        settleMs: Long? = null,
+        id: Int? = flipId.takeIf { direction != null },
+    ) {
+        traceLatest.value(ReaderTrace(action, dir, id, reason = reason, settleMs = settleMs))
+    }
     SideEffect {
         if (heldPages != null && current?.spec != null && current.spec == heldPages?.current?.spec) {
             heldPages = null
@@ -154,8 +172,8 @@ fun PageFlipContainer(
     // 底下露出来的就是一张白纸，字闪一下才出来。
     val held = heldPages?.takeUnless { current?.spec != null && current.spec == it.current?.spec }
     val shownCurrent = held?.current ?: current
-    val shownPrev = held?.prev ?: prev
-    val shownNext = held?.next ?: next
+    val shownPrev = if (held == null) prev else held.prev
+    val shownNext = if (held == null) next else held.next
 
     // 松手速度越快，收尾动画越短（更跟手）；范围 [minMs, maxMs]
     fun settleDuration(velocity: Float, minMs: Int, maxMs: Int): Int {
@@ -164,10 +182,21 @@ fun PageFlipContainer(
         return (maxMs - (maxMs - minMs) * t).toInt()
     }
 
+    fun commitFlip(dir: FlipDirection, reason: String, settleMs: Long? = null) {
+        trace(ReaderTrace.Action.COMMIT, dir, reason, settleMs)
+        onCommitLatest(dir)
+    }
+
     fun resetFlipState() {
         direction = null
-        offset.floatValue = 0f
         settling = false
+    }
+
+    // direction 在组合阶段切换图层，offset 则由 graphicsLayer 延后读取。收尾时立刻归零，
+    // 旧的动画图层可能还没被移除，就先回到原位，把已经滑走的旧页闪回来一帧。
+    // 等静止页的组合成功提交、动画图层卸下后再清位移；新手势仍在起手时自行设初值。
+    SideEffect {
+        if (direction == null) offset.floatValue = 0f
     }
 
     fun holdAfterCommit(dir: FlipDirection) {
@@ -182,49 +211,53 @@ fun PageFlipContainer(
     }
 
     /** 把还在飞的那一刀落地。ViewModel 换页比重组慢一拍，先本地挪 prev/cur/next，避免弹回旧页。 */
-    fun consumeInFlightCommit() {
+    fun consumeInFlightCommit(elapsedMs: Long) {
         val dir = inFlightCommitDir[0] ?: return
         inFlightCommitDir[0] = null
         holdAfterCommit(dir)
         if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        onCommit(dir)
+        commitFlip(dir, "interrupted", elapsedMs)
     }
 
-    suspend fun settle(commit: Boolean, velocity: Float = 0f, gen: Int = settleGen[0]) {
+    suspend fun settle(commit: Boolean, durationMs: Int, gen: Int) {
         val dir = direction ?: return
-        settling = true
         val width = size.width.toFloat()
+        val targetOffset = when {
+            !commit -> 0f
+            dir == FlipDirection.FORWARD -> -width
+            else -> width
+        }
         try {
-        if (effectiveAnim == FlipAnimation.CURL) {
-            // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点
-            val target = when {
-                commit && dir == FlipDirection.FORWARD -> -width * 0.7f  // 卷出左侧
-                commit -> downX + width                                  // prev 展开盖满
-                dir == FlipDirection.FORWARD -> width - 1.5f             // 回滚：贴回右缘
-                else -> downX - width * 0.3f                             // 回滚：重新折叠到屏外
+            if (effectiveAnim == FlipAnimation.CURL) {
+                // 后翻用相对位移（downX 为折叠原点），目标要换算回绝对触点。
+                val target = when {
+                    commit && dir == FlipDirection.FORWARD -> -width * 0.7f
+                    commit -> downX + width
+                    dir == FlipDirection.FORWARD -> width - 1.5f
+                    else -> downX - width * 0.3f
+                }
+                val startOffset = offset.floatValue
+                val startTouchX = touchX.floatValue
+                animate(0f, 1f, animationSpec = tween(durationMs, easing = LinearOutSlowInEasing)) { progress, _ ->
+                    touchX.floatValue = startTouchX + (target - startTouchX) * progress
+                    // 位图未就绪时仍会画平移层，两条路径都要完成收尾。
+                    offset.floatValue = startOffset + (targetOffset - startOffset) * progress
+                }
+            } else {
+                animate(offset.floatValue, targetOffset, animationSpec = tween(durationMs, easing = LinearOutSlowInEasing)) { v, _ ->
+                    offset.floatValue = v
+                }
             }
-            val dur = if (commit) settleDuration(velocity, 200, 320) else settleDuration(velocity, 160, 240)
-            // 减速曲线（≈DecelerateInterpolator）：纸张甩出后自然减速停下
-            animate(touchX.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
-                touchX.floatValue = v
+            val elapsedMs = SystemClock.uptimeMillis() - settleStartedAt[0]
+            if (commit) {
+                // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页。
+                inFlightCommitDir[0] = null
+                holdAfterCommit(dir)
+                if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                commitFlip(dir, "animation_finished", elapsedMs)
+            } else {
+                trace(ReaderTrace.Action.ROLLBACK, dir, "animation_finished", elapsedMs)
             }
-        } else {
-            val target = when {
-                commit -> if (dir == FlipDirection.FORWARD) -width else width
-                else -> 0f
-            }
-            val dur = if (commit) settleDuration(velocity, 180, 260) else settleDuration(velocity, 140, 200)
-            animate(offset.floatValue, target, animationSpec = tween(dur, easing = LinearOutSlowInEasing)) { v, _ ->
-                offset.floatValue = v
-            }
-        }
-        if (commit) {
-            // 先换页并复位 direction，再归零：任何中间帧都只会画新当前页
-            inFlightCommitDir[0] = null
-            holdAfterCommit(dir)
-            if (hapticOnFlip) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onCommit(dir)
-        }
         } finally {
             // 只复位自己这一轮。新一轮 settle 已经加过 gen 的话，这里动 direction 会把新动画掐死
             if (gen == settleGen[0]) {
@@ -235,34 +268,45 @@ fun PageFlipContainer(
     }
 
     fun launchSettle(commit: Boolean, velocity: Float = 0f) {
-        consumeInFlightCommit()
-        settleGen[0] += 1
-        val gen = settleGen[0]
-        settleJob[0]?.cancel()
+        if (settling) return
+        val dir = direction ?: return
+        val durationMs = when {
+            effectiveAnim == FlipAnimation.CURL && commit -> settleDuration(velocity, 200, 320)
+            effectiveAnim == FlipAnimation.CURL -> settleDuration(velocity, 160, 240)
+            commit -> settleDuration(velocity, 180, 260)
+            else -> settleDuration(velocity, 140, 200)
+        }
+        val gen = ++settleGen[0]
+        settleStartedAt[0] = SystemClock.uptimeMillis()
+        settling = true
+        trace(ReaderTrace.Action.ANIMATION_START, dir, if (commit) "commit" else "rollback", durationMs.toLong())
         inFlightCommitDir[0] = if (commit) direction else null
-        settleJob[0] = scope.launch { settle(commit, velocity, gen) }
+        settleJob[0] = scope.launch { settle(commit, durationMs, gen) }
     }
 
     /** 下一刀接手：该翻过去的立刻提交，再清动画。只清不提交会把纸弹回来。 */
-    fun interruptSettle() {
-        consumeInFlightCommit()
+    fun interruptSettle(reason: String) {
+        if (settling) {
+            val elapsedMs = SystemClock.uptimeMillis() - settleStartedAt[0]
+            trace(ReaderTrace.Action.INTERRUPTED, direction, reason, elapsedMs)
+            consumeInFlightCommit(elapsedMs)
+        }
         settleGen[0] += 1
         settleJob[0]?.cancel()
         resetFlipState()
     }
 
-    fun startProgrammaticFlip(dir: FlipDirection) {
-        if (!canFlip(dir)) {
-            interruptSettle()
-            if (dir == FlipDirection.FORWARD) onCommit(dir) // 让上层弹"最后一页"提示
+    fun startProgrammaticFlip(dir: FlipDirection, reason: String) {
+        interruptSettle(reason)
+        if (!canFlipLatest(dir)) {
+            trace(ReaderTrace.Action.BLOCKED, dir)
+            if (dir == FlipDirection.FORWARD) commitFlip(dir, "boundary") // 让上层弹"最后一页"提示
             return
         }
         if (effectiveAnim == FlipAnimation.NONE) {
-            interruptSettle()
-            onCommit(dir)
+            commitFlip(dir, if (animationsEnabled) "animation_none" else "system_animations_disabled")
             return
         }
-        interruptSettle()
         // 点击翻页 = 翻整页，走竖直圆柱：触点 Y 钉到页底（与中间横划一致），别卷出斜角
         cornerBottom = true
         flatSwipe = true
@@ -270,6 +314,7 @@ fun PageFlipContainer(
         downX = if (dir == FlipDirection.FORWARD) size.width * 0.92f else size.width * 0.08f
         touchX.floatValue = downX
         offset.floatValue = 0f
+        flipId++
         direction = dir
         launchSettle(commit = true)
     }
@@ -278,7 +323,9 @@ fun PageFlipContainer(
     // LaunchedEffect 只随 controller 重启，直接在里面调它就永远是**首帧**那一份 —— 用户在
     // 阅读中把仿真换成滑动、或系统关掉动画后，音量键与自动翻页仍按旧类型跑。
     // 经 rememberUpdatedState 取最新，与下面 pointerInput 里读到的保持同一帧。
-    val programmaticFlip by rememberUpdatedState<(FlipDirection) -> Unit> { startProgrammaticFlip(it) }
+    val programmaticFlip by rememberUpdatedState<(FlipDirection, String) -> Unit> { dir, reason ->
+        startProgrammaticFlip(dir, reason)
+    }
     val selectionLatest = rememberUpdatedState(selection)
     // 手势循环的 pointerInput 不以它为 key：在面板里改分区不该把正在进行的手势循环拆了重建
     val tapZonesLatest = rememberUpdatedState(tapZones)
@@ -290,12 +337,15 @@ fun PageFlipContainer(
             // 这条路从前却不看：选区和工具条还亮着，底下那页先翻走了，「复制」「净化」拿到的是上一页的字。
             // 这里**不**看 gesturesEnabled —— 菜单上滑动翻页是先关菜单再发请求，请求到的那一刻
             // gesturesEnabled 还没跟上，按它拦就把这一下吞了。
-            if (selectionLatest.value != null) return@collect
-            programmaticFlip(dir)
+            if (selectionLatest.value != null) {
+                trace(ReaderTrace.Action.BLOCKED, dir)
+                return@collect
+            }
+            programmaticFlip(dir, "controller")
         }
     }
     LaunchedEffect(gesturesEnabled) {
-        if (!gesturesEnabled) interruptSettle()
+        if (!gesturesEnabled) interruptSettle("gestures_disabled")
     }
 
     Box(
@@ -306,22 +356,21 @@ fun PageFlipContainer(
             .readerPageSemantics(
                 page = current,
                 canFlip = { gesturesEnabled && canFlip(it) },
-                onFlip = { programmaticFlip(it) },
+                onFlip = { trace(ReaderTrace.Action.ACCESSIBILITY, it); programmaticFlip(it, "accessibility") },
                 onMenu = onCenterTap,
             )
             .pointerInput(gesturesEnabled, effectiveAnim, flipSlopPx) {
                 if (!gesturesEnabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    // 收尾还在播时手指再按上来：先把这一页落下，再让这一刀跟手。
-                    // 否则 cancel 会把纸弹回当前页，连翻就像没翻。
-                    val pressedDuringSettle = settling || inFlightCommitDir[0] != null
-                    if (pressedDuringSettle) interruptSettle()
+                    // 先让上一页继续播，等横向翻页手势成立再接管。
+                    val startedDuringFlip = direction != null
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
                     var last = down
                     var dragDir: FlipDirection? = null
-                    var following = false
+                    var followedFlipId: Int? = null
+                    fun isFollowing() = followedFlipId == flipId && direction != null && !settling
                     var cancelled = false
                     // 快甩时位移经常整段落在抬手那一帧。必须先判 slop 再看 pressed ——
                     // 先因 UP 跳出的话，offset 几乎是 0，松手当回弹，中间还会被当成开菜单。
@@ -355,9 +404,9 @@ fun PageFlipContainer(
                                 dragDir = dir
                                 // 连翻：收尾还在播时下一刀接手。先把上一页提交掉，再跟手。
                                 if (settling || direction != null || inFlightCommitDir[0] != null) {
-                                    interruptSettle()
+                                    interruptSettle("next_swipe")
                                 }
-                                val flippable = canFlip(dir)
+                                val flippable = canFlipLatest(dir)
                                 val width = size.width.toFloat()
                                 // 必须用 effectiveAnim：系统把动画时长设为 0 时（开发者选项/无障碍）它降级为 NONE，
                                 // 而 animation 仍是 CURL/COVER/SLIDE。用后者会把 direction 置上，紧接着下面
@@ -383,16 +432,17 @@ fun PageFlipContainer(
                                     downX = down.position.x
                                     touchX.floatValue = change.position.x
                                     offset.floatValue = seedFlipOffset(dx, dir, width)
+                                    flipId++
                                     direction = dir
-                                    following = true
+                                    followedFlipId = flipId
                                 }
                                 if (!change.pressed) break
                                 continue
                             }
                             change.consume()
-                            if (following) {
+                            if (isFollowing()) {
                                 val width = size.width.toFloat()
-                                val dir = dragDir ?: break
+                                val dir = dragDir
                                 // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
                                 // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
                                 touchY.floatValue = if (flatSwipe) {
@@ -409,10 +459,11 @@ fun PageFlipContainer(
                             if (!change.pressed) break
                         }
                     } catch (e: CancellationException) {
+                        trace(ReaderTrace.Action.SWIPE_CANCELLED, dragDir, "input_restarted", id = followedFlipId)
                         // pointerInput 被掐时别把 direction 晾着：仿真会停在半页，此后点击也不翻。
-                        if (following && direction != null && !settling) {
+                        if (isFollowing()) {
                             val dir = direction
-                            if (dir != null && canFlip(dir)) {
+                            if (dir != null && canFlipLatest(dir)) {
                                 val width = size.width.toFloat()
                                 val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
                                 if (shouldCommitHorizontalFlip(
@@ -424,7 +475,7 @@ fun PageFlipContainer(
                                     )
                                 ) {
                                     holdAfterCommit(dir)
-                                    onCommit(dir)
+                                    commitFlip(dir, "gesture_cancelled")
                                 }
                             }
                             resetFlipState()
@@ -432,8 +483,9 @@ fun PageFlipContainer(
                         throw e
                     }
                     if (cancelled) {
+                        trace(ReaderTrace.Action.SWIPE_CANCELLED, dragDir, "input_consumed", id = followedFlipId)
                         // 跟手到一半被收走：弹回当前页，不提交
-                        if (following) launchSettle(commit = false)
+                        if (isFollowing()) launchSettle(commit = false)
                         return@awaitEachGesture
                     }
                     if (dragDir == null) {
@@ -444,21 +496,32 @@ fun PageFlipContainer(
                         )
                         when (action) {
                             is FlipReleaseBeforeSlop.Flick -> {
-                                interruptSettle()
-                                startProgrammaticFlip(action.direction)
+                                trace(ReaderTrace.Action.SWIPE_RELEASE, action.direction, id = null)
+                                programmaticFlip(action.direction, "next_flick")
                             }
                             FlipReleaseBeforeSlop.Tap -> {
-                                if (!pressedDuringSettle && !settling && direction == null) {
-                                    val hit = onImageTapLatest.value?.let {
-                                        (heldPages?.current ?: currentLatest.value)?.imageAt(down.position.x, down.position.y, layoutLatest.value)
-                                    }
-                                    if (hit == null || onImageTapLatest.value?.invoke(hit) != true) {
-                                        tapAction(
-                                            down.position.x, down.position.y,
-                                            size.width.toFloat(), size.height.toFloat(),
-                                            tapZonesLatest.value,
-                                        ).dispatch(onMenu = onCenterTap, onFlip = ::startProgrammaticFlip)
-                                    }
+                                val idle = !startedDuringFlip && direction == null
+                                val hit = if (!idle) null else onImageTapLatest.value?.let {
+                                    (heldPages?.current ?: currentLatest.value)
+                                        ?.imageAt(down.position.x, down.position.y, layoutLatest.value)
+                                }
+                                if (hit == null || onImageTapLatest.value?.invoke(hit) != true) {
+                                    tapAction(
+                                        down.position.x, down.position.y,
+                                        size.width.toFloat(), size.height.toFloat(),
+                                        tapZonesLatest.value,
+                                    ).dispatch(
+                                        onMenu = {
+                                            if (idle) {
+                                                trace(ReaderTrace.Action.TAP)
+                                                onCenterTap()
+                                            }
+                                        },
+                                        onFlip = {
+                                            trace(ReaderTrace.Action.TAP, it, id = null)
+                                            programmaticFlip(it, "next_tap")
+                                        },
+                                    )
                                 }
                             }
                             FlipReleaseBeforeSlop.Ignore -> Unit
@@ -466,24 +529,30 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir
-                    val flippable = canFlip(dir)
+                    trace(ReaderTrace.Action.SWIPE_RELEASE, dir, id = followedFlipId)
+                    if (followedFlipId != null && !isFollowing()) return@awaitEachGesture
+                    val flippable = canFlipLatest(dir)
                     val width = size.width.toFloat()
                     if (!flippable) {
+                        trace(ReaderTrace.Action.BLOCKED, dir)
                         // 书首/书末：无动画，前翻到底时提示
-                        if (dir == FlipDirection.FORWARD) onCommit(dir)
-                        if (following) resetFlipState()
+                        if (dir == FlipDirection.FORWARD) commitFlip(dir, "boundary")
+                        if (isFollowing()) resetFlipState()
                         return@awaitEachGesture
                     }
                     if (effectiveAnim == FlipAnimation.NONE) {
-                        onCommit(dir)
+                        commitFlip(dir, if (animationsEnabled) "animation_none" else "system_animations_disabled")
                         return@awaitEachGesture
                     }
                     val velocity = tracker.calculateVelocity().x
                     val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
-                    val commit = shouldCommitHorizontalFlip(
-                        offset.floatValue, velocity, width, dir, elapsed,
-                    )
-                    launchSettle(commit, velocity)
+                    val displacement = seedFlipOffset(last.position.x - down.position.x, dir, width)
+                    val commit = shouldCommitHorizontalFlip(displacement, velocity, width, dir, elapsed)
+                    if (isFollowing()) {
+                        launchSettle(commit, velocity)
+                    } else if (commit) {
+                        programmaticFlip(dir, "next_swipe")
+                    }
                 }
             },
     ) {
@@ -508,6 +577,7 @@ fun PageFlipContainer(
                 touchY = touchY,
                 cornerBottom = cornerBottom,
                 size = size, density = density,
+                flipId = flipId, onTrace = { traceLatest.value(it) },
             )
         }
     }
@@ -602,6 +672,8 @@ private fun CurlLayer(
     cornerBottom: Boolean,
     size: IntSize,
     density: androidx.compose.ui.unit.Density,
+    flipId: Int,
+    onTrace: (ReaderTrace) -> Unit,
     selection: TextSelection? = null,
 ) {
     // 闲时也预渲，但放到 Default：主线程不再被 remember { renderPageBitmap } 卡住。
@@ -638,11 +710,12 @@ private fun CurlLayer(
                     return@collect
                 }
                 bitmaps = produced
-                // 新图已经交给状态；等两帧再 recycle 卸下来的槽，Canvas 不会画到已回收的 Bitmap。
-                // 这段等待也不许取消：被掐掉的话，卸下来的那几张就再也没人回收了
-                withContext(NonCancellable) {
-                    kotlinx.coroutines.delay(32)
-                    old?.recycleUnused(produced)
+                // 回收宽限期不阻塞下一轮位图渲染。之后的请求只会复用 produced 里仍持有的槽。
+                if (old != null) launch(start = CoroutineStart.UNDISPATCHED) {
+                    withContext(NonCancellable) {
+                        delay(32)
+                        old.recycleUnused(produced)
+                    }
                 }
             }
     }
@@ -656,18 +729,43 @@ private fun CurlLayer(
         PageCanvas(current, layout, theme, selection = selection)
         return
     }
-    // 手里的位图必须正是**眼前这几页**：连翻、跳目录、拖进度、改字号/纸色之后，新图还在 Default 上烤，
-    // 这份可能还是上一页的。从前只看「有没有」不看「是不是」，卷起来的就是刚翻过去的那页，
-    // 几帧之后才突然换成对的。对不上就先平移跟手（画面不冻住、也不画错页），等新图交上来再卷。
-    val pair = bitmaps?.curlPair(direction, request)
-    if (pair == null) {
+    val frontPage = if (direction == FlipDirection.FORWARD) current else prev
+    val underPage = if (direction == FlipDirection.FORWARD) next else current
+    // 连翻后可直接找上一轮相同内容的图，不必等后台把位图挪到新的槽位。
+    val matching = bitmaps?.takeIf { it.matchesStyle(request) }
+    val frontBitmap = frontPage?.let { matching?.bitmapFor(it.curlKey()) }
+    val under = underPage?.let { matching?.bitmapFor(it.curlKey()) }
+    val startedWithFront = remember(flipId) { frontBitmap != null }
+    val front = frontBitmap.takeIf { startedWithFront }
+    // 后翻的卷曲页是上一页。连翻时分页通常已就绪，位图却要等上一次提交后才开始生成。
+    // 起手缺位图时直接在卷页可见区画正文，且这一刀保持直接绘制，避免位图就绪后换绘制方式。
+    val liveFront = frontPage.takeIf { direction == FlipDirection.BACKWARD && front == null }
+    val render = when {
+        liveFront != null -> ReaderTrace.Render.CURL_LIVE_FRONT
+        front == null -> ReaderTrace.Render.SLIDE
+        under != null -> ReaderTrace.Render.CURL_BITMAPS
+        underPage != null -> ReaderTrace.Render.CURL_LIVE_UNDER
+        else -> ReaderTrace.Render.CURL_PAPER_UNDER
+    }
+    val reason = when (render) {
+        ReaderTrace.Render.SLIDE, ReaderTrace.Render.CURL_LIVE_FRONT -> when {
+            frontPage == null -> "front_page_unavailable"
+            startedWithFront -> "front_bitmap_invalidated"
+            else -> "front_bitmap_not_ready_at_start"
+        }
+        ReaderTrace.Render.CURL_LIVE_UNDER -> "under_bitmap_not_ready"
+        ReaderTrace.Render.CURL_PAPER_UNDER -> "under_page_unavailable"
+        else -> null
+    }
+    LaunchedEffect(flipId, render, reason) {
+        onTrace(ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId, render, reason))
+    }
+    if (render == ReaderTrace.Render.SLIDE) {
         SlideLayers(
             selection, current, prev, next, layout, theme, direction, offset, size.width.toFloat(),
         )
         return
     }
-    val (front, under) = pair
-
     Spacer(
         Modifier.fillMaxSize().drawBehind {
             val tx = if (direction == FlipDirection.BACKWARD) {
@@ -675,6 +773,11 @@ private fun CurlLayer(
             } else {
                 touchX.floatValue
             }
+            // 底页不参与卷曲变形，位图未完成时可在露出的区域画真实页面。
+            val drawLiveUnder: (() -> Unit)? = if (under == null && underPage != null) {
+                { drawPage(underPage, layout, theme) }
+            } else null
+            val drawLiveFront: (() -> Unit)? = liveFront?.let { page -> { drawPage(page, layout, theme) } }
             drawIntoCanvas { canvas ->
                 renderer.draw(
                     canvas.nativeCanvas,
@@ -682,6 +785,8 @@ private fun CurlLayer(
                     under,
                     tx, touchY.floatValue, cornerBottom,
                     paperColor = theme.background.toInt(),
+                    drawLiveUnder = drawLiveUnder,
+                    drawLiveFront = drawLiveFront,
                 )
             }
         }
@@ -694,15 +799,22 @@ private fun CurlLayer(
  * 光比 [PageSpec] 不够：改了净化规则后重排，同一页的 spec 可能一模一样（行数、偏移都没变），字却换过了。
  * 那时 measured 一定是新的一份（每次分页都新建），所以再按引用比一次 measured。
  * 同一份分页结果里的页共用同一个 measured，翻页挪槽时照样认得出来。
+ * 图片异步解码后 spec 和 measured 不变，必须同时比较 images，避免复用带占位框的旧快照。
  */
-private class CurlPageKey(val spec: PageSpec, val measured: Map<Int, MeasuredParagraph>) {
+internal class CurlPageKey(
+    val spec: PageSpec,
+    val measured: Map<Int, MeasuredParagraph>,
+    val images: Map<Int, androidx.compose.ui.graphics.ImageBitmap>,
+    val failedImages: Set<Int> = emptySet(),
+) {
     override fun equals(other: Any?): Boolean =
-        other is CurlPageKey && other.measured === measured && other.spec == spec
+        other is CurlPageKey && other.measured === measured && other.spec == spec &&
+            other.images == images && other.failedImages == failedImages
 
     override fun hashCode(): Int = spec.hashCode()
 }
 
-private fun RenderablePage.curlKey() = CurlPageKey(spec, measured)
+private fun RenderablePage.curlKey() = CurlPageKey(spec, measured, images, failedImages)
 
 private fun RenderablePage?.matches(key: CurlPageKey?): Boolean =
     if (this == null) key == null else key == curlKey()
@@ -730,9 +842,7 @@ private class CurlRequest(
  * 什么都没变时原样返回 [old]，调用方据此跳过提交。
  */
 private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest): CurlBitmaps {
-    val reusable = old?.takeIf {
-        it.layout == req.layout && it.theme == req.theme && it.density == req.density
-    }
+    val reusable = old?.takeIf { it.matchesStyle(req) }
     if (reusable != null &&
         req.current.matches(reusable.currentKey) &&
         req.prev.matches(reusable.prevKey) &&
@@ -791,28 +901,8 @@ private class CurlBitmaps(
         else -> null
     }
 
-    /**
-     * 这一刀要卷的「上层 / 底层」两张图；手里的图不是 [req] 里这几页（或版式/纸张已变）时返回 null。
-     * 前翻卷走当前页、底下露出下一页；后翻是上一页卷回来盖住当前页。邻页还没排好时那一层是 null（纸色）。
-     */
-    fun curlPair(
-        direction: FlipDirection,
-        req: CurlRequest,
-    ): Pair<android.graphics.Bitmap?, android.graphics.Bitmap?>? {
-        if (layout != req.layout || theme != req.theme || density != req.density) return null
-        val cur = current ?: return null
-        if (!req.current.matches(currentKey)) return null
-        return when (direction) {
-            FlipDirection.FORWARD -> {
-                if (!req.next.matches(nextKey)) return null
-                cur to next
-            }
-            FlipDirection.BACKWARD -> {
-                if (!req.prev.matches(prevKey)) return null
-                prev to cur
-            }
-        }
-    }
+    fun matchesStyle(req: CurlRequest): Boolean =
+        layout == req.layout && theme == req.theme && density == req.density
 
     fun recycleAll() {
         recycleBitmap(current)

@@ -22,7 +22,7 @@ data class FolderBook(
 )
 
 /**
- * @param truncated 书太多，只列了前 [LocalFolderScanner.MAX_BOOKS] 本
+ * @param truncated 扫描触及书籍数量或目录深度上限
  */
 data class FolderScan(
     val folderName: String,
@@ -36,26 +36,26 @@ data class FolderScan(
  * 走 [DocumentsContract] 直接查子项，不另引 DocumentFile：后者每取一个属性就查一次 ContentResolver，
  * 几百个文件的下载目录要查上千次；这里一个文件夹一次查询，名字、类型、大小一起拿回来。
  *
- * 选文件夹那一下拿到的是这次会话内有效的临时授权，导入是马上就做的（复制进私有目录，见 BookRepository.importLocalBook），
- * 用不着申请持久授权。
+ * 手动导入使用会话内临时授权，书籍复制到私有目录。
+ * 用户开启自动扫描时，由 LocalFolderLibrary 额外申请持久读授权，后续仍使用同一扫描器。
  */
 class LocalFolderScanner(private val context: Context) {
 
     /**
      * @param onProgress 每找到一本回调一次（找到的总数），面板上「正在查找… 已找到 N 本」；在 IO 线程上回调
      */
-    suspend fun scan(treeUri: Uri, onProgress: (Int) -> Unit = {}): FolderScan = withContext(Dispatchers.IO) {
+    suspend fun scan(treeUri: Uri, maxBooks: Int = MAX_BOOKS, maxDepth: Int = MAX_DEPTH, onProgress: (Int) -> Unit = {}): FolderScan = withContext(Dispatchers.IO) {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val folderName = displayName(DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId))
             ?: rootId.substringAfterLast(':').substringAfterLast('/').ifEmpty { "所选文件夹" }
         val books = ArrayList<FolderBook>()
-        var truncated = false
-
-        suspend fun walk(docId: String, path: List<String>) {
+        suspend fun visit(docId: String, path: List<String>): List<Pair<String, String>>? {
             currentCoroutineContext().ensureActive()
             val subDirs = ArrayList<Pair<String, String>>()
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-            context.contentResolver.query(children, COLUMNS, null, null, null)?.use { c ->
+            val cursor = context.contentResolver.query(children, COLUMNS, null, null, null)
+                ?: error("无法读取文件夹，请检查目录是否仍然可用")
+            cursor.use { c ->
                 while (c.moveToNext()) {
                     val id = c.getString(0) ?: continue
                     val name = c.getString(1) ?: continue
@@ -66,10 +66,7 @@ class LocalFolderScanner(private val context: Context) {
                             if (!name.startsWith('.')) subDirs += id to name
                         else -> {
                             val format = FolderBooks.formatOf(name) ?: continue
-                            if (books.size >= MAX_BOOKS) {
-                                truncated = true
-                                return
-                            }
+                            if (books.size >= maxBooks) return null
                             books += FolderBook(
                                 uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id),
                                 name = name,
@@ -82,15 +79,10 @@ class LocalFolderScanner(private val context: Context) {
                     }
                 }
             }
-            if (path.size >= MAX_DEPTH) return
-            // 先列完这一层的书，再进子文件夹：分组时所选文件夹自己的书排在最前
-            for ((id, name) in subDirs.sortedWith(compareBy(FolderBooks.NAME_ORDER) { it.second })) {
-                if (truncated) return
-                walk(id, path + name)
-            }
+            return subDirs
         }
 
-        walk(rootId, emptyList())
+        val truncated = walkFolderTree(rootId, maxDepth, ::visit)
         FolderScan(folderName, FolderBooks.sorted(books), truncated)
     }
 
@@ -115,8 +107,31 @@ class LocalFolderScanner(private val context: Context) {
     }
 }
 
+/** visit 返回 null 表示书籍上限已耗尽，整轮停止；深度上限只截断当前子树。 */
+internal suspend fun walkFolderTree(
+    rootId: String,
+    maxDepth: Int,
+    visit: suspend (String, List<String>) -> List<Pair<String, String>>?,
+): Boolean {
+    var depthLimited = false
+    suspend fun walk(id: String, path: List<String>): Boolean {
+        val subDirs = visit(id, path) ?: return true
+        if (path.size >= maxDepth) {
+            depthLimited = depthLimited || subDirs.isNotEmpty()
+            return false
+        }
+        return subDirs.sortedWith(compareBy(FolderBooks.NAME_ORDER) { it.second })
+            .any { (childId, name) -> walk(childId, path + name) }
+    }
+    return walk(rootId, emptyList()) || depthLimited
+}
+
 /** 文件夹导入里不碰 Android 的那部分（认格式、排序、和书架比书名），单测见 FolderBooksTest */
 object FolderBooks {
+
+    /** 完整相对路径避免不同父目录下的同名子文件夹混组；根目录中的书归入根目录名。 */
+    fun groupName(rootName: String, relativeFolder: String): String =
+        listOf(rootName.trim(), relativeFolder.trim()).filter { it.isNotEmpty() }.joinToString(" / ")
 
     /** 认得的扩展名 → 面板上的格式名。和 BookRepository 按扩展名定书的类型是同一张表 */
     private val FORMATS = mapOf(

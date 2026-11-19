@@ -42,7 +42,7 @@ class AppPrefs(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private object Keys {
+    internal object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
         val UPDATE_SOURCE = stringPreferencesKey("update_source")
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -57,6 +57,8 @@ class AppPrefs(private val context: Context) {
         val AUTO_CHANGE_SOURCE = booleanPreferencesKey("auto_change_source")
         val EXPLORE_ENABLED = booleanPreferencesKey("explore_enabled")
         val RSS_ENTRY_ENABLED = booleanPreferencesKey("rss_entry_enabled")
+        /** 根页面返回桌面前的确认，只属于本机。 */
+        val CONFIRM_EXIT = booleanPreferencesKey("confirm_exit")
         /** 首次启动的欢迎页走过了没有。只属于这台设备：不进备份，也不盖 UPDATED_AT（不算一次设置改动） */
         val ONBOARDED = booleanPreferencesKey("onboarded")
         /** 阅读页目录倒序（最新章在上）。看的是哪种顺序顺手，只属于这台设备：不进备份，也不盖 UPDATED_AT */
@@ -104,21 +106,16 @@ class AppPrefs(private val context: Context) {
     private suspend fun editTouched(block: (MutablePreferences) -> Unit) {
         context.appDataStore.edit { p ->
             block(p)
-            p[Keys.UPDATED_AT] = System.currentTimeMillis()
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
         }
     }
 
     suspend fun updatedAt(): Long = context.appDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
 
-    /** 从远端导入后按远端的时间戳落章，免得两台设备来回覆盖 */
-    suspend fun stampUpdatedAt(at: Long) {
-        context.appDataStore.edit { it[Keys.UPDATED_AT] = at }
-    }
-
     /** WebDAV 备份用：设置 ↔ 字符串表。读到不认识的键忽略，新旧版本能共用同一份备份 */
     suspend fun exportForBackup(): BackupSettings {
         val p = context.appDataStore.data.first()
-        val theme = themeConfig.first()
+        val theme = BackupImport.resolveThemeConfig(p)
         return BackupSettings(
             updatedAt = p[Keys.UPDATED_AT] ?: 0L,
             values = mapOf(
@@ -146,10 +143,18 @@ class AppPrefs(private val context: Context) {
         )
     }
 
-    suspend fun importFromBackup(backup: BackupSettings) {
-        val v = backup.values
-        val base = themeConfig.first()
-        context.appDataStore.edit { p ->
+    suspend fun importFromBackup(backup: BackupSettings): Boolean {
+        var applied = false
+        context.appDataStore.edit { p -> applied = BackupImport.applyBackup(p, backup) }
+        return applied
+    }
+
+    internal object BackupImport {
+        /** 检查版本与写值在同一次 DataStore edit 内，快照之后的本地修改不会丢。 */
+        internal fun applyBackup(p: MutablePreferences, backup: BackupSettings): Boolean {
+            if (backup.updatedAt <= (p[Keys.UPDATED_AT] ?: 0L)) return false
+            val v = backup.values
+            val base = resolveThemeConfig(p)
             v["update_channel"]
                 ?.takeIf { name -> UpdateChannel.entries.any { it.name == name } }
                 ?.let { p[Keys.UPDATE_CHANNEL] = it }
@@ -193,8 +198,22 @@ class AppPrefs(private val context: Context) {
             p[Keys.CUSTOM_LIGHT_BG] = v["custom_light_bg"]?.toLongOrNull() ?: base.customLightBg
             p[Keys.CUSTOM_DARK_SEED] = v["custom_dark_seed"]?.toLongOrNull() ?: base.customDarkSeed
             p[Keys.CUSTOM_DARK_BG] = v["custom_dark_bg"]?.toLongOrNull() ?: base.customDarkBg
-            // 这份设置来自远端，时间戳照抄远端的
             p[Keys.UPDATED_AT] = backup.updatedAt
+            return true
+        }
+
+        fun resolveThemeConfig(p: Preferences): ThemeConfig {
+            val default = ThemeConfig()
+            return ThemeConfig(
+                mode = p[Keys.THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                    ?: ThemeMode.SYSTEM,
+                lightPreset = p[Keys.THEME_LIGHT] ?: AppThemes.HYPEROS,
+                darkPreset = p[Keys.THEME_DARK] ?: AppThemes.HYPEROS,
+                customLightSeed = p[Keys.CUSTOM_LIGHT_SEED] ?: default.customLightSeed,
+                customLightBg = p[Keys.CUSTOM_LIGHT_BG] ?: default.customLightBg,
+                customDarkSeed = p[Keys.CUSTOM_DARK_SEED] ?: default.customDarkSeed,
+                customDarkBg = p[Keys.CUSTOM_DARK_BG] ?: default.customDarkBg,
+            )
         }
     }
 
@@ -535,20 +554,7 @@ class AppPrefs(private val context: Context) {
         context.appDataStore.edit { it[Keys.UPDATE_SEEN] = version }
     }
 
-    val themeConfig: Flow<ThemeConfig> = context.appDataStore.data.map { p ->
-        val default = ThemeConfig()
-        ThemeConfig(
-            mode = p[Keys.THEME_MODE]
-                ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
-                ?: ThemeMode.SYSTEM,
-            lightPreset = p[Keys.THEME_LIGHT] ?: AppThemes.HYPEROS,
-            darkPreset = p[Keys.THEME_DARK] ?: AppThemes.HYPEROS,
-            customLightSeed = p[Keys.CUSTOM_LIGHT_SEED] ?: default.customLightSeed,
-            customLightBg = p[Keys.CUSTOM_LIGHT_BG] ?: default.customLightBg,
-            customDarkSeed = p[Keys.CUSTOM_DARK_SEED] ?: default.customDarkSeed,
-            customDarkBg = p[Keys.CUSTOM_DARK_BG] ?: default.customDarkBg,
-        )
-    }
+    val themeConfig: Flow<ThemeConfig> = context.appDataStore.data.map(BackupImport::resolveThemeConfig)
 
     /**
      * [themeConfig] 的预热版，null = 磁盘那一读还没回来。
@@ -597,6 +603,14 @@ class AppPrefs(private val context: Context) {
     val developerModeState: StateFlow<Boolean?> = developerMode.warm()
     val updateChannelState: StateFlow<UpdateChannel?> = updateChannel.warm()
     val updateSourceState: StateFlow<UpdateSource?> = updateSource.warm()
+
+    /** 仅本机的防误触偏好，默认关闭。 */
+    val confirmExit: Flow<Boolean> = context.appDataStore.data.map { it[Keys.CONFIRM_EXIT] ?: false }.distinctUntilChanged()
+    val confirmExitState: StateFlow<Boolean?> = confirmExit.warm()
+
+    suspend fun setConfirmExit(on: Boolean) {
+        context.appDataStore.edit { it[Keys.CONFIRM_EXIT] = on }
+    }
 
     companion object {
         const val DEFAULT_CACHE_AUTO_PRUNE_DAYS = 14

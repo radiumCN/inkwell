@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +38,9 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingGroupPosition
+import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupedCardItem
@@ -58,6 +64,7 @@ internal fun ImportBooksMenu(
     onDismiss: () -> Unit,
     onPickFiles: () -> Unit,
     onPickFolder: () -> Unit,
+    onManageFolders: () -> Unit,
 ) {
     AppDropdownMenu(
         expanded = expanded,
@@ -79,6 +86,7 @@ internal fun ImportBooksMenu(
                 },
                 summary = "把文件夹里的书都找出来（含子文件夹）",
             ),
+            AppMenuItem("自动扫描目录", onClick = { onDismiss(); onManageFolders() }, summary = "管理授权目录、暂停或立即扫描"),
         ),
     )
 }
@@ -87,8 +95,8 @@ internal fun ImportBooksMenu(
  * 选文件夹导入：找到的书先列出来勾，再一起导（同整理重复的书：一张定高的卡，主按钮写清数量）。
  *
  * - 还在找：转圈 +「已找到 N 本」；一本没有就说清这个文件夹里没有认得的格式；
- * - 概况行「「文件夹」里找到 N 本 · M 本已在书架」+ 全选 / 全不选（管的是没在书架上的那些）；
- * - 按子文件夹分组，小标题是在所选文件夹里的路径；行是文件名，副行格式和大小，已在书架的写在副行最前、默认不勾；
+ * - 概况行显示找到的数量，提供全选 / 全不选；重复书籍在实际导入时按元数据跳过；
+ * - 按子文件夹展示，可保留完整路径作为书架分组，并开启此目录的自动扫描；
  * - 「导入 N 本」：取好勾选再收面板（面板收起时先回调 [onDismiss] 清掉状态），收起后走和多选文件同一条导入。
  */
 @Composable
@@ -96,7 +104,7 @@ internal fun FolderImportSheet(
     state: FolderImportState,
     onToggle: (Uri) -> Unit,
     onSelectAll: (Boolean) -> Unit,
-    onConfirm: (List<Uri>) -> Unit,
+    onConfirm: (FolderImportState.Ready, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AppBottomSheet(
@@ -115,16 +123,10 @@ internal fun FolderImportSheet(
                 Modifier.heightIn(max = listMax),
                 label = if (state.found == 0) "正在查找…" else "正在查找… 已找到 ${state.found} 本",
             )
-            is FolderImportState.Ready -> if (state.books.isEmpty()) {
-                EmptyState(
-                    icon = MiuixIcons.Notes,
-                    title = "没有找到书",
-                    hint = "「${state.folderName}」里没有 txt / EPUB / MOBI 文件",
-                    modifier = Modifier.heightIn(max = listMax),
-                )
-            } else {
-                FolderBookList(state, listMax, onToggle, onSelectAll, onConfirm = { uris -> dismiss { onConfirm(uris) } })
-            }
+            is FolderImportState.Ready -> FolderBookList(
+                state, listMax, onToggle, onSelectAll,
+                onConfirm = { ready, grouped, watch -> dismiss { onConfirm(ready, grouped, watch) } },
+            )
         }
     }
 }
@@ -135,12 +137,35 @@ private fun FolderBookList(
     listMax: Dp,
     onToggle: (Uri) -> Unit,
     onSelectAll: (Boolean) -> Unit,
-    onConfirm: (List<Uri>) -> Unit,
+    onConfirm: (FolderImportState.Ready, Boolean, Boolean) -> Unit,
 ) {
+    var groupByFolder by remember(state.treeUri) { mutableStateOf(state.groupByFolder) }
+    var watchRequested by remember(state.treeUri) { mutableStateOf(state.autoScan) }
+    val watch = watchRequested && !state.truncated
     val groups = remember(state.books) { state.books.groupBy { it.folder }.toList() }
     val notOnShelf = remember(state.books, state.onShelf) { state.books.count { it.uri !in state.onShelf } }
     val chosen = state.books.filter { it.uri in state.selected }
     Column(Modifier.fillMaxWidth()) {
+        SettingGroup {
+            SwitchRow(
+                title = "按文件夹分组",
+                subtitle = "使用完整路径作为分组名，已有书的分组保持不变",
+                checked = groupByFolder, onCheckedChange = { groupByFolder = it },
+                position = SettingGroupPosition.First,
+            )
+            SwitchRow(
+                title = "自动扫描此目录",
+                subtitle = when {
+                    state.truncated && state.autoScan -> "预览未完成，可在自动扫描目录列表中调整已开启的设置"
+                    state.truncated -> "预览未完成，请选择更小的子目录开启自动扫描"
+                    else -> "回到应用时导入新书；本次未勾选和以后从书架删除的书不会自动加入"
+                },
+                checked = if (state.truncated) state.autoScan else watch,
+                onCheckedChange = { watchRequested = it },
+                enabled = !state.truncated,
+                position = SettingGroupPosition.Last,
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -181,8 +206,10 @@ private fun FolderBookList(
                 }
                 item(key = "foot") {
                     SettingFootnote(
-                        if (state.truncated) {
-                            "书太多，只列出了前 ${LocalFolderScanner.MAX_BOOKS} 本。可以分几个子文件夹导入。"
+                        if (state.books.isEmpty()) {
+                            "当前没有找到书。仍可开启自动扫描，以后放入此目录的新书会自动导入。"
+                        } else if (state.truncated) {
+                            "扫描未完成（最多 ${LocalFolderScanner.MAX_BOOKS} 本、${LocalFolderScanner.MAX_DEPTH} 层子目录）。可选择更小的子目录。"
                         } else {
                             "书会复制一份到应用里，原文件不动。同一本已在书架的会自动跳过。"
                         },
@@ -192,9 +219,9 @@ private fun FolderBookList(
             }
         }
         PrimaryButton(
-            text = if (chosen.isEmpty()) "导入" else "导入 ${chosen.size} 本",
-            onClick = { onConfirm(chosen.map { it.uri }) },
-            enabled = chosen.isNotEmpty(),
+            text = if (chosen.isEmpty() && watch) "开启自动扫描" else if (chosen.isEmpty()) "导入" else "导入 ${chosen.size} 本",
+            onClick = { onConfirm(state, groupByFolder, watch) },
+            enabled = chosen.isNotEmpty() || watch,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = cardMargin())
@@ -248,5 +275,41 @@ private fun FolderBookRow(
     }
 }
 
-/** 列表最多占屏高的一半（同整理重复的书），再多就在卡里滚 */
-private const val LIST_HEIGHT_FRACTION = 0.5f
+/** 给目录选项和确认按钮留出空间，其余书籍在卡内滚动。 */
+private const val LIST_HEIGHT_FRACTION = 0.35f
+
+
+@Composable
+internal fun WatchedFoldersSheet(
+    folders: List<com.radium.inkwell.data.repo.WatchedFolder>,
+    onToggle: (String, Boolean) -> Unit,
+    onRemove: (String) -> Unit,
+    onScan: () -> Unit,
+    scanning: Boolean,
+    onDismiss: () -> Unit,
+) {
+    AppBottomSheet(onDismissRequest = onDismiss, title = "自动扫描目录") {
+        LazyColumn(Modifier.heightIn(max = Dimens.sheetListMaxHeight)) {
+            if (folders.isEmpty()) item {
+                SettingFootnote("还没有自动扫描目录。选择文件夹导入时开启「自动扫描此目录」。")
+            }
+            itemsIndexed(folders, key = { _, folder -> folder.uri }) { _, folder ->
+                SettingGroup {
+                    SwitchRow(
+                        title = folder.name,
+                        subtitle = folder.status,
+                        checked = folder.enabled,
+                        onCheckedChange = { onToggle(folder.uri, it) },
+                        position = SettingGroupPosition.Alone,
+                    )
+                    AppTextButton("移除目录（保留已导入的书）", onClick = { onRemove(folder.uri) })
+                }
+            }
+            item {
+                SettingFootnote("只扫描授权目录，回到应用时查找新书。暂停或移除目录不删除书籍与阅读进度。")
+            }
+        }
+        PrimaryButton(text = if (scanning) "正在扫描…" else "立即扫描", onClick = onScan, enabled = !scanning && folders.any { it.enabled },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = cardMargin(), vertical = Dimens.gapM))
+    }
+}

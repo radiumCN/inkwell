@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.nav
 
+import android.content.Intent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -17,9 +18,21 @@ import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation.BackNavigationBehavior
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.koin.compose.koinInject
+import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.ui.components.AppAlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
@@ -88,9 +101,46 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun InkwellNavDisplay() {
+fun InkwellNavDisplay(
+    externalBook: Intent? = null,
+    onExternalBookHandled: (Intent) -> Unit = {},
+) {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
+    LaunchedEffect(backStack) {
+        snapshotFlow { backStack.lastOrNull() }.collect { route ->
+            UsageLog.screenVisible(route.diagnosticName(), backStack.size)
+        }
+    }
+
+    val confirmExit = koinInject<AppPrefs>().confirmExitState.collectAsStateWithLifecycle().value ?: false
+    val activity = LocalActivity.current
+    var showExit by remember { mutableStateOf(false) }
+    BackHandler(confirmExit && backStack.size == 1 && backStack.lastOrNull() == BookshelfRoute) { showExit = true }
+    if (showExit) {
+        AppAlertDialog(
+            title = "返回桌面？",
+            text = "返回桌面后，可随时继续阅读。",
+            confirmText = "返回桌面",
+            dismissText = "继续使用",
+            onDismissRequest = { showExit = false },
+            closeOnConfirm = true,
+            onConfirm = { showExit = false; activity?.moveTaskToBack(true) },
+        )
+    }
+
+    if (externalBook != null) key(externalBook) {
+        ExternalBookImportDialog(
+            request = externalBook,
+            onDismiss = { onExternalBookHandled(externalBook) },
+            onOpen = { id ->
+                nav.openOrigin.value = TransformOrigin.Center
+                if (backStack.lastOrNull() is ReaderRoute) nav.go(ReaderRoute(id))
+                else nav.openBook(id, TransformOrigin.Center)
+                onExternalBookHandled(externalBook)
+            },
+        )
+    }
 
     val containerSize = LocalWindowInfo.current.containerSize
     LaunchedEffect(containerSize) { nav.openOrigin.value = TransformOrigin.Center }

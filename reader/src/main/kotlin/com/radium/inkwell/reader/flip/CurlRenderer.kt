@@ -72,9 +72,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
 
     /**
      * @param cornerBottom 卷角固定在右下(true)/右上(false)，手势开始时锁定
-     * @param front 卷起的那页；null = 那一页还没排好，只有纸色（同 [under]）。
-     *   从前用一张常驻的全屏空白位图垫着，可它画上去和这里先铺的纸色一模一样（背面的淡墨也只调 alpha），
-     *   白占十几 MB。
+     * @param front 卷起页的位图，用于前页可见区和背面淡墨。
+     * @param drawLiveFront 尚无卷起页位图时，直接绘制前页可见区；背面只画纸色与折缝阴影。
      */
     fun draw(
         canvas: Canvas,
@@ -84,6 +83,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         touchY: Float,
         cornerBottom: Boolean,
         paperColor: Int,
+        drawLiveUnder: (() -> Unit)? = null,
+        drawLiveFront: (() -> Unit)? = null,
     ) {
         this.paperColor = paperColor
         cornerX = width
@@ -105,28 +106,28 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         // legado onDraw 顺序：前页区 → 下页区+投影 → 前页折痕投影 → 背面。
         // 拖动帧也画三片阴影：关掉会变成「纸片平移」，不像在卷。跟手靠触点只在
         // drawBehind 里读，不靠少画阴影。
-        drawCurrentPageArea(canvas, front)
-        drawNextPageAreaAndShadow(canvas, under)
+        drawCurrentPageArea(canvas, front, drawLiveFront)
+        drawNextPageAreaAndShadow(canvas, under, drawLiveUnder)
         drawCurrentPageShadow(canvas)
         drawCurrentBackArea(canvas, front)
     }
 
     /** 前页可见区（挖掉卷起区，画前页） */
-    private fun drawCurrentPageArea(canvas: Canvas, front: Bitmap?) {
-        if (front == null) return // 纸色已经铺过
+    private fun drawCurrentPageArea(canvas: Canvas, front: Bitmap?, drawLiveFront: (() -> Unit)?) {
+        if (front == null && drawLiveFront == null) return // 纸色已经铺过
         canvas.save()
         canvas.clipOutPath(pathFront)
-        canvas.drawBitmap(front, 0f, 0f, null)
+        if (front != null) canvas.drawBitmap(front, 0f, 0f, null) else drawLiveFront?.invoke()
         canvas.restore()
     }
 
     /** 下页露出区 + 翻起页投在下页上的阴影（legado 的 backShadow，宽 = 触角距/4） */
-    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?) {
+    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?, drawLiveUnder: (() -> Unit)?) {
         canvas.save()
         canvas.clipPath(pathFront)
         canvas.clipPath(pathUnder)
         // 没有底页就露纸色（已铺）；投影照画，否则卷起来像纸片平移
-        if (under != null) canvas.drawBitmap(under, 0f, 0f, null)
+        if (under != null) canvas.drawBitmap(under, 0f, 0f, null) else drawLiveUnder?.invoke()
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val w = (touchToCornerDis / 4f)

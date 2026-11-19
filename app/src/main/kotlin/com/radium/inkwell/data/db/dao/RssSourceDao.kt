@@ -12,9 +12,6 @@ interface RssSourceDao {
     @Query("SELECT * FROM rss_source WHERE deleted = 0 ORDER BY sortOrder ASC, name ASC")
     fun observeAll(): Flow<List<RssSourceEntity>>
 
-    @Query("SELECT * FROM rss_source WHERE enabled = 1 AND deleted = 0 ORDER BY sortOrder ASC, name ASC")
-    suspend fun getEnabled(): List<RssSourceEntity>
-
     /** 有没有开着的订阅源：书架顶栏的「订阅」按钮跟着它出现 / 消失（见 RssRepository.hasEnabledSourceState） */
     @Query("SELECT EXISTS(SELECT 1 FROM rss_source WHERE enabled = 1 AND deleted = 0)")
     fun observeHasEnabled(): Flow<Boolean>

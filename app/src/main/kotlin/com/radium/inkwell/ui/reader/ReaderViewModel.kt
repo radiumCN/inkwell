@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.reader
 
 import android.net.Uri
 import android.util.Log
+import com.radium.inkwell.util.UsageLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
@@ -17,6 +18,7 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.ReaderFontStore
+import com.radium.inkwell.data.repo.FontImportStage
 import com.radium.inkwell.data.repo.ReadingClock
 import com.radium.inkwell.data.repo.ReadingStatsRepository
 import com.radium.inkwell.data.repo.UserFont
@@ -26,6 +28,7 @@ import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
+import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.TitleMatch
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -33,8 +36,10 @@ import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReadPosition
 import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.reader.api.ReaderSettings
+import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.measure.TextMeasureFacade
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.ImageInfo
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.paginate.Paginator
@@ -84,6 +89,7 @@ import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.util.RepeatedTitle
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
 data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
@@ -241,6 +247,15 @@ private fun ReaderUiState.toOverlay() = ReaderOverlayUi(
  */
 private class ContentTimeoutException : Exception("正文加载超时")
 
+private inline fun <T> measureChapterStage(record: (Long) -> Unit, block: () -> T): T {
+    val started = TimeSource.Monotonic.markNow()
+    try {
+        return block()
+    } finally {
+        record(started.elapsedNow().inWholeMilliseconds)
+    }
+}
+
 /**
  * 网上的书、关着「正文显示图片」时，这一章只有图没有字。从前解析时就抹掉了图，这种章是一章空正文、
  * 报「读不出来」、触发自动换源（不少站拿图片当正文防抓取，换个源多半就有字了）—— 关着开关时照旧这么走，
@@ -268,6 +283,7 @@ class ReaderViewModel(
     private val autoSwitcher: com.radium.inkwell.data.repo.AutoSourceSwitcher,
     private val fontStore: ReaderFontStore,
     private val readingStats: ReadingStatsRepository,
+    private val readHealth: SourceReadHealth,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -369,11 +385,20 @@ class ReaderViewModel(
     /** 正在重试的图：连点几下「点按重试」只算一次 */
     private val retryingImages = HashSet<String>()
 
+    private val diagnosticBook = UsageLog.reference(bookId)
+    private fun trace(event: String, vararg fields: Pair<String, Any?>) {
+        UsageLog.event("reader.$event", "book" to diagnosticBook, *fields)
+    }
+
     init {
         viewModelScope.launch {
             loadSession()
             readerPrefs.settings.collect { s ->
-                _state.value = _state.value.copy(settings = s)
+                val previous = _state.value.settings.theme.id
+                _state.value = _state.value.copy(settings = settingsForBook(s))
+                if (previous != s.theme.id) {
+                    trace("settings.paper_applied", "from_theme" to previous, "theme" to s.theme.id)
+                }
             }
         }
         viewModelScope.launch {
@@ -502,8 +527,12 @@ class ReaderViewModel(
         )
 
     private suspend fun loadSession() {
+        trace("session.load.start")
         try {
             sessionReady = false
+            stopLegacyImageUpgrade()
+            upgradedChapterUrl = null
+            decodeJob?.cancel()
             (source as? AutoCloseable)?.close()
             var b = bookRepo.getBook(bookId) ?: error("书籍不存在")
             book = b
@@ -517,6 +546,7 @@ class ReaderViewModel(
             // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
             _state.value = _state.value.copy(
+                settings = settingsForBook(readerPrefs.settings.value),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -545,14 +575,13 @@ class ReaderViewModel(
                     }
                 }
                 NetReaderBookSource(
-                    bookId, chapters, rule, engine, contentCache, chapterDao,
+                    bookId, chapters, rule, engine, contentCache, chapterDao, readHealth,
                     bookVariables = SourceVariables.decode(b.variable),
                 )
             } else {
                 withContext(Dispatchers.IO) { LocalReaderBookSource(bookRepo.openLocal(b)) }
             }
             source = src
-            (src as? NetReaderBookSource)?.imagesWanted = spec?.showImages ?: _state.value.settings.showImages
             // 上个会话（换源前）没取到的图不再记着：新会话里它们该有机会重新取；排着队等解码的是旧源的图，作废
             readerImages.forgetFailures()
             pendingDecodes.clear()
@@ -576,6 +605,7 @@ class ReaderViewModel(
                 progressHeld = b.type == BookType.NET
             }
             _state.value = _state.value.copy(
+                settings = settingsForBook(readerPrefs.settings.value),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -587,6 +617,7 @@ class ReaderViewModel(
                 inShelf = b.inShelf && !b.deleted,
                 error = null,
             )
+            trace("session.load.ready", "chapters" to src.chapterCount, "type" to b.type)
             sessionReady = true
             // 网络书：首章加载别等清理。进度之前且超龄的正文缓存顺手清掉，目录 isCached 一并 sync。
             // 先让开进书动画（同预取的 PREFETCH_LEAD_IN_MS）：清理要给全书每章算一遍文件名摘要、
@@ -607,6 +638,7 @@ class ReaderViewModel(
             // 退出阅读/换源取消了这次进书，不是"打开失败"。吞掉会误触发自动换源、改掉用户的源。
             throw e
         } catch (e: Exception) {
+            trace("session.load.failed", "error" to e.javaClass.simpleName)
             _state.value = _state.value.copy(loading = false, error = e.message ?: "打开书籍失败")
             // 书源被删了、目录拉不到 —— 这两种进书就废的情况，Legado 原生也自动换源
             maybeAutoChangeSource(e.message ?: "打开书籍失败", target = position)
@@ -639,11 +671,12 @@ class ReaderViewModel(
     /** 视口/设置变化时由 UI 调用；重建排版环境并按 charOffset 恢复位置 */
     fun onLayoutReady(facade: TextMeasureFacade, spec: LayoutSpec) {
         if (this.spec == spec && this.facade != null) return
+        decodeJob?.cancel()
+        pendingDecodes.clear()
         this.facade = facade
         this.spec = spec
         // 「正文显示图片」也在排版指纹里：开关一拨走到这里，按同一个字符偏移重排。
-        // 网上的书顺带改口：开着时，升级前只缓存了字的章读到时重抓一份带图的
-        (source as? NetReaderBookSource)?.imagesWanted = spec.showImages
+        if (!spec.showImages) stopLegacyImageUpgrade()
         // 加载途中旋转/改字号：用户点的那一章还没出来，重排要接着去那一章，别退回旧章
         navigate(invalidate = true) { pendingTarget ?: position }
     }
@@ -669,7 +702,9 @@ class ReaderViewModel(
             engineMutex.withLock {
                 // 等锁期间完成的邻章预载可能还是按旧环境排的，拿到锁再清一遍
                 if (invalidate) paginated.clear()
-                showPosition(target())
+                val destination = target()
+                if (destination.chapterIndex != position.chapterIndex) stopLegacyImageUpgrade()
+                showPosition(destination)
             }
         }
     }
@@ -684,10 +719,26 @@ class ReaderViewModel(
         navTarget = null
     }
 
+    fun traceInteraction(event: com.radium.inkwell.reader.flip.ReaderTrace) {
+        val diagnostics = listOfNotNull(
+            event.flipId?.let { "flip_id" to it },
+            event.render?.let { "render" to it.name },
+            event.reason?.let { "reason" to it },
+            event.settleMs?.let { "settle_ms" to it },
+        )
+        trace("input", "action" to event.action.name, "direction" to event.direction?.name,
+            "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter,
+            "animation" to _state.value.settings.flipAnimation.name, *diagnostics.toTypedArray())
+    }
+
     fun flip(direction: FlipDirection) {
+        trace("flip.commit_requested", "direction" to direction.name, "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter)
         progressHeld = false
         val s = _state.value
-        val result = paginated[s.chapterIndex] ?: return
+        val result = paginated[s.chapterIndex] ?: run {
+            trace("flip.blocked", "reason" to "chapter_not_paginated")
+            return
+        }
         val chapter = result.chapter
         when (direction) {
             FlipDirection.FORWARD -> {
@@ -696,10 +747,12 @@ class ReaderViewModel(
                     showPage(s.chapterIndex, s.pageInChapter + 1)
                 } else if (!result.complete) {
                     // 本章还在往后排，下一页马上就来；跳章会把人甩到下一章开头
+                    trace("flip.blocked", "reason" to "pagination_pending")
                     return
                 } else if (s.chapterIndex + 1 < s.chapterCount) {
                     gotoChapter(s.chapterIndex + 1, charOffset = 0)
                 } else {
+                    trace("flip.blocked", "reason" to "book_end")
                     _state.value = s.copy(atBookEnd = true)
                 }
             }
@@ -715,6 +768,7 @@ class ReaderViewModel(
     }
 
     fun gotoChapter(index: Int, charOffset: Int = 0) {
+        trace("chapter.request", "chapter" to index, "offset" to charOffset)
         val count = _state.value.chapterCount
         if (index !in 0 until count) return
         progressHeld = false
@@ -727,11 +781,13 @@ class ReaderViewModel(
     }
 
     fun setReaderSheetOpen(open: Boolean) {
+        if (_state.value.readerSheetOpen != open) trace("sheet", "open" to open)
         if (_state.value.readerSheetOpen == open) return
         _state.value = _state.value.copy(readerSheetOpen = open)
     }
 
     fun seekToPercent(percent: Float) {
+        trace("seek", "percent" to (percent.coerceIn(0f, 1f) * 100).toInt())
         progressHeld = false
         val s = _state.value
         val chapter = paginated[s.chapterIndex]?.chapter ?: return
@@ -742,6 +798,7 @@ class ReaderViewModel(
     }
 
     fun toggleMenu() {
+        trace("menu.toggle", "was_open" to _state.value.menuVisible)
         // 一点屏幕就停自动翻页：想接着自动翻，再点一次「自动」就是了 ——
         // 反过来（点了没反应、页面还在自己翻）会让人以为应用卡死了
         if (_state.value.autoFlipping) {
@@ -760,8 +817,28 @@ class ReaderViewModel(
     /** UI 层按 App 主题模式 + 系统日夜算出后调这个，阅读纸张随之切日/夜槽 */
     fun setDarkActive(dark: Boolean) = readerPrefs.setDarkActive(dark)
 
+    private fun settingsForBook(settings: ReaderSettings): ReaderSettings =
+        if (book != null && book?.type != BookType.NET) settings.copy(showImages = settings.localShowImages) else settings
+
+    private suspend fun persistSettings(settings: ReaderSettings) {
+        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET)
+    }
+
     fun updateSettings(settings: ReaderSettings) {
-        viewModelScope.launch { readerPrefs.update(settings) }
+        trace("settings.apply", "animation" to settings.flipAnimation.name, "font_size" to settings.fontSizeSp)
+        viewModelScope.launch { persistSettings(settings) }
+    }
+
+    fun selectPaper(themeId: String) {
+        trace("settings.paper_selected", "from_theme" to _state.value.settings.theme.id, "theme" to themeId)
+        viewModelScope.launch { readerPrefs.selectPaper(themeId) }
+    }
+
+    fun commitCustomPaper() {
+        val theme = _state.value.settings.theme
+        if (theme.id == ReaderTheme.CUSTOM_ID) {
+            viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
+        }
     }
 
     /**
@@ -783,16 +860,41 @@ class ReaderViewModel(
 
     val userFonts: StateFlow<List<UserFont>> = fontStore.fonts
     val layoutSchemes: StateFlow<List<LayoutScheme>> = readerPrefs.layoutSchemes
+    fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
+        viewModelScope.launch {
+            try {
+                readerPrefs.adjustTypography(change)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                messageBus.emit("排版设置保存失败")
+            }
+        }
+    }
+    private val _fontImportStage = MutableStateFlow<FontImportStage?>(null)
+    val fontImportStage = _fontImportStage.asStateFlow()
+    private val _fontImportError = MutableStateFlow<String?>(null)
+    val fontImportError = _fontImportError.asStateFlow()
+
+    fun dismissFontImportError() { _fontImportError.value = null }
 
     /** 导入成功就直接用上：人是为了换字体才去导入的，导完还得再点一下才生效像没导进来 */
     fun importFont(uri: Uri) {
+        if (_fontImportStage.value != null) return
+        dismissFontImportError()
+        _fontImportStage.value = FontImportStage.READING
         viewModelScope.launch {
-            fontStore.import(uri)
-                .onSuccess { font ->
-                    readerPrefs.update(_state.value.settings.copy(fontId = font.id))
-                    messageBus.emit("已导入字体「${font.label}」")
-                }
-                .onFailure { messageBus.emit("导入失败：${it.message ?: "未知错误"}") }
+            try {
+                val font = fontStore.import(uri) { _fontImportStage.value = it }.getOrThrow()
+                readerPrefs.adjustTypography { copy(fontId = font.id) }
+                messageBus.emit("已导入字体「${font.label}」")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _fontImportError.value = e.message ?: "无法导入所选字体"
+            } finally {
+                _fontImportStage.value = null
+            }
         }
     }
 
@@ -801,7 +903,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             val current = _state.value.settings
             if (current.fontId == font.id) {
-                readerPrefs.update(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
+                persistSettings(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
             }
             fontStore.delete(font)
             messageBus.emit("已删除字体「${font.label}」")
@@ -845,6 +947,7 @@ class ReaderViewModel(
     }
 
     fun toggleAutoFlip() {
+        trace("auto_flip.toggle", "was_active" to _state.value.autoFlipping)
         if (_state.value.autoFlipping) {
             stopAutoFlip()
             return
@@ -875,6 +978,7 @@ class ReaderViewModel(
      * 回来已经翻过几百页、进度跟着存了，后台还白抓了一路章节。
      */
     fun stopAutoFlip() {
+        if (_state.value.autoFlipping) trace("auto_flip.stop")
         autoFlipJob?.cancel()
         autoFlipJob = null
         _state.value = _state.value.copy(autoFlipping = false)
@@ -882,6 +986,7 @@ class ReaderViewModel(
 
     /** 正文加载失败后重试：清掉分页缓存重来一遍（站点抽风、临时封 IP 都可能只是一次性的） */
     fun retry() {
+        trace("retry")
         // 手动重试 = 用户想再给一次机会（可能网络恢复了）；自动换源的额度跟着复位
         autoChangeUsed = false
         _state.value = _state.value.copy(error = null, loading = true)
@@ -896,19 +1001,84 @@ class ReaderViewModel(
     }
 
     private var chapterRefreshJob: Job? = null
+    private var legacyImageUpgradeJob: Job? = null
+    private var legacyImageUpgradeKey: Pair<NetReaderBookSource, String>? = null
+    private var upgradedChapterUrl: String? = null
+
+    private fun stopLegacyImageUpgrade() {
+        legacyImageUpgradeJob?.cancel()
+        legacyImageUpgradeJob = null
+        legacyImageUpgradeKey = null
+    }
+
+    /** 只在已出正文的当前章补全旧缓存，成功后也不重新排正在读的页。 */
+    private fun scheduleLegacyImageUpgrade(chapterIndex: Int) {
+        val src = source as? NetReaderBookSource ?: return
+        if (spec?.showImages != true || sourceChanging || _state.value.refreshingChapter) return
+        val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
+        val key = src to url
+        if (key == legacyImageUpgradeKey) return
+        stopLegacyImageUpgrade()
+        legacyImageUpgradeKey = key
+        legacyImageUpgradeJob = viewModelScope.launch {
+            delay(PREFETCH_LEAD_IN_MS)
+            if (source !== src || spec?.showImages != true ||
+                src.chapters.getOrNull(position.chapterIndex)?.url != url
+            ) return@launch
+            val started = TimeSource.Monotonic.markNow()
+            var stage = "check"
+            var fetchMs: Long? = null
+            var fetchStarted = started
+            var writeStarted = started
+            var outcome = "cancelled"
+            var errorType: String? = null
+            try {
+                outcome = withTimeoutOrNull(CONTENT_TIMEOUT_MS) {
+                    src.upgradeTextOnlyChapter(position.chapterIndex) { nextStage ->
+                        stage = nextStage
+                        if (nextStage == "fetch") {
+                            fetchStarted = TimeSource.Monotonic.markNow()
+                        } else {
+                            fetchMs = fetchStarted.elapsedNow().inWholeMilliseconds
+                            writeStarted = TimeSource.Monotonic.markNow()
+                        }
+                    }
+                } ?: "timeout"
+                if (outcome == "ready" && source === src) upgradedChapterUrl = url
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                outcome = "failed"
+                errorType = e.javaClass.simpleName
+            } finally {
+                if (outcome != "skipped") {
+                    trace("chapter.cache_upgrade", "chapter" to chapterIndex, "outcome" to outcome, "stage" to stage,
+                        "duration_ms" to started.elapsedNow().inWholeMilliseconds,
+                        "fetch_ms" to (if (stage == "fetch") fetchStarted.elapsedNow().inWholeMilliseconds else fetchMs),
+                        "cache_write_ms" to (if (stage == "write") writeStarted.elapsedNow().inWholeMilliseconds else null),
+                        "error" to errorType)
+                }
+            }
+        }
+    }
 
     /** 保留现有页面直到新正文抓取、净化和完整排版均成功。手动刷新不触发自动换源。 */
     fun refreshCurrentChapter() {
+        trace("chapter.refresh", "chapter" to _state.value.chapterIndex)
         val src = source as? NetReaderBookSource ?: return
         val state = _state.value
         if (state.refreshingChapter || sourceChanging || state.loading || state.page == null) return
         val chapterIndex = state.chapterIndex
         val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
         val generation = tocGeneration
+        val cacheEpoch = src.cacheEpoch()
         stopAutoFlip()
         _state.update { it.copy(refreshingChapter = true, chapterRefreshFailed = false) }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
+                val upgrade = legacyImageUpgradeJob
+                stopLegacyImageUpgrade()
+                upgrade?.join()
                 stopPrefetch()
                 val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.fetchFreshChapter(chapterIndex) }
                     ?: throw ContentTimeoutException()
@@ -924,7 +1094,7 @@ class ReaderViewModel(
                     val result = ensurePaginated(chapterIndex, notifyAfterChar = offset, replacement = raw)
                         ?: error("新正文暂时无法排版，请重试")
                     try {
-                        src.cacheFreshChapter(url, raw)
+                        src.cacheFreshChapter(url, raw, cacheEpoch)
                     } catch (e: Exception) {
                         if (source === src && tocGeneration == generation) {
                             if (previous != null) paginated[chapterIndex] = previous else paginated.remove(chapterIndex)
@@ -1012,8 +1182,14 @@ class ReaderViewModel(
      * 点了「图片没加载出来 · 点按重试」：再取一次，取到了按同一个字符偏移重排（图从提示条变回图，后面的字跟着挪），
      * 还是没取到就说一声 —— 什么反应都没有的话，人会以为没点上。
      */
-    fun retryImage(resourceId: String) {
+    fun retryImage(box: PageItem.ImageBox) {
         val src = source ?: return
+        val resourceId = box.resourceId
+        if (src is NetReaderBookSource) {
+            readerImages.allowRetry(resourceId, box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
+            refreshImages()
+            return
+        }
         if (!retryingImages.add(resourceId)) return
         messageBus.emit("正在重新加载图片…")
         viewModelScope.launch {
@@ -1062,7 +1238,10 @@ class ReaderViewModel(
                 val src = source ?: break
                 val (key, box) = pendingDecodes.entries.firstOrNull()?.toPair() ?: break
                 pendingDecodes.remove(key)
-                readerImages.decode(src, box.resourceId, box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
+                readerImages.decode(
+                    src, box.resourceId, box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1),
+                    fit = src is NetReaderBookSource,
+                )
                 refreshImages()
             }
         }
@@ -1111,6 +1290,7 @@ class ReaderViewModel(
      * @param force 为 true 时忽略会话缓存，强制重搜（面板上的「重新搜索」）。
      */
     fun searchOtherSources(force: Boolean = false) {
+        trace("source.search", "force" to force)
         val b = book ?: return
         // 同一次阅读会话里搜过（含半截）→ 直接摊开；要打新请求只能点「重新搜索」
         if (!force && sourceSearchStarted && sourceSearchJob?.isActive != true) {
@@ -1276,6 +1456,7 @@ class ReaderViewModel(
         TitleMatch.authorMatches(candidate, want)
 
     fun applyChangeSource(candidate: SearchResult) {
+        trace("source.change.request", "source" to UsageLog.reference(candidate.sourceId))
         val b = book ?: return
         // 正在换源就别再受理下一次点击，避免同一本书的 changeSource 交错执行
         if (_state.value.changingSource) return
@@ -1365,6 +1546,9 @@ class ReaderViewModel(
     private suspend fun beginSourceChange() {
         sourceChangesInFlight++
         (source as? NetReaderBookSource)?.cacheWritesHeld = true
+        val upgrade = legacyImageUpgradeJob
+        stopLegacyImageUpgrade()
+        upgrade?.join()
         // 等手动刷新完全退出，避免旧源正文在换源清缓存之后才写回。
         chapterRefreshJob?.cancelAndJoin()
         chapterRefreshJob = null
@@ -1490,6 +1674,7 @@ class ReaderViewModel(
      * 否则"帮了倒忙"就成了不可逆的。
      */
     fun undoAutoChange() {
+        trace("source.change.undo")
         val snap = undoSnapshot ?: return
         val b = book ?: return
         // 与 applyChangeSource 同一道闸：换源要走一整趟网络（详情+目录+清缓存+改库），
@@ -1602,12 +1787,7 @@ class ReaderViewModel(
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
      * 本地书没有「抓取时」，通用规则也只能在这里跑。
      */
-    private suspend fun loadPurified(src: ReaderBookSource, chapterIndex: Int, replacement: ChapterContent? = null): ChapterContent {
-        // 慢到这个份上的源基本没救（正常源 1-3 秒）。用 withTimeoutOrNull 而不是 withTimeout：
-        // 后者抛的是 CancellationException，会被下游的 catch(Exception) 吞掉，还会跟"协程被正常
-        // 取消"混为一谈 —— 翻页时取消上一次加载也会被当成超时，进而触发自动换源。
-        val raw = replacement ?: withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(chapterIndex) }
-            ?: throw ContentTimeoutException()
+    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int): ChapterContent {
         // 本地书不经过引擎，通用规则从前一条都不跑（从阅读导进来一批去广告的规则，本地书毫无反应），在这里和书内规则一起跑。
         // 网上的书不加：通用规则在抓取时已经跑过、结果进了缓存，这里再跑一遍，「a → ab」这种规则会替换两次
         val b = book
@@ -1648,12 +1828,20 @@ class ReaderViewModel(
 
     private fun renderable(result: Paginator.Result, pageIndex: Int): RenderablePage? {
         val page = result.chapter.pages.getOrNull(pageIndex) ?: return null
+        val failedImages = if (source is NetReaderBookSource) {
+            page.items.filterIsInstance<PageItem.ImageBox>().mapNotNullTo(mutableSetOf()) { box ->
+                box.elementIndex.takeIf {
+                    readerImages.isUndecodable(box.resourceId, box.width.toInt().coerceAtLeast(1), box.height.toInt().coerceAtLeast(1))
+                }
+            }
+        } else emptySet()
         return RenderablePage(
             spec = page,
             measured = result.measured,
             images = imagesFor(page),
             header = result.chapter.title,
             footer = "${pageIndex + 1}/${result.chapter.pages.size}",
+            failedImages = failedImages,
         )
     }
 
@@ -1683,10 +1871,28 @@ class ReaderViewModel(
      */
     private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
         val result = paginated[chapterIndex] ?: return
+        if (pageIndex !in result.chapter.pages.indices) return
+        val oldPage = _state.value
+        if (oldPage.chapterIndex != chapterIndex) {
+            val src = source as? NetReaderBookSource
+            val upgradedUrl = upgradedChapterUrl
+            if (upgradedUrl != null && src?.chapters?.getOrNull(oldPage.chapterIndex)?.url == upgradedUrl) {
+                // 这一章已经离开，丢掉旧分页；下次预载或进入时从带图缓存重排。
+                paginated.remove(oldPage.chapterIndex)
+                upgradedChapterUrl = null
+            }
+        }
+        if (oldPage.chapterIndex != chapterIndex || oldPage.pageInChapter != pageIndex) {
+            decodeJob?.cancel()
+            pendingDecodes.clear()
+        }
         val page = renderable(result, pageIndex) ?: return
         val offset = keepOffset
             ?.takeIf { it != Int.MAX_VALUE && it >= page.spec.startCharOffset && it < page.spec.endCharOffset }
             ?: page.spec.startCharOffset
+        if (_state.value.chapterIndex != chapterIndex || _state.value.pageInChapter != pageIndex || _state.value.page?.spec !== page.spec) {
+            trace("page.shown", "chapter" to chapterIndex, "page" to pageIndex, "pages" to result.chapter.pages.size, "offset" to offset)
+        }
         position = ReadPosition(chapterIndex, offset)
         pendingTarget = null
         val (prev, next) = neighborPages(chapterIndex, pageIndex)
@@ -1712,6 +1918,7 @@ class ReaderViewModel(
         readingClock.touch()
         if (readingClock.pendingMillis >= ReadingClock.FLUSH_EVERY_MS) flushReadingTime()
         notifyIfUnpurified(chapterIndex)
+        scheduleLegacyImageUpgrade(chapterIndex)
         // 滚动一次惯性就能甩过好几页，临近章末再预取会来不及，倒数第二页就开始排邻章。
         if (pageIndex <= 1 || pageIndex >= result.chapter.pages.lastIndex - 1) {
             preloadNeighbors(chapterIndex)
@@ -1737,7 +1944,8 @@ class ReaderViewModel(
      * 挂着的图也要一样：图晚到的那一页是同一个 PageSpec，不比图的话新到的图永远挂不上去
      */
     private fun samePage(a: RenderablePage?, b: RenderablePage?): Boolean =
-        a === b || (a != null && b != null && a.spec === b.spec && a.measured === b.measured && a.images == b.images)
+        a === b || (a != null && b != null && a.spec === b.spec && a.measured === b.measured &&
+            a.images == b.images && a.failedImages == b.failedImages)
 
     /**
      * [userFacing] 这一章是不是用户正在等的那一章 —— **由调用方声明，不要再靠 position 去猜**。
@@ -1764,12 +1972,31 @@ class ReaderViewModel(
         // 发起这次加载的协程（跳章时就是 navJob）。部分结果的 showPage 是另投递到主线程的，
         // 不随它取消 —— 这一跳已经被下一次取代的话，别再把人拽回被放弃的那一章
         val caller = currentCoroutineContext()[Job]
+        val loadId = chapterLoadSequence.incrementAndGet()
+        val loadStarted = TimeSource.Monotonic.markNow()
+        var loadOutcome = "discarded"
+        var acquireMs: Long? = null
+        var purifyMs: Long? = null
+        var imageMeasureMs: Long? = null
+        var paginateWaitMs: Long? = null
+        var paginateMs: Long? = null
+        val netTiming = if (userFacing && replacement == null && src is NetReaderBookSource) {
+            NetReaderBookSource.LoadTiming()
+        } else null
+        trace("chapter.load.start", "chapter" to chapterIndex, "user_facing" to userFacing, "load_id" to loadId)
         return try {
             val title = src.chapterTitle(chapterIndex) ?: ""
             // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
             // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
             // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
-            val purified = loadPurified(src, chapterIndex, replacement)
+            val raw = replacement ?: measureChapterStage({ acquireMs = it }) {
+                // 只把本次超时当成加载失败，正常取消仍须向上传递。
+                withTimeoutOrNull(CONTENT_TIMEOUT_MS) {
+                    if (src is NetReaderBookSource) src.loadChapter(chapterIndex, netTiming)
+                    else src.loadChapter(chapterIndex)
+                } ?: throw ContentTimeoutException()
+            }
+            val purified = measureChapterStage({ purifyMs = it }) { loadPurified(raw, chapterIndex) }
             // 关着图时，网上的书只有图没有字的章照旧当读不出来（见 ImageOnlyChapterException）。
             // 看的是去掉重复标题**之前**：那一行标题也是字，从前它在时这一章不算空
             if (!spec.showImages && book?.type == BookType.NET &&
@@ -1780,45 +2007,63 @@ class ReaderViewModel(
             val content = purified.copy(
                 elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()),
             )
-            // 开着图：排版前先把这一章的图量好（要知道多高才知道这一页装不装得下），见 ReaderImages.measure
-            if (spec.showImages) readerImages.measure(src, content)
+            // 本地包可以同步取得尺寸；网络插图先留框，交给可见页的解码队列。
+            if (spec.showImages && src !is NetReaderBookSource) {
+                measureChapterStage({ imageMeasureMs = it }) { readerImages.measure(src, content) }
+            }
+            val reservedImage = if (spec.showImages && src is NetReaderBookSource) {
+                ImageInfo.Reserved(content.elements.all { it is ContentElement.Image })
+            } else null
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
             fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
-            val result = measureMutex.withLock {
-                if (replacement == null) paginated[chapterIndex]?.let { if (it.complete) return it }
-                // 排队等锁期间条件已经变了：别再按旧参数整章排一遍、占着锁让新字号干等。
-                // 连点几下 A+ 时，每一档排在锁上的邻章预载都会走到这里
-                if (stale()) return null
-                withContext(Dispatchers.Default) {
-                    val job = coroutineContext[Job]
-                    Paginator(facade).paginate(
-                        chapterIndex, title, content, spec,
-                        notifyAfterChar = notifyAfterChar,
-                        images = { readerImages.info(it.resourceId) },
-                        // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
-                        isAbandoned = { job?.isActive == false || stale() },
-                        onPartial = { partial ->
-                            if (replacement != null) return@paginate
-                            // 排到一半视口/字号已经换了：这份是按旧 spec 排的，别塞进缓存；源换了、目录换过同理
-                            if (stale()) return@paginate
-                            paginated[chapterIndex] = partial
-                            if (userFacing) {
-                                val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
-                                    partial.chapter.pages.lastIndex
-                                } else {
-                                    partial.chapter.pageIndexFor(notifyAfterChar)
-                                }
-                                // 这个回调跑在 Default 上：showPage 读改写 _state / position / 预取 Job，
-                                // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
-                                // 排版完成后的那次 showPage 之前，先出的仍是这一屏
-                                viewModelScope.launch(Dispatchers.Main) {
-                                    if (caller?.isActive == false || gen != tocGeneration) return@launch
-                                    showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
-                                }
-                            }
-                        },
-                    )
+            val waitStarted = TimeSource.Monotonic.markNow()
+            val result = try {
+                measureMutex.withLock {
+                    paginateWaitMs = waitStarted.elapsedNow().inWholeMilliseconds
+                    if (replacement == null) paginated[chapterIndex]?.let {
+                        if (it.complete) {
+                            loadOutcome = "cached"
+                            return it
+                        }
+                    }
+                    // 排队等锁期间条件已经变了：别再按旧参数整章排一遍、占着锁让新字号干等。
+                    // 连点几下 A+ 时，每一档排在锁上的邻章预载都会走到这里
+                    if (stale()) return null
+                    measureChapterStage({ paginateMs = it }) {
+                        withContext(Dispatchers.Default) {
+                            val job = coroutineContext[Job]
+                            Paginator(facade).paginate(
+                                chapterIndex, title, content, spec,
+                                notifyAfterChar = notifyAfterChar,
+                                images = { reservedImage ?: readerImages.info(it.resourceId) },
+                                // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
+                                isAbandoned = { job?.isActive == false || stale() },
+                                onPartial = { partial ->
+                                    if (replacement != null) return@paginate
+                                    // 排到一半视口/字号已经换了：这份是按旧 spec 排的，别塞进缓存；源换了、目录换过同理
+                                    if (stale()) return@paginate
+                                    paginated[chapterIndex] = partial
+                                    if (userFacing) {
+                                        val pageIdx = if (notifyAfterChar == Int.MAX_VALUE) {
+                                            partial.chapter.pages.lastIndex
+                                        } else {
+                                            partial.chapter.pageIndexFor(notifyAfterChar)
+                                        }
+                                        // 这个回调跑在 Default 上：showPage 读改写 _state / position / 预取 Job，
+                                        // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
+                                        // 排版完成后的那次 showPage 之前，先出的仍是这一屏
+                                        viewModelScope.launch(Dispatchers.Main) {
+                                            if (caller?.isActive == false || gen != tocGeneration) return@launch
+                                            showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
+            } finally {
+                if (paginateWaitMs == null) paginateWaitMs = waitStarted.elapsedNow().inWholeMilliseconds
             }
             // 排版中途被 isAbandoned 叫停的半截结果：不能当缓存。下面三道检查拦不住它 ——
             // 连点 A+、A- 回到原字号时，作废的条件到这里又不成立了，半截结果会被当成整章写进去
@@ -1838,13 +2083,18 @@ class ReaderViewModel(
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
             // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。
             trimWindow(position.chapterIndex, alsoKeep = chapterIndex)
+            loadOutcome = "ready"
             result
         } catch (e: CancellationException) {
+            loadOutcome = "cancelled"
             // 翻页/换视口取消了上一次加载，不是"章节读不出来"。吞掉当失败会误触发自动换源。
             throw e
         } catch (e: Exception) {
+            loadOutcome = "failed"
             // 预取失败（userFacing=false）不打扰用户，但**必须留痕**：从前这里把 e 整个丢掉，
             // 结果"预加载为什么没成功"在应用内外都查不到任何线索，只能看着转圈干瞪眼。
+            trace("chapter.load.failed", "chapter" to chapterIndex, "user_facing" to userFacing,
+                "load_id" to loadId, "error" to e.javaClass.simpleName)
             Log.w(TAG, "第 $chapterIndex 章分页失败（userFacing=$userFacing）", e)
             if (userFacing) {
                 _state.value = _state.value.copy(loading = false, error = "章节加载失败: ${e.message}")
@@ -1854,6 +2104,17 @@ class ReaderViewModel(
                 )
             }
             null
+        } finally {
+            trace("chapter.load.end", "chapter" to chapterIndex, "user_facing" to userFacing,
+                "load_id" to loadId, "outcome" to loadOutcome, "duration_ms" to loadStarted.elapsedNow().inWholeMilliseconds,
+                "acquire_ms" to acquireMs, "purify_ms" to purifyMs, "image_measure_ms" to imageMeasureMs,
+                "paginate_wait_ms" to paginateWaitMs, "paginate_ms" to paginateMs)
+            if (netTiming != null) {
+                trace("chapter.load.network", "chapter" to chapterIndex, "load_id" to loadId,
+                    "cache_state" to netTiming.cacheState, "cache_read_ms" to netTiming.cacheReadMs,
+                    "fetch_wait_ms" to netTiming.fetchWaitMs, "fetch_ms" to netTiming.fetchMs,
+                    "cache_write_ms" to netTiming.cacheWriteMs, "cache_written" to netTiming.cacheWritten)
+            }
         }
     }
 
@@ -1952,8 +2213,6 @@ class ReaderViewModel(
                 // 网络书这条路径禁止开 WebView（见 NetReaderBookSource.prefetchChapter）。
                 try {
                     src.prefetchChapter(i)
-                    // 开着图：网上的书把这一章的图也先取进缓存，翻到时不用再等（本地书的图就在包里，不用取）
-                    if (src is NetReaderBookSource && src.imagesWanted) src.prefetchImages(i)
                 } catch (e: CancellationException) {
                     // 换源/退出取消了预取。runCatching 会吞掉，循环继续往下章写，和清缓存打架。
                     throw e
@@ -2042,10 +2301,14 @@ class ReaderViewModel(
     private val readingClock = ReadingClock()
 
     /** 阅读页回到前台（含刚打开）。之前在后台的时间不算 */
-    fun onReaderStarted() = readingClock.start()
+    fun onReaderStarted() {
+        trace("started")
+        readingClock.start()
+    }
 
     /** 进后台 / 离开阅读页：收尾这一段并落库 */
     fun onReaderStopped() {
+        trace("stopped", "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter)
         readingClock.stop()
         flushReadingTime()
     }
@@ -2060,12 +2323,14 @@ class ReaderViewModel(
     }
 
     override fun onCleared() {
+        trace("closed")
         onReaderStopped()
         flushProgress()
         (source as? AutoCloseable)?.close()
     }
 
     private companion object {
+        val chapterLoadSequence = AtomicInteger()
         const val TAG = "ReaderViewModel"
 
 

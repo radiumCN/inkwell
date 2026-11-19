@@ -4,7 +4,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -14,14 +16,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.prefs.LayoutScheme
+import com.radium.inkwell.data.repo.FontImportStage
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.FontRegistry
 import com.radium.inkwell.ui.components.AddChip
 import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
@@ -42,6 +50,10 @@ class TypographyActions(
     val fontRegistry: FontRegistry,
     val schemes: List<LayoutScheme>,
     val onImportFont: (Uri) -> Unit,
+    val onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
+    val fontImportStage: FontImportStage?,
+    val fontImportError: String?,
+    val onDismissFontImportError: () -> Unit,
     val onDeleteFont: (UserFont) -> Unit,
     val onApplyScheme: (LayoutScheme) -> Unit,
     val onSaveScheme: (String) -> Unit,
@@ -52,13 +64,19 @@ class TypographyActions(
 fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
     val fonts by viewModel.userFonts.collectAsStateWithLifecycle()
     val schemes by viewModel.layoutSchemes.collectAsStateWithLifecycle()
+    val importStage by viewModel.fontImportStage.collectAsStateWithLifecycle()
+    val importError by viewModel.fontImportError.collectAsStateWithLifecycle()
     val fontRegistry = koinInject<ReaderFontStore>().registry
-    return remember(fonts, schemes, viewModel, fontRegistry) {
+    return remember(fonts, schemes, importStage, importError, viewModel, fontRegistry) {
         TypographyActions(
             fonts = fonts,
             fontRegistry = fontRegistry,
             schemes = schemes,
             onImportFont = viewModel::importFont,
+            onAdjust = viewModel::adjustTypography,
+            fontImportStage = importStage,
+            fontImportError = importError,
+            onDismissFontImportError = viewModel::dismissFontImportError,
             onDeleteFont = viewModel::deleteFont,
             onApplyScheme = viewModel::applyLayoutScheme,
             onSaveScheme = viewModel::saveLayoutScheme,
@@ -197,8 +215,43 @@ internal fun FontSection(
         longClickActions = ReaderSettings.FONT_PRESETS.map { null } +
             actions.fonts.map { font -> { deleting = font } },
         longClickLabel = "删除字体",
-        trailing = { AddChip(onClick = { picker.launch(arrayOf("*/*")) }, contentDescription = "导入字体") },
+        trailing = {
+            if (actions.fontImportStage == null) {
+                AddChip(onClick = { picker.launch(arrayOf("*/*")) }, contentDescription = "导入字体")
+            }
+        },
     )
+
+    actions.fontImportStage?.let { stage ->
+        Row(
+            modifier = Modifier.padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapS),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Dimens.gapS),
+        ) {
+            AppLoadingIndicator(size = Dimens.iconSm)
+            Text(
+                when (stage) {
+                    FontImportStage.READING -> "正在读取字体文件…"
+                    FontImportStage.VALIDATING -> "正在校验字体…"
+                },
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                style = MiuixTheme.textStyles.footnote1,
+            )
+        }
+    }
+    actions.fontImportError?.let { error ->
+        AppAlertDialog(
+            onDismissRequest = actions.onDismissFontImportError,
+            title = "字体导入失败",
+            text = error,
+            confirmText = "重新选择",
+            closeOnConfirm = true,
+            onConfirm = {
+                actions.onDismissFontImportError()
+                picker.launch(arrayOf("*/*"))
+            },
+        )
+    }
 
     deleting?.let { font ->
         AppAlertDialog(

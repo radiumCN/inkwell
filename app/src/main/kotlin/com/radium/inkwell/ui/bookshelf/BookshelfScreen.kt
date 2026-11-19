@@ -225,6 +225,9 @@ fun BookshelfScreen(
     var confirmBatchDelete by remember { mutableStateOf(false) }
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val folderImport by viewModel.folderImport.collectAsStateWithLifecycle()
+    val watchedFolders by viewModel.watchedFolders.collectAsStateWithLifecycle()
+    val scanningFolders by viewModel.scanningFolders.collectAsStateWithLifecycle()
+    var showWatchedFolders by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
@@ -376,6 +379,7 @@ fun BookshelfScreen(
         expanded = importMenuAt == anchor,
         onDismiss = { importMenuAt = null },
         onPickFiles = ::launchImport,
+        onManageFolders = { showWatchedFolders = true },
         onPickFolder = { folderLauncher.launch(null) },
     )
 
@@ -902,12 +906,18 @@ fun BookshelfScreen(
         }
     }
 
+    if (showWatchedFolders) {
+        WatchedFoldersSheet(watchedFolders, viewModel::setWatchedFolderEnabled, viewModel::removeWatchedFolder,
+            onScan = { viewModel.scanWatchedFolders(manual = true) }, scanning = scanningFolders,
+            onDismiss = { showWatchedFolders = false })
+    }
+
     folderImport?.let { state ->
         FolderImportSheet(
             state = state,
             onToggle = viewModel::toggleFolderBook,
             onSelectAll = viewModel::setAllFolderBooks,
-            onConfirm = viewModel::importBooks,
+            onConfirm = viewModel::importFolder,
             onDismiss = viewModel::dismissFolderImport,
         )
     }

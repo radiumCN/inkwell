@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.radium.inkwell.core.source.rss.RssSourceRule
 import com.radium.inkwell.data.repo.RssFeedRepository
 import com.radium.inkwell.data.repo.RssImportReport
 import com.radium.inkwell.data.repo.RssRepository
@@ -41,7 +40,7 @@ class RssSourceViewModel(
      */
     val webSourceIds: StateFlow<Set<String>> = repo.sources
         .map { list ->
-            list.filterTo(HashSet()) { e -> runCatching { RssSourceRule.fromJson(e.json).singleUrl }.getOrDefault(false) }
+            list.filterTo(HashSet()) { e -> repo.ruleOf(e)?.singleUrl == true }
                 .mapTo(HashSet()) { it.id }
         }
         .flowOn(Dispatchers.Default)

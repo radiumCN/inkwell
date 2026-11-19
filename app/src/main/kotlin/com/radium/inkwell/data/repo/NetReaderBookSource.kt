@@ -10,7 +10,9 @@ import com.radium.inkwell.reader.api.ReaderBookSource
 import com.radium.inkwell.util.SingleFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.time.TimeSource
 
 /** 网络书的阅读数据源：磁盘缓存优先，未命中走书源引擎抓取并落盘 */
 class NetReaderBookSource(
@@ -20,6 +22,7 @@ class NetReaderBookSource(
     private val engine: BookSourceEngine,
     private val cache: ChapterContentCache,
     private val chapterDao: ChapterDao,
+    private val readHealth: SourceReadHealth,
     /** 详情页存下的书级变量（BookEntity.variable 解出来的）；正文规则 @get 取不到本章变量时落到这里 */
     private val bookVariables: Map<String, String> = emptyMap(),
 ) : ReaderBookSource {
@@ -56,13 +59,6 @@ class NetReaderBookSource(
     @Volatile
     var cacheWritesHeld: Boolean = false
 
-    /**
-     * 阅读设置「正文显示图片」开着没有，由阅读页跟着设置改。开着时，升级前缓存的只有字的那一版（v4，见
-     * [ChapterContentCache.TEXT_ONLY_VERSION]）算过期：读到时重抓一份带图的；抓不到（没网）照旧读那份字。
-     */
-    @Volatile
-    var imagesWanted: Boolean = false
-
     override val chapterCount: Int get() = toc.chapters.size
 
     override fun chapterTitle(index: Int): String? = toc.chapters.getOrNull(index)?.title
@@ -74,65 +70,120 @@ class NetReaderBookSource(
      * 调 loadChapter —— 不合并的话同一章被并发抓两到四遍：白耗流量不说，JS 源要在 WebView 渲染锁上
      * 排队、限速源要排令牌，用户正等着的那一章被这些重复请求挤到超时，随后误触发自动换源、清缓存。
      */
-    private val loads = SingleFlight<String, ChapterContent>(Dispatchers.IO)
+    private data class FetchedChapter(
+        val chapter: ChapterContent,
+        val fetchMs: Long,
+        val cacheWriteMs: Long,
+        val cacheWritten: Boolean,
+    )
+
+    private val loads = SingleFlight<Pair<String, Long>, FetchedChapter>(Dispatchers.IO)
+
+    internal class LoadTiming {
+        var cacheState = "unresolved"
+        var cacheReadMs: Long? = null
+        var fetchWaitMs: Long? = null
+        var fetchMs: Long? = null
+        var cacheWriteMs: Long? = null
+        var cacheWritten: Boolean? = null
+    }
 
     /** 显式刷新必须绕过磁盘缓存和正在进行的普通加载；抓取失败不触碰原文。 */
     suspend fun fetchFreshChapter(index: Int): ChapterContent {
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
-        val remote = engine.getContent(
-            rule, url, toc.urls,
-            chapterVariable = chapter.variable,
-            chapterTitle = chapter.title.orEmpty(),
-            chapterIndex = index,
-            variables = bookVariables,
-        )
+        return fetchChapter(index, chapter, url, toc.urls)
+    }
+
+    private suspend fun fetchChapter(index: Int, chapter: ChapterEntity, url: String, chapterUrls: Set<String>): ChapterContent {
+        val remote = readHealth.measure(rule, ReadStage.CONTENT, usable = { it.elements.isNotEmpty() }) {
+            engine.getContent(
+                rule, url, chapterUrls,
+                chapterVariable = chapter.variable,
+                chapterTitle = chapter.title.orEmpty(),
+                chapterIndex = index,
+                variables = bookVariables,
+            )
+        }
         return ChapterContent(remote.elements)
     }
 
     /** 新正文成功排版后才替换缓存，URL 在发起请求时固定，目录插章不会写错章。 */
-    suspend fun cacheFreshChapter(url: String, content: ChapterContent) {
-        check(!cacheWritesHeld) { "正在切换书源" }
-        store(url, content)
+    fun cacheEpoch(): Long = cache.epoch(bookId)
+
+    suspend fun cacheFreshChapter(url: String, content: ChapterContent, epoch: Long) {
+        check(!cacheWritesHeld) { "正在切换来源" }
+        check(store(url, content, epoch)) { "来源或缓存已变化，请重新获取本章" }
     }
 
-    override suspend fun loadChapter(index: Int): ChapterContent {
+    override suspend fun loadChapter(index: Int): ChapterContent = loadChapter(index, null)
+
+    internal suspend fun loadChapter(index: Int, timing: LoadTiming?): ChapterContent {
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: error("章节不存在: $index")
         val url = chapter.url ?: error("章节缺少地址")
         // 缓存以章节 URL 为 key：目录变动后序号会错位，按序号读会读出别的章节。
         // 读盘（含 MD5 计算）切到 IO：阅读器在主线程调用，翻章时别拿它掉帧。
-        val cached = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) }
-        if (cached != null && (cached.withImages || !imagesWanted)) return cached.content
-        return try {
-            loads.run(url) {
-                // 目录阶段 @put 存的变量随章节一起落了库，这里喂回给正文规则的 @get
-                val remote = engine.getContent(
-                    rule, url, toc.urls,
-                    chapterVariable = chapter.variable,
-                    chapterTitle = chapter.title.orEmpty(),
-                    chapterIndex = index,
-                    variables = bookVariables,
-                )
-                val content = ChapterContent(remote.elements)
-                store(url, content)
-                content
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // 为了图去重抓只有字的旧缓存，没抓到（离线、来源抽风）：先读那份字，别让升级前缓存好的书读不了
-            cached?.content ?: throw e
+        val cacheStarted = timing?.let { TimeSource.Monotonic.markNow() }
+        val epoch: Long
+        var incompatible = false
+        val cached = try {
+            epoch = cacheEpoch()
+            withContext(Dispatchers.IO) { cache.readEntry(bookId, url) { incompatible = true } }
+        } finally {
+            if (cacheStarted != null) timing.cacheReadMs = cacheStarted.elapsedNow().inWholeMilliseconds
         }
+        if (cached != null) {
+            timing?.cacheState = if (cached.withImages) "hit" else "text_only_hit"
+            return cached.content
+        }
+        timing?.cacheState = when {
+            incompatible -> "incompatible"
+            else -> "miss"
+        }
+        val fetchWaitStarted = timing?.let { TimeSource.Monotonic.markNow() }
+        return try {
+            val fetched = loads.run(url to epoch) {
+                val fetchStarted = TimeSource.Monotonic.markNow()
+                val content = fetchChapter(index, chapter, url, toc.urls)
+                val fetchMs = fetchStarted.elapsedNow().inWholeMilliseconds
+                val writeStarted = TimeSource.Monotonic.markNow()
+                val written = store(url, content, epoch)
+                FetchedChapter(content, fetchMs, writeStarted.elapsedNow().inWholeMilliseconds, written)
+            }
+            if (timing != null) {
+                timing.fetchMs = fetched.fetchMs
+                timing.cacheWriteMs = fetched.cacheWriteMs
+                timing.cacheWritten = fetched.cacheWritten
+            }
+            fetched.chapter
+        } finally {
+            if (fetchWaitStarted != null) timing.fetchWaitMs = fetchWaitStarted.elapsedNow().inWholeMilliseconds
+        }
+    }
+
+    internal suspend fun upgradeTextOnlyChapter(index: Int, onStage: (String) -> Unit): String {
+        val toc = toc
+        val chapter = toc.chapters.getOrNull(index) ?: return "skipped"
+        val url = chapter.url ?: return "skipped"
+        val epoch = cacheEpoch()
+        if (cacheWritesHeld || !withContext(Dispatchers.IO) { cache.claimTextOnlyUpgrade(bookId, url, epoch) }) {
+            return "skipped"
+        }
+        onStage("fetch")
+        val content = fetchChapter(index, chapter, url, toc.urls)
+        onStage("write")
+        return if (store(url, content, epoch, onlyTextOnly = true)) "ready" else "discarded"
     }
 
     override suspend fun prefetchChapter(index: Int) {
         val toc = toc
         val chapter = toc.chapters.getOrNull(index) ?: return
         val url = chapter.url ?: return
+        val epoch = cacheEpoch()
         // 只问「有没有」，别 read：命中时整章读进来解析一遍再扔掉，每到章首章尾都要这样过几章（见 hasCurrent）
-        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url, needImages = imagesWanted) }) return
+        if (withContext(Dispatchers.IO) { cache.hasCurrent(bookId, url) }) return
         // 预取禁止 JS 渲染：WebView 只能在主线程跑，翻页/卷页跟手会被 Chromium 抢走。
         // 静态抓不到就放弃，等用户真翻到这一章再走 loadChapter 的渲染回退。
         val remote = engine.getContent(
@@ -143,7 +194,7 @@ class NetReaderBookSource(
             chapterIndex = index,
             variables = bookVariables,
         )
-        store(url, ChapterContent(remote.elements))
+        store(url, ChapterContent(remote.elements), epoch)
     }
 
     /**
@@ -153,28 +204,31 @@ class NetReaderBookSource(
      * 旧序号上躺着的是另一章，打错了标记，目录里没缓存的章亮着、缓存了的反倒灭着。
      * 一条按 URL 的 UPDATE 搞定：先查后改的两步之间目录照样可能被换掉。
      */
-    private suspend fun store(url: String, content: ChapterContent) {
-        if (cacheWritesHeld) return
-        withContext(Dispatchers.IO) {
-            cache.write(bookId, url, content)
-            chapterDao.markCachedByUrl(bookId, url, true)
+    private suspend fun store(
+        url: String,
+        content: ChapterContent,
+        epoch: Long,
+        onlyTextOnly: Boolean = false,
+    ): Boolean {
+        if (cacheWritesHeld) return false
+        return withContext(Dispatchers.IO) {
+            ensureActive()
+            if (cacheWritesHeld || !cache.writeIfEpoch(bookId, url, content, epoch, onlyTextOnly)) {
+                return@withContext false
+            }
+            // 文件写入后可能已经被清理；不要给旧请求打新目录的缓存标记。
+            if (cacheEpoch() == epoch) {
+                chapterDao.markCachedByUrl(bookId, url, true)
+                if (cacheEpoch() != epoch) {
+                    chapterDao.markCachedByUrl(bookId, url, cache.hasCurrent(bookId, url))
+                }
+            }
+            true
         }
     }
 
     /** 同一张图同时只取一次：本章排版、邻章预载、看大图可能一起要它 */
-    private val imageLoads = SingleFlight<String, ByteArray?>(Dispatchers.IO)
-
-    /**
-     * 往后预取时顺带把这一章的图取进缓存（开着「正文显示图片」时），翻到时不用再等。
-     * 只看已经缓存好的正文（[prefetchChapter] 刚取过），不为了它去抓正文 —— 那条路可能开 WebView，预取不许。
-     */
-    suspend fun prefetchImages(index: Int) {
-        val url = toc.chapters.getOrNull(index)?.url ?: return
-        val entry = withContext(Dispatchers.IO) { cache.readEntry(bookId, url) } ?: return
-        for (el in entry.content.elements) {
-            if (el is ContentElement.Image) loadImage(el.resourceId)
-        }
-    }
+    private val imageLoads = SingleFlight<Pair<String, Long>, ByteArray?>(Dispatchers.IO)
 
     /**
      * 正文插图：先看缓存（离线也看得到读过的图），没有再经引擎取 —— 带上来源的请求头、防盗链时补 Referer、
@@ -182,11 +236,12 @@ class NetReaderBookSource(
      * 取到就落盘；换源进行中不落（理由同 [cacheWritesHeld]）。取不到返回 null，阅读页排一条「点按重试」。
      */
     override suspend fun loadImage(resourceId: String): ByteArray? = withContext(Dispatchers.IO) {
+        val epoch = cacheEpoch()
         cache.readImage(bookId, resourceId)?.let { return@withContext it }
-        imageLoads.run(resourceId) {
+        imageLoads.run(resourceId to epoch) {
             try {
                 engine.getImage(rule, resourceId).also { bytes ->
-                    if (!cacheWritesHeld) cache.writeImage(bookId, resourceId, bytes)
+                    if (!cacheWritesHeld) cache.writeImageIfEpoch(bookId, resourceId, bytes, epoch)
                 }
             } catch (e: CancellationException) {
                 throw e

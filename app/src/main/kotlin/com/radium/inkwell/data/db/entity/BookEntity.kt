@@ -88,3 +88,6 @@ data class BookEntity(
     /** 用户主动移出书架，保留文件、目录与进度；与从未加入的试读区分，参与同步。 */
     val removedFromShelf: Boolean = false,
 )
+
+/** 阅读统计的轻量书目；不读取文件路径、封面、简介与阅读进度。 */
+data class StatsBook(val id: String, val title: String, val author: String, val hidden: Boolean)

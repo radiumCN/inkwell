@@ -7,6 +7,7 @@ import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Update
 import com.radium.inkwell.data.db.entity.BookEntity
+import com.radium.inkwell.data.db.entity.StatsBook
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -82,6 +83,14 @@ interface BookDao {
     @Query("SELECT * FROM book WHERE deleted = 0 AND inShelf = 1")
     suspend fun getAllVisible(): List<BookEntity>
 
+    /** 只返回同名同作者的本地书，避免逐本导入时把含简介/封面的整库读进内存。 */
+    @Query(FIND_LOCAL_BOOKS_SQL)
+    suspend fun findLocalBooks(title: String, author: String, includeRemoved: Boolean, whitespace: String): List<BookEntity>
+
+    /** 榜单只需这几列；保留墓碑书的名称，隐藏状态变化也会实时重算。 */
+    @Query("SELECT id, title, author, hidden FROM book ORDER BY id")
+    fun observeStatsBooks(): Flow<List<StatsBook>>
+
     /**
      * 分组、隐藏都是要跨设备同步的元数据，合并按 updatedAt 做 LWW —— 必须同时盖时间戳。
      * 不盖的话改动永远同步不出去，别的设备一追更（刷新了 updatedAt）还会把它改回来：
@@ -101,3 +110,8 @@ interface BookDao {
     @Query("SELECT MAX(COALESCE(MAX(updatedAt), 0), COALESCE(MAX(readAt), 0)) FROM book")
     suspend fun lastChangeAt(): Long
 }
+
+/** 共享给真实 SQLite 回归，保证 SQL trim 与 Kotlin 的查重键一致。 */
+internal const val FIND_LOCAL_BOOKS_SQL = """SELECT * FROM book WHERE deleted = 0 AND type != 3
+        AND (inShelf = 1 OR (:includeRemoved AND removedFromShelf = 1))
+        AND trim(title, :whitespace) = :title AND trim(author, :whitespace) = :author"""

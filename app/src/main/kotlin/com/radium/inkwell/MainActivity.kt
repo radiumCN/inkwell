@@ -1,5 +1,6 @@
 package com.radium.inkwell
 
+import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.SystemClock
@@ -12,8 +13,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.core.os.BundleCompat
 import androidx.core.view.WindowCompat
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.nav.InkwellNavDisplay
@@ -35,10 +39,17 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private val keyEventBus: KeyEventBus by inject()
     private val appPrefs: AppPrefs by inject()
     private val updateNotifier: UpdateNotifier by inject()
+    private var externalBooks by mutableStateOf<List<Intent>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) {
+            receiveExternalBook(intent)
+        } else {
+            externalBooks = BundleCompat.getParcelableArrayList(savedInstanceState, EXTERNAL_BOOKS, Intent::class.java)
+                .orEmpty()
+        }
         // 夹具开关先判：正式包里这个 extra 谁都能塞进来（桌面 alias 是 exported 的），见 ProfileSeed
         if (ProfileSeed.enabled(this) && intent.getBooleanExtra(ProfileSeed.EXTRA, false)) {
             lifecycleScope.launch {
@@ -70,9 +81,29 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             }
             InkwellTheme(config = themeConfig) {
-                InkwellNavDisplay()
+                InkwellNavDisplay(
+                    externalBook = externalBooks.firstOrNull(),
+                    onExternalBookHandled = { request -> externalBooks = externalBooks.filterNot { it === request } },
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiveExternalBook(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putParcelableArrayList(EXTERNAL_BOOKS, ArrayList(externalBooks))
+    }
+
+    private fun receiveExternalBook(intent: Intent) {
+        val uri = intent.data ?: return
+        if (intent.action != Intent.ACTION_VIEW || uri.scheme != "content") return
+        if (externalBooks.any { it.data == uri }) return
+        externalBooks = externalBooks + Intent(Intent.ACTION_VIEW).setDataAndType(uri, intent.type)
     }
 
     /** 首帧是否已按读到的主题组合过；见 [holdFirstFrameUntilThemed] */
@@ -101,6 +132,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private companion object {
         const val THEME_WAIT_MS = 300L
+        const val EXTERNAL_BOOKS = "external_book_requests"
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

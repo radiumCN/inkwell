@@ -46,7 +46,41 @@
         <activity
             android:name=".MainActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden" />
+
+        <activity-alias
+            android:name=".OpenBook"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+                <data android:mimeType="application/x-mobi8-ebook" />
+            </intent-filter>
+            <!-- 某些下载器只给通用 MIME；URI 保留文件后缀时仍可精确匹配。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathSuffix=".txt" />
+                <data android:pathSuffix=".epub" />
+                <data android:pathSuffix=".mobi" />
+                <data android:pathSuffix=".azw" />
+                <data android:pathSuffix=".azw3" />
+                <data android:pathSuffix=".TXT" />
+                <data android:pathSuffix=".EPUB" />
+                <data android:pathSuffix=".MOBI" />
+                <data android:pathSuffix=".AZW" />
+                <data android:pathSuffix=".AZW3" />
+            </intent-filter>
+        </activity-alias>
 
         <!--
           桌面图标：4 种图形 × 5 种纸色，一个组合一个 alias（对应表见 util/AppIcon.kt，AppIconManifestTest 钉着两边对得上）。

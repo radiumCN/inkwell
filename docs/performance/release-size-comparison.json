@@ -1,0 +1,16 @@
+{
+  "before": {
+    "apk_bytes": 9336702,
+    "resources_bytes": 820549,
+    "resource_entries": 432,
+    "launcher_variants_present": 20
+  },
+  "after": {
+    "apk_bytes": 9013883,
+    "resources_bytes": 505556,
+    "resource_entries": 362,
+    "launcher_variants_present": 20
+  },
+  "apk_saved_bytes": 322819,
+  "resources_saved_bytes": 314993
+}

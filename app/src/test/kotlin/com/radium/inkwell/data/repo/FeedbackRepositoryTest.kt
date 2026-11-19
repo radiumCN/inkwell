@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import java.io.File
 
 /**
  * 反馈提交的状态码分支。
@@ -79,6 +80,43 @@ class FeedbackRepositoryTest {
         repo.submit(content = "正文", contact = "   ")
         val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()) as JsonObject
         assertTrue("contact" !in body)
+    }
+
+    @Test
+    fun `附带日志使用 multipart 并发送同一个提交编号`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"issue":1,"url":"u"}"""))
+        val logs = File.createTempFile("feedback-test", ".zip")
+        try {
+            logs.writeText("test-archive-marker")
+            repo.submit(content = "正文", requestId = "stable-submission-id", logs = logs)
+            val req = server.takeRequest()
+            assertTrue(req.getHeader("Content-Type")!!.startsWith("multipart/form-data;"))
+            val body = req.body.readUtf8()
+            assertTrue("name=\"payload\"" in body)
+            assertTrue("\"request_id\":\"stable-submission-id\"" in body)
+            assertTrue("name=\"logs\"; filename=\"logs.zip\"" in body)
+            assertTrue("test-archive-marker" in body)
+        } finally {
+            logs.delete()
+        }
+    }
+
+    @Test
+    fun `不附带日志保留 JSON 且发送提交编号`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"issue":1,"url":"u"}"""))
+        repo.submit(content = "正文", requestId = "stable-submission-id")
+        val req = server.takeRequest()
+        assertTrue(req.getHeader("Content-Type")!!.startsWith("application/json"))
+        val body = Json.parseToJsonElement(req.body.readUtf8()) as JsonObject
+        assertEquals("stable-submission-id", body["request_id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `结果待确认不提示重新提交`() = runBlocking {
+        for (code in listOf(409, 502, 503)) {
+            server.enqueue(MockResponse().setResponseCode(code).setBody("""{"code":"result_pending"}"""))
+            assertEquals(FeedbackResult.Pending, repo.submit("正文"))
+        }
     }
 
     @Test

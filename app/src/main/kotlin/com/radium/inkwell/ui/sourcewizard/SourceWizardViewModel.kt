@@ -516,7 +516,7 @@ class SourceWizardViewModel(
         job = viewModelScope.launch {
             _state.update { it.copy(saving = true, saveError = null) }
             val detail = attempt(VERIFY_TIMEOUT_MS) {
-                val (detail, chapters) = netBookRepo.fetchDetailAndToc(draft, book.bookUrl)
+                val (detail, chapters) = netBookRepo.fetchDetailAndToc(draft, book.bookUrl, trackReadHealth = false)
                 if (chapters.isEmpty()) error("按识别结果没抓到目录")
                 val sampleUrl = s.toc?.sampleChapter?.url
                 val sample = chapters.firstOrNull { it.url == sampleUrl } ?: chapters.first()

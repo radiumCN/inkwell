@@ -13,6 +13,7 @@ import com.radium.inkwell.data.db.dao.ReplaceRuleDao
 import com.radium.inkwell.data.db.dao.RssArticleDao
 import com.radium.inkwell.data.db.dao.RssSourceDao
 import com.radium.inkwell.data.db.dao.ReadingStatDao
+import com.radium.inkwell.data.db.dao.SourceReadHealthDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookSourceEntity
 import com.radium.inkwell.data.db.entity.BookSourceHitEntity
@@ -21,6 +22,7 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.db.entity.RssArticleEntity
 import com.radium.inkwell.data.db.entity.RssSourceEntity
 import com.radium.inkwell.data.db.entity.ReadingStatEntity
+import com.radium.inkwell.data.db.entity.SourceReadHealthEntity
 
 @Database(
     entities = [
@@ -32,9 +34,10 @@ import com.radium.inkwell.data.db.entity.ReadingStatEntity
         RssSourceEntity::class,
         ReadingStatEntity::class,
         RssArticleEntity::class,
+        SourceReadHealthEntity::class,
     ],
-    version = 22,
-    exportSchema = false,
+    version = 23,
+    exportSchema = true,
 )
 abstract class InkwellDb : RoomDatabase() {
     abstract fun bookDao(): BookDao
@@ -45,8 +48,25 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun rssSourceDao(): RssSourceDao
     abstract fun readingStatDao(): ReadingStatDao
     abstract fun rssArticleDao(): RssArticleDao
+    abstract fun sourceReadHealthDao(): SourceReadHealthDao
 
     companion object {
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN searchAt INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("ALTER TABLE book_source ADD COLUMN searchRetryAt INTEGER NOT NULL DEFAULT 0")
+                connection.execSQL("DROP INDEX idx_book_source_enabled")
+                connection.execSQL("CREATE INDEX idx_book_source_enabled ON book_source (enabled, deleted, sortOrder, name, id, updatedAt, checkStatus, respondTime, searchMs, searchFails, searchAt, searchRetryAt, checkedAt)")
+                connection.execSQL("""
+                    CREATE TABLE IF NOT EXISTS source_read_health (
+                        sourceId TEXT NOT NULL, stage TEXT NOT NULL, ruleHash INTEGER NOT NULL,
+                        score INTEGER NOT NULL, samples INTEGER NOT NULL, observedAt INTEGER NOT NULL,
+                        PRIMARY KEY(sourceId, stage, ruleHash)
+                    )
+                """.trimIndent())
+            }
+        }
+
         val MIGRATION_21_22 = object : Migration(21, 22) {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("ALTER TABLE book ADD COLUMN removedFromShelf INTEGER NOT NULL DEFAULT 0")
@@ -343,5 +363,30 @@ abstract class InkwellDb : RoomDatabase() {
                 connection.execSQL("ALTER TABLE book_source ADD COLUMN checkedAt INTEGER NOT NULL DEFAULT 0")
             }
         }
+        /** 运行时注册与升级回归共用这条链，避免测试了迁移却忘了注册到应用。 */
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12,
+            MIGRATION_12_13,
+            MIGRATION_13_14,
+            MIGRATION_14_15,
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_23,
+        )
     }
 }

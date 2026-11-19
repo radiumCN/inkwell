@@ -1,0 +1,6 @@
+n=2000 sources=3 sort=WORD_COUNT mode=comparator_baseline median_ms=100.404
+n=2000 sources=3 sort=WORD_COUNT mode=production_cold median_ms=8.730
+n=2000 sources=3 sort=WORD_COUNT mode=production_reused median_ms=1.598
+n=2000 sources=3 sort=UPDATE_TIME mode=comparator_baseline median_ms=143.041
+n=2000 sources=3 sort=UPDATE_TIME mode=production_cold median_ms=7.930
+n=2000 sources=3 sort=UPDATE_TIME mode=production_reused median_ms=1.928

@@ -14,4 +14,7 @@ data class EnabledSourceMeta(
     val sortOrder: Int,
     val searchMs: Long,
     val searchFails: Int,
+    val searchAt: Long = 0,
+    val searchRetryAt: Long = 0,
+    val checkedAt: Long = 0,
 )

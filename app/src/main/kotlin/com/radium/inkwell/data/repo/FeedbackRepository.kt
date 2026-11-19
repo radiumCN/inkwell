@@ -11,6 +11,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.MultipartBody
+import java.io.File
 
 /**
  * 提交结果。**每个分支对应服务端一个明确的状态码**，而不是笼统的成功/失败 ——
@@ -25,6 +28,8 @@ sealed interface FeedbackResult {
 
     /** 413：超过 [MAX_CONTENT_LENGTH] 字。UI 层本该拦住，走到这里说明拦漏了 */
     data object TooLong : FeedbackResult
+    data object AttachmentTooLarge : FeedbackResult
+    data object Pending : FeedbackResult
 
     /**
      * 429：限流。按**来源 IP** 计（默认每小时 5 条），
@@ -69,6 +74,8 @@ class FeedbackRepository(
         device: String? = null,
         osVersion: String? = null,
         channel: String? = null,
+        requestId: String? = null,
+        logs: File? = null,
     ): FeedbackResult = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
             Payload.serializer(),
@@ -79,11 +86,18 @@ class FeedbackRepository(
                 device = device,
                 osVersion = osVersion,
                 channel = channel,
+                requestId = requestId,
             ),
         )
+        val requestBody = if (logs == null) body.toRequestBody(JSON_MEDIA) else {
+            MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("payload", body)
+                .addFormDataPart("logs", "logs.zip", logs.asRequestBody("application/zip".toMediaType()))
+                .build()
+        }
         val req = Request.Builder()
             .url("$baseUrl/api/v1/feedback")
-            .post(body.toRequestBody(JSON_MEDIA))
+            .post(requestBody)
             .build()
         try {
             http.newCall(req).execute().use { resp ->
@@ -93,11 +107,15 @@ class FeedbackRepository(
                         FeedbackResult.Success(dto.issue, dto.url)
                     }
                     400 -> FeedbackResult.InvalidContent
-                    413 -> FeedbackResult.TooLong
+                    413 -> if (logs != null) FeedbackResult.AttachmentTooLarge else FeedbackResult.TooLong
+                    409 -> FeedbackResult.Pending
                     429 -> FeedbackResult.RateLimited(
                         resp.header("Retry-After")?.trim()?.toLongOrNull(),
                     )
-                    502, 503 -> FeedbackResult.ServerDown
+                    502, 503 -> {
+                        val error = runCatching { json.decodeFromString<ErrorResponse>(resp.body.string()) }.getOrNull()
+                        if (error?.code == "result_pending") FeedbackResult.Pending else FeedbackResult.ServerDown
+                    }
                     else -> FeedbackResult.NetworkError("HTTP ${resp.code}")
                 }
             }
@@ -117,7 +135,11 @@ class FeedbackRepository(
         val device: String? = null,
         @SerialName("os_version") val osVersion: String? = null,
         val channel: String? = null,
+        @SerialName("request_id") val requestId: String? = null,
     )
+
+    @Serializable
+    private data class ErrorResponse(val code: String = "")
 
     @Serializable
     private data class Response(val status: String = "", val issue: Int = 0, val url: String = "")

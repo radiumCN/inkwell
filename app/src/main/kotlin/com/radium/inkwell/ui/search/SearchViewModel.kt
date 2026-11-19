@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.search
 
 import android.util.Log
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -28,7 +29,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,7 +49,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.text.Collator
-import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -81,6 +83,11 @@ data class SearchHit(val results: List<SearchResult>) {
      * 打开详情 / 加入书架时优先用的源。[results] 按书源健康度排过之后即第一条；
      * 和 [result] 分开，是因为副标题要字数，打开却要快的活源。
      */
+    // 一个 SearchHit 的来源列表不可变；合并新增来源时会创建新实例，排序值自然重新计算。
+    // 比较器只读缓存的数字，不再每次比较都编译正则、扫描简介和创建 Calendar。
+    internal val wordCount: Long by lazy { results.maxOf { parseWordCount(it.wordCount) } }
+    internal val updateEpoch: Long by lazy { searchUpdateEpoch(results) }
+
     val preferred: SearchResult get() = results.first()
     val origins: Set<String> by lazy(LazyThreadSafetyMode.PUBLICATION) { results.mapTo(LinkedHashSet()) { it.sourceId } }
 }
@@ -191,15 +198,23 @@ class SearchViewModel(
 
     /** 本轮允不允许提前结束：只在新搜索的第一页、书源够多时开；触发过一次或点了「继续搜索」就关掉 */
     private var earlyStopArmed = false
-    private var normalizedKeyword = ""
-    /** 交回过书名完全一致结果的书源 */
-    private val exactTitleSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private var exactMatches: ExactBookMatches? = null
+    private val pageHistory = SearchPageHistory()
 
-    // 一轮搜索的耗时概要，写进日志（开发者模式的运行日志录的就是 logcat）。调调度参数得先有数
     private var searchStartedAt = 0L
-    private var firstResultAt = 0L
-    private val timeoutCount = AtomicInteger(0)
-    private val failCount = AtomicInteger(0)
+    private var prepareMs = 0L
+    private var pausedAt = 0L
+    private var pausedMs = 0L
+    private var firstResultPlaced = false
+    private val searchCounts = IntArray(SearchStatus.entries.size)
+
+    fun noteFirstResultPlaced(searchId: Int) {
+        val state = _state.value
+        if (searchId != state.searchId || state.results.isEmpty() || firstResultPlaced) return
+        firstResultPlaced = true
+        UsageLog.event("search.first_visible", "search_id" to searchId,
+            "duration_ms" to nowMs() - searchStartedAt, "prepare_ms" to prepareMs)
+    }
 
     /** 暂停时拍下还没跑完的源；返回列表后 [resumeSearch] 接着跑，不重开一轮、不清已有结果 */
     private var paused: PausedSearch? = null
@@ -331,7 +346,7 @@ class SearchViewModel(
         sortJob = viewModelScope.launch {
             val snapshot = hitsMutex.withLock { hits.values.toList() }
             val sorted = withContext(Dispatchers.Default) {
-                ordered(snapshot, keyword, sort)
+                orderSearchHits(snapshot, keyword, sort)
             }
             if (_state.value.sortId != sortId) return@launch
             _state.value = _state.value.copy(results = sorted)
@@ -342,6 +357,8 @@ class SearchViewModel(
         // 与历史同一个规范形（见 normalizeSearchKeyword），点历史重搜才是同一个词
         val keyword = normalizeSearchKeyword(_state.value.query)
         if (keyword.isEmpty()) return
+        val submittedAt = nowMs()
+        UsageLog.event("ui.click", "action" to "search.submit")
         // 单独起协程、不挂在 searchJob 上：紧接着再搜一次会 cancel 掉 searchJob，这条历史不该跟着丢。
         // 没有可用书源也照记 —— 用户导好书源回来，正好点历史重搜。
         // 指向上锁隐藏书的词不记（见 revealsHiddenBook）：搜索页不经验证就能打开
@@ -352,22 +369,66 @@ class SearchViewModel(
             }
         }
         paused = null
+        if (_state.value.searching) logSummary("replaced")
         searchJob?.cancel()
         sortJob?.cancel()
         publishJob?.cancel()
         // 上一轮的「加载更多」还在飞时开新搜索：不掐掉它，它回来会把旧关键词的结果 merge 进
         // 刚清空的 hits，串进新搜索列表
         pagingJob?.cancel()
+        roundGen++
+        roundRules = emptyList()
+        pendingIds.clear()
+        searchStartedAt = submittedAt
+        prepareMs = 0L
+        pausedAt = 0L
+        pausedMs = 0L
+        firstResultPlaced = false
+        searchCounts.fill(0)
+        doneCounter.set(0)
+        val searchId = _state.value.searchId + 1
+        _state.update {
+            it.copy(
+                searching = true,
+                searchPaused = false,
+                earlyStopped = false,
+                allFailed = false,
+                pausedRemaining = 0,
+                results = emptyList(),
+                sourceCount = 0, doneCount = 0,
+                page = 1, hasMore = false, loadingMore = false,
+                searchId = searchId,
+            )
+        }
         searchJob = viewModelScope.launch {
+            activeKeyword = keyword
+            hitsMutex.withLock { hits.clear() }
+            moreAcc.clear()
+            pagingRules = emptyList()
+            pageHistory.clear()
+            inFlightPage = 1
             // 上一轮被新搜索打断时没走到收尾，它测到的速度在这里落库
             flushSearchStats()
-            val enabled = sourceRepo.getEnabledForSwitch()
+            val enabled = try {
+                sourceRepo.getEnabledForSwitch()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+                _state.update { it.copy(searching = false) }
+                logSummary("source_load_failed")
+                messages.emit("读取书源失败，请重试")
+                return@launch
+            }
             sourceMetaById = enabled.associateBy { it.rule.id }
             // 快的、活的先发，坏源排到最后（见 SearchScheduling）。从前按书源管理里的手动顺序发，
             // 一个吊死的源排在前面就占着一个并发名额等满超时，健康的源在后面干等
             val searchable = SearchScheduling.order(withLiveSpeed(enabled.filter { it.rule.search != null }))
             val rules = searchable.map { it.rule }
             if (rules.isEmpty()) {
+                _state.update { it.copy(searching = false) }
+                UsageLog.event("search.no_sources", "enabled" to enabled.size,
+                    "duration_ms" to nowMs() - submittedAt)
                 // 区分"没有书源"和"启用的都是仅发现页的源"，后者曾误导用户以为启用没生效。
                 // 「新建书源」没设置搜索的源连发现页也没有：别叫人去发现页里找它
                 messages.emit(
@@ -381,31 +442,11 @@ class SearchViewModel(
                 )
                 return@launch
             }
-            activeKeyword = keyword
-            hitsMutex.withLock { hits.clear() }
-            moreAcc.clear()
-            pagingRules = emptyList()
-            doneCounter.set(0)
-            normalizedKeyword = TitleMatch.normalize(keyword)
-            exactTitleSources.clear()
+            val normalizedKeyword = TitleMatch.normalize(keyword)
             earlyStopArmed = rules.size >= SearchScheduling.EARLY_STOP_MIN_SOURCES && normalizedKeyword.isNotEmpty()
-            searchStartedAt = nowMs()
-            firstResultAt = 0L
-            timeoutCount.set(0)
-            failCount.set(0)
-            val searchId = _state.value.searchId + 1
-            inFlightPage = 1
-            _state.value = _state.value.copy(
-                searching = true,
-                searchPaused = false,
-                earlyStopped = false,
-                allFailed = false,
-                pausedRemaining = 0,
-                results = emptyList(),
-                sourceCount = rules.size, doneCount = 0,
-                page = 1, hasMore = false, loadingMore = false,
-                searchId = searchId,
-            )
+            exactMatches = if (earlyStopArmed) ExactBookMatches(normalizedKeyword) else null
+            prepareMs = nowMs() - submittedAt
+            _state.update { it.copy(sourceCount = rules.size) }
             searchRound(rules, keyword, page = 1, searchId, countProgress = true)
             finishRound(searchId, keyword, fetchPage = 1)
         }
@@ -416,30 +457,39 @@ class SearchViewModel(
      * 协程的 finally 会把 pending 清掉，cancel 后再读就只剩空的，返回来没法继续。
      * 不自动 resume：详情页还在加载，后台接着搜会跟它抢网。
      */
-    fun pauseSearch() {
+    fun pauseSearch() = pauseSearch("paused")
+
+    private fun pauseSearch(reason: String) {
+        UsageLog.event("search.pause")
         val s = _state.value
         if (!s.searching && !s.loadingMore) return
+        if (s.searching) logSummary(reason)
         val remaining = roundRules.filter { it.id in pendingIds }
+        val nextPageRules = moreAcc.toList()
         paused = PausedSearch(
             remaining = remaining,
-            alreadyMore = moreAcc.toList(),
+            alreadyMore = nextPageRules,
             fetchPage = inFlightPage,
             keyword = activeKeyword,
             searchId = s.searchId,
         ).takeIf { remaining.isNotEmpty() }
+        if (s.searching && paused != null) pausedAt = nowMs()
         // 让还在飞的旧协程别再往 moreAcc / pending 里写；searchId 没变，已完成的 merge 仍可进 hits
         roundGen++
         searchJob?.cancel()
         pagingJob?.cancel()
         publishJob?.cancel()
+        if (remaining.isEmpty()) pagingRules = nextPageRules
         _state.update {
             it.copy(
                 searching = false,
                 loadingMore = false,
                 searchPaused = remaining.isNotEmpty(),
                 pausedRemaining = remaining.size,
-                // 暂停期间不准翻页：pagingRules 可能还是上一轮残留，和当前关键词对不上
-                hasMore = false,
+                // 仅在这一页还有待搜来源时禁止翻页；如果所有源已完成，就保留下一页队列。
+                hasMore = remaining.isEmpty() && nextPageRules.isNotEmpty(),
+                page = if (remaining.isEmpty()) inFlightPage else it.page,
+                doneCount = doneCounter.get(),
             )
         }
         // 被掐掉的这一轮走不到 finishRound，已经测到的速度在这里落库
@@ -456,12 +506,14 @@ class SearchViewModel(
     }
 
     fun resumeSearch() {
+        UsageLog.event("search.resume")
         val p = paused ?: return
         paused = null
         // 点了「继续搜索」就是要全量结果：别搜两下又提前结束一次
         earlyStopArmed = false
         _state.update { it.copy(earlyStopped = false) }
         if (p.fetchPage == 1) {
+            pausedMs += nowMs() - pausedAt
             searchJob?.cancel()
             searchJob = viewModelScope.launch { resumeRound(p) }
         } else {
@@ -500,41 +552,32 @@ class SearchViewModel(
         roundRules = rules.toList()
         pendingIds.clear()
         pendingIds.addAll(roundRules.map { it.id })
-        val limiter = Semaphore(8)
+        val limiter = Semaphore(SearchScheduling.CONCURRENCY)
         roundRules.map { rule ->
             async {
                 try {
                     limiter.withPermit {
                         val pageResult = searchPage(rule, keyword, page)
-                        if (_state.value.searchId != searchId) return@withPermit
+                        if (_state.value.searchId != searchId || gen != roundGen) return@withPermit
+                        val items = pageResult?.items.orEmpty()
+                        val changed = hitsMutex.withLock {
+                            if (gen != roundGen) return@withLock false
+                            merge(items)
+                        }
+                        if (gen != roundGen) return@withPermit
+                        if (pageHistory.canContinue(rule.id, pageResult)) moreAcc += rule
                         if (countProgress) {
-                            val items = pageResult?.items.orEmpty()
-                            hitsMutex.withLock { merge(items) }
-                            if (gen != roundGen) return@withPermit
-                            if (items.isNotEmpty() && firstResultAt == 0L) firstResultAt = nowMs()
                             doneCounter.incrementAndGet()
                             // 进度随节流发布一起刷（见 schedulePublish）：从前每回来一个源就 copy 一次整份状态，
                             // 几百个源就是几百次整页重组，边搜边滑会掉帧
                             schedulePublish(keyword, searchId)
-                            if (pageResult?.hasMore == true) moreAcc += rule
-                            if (earlyStopArmed && items.any { SearchScheduling.isExactTitle(it.title, normalizedKeyword) }) {
-                                exactTitleSources += rule.id
-                                if (exactTitleSources.size >= SearchScheduling.EARLY_STOP_SOURCES) {
-                                    // 这个源已经搜完了，别留在「待搜」里 —— 否则继续搜索时它会再被请求一遍
-                                    pendingIds.remove(rule.id)
-                                    // 正好是最后一个源就没什么可省的了：照常收尾，别丢掉 finishRound 里的「加载更多」
-                                    if (pendingIds.isNotEmpty()) stopEarly(keyword)
-                                }
+                            if (earlyStopArmed && exactMatches?.record(rule, items) == true) {
+                                // 最后一个源不暂停，照常收尾并保留加载更多。
+                                pendingIds.remove(rule.id)
+                                if (pendingIds.isNotEmpty()) stopEarly()
                             }
-                        } else {
-                            val gotNew = hitsMutex.withLock {
-                                val before = hits.size
-                                merge(pageResult?.items.orEmpty())
-                                hits.size > before
-                            }
-                            if (gen != roundGen) return@withPermit
-                            if (gotNew) schedulePublish(keyword, searchId)
-                            if (pageResult?.hasMore == true && gotNew) moreAcc += rule
+                        } else if (changed) {
+                            schedulePublish(keyword, searchId)
                         }
                     }
                 } finally {
@@ -556,13 +599,13 @@ class SearchViewModel(
         val more = moreAcc.toList()
         pagingRules = more
         flushSearchStats()
-        if (fetchPage == 1) logSummary(keyword, "搜完")
         if (_state.value.searchId != searchId) return
+        if (fetchPage == 1) logSummary("completed")
         val done = doneCounter.get()
         _state.value = _state.value.copy(
             results = sorted,
             allFailed = fetchPage == 1 && sorted.isEmpty() && done > 0 &&
-                timeoutCount.get() + failCount.get() >= done,
+                count(SearchStatus.MATCHES) + count(SearchStatus.EMPTY) == 0,
             searching = false,
             loadingMore = false,
             searchPaused = false,
@@ -627,7 +670,7 @@ class SearchViewModel(
     private suspend fun orderedNow(snapshot: List<SearchHit>, keyword: String): List<SearchHit> {
         while (true) {
             val sort = _state.value.sort
-            val sorted = withContext(Dispatchers.Default) { ordered(snapshot, keyword, sort) }
+            val sorted = withContext(Dispatchers.Default) { orderSearchHits(snapshot, keyword, sort) }
             if (_state.value.sort == sort) return sorted
         }
     }
@@ -648,63 +691,6 @@ class SearchViewModel(
         mergeSearchResults(hits, items) { AutoSourceSwitcher.rankSearchResults(it, sourceMetaById) }
 
     /**
-     * 对快照排序。Collator 非线程安全，每次现场建一份；
-     * 调用方先 [Collection.toList] 再丢进 Default，避免边 merge 边排。
-     * 各本书里的源在合并时已经排好（见 [merge]），这里只排书。
-     */
-    private fun ordered(
-        items: List<SearchHit>,
-        keyword: String,
-        sort: SearchSort,
-    ): List<SearchHit> {
-        val collator = Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY }
-        return when (sort) {
-            SearchSort.RELEVANCE -> items.sortedWith(
-                compareBy<SearchHit> { tier(it.result, keyword) }
-                    .thenByDescending { it.origins.size },
-            )
-            SearchSort.WORD_COUNT -> items.sortedWith(
-                compareByDescending<SearchHit> { wordCountOf(it) }
-                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-            SearchSort.TITLE_PINYIN -> items.sortedWith(
-                compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
-                    .thenByDescending { it.origins.size },
-            )
-            SearchSort.AUTHOR_PINYIN -> items.sortedWith(
-                compareBy(collator) { hit: SearchHit ->
-                    hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
-                }.thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-            SearchSort.UPDATE_TIME -> items.sortedWith(
-                compareByDescending<SearchHit> { updateEpochOf(it) }
-                    .thenBy(collator) { hit: SearchHit -> hit.result.title },
-            )
-        }
-    }
-
-    /**
-     * 相关度排序：书名/作者与关键词完全相等 > 包含关键词 > 其余；
-     * 同档内按「有这本书的书源数」降序 —— 越多书源都收录，越可能就是要找的那本。
-     *
-     * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
-     * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
-     */
-    private fun tier(r: SearchResult, keyword: String): Int = when {
-        r.title == keyword || r.author == keyword -> 0
-        r.title.contains(keyword) || r.author?.contains(keyword) == true -> 1
-        else -> 2
-    }
-
-    /** 合并条目取各源最大字数；解不出的当 -1，降序时沉底 */
-    private fun wordCountOf(hit: SearchHit): Long =
-        hit.results.maxOf { parseWordCount(it.wordCount) }
-
-    /** 合并条目取各源能解出的最新日期；解不出当 Long.MIN_VALUE，降序沉底 */
-    private fun updateEpochOf(hit: SearchHit): Long =
-        hit.results.maxOf { parseUpdateEpoch(it.kind, it.intro) }
-
-    /**
      * 单个书源搜一页：网络/规则错误按「这个源没结果」降级，但**取消必须往外抛**。
      *
      * 从前这里是 `runCatching { … }.getOrNull()`，它连 CancellationException 一起吞。
@@ -715,20 +701,42 @@ class SearchViewModel(
     private suspend fun searchPage(rule: BookSourceRule, keyword: String, page: Int): SearchPage? {
         // 每个源按自己的历史定超时（见 SearchScheduling.timeoutMs）：吊源别占着 Semaphore 名额拖整轮搜索。
         // 从前统一等 30 秒，几十个死源就能把一轮搜索拖到几分钟
-        val limit = SearchScheduling.timeoutMs(liveSpeed[rule.id])
+        val source = liveSpeed[rule.id]
+        val now = System.currentTimeMillis()
+        if (source != null && SearchScheduling.coolingDown(source, now)) {
+            if (page == 1) recordStatus(SearchStatus.RATE_LIMITED)
+            return null
+        }
+        val limit = SearchScheduling.timeoutMs(source, now)
         val startedAt = nowMs()
         return try {
             val result = withTimeoutOrNull(limit) {
                 engine.search(rule, keyword, page = page)
             }
+            currentCoroutineContext().ensureActive()
             record(rule.id, if (result == null) SearchOutcome.TimedOut(limit) else SearchOutcome.Ok(nowMs() - startedAt))
+            if (page == 1) {
+                recordStatus(when {
+                    result == null -> SearchStatus.TIMEOUT
+                    result.items.isEmpty() -> SearchStatus.EMPTY
+                    else -> SearchStatus.MATCHES
+                })
+            }
             result
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // 界面上照旧静默（几十个源里挂几个是常态），但日志里得留下是哪个源、为什么
-            Log.w(TAG, "搜索失败：来源「${rule.name}」第 $page 页", e)
-            record(rule.id, SearchOutcome.Failed)
+            currentCoroutineContext().ensureActive()
+            // 反馈只需知道失败类别，日志不要写用户输入、来源名或网络地址。
+            val status = searchFailure(e)
+            Log.w(TAG, "来源搜索失败，第 $page 页：${status.name}")
+            val outcome = when (status) {
+                SearchStatus.RATE_LIMITED -> SearchOutcome.RateLimited(httpSearchFailure(e)?.retryAfter)
+                SearchStatus.TIMEOUT -> SearchOutcome.TimedOut(nowMs() - startedAt)
+                else -> SearchOutcome.Failed
+            }
+            record(rule.id, outcome)
+            if (page == 1) recordStatus(status)
             null
         }
     }
@@ -741,20 +749,27 @@ class SearchViewModel(
      */
     private fun withLiveSpeed(fresh: List<EnabledSource>): List<EnabledSource> = fresh.map { s ->
         val live = liveSpeed[s.rule.id]
-        val merged = if (live == null) s else s.copy(searchMs = live.searchMs, searchFails = live.searchFails)
+        val merged = if (live == null || live.rule != s.rule || live.searchAt < s.searchAt) s else s.copy(
+            searchMs = live.searchMs, searchFails = live.searchFails,
+            searchAt = live.searchAt,
+            searchRetryAt = if (live.searchAt == s.searchAt) maxOf(live.searchRetryAt, s.searchRetryAt) else live.searchRetryAt,
+        )
         liveSpeed[s.rule.id] = merged
-        persistedSpeed.putIfAbsent(s.rule.id, s)
+        persistedSpeed.compute(s.rule.id) { _, previous ->
+            if (previous == null || previous.revision != s.revision || previous.searchAt <= s.searchAt) s else previous
+        }
         merged
     }
 
     private fun record(sourceId: String, outcome: SearchOutcome) {
         liveSpeed.computeIfPresent(sourceId) { _, s -> SearchScheduling.next(s, outcome) }
-        when (outcome) {
-            is SearchOutcome.TimedOut -> timeoutCount.incrementAndGet()
-            SearchOutcome.Failed -> failCount.incrementAndGet()
-            is SearchOutcome.Ok -> Unit
-        }
     }
+
+    private fun recordStatus(status: SearchStatus) {
+        searchCounts[status.ordinal]++
+    }
+
+    private fun count(status: SearchStatus): Int = searchCounts[status.ordinal]
 
     /**
      * 把变化够大的测速写回库里，下次进页搜索就能用上。
@@ -766,10 +781,14 @@ class SearchViewModel(
             SearchScheduling.worthPersisting(before, live)
         }
         if (changed.isEmpty()) return
-        changed.forEach { persistedSpeed[it.rule.id] = it }
         CoroutineScope(Dispatchers.IO + NonCancellable).launch {
             try {
                 sourceRepo.saveSearchStats(changed)
+                changed.forEach { saved ->
+                    persistedSpeed.computeIfPresent(saved.rule.id) { _, before ->
+                        if (before.revision == saved.revision && before.searchAt <= saved.searchAt) saved else before
+                    }
+                }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 Log.w(TAG, "搜索测速写库失败", e)
@@ -781,20 +800,22 @@ class SearchViewModel(
      * 提前结束：书名完全一致的结果已经来自够多个书源，剩下的先不搜。走与「进详情页暂停」同一条路 ——
      * 剩余的源拍下来，列表上方给「继续搜索」；要全量结果的人点一下就接着搜，已有结果一条不丢。
      */
-    private fun stopEarly(keyword: String) {
+    private fun stopEarly() {
         earlyStopArmed = false
-        logSummary(keyword, "提前结束")
-        pauseSearch()
+        pauseSearch("early_stop")
         if (paused != null) _state.update { it.copy(earlyStopped = true) }
     }
 
-    private fun logSummary(keyword: String, how: String) {
-        val first = if (firstResultAt > 0) "${firstResultAt - searchStartedAt}ms" else "无"
-        Log.i(
-            TAG,
-            "搜索「$keyword」$how：${doneCounter.get()}/${_state.value.sourceCount} 个源，" +
-                "首条结果 $first，用时 ${nowMs() - searchStartedAt}ms，" +
-                "超时 ${timeoutCount.get()}，失败 ${failCount.get()}",
+    private fun logSummary(how: String) {
+        val state = _state.value
+        val elapsed = nowMs() - searchStartedAt - pausedMs
+        UsageLog.event(
+            "search.round.end",
+            "search_id" to state.searchId, "sources" to state.sourceCount, "done" to doneCounter.get(),
+            "duration_ms" to elapsed, "prepare_ms" to if (state.sourceCount == 0) elapsed else prepareMs, "how" to how,
+            "empty" to count(SearchStatus.EMPTY), "timeouts" to count(SearchStatus.TIMEOUT),
+            "rate_limited" to count(SearchStatus.RATE_LIMITED), "network_failures" to count(SearchStatus.NETWORK),
+            "http_failures" to count(SearchStatus.HTTP), "rule_failures" to count(SearchStatus.RULE),
         )
     }
 
@@ -889,15 +910,70 @@ internal fun mergeSearchResults(
     hits: MutableMap<Pair<String, String>, SearchHit>,
     items: List<SearchResult>,
     rank: (List<SearchResult>) -> List<SearchResult> = { it },
-) {
+): Boolean {
+    var changed = false
     for (r in items) {
         val key = r.searchKey
         val old = hits[key]
+        if (old?.results?.any { it.sourceId == r.sourceId } == true) continue
         hits[key] = when {
             old == null -> SearchHit(listOf(r))
-            old.results.any { it.sourceId == r.sourceId } -> old
             else -> SearchHit(rank(old.results + r))
         }
+        changed = true
+    }
+    return changed
+}
+
+/** 对快照排序。Collator 不跨线程共享，排序数值随不可变 SearchHit 缓存。 */
+internal fun orderSearchHits(
+    items: List<SearchHit>,
+    keyword: String,
+    sort: SearchSort,
+): List<SearchHit> {
+    val collator by lazy { Collator.getInstance(Locale.CHINA).apply { strength = Collator.PRIMARY } }
+    return when (sort) {
+        SearchSort.RELEVANCE -> {
+            val normalized = TitleMatch.normalize(keyword)
+            items.sortedWith(compareBy<SearchHit> { tier(it.result, normalized) }.thenByDescending { it.origins.size })
+        }
+        SearchSort.WORD_COUNT -> items.sortedWith(
+            compareByDescending<SearchHit> { it.wordCount }
+                .thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+        SearchSort.TITLE_PINYIN -> items.sortedWith(
+            compareBy(collator) { hit: SearchHit -> hit.result.title.trim() }
+                .thenByDescending { it.origins.size },
+        )
+        SearchSort.AUTHOR_PINYIN -> items.sortedWith(
+            compareBy(collator) { hit: SearchHit ->
+                hit.result.author?.trim().orEmpty().ifEmpty { "\uFFFF" }
+            }.thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+        SearchSort.UPDATE_TIME -> items.sortedWith(
+            compareByDescending<SearchHit> { it.updateEpoch }
+                .thenBy(collator) { hit: SearchHit -> hit.result.title },
+        )
+    }
+}
+
+/**
+ * 相关度排序：书名完全相等 > 作者完全相等 > 书名包含 > 作者包含 > 其余。
+ * 同档内按「有这本书的书源数」降序 —— 越多书源都收录，越可能就是要找的那本。
+ *
+ * 从前是哪个书源先返回就排在前面，顺序完全由网络快慢决定，
+ * 于是精确命中的书常被沉到列表底部，同一本书还会按书源数重复几十行。
+ */
+private fun tier(r: SearchResult, keyword: String): Int {
+    if (keyword.isEmpty()) return 4
+    val title = TitleMatch.normalize(r.title)
+    val author = normalizeAuthor(r.author.orEmpty())
+    return when {
+        title.equals(keyword, ignoreCase = true) -> 0
+        author.equals(keyword, ignoreCase = true) -> 1
+        title.contains(keyword, ignoreCase = true) -> 2
+        author.contains(keyword, ignoreCase = true) -> 3
+        else -> 4
     }
 }
 
@@ -905,37 +981,17 @@ internal fun mergeSearchResults(
 internal fun parseWordCount(raw: String?): Long {
     if (raw.isNullOrBlank()) return -1L
     val t = raw.trim().replace(",", "").replace("，", "").replace(" ", "")
-    Regex("""([\d.]+)\s*亿""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+    WORD_YI.find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
         return (it * 100_000_000L).toLong()
     }
-    Regex("""([\d.]+)\s*万""").find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
+    WORD_WAN.find(t)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
         return (it * 10_000L).toLong()
     }
-    Regex("""(\d+)""").find(t)?.groupValues?.getOrNull(1)?.toLongOrNull()?.let { return it }
+    WORD_PLAIN.find(t)?.groupValues?.getOrNull(1)?.toLongOrNull()?.let { return it }
     return -1L
 }
 
-/**
- * 从分类/简介里抠日期。Legado 搜索规则没有独立 updateTime，
- * 常见写法是 kind 里夹「2024-01-15」或「2024年1月15日」。
- */
-internal fun parseUpdateEpoch(vararg blobs: String?): Long {
-    var best = Long.MIN_VALUE
-    for (blob in blobs) {
-        if (blob.isNullOrBlank()) continue
-        for (m in DATE_YMD.findAll(blob)) {
-            val y = m.groupValues[1].toIntOrNull() ?: continue
-            val mo = m.groupValues[2].toIntOrNull() ?: continue
-            val d = m.groupValues[3].toIntOrNull() ?: continue
-            if (y !in 1990..2100 || mo !in 1..12 || d !in 1..31) continue
-            val cal = Calendar.getInstance().apply {
-                set(Calendar.MILLISECOND, 0)
-                set(y, mo - 1, d, 0, 0, 0)
-            }
-            best = maxOf(best, cal.timeInMillis)
-        }
-    }
-    return best
-}
-
-private val DATE_YMD = Regex("""(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})""")
+// 所有搜索结果共用编译好的模式；只缓存模式，不缓存用户输入或解析结果。
+private val WORD_YI = Regex("""([\d.]+)\s*亿""")
+private val WORD_WAN = Regex("""([\d.]+)\s*万""")
+private val WORD_PLAIN = Regex("""(\d+)""")

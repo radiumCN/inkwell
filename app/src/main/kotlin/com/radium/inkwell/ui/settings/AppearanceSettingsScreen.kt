@@ -63,6 +63,7 @@ fun AppearanceSettingsScreen(
     val messages = remember { MessageBus() }
     CollectMessages(messages, snackbar)
     // 读预热好的那份，第一帧就是真值（见 AppPrefs 的「设置页读的预热版」）
+    val confirmExit = appPrefs.confirmExitState.collectAsStateWithLifecycle().value ?: false
     val exploreEnabled = appPrefs.exploreEnabledState.collectAsStateWithLifecycle().value ?: true
     val rssEntryEnabled = appPrefs.rssEntryEnabledState.collectAsStateWithLifecycle().value ?: true
     val duplicateHint = appPrefs.duplicateHintEnabledState.collectAsStateWithLifecycle().value ?: true
@@ -101,6 +102,13 @@ fun AppearanceSettingsScreen(
                     title = "应用图标",
                     value = appIcon.label,
                     onClick = { showIconPicker = true },
+                    position = SettingGroupPosition.Middle,
+                )
+                SwitchRow(
+                    title = "退出前确认",
+                    subtitle = "在书架首页返回桌面前询问一次",
+                    checked = confirmExit,
+                    onCheckedChange = { on -> scope.launch { appPrefs.setConfirmExit(on) } },
                     position = SettingGroupPosition.Last,
                 )
             }

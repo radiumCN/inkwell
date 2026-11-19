@@ -14,6 +14,7 @@ import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
+import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.WebDavRepository
@@ -31,29 +32,7 @@ import org.koin.dsl.module
 val appModule = module {
     single {
         Room.databaseBuilder(androidContext(), InkwellDb::class.java, "inkwell.db")
-            .addMigrations(
-                InkwellDb.MIGRATION_1_2,
-                InkwellDb.MIGRATION_2_3,
-                InkwellDb.MIGRATION_3_4,
-                InkwellDb.MIGRATION_4_5,
-                InkwellDb.MIGRATION_5_6,
-                InkwellDb.MIGRATION_6_7,
-                InkwellDb.MIGRATION_7_8,
-                InkwellDb.MIGRATION_8_9,
-                InkwellDb.MIGRATION_9_10,
-                InkwellDb.MIGRATION_10_11,
-                InkwellDb.MIGRATION_11_12,
-                InkwellDb.MIGRATION_12_13,
-                InkwellDb.MIGRATION_13_14,
-                InkwellDb.MIGRATION_14_15,
-                InkwellDb.MIGRATION_15_16,
-                InkwellDb.MIGRATION_16_17,
-                InkwellDb.MIGRATION_17_18,
-                InkwellDb.MIGRATION_18_19,
-                InkwellDb.MIGRATION_19_20,
-                InkwellDb.MIGRATION_20_21,
-                InkwellDb.MIGRATION_21_22,
-            )
+            .addMigrations(*InkwellDb.ALL_MIGRATIONS)
             // 用户侧载旧版 APK（库版本比代码新）时，Room 默认抛异常 → 每次启动崩溃死循环。
             // 仅**降级**时销毁重建（升级仍走上面的迁移，不丢数据）。
             .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
@@ -154,19 +133,21 @@ val appModule = module {
     single { com.radium.inkwell.update.UpdateNotifier(androidContext(), get(), get()) }
 
     single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get(), get()) }
-    single { BookSourceRepository(get(), get()) }
+    single { SourceReadHealth(get<InkwellDb>().sourceReadHealthDao()) }
+    single { BookSourceRepository(get(), get(), get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { com.radium.inkwell.data.repo.LocalFolderScanner(androidContext()) }
-    single { NetBookRepository(get(), get(), get(), get(), get()) }
+    single { com.radium.inkwell.data.repo.LocalFolderLibrary(androidContext(), get(), get()) }
+    single { NetBookRepository(get(), get(), get(), get(), get(), get()) }
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
     single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
-    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { BookshelfViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { (bookId: String) ->
-        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
+        ReaderViewModel(bookId, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
     viewModel { SearchViewModel(get(), get(), get(), get()) }
     viewModel { (results: List<com.radium.inkwell.core.source.SearchResult>) ->
@@ -182,7 +163,7 @@ val appModule = module {
     viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.sourcewizard.SourceWizardViewModel(get(), get(), get(), get()) }
     viewModel { WebDavViewModel(get(), get(), get(), get()) }
-    viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get()) }
+    viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.replace.ReplaceRuleViewModel(androidContext(), get(), get(), get()) }

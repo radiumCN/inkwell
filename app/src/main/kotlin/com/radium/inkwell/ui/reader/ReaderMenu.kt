@@ -2,6 +2,7 @@ package com.radium.inkwell.ui.reader
 
 import com.radium.inkwell.ui.components.blockTouchesBelow
 import com.radium.inkwell.ui.components.sheetBottomInset
+import com.radium.inkwell.util.UsageLog
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -21,6 +22,7 @@ import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import kotlin.math.roundToInt
+import java.util.Locale
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
 import top.yukonga.miuix.kmp.squircle.squircleBackground
@@ -60,6 +62,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
@@ -68,6 +74,7 @@ import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppSlider
+import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.animation.AnimatedVisibility
 import com.radium.inkwell.ui.components.SheetPageHeader
 import com.radium.inkwell.ui.components.SheetPages
@@ -171,6 +178,8 @@ fun ReaderMenu(
     onUpdateSettings: (ReaderSettings) -> Unit,
     onPreviewSettings: (ReaderSettings) -> Unit,
     onCommitSettings: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
     typography: TypographyActions,
     onSearchSources: () -> Unit,
@@ -432,9 +441,12 @@ fun ReaderMenu(
                 dragging = dragging,
                 onDragging = { dragging = it },
                 settings = session.settings,
+                isNetBook = session.isNetBook,
                 onUpdate = onUpdateSettings,
                 onPreview = onPreviewSettings,
                 onCommit = onCommitSettings,
+                onSelectPaper = onSelectPaper,
+                onCommitCustomPaper = onCommitCustomPaper,
                 textSelectionEnabled = session.textSelectionEnabled,
                 onTextSelectionChange = onSetTextSelection,
                 typography = typography,
@@ -556,27 +568,27 @@ private fun MenuActions(
         BarAction(
             icon = MiuixIcons.ListView,
             label = "目录",
-            onClick = onShowToc,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.toc"); onShowToc() },
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = MiuixIcons.Replace,
             label = "换源",
-            onClick = onSearchSources,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.source"); onSearchSources() },
             enabled = session.isNetBook,
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = if (overlay.autoFlipping) MiuixIcons.Pause else MiuixIcons.Play,
             label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
-            onClick = onToggleAutoFlip,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.auto_flip"); onToggleAutoFlip() },
             enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
             modifier = Modifier.weight(1f),
         )
         BarAction(
             icon = MiuixIcons.Tune,
             label = "设置",
-            onClick = onShowSettings,
+            onClick = { UsageLog.event("ui.click", "action" to "reader.settings"); onShowSettings() },
             modifier = Modifier.weight(1f),
         )
     }
@@ -874,13 +886,6 @@ private val PARA_SPACING_OPTIONS = listOf(
     "宽松" to 1.0f,
 )
 
-/** 字距（em）。档位很小：中文字距加到 0.1em 已经明显松散，再大就是一个个散字 */
-private val LETTER_SPACING_OPTIONS = listOf(
-    "标准" to 0f,
-    "稍宽" to 0.05f,
-    "宽" to 0.1f,
-)
-
 /** 首行缩进（字）。有的书正文自带全角空格缩进，再叠两字就成了四字 —— 给个「无」让人关掉 */
 private val INDENT_OPTIONS = listOf(
     "无" to 0f,
@@ -901,27 +906,6 @@ private val TITLE_TOP_OPTIONS = listOf(
     "小" to 12f,
     "标准" to 24f,
     "大" to 48f,
-)
-
-/** 头部留白（dp）= 正文上边距：页眉小标题落在这，正文从它下面开始。缩小 → 正文多出空间 */
-private val HEADER_TOP_OPTIONS = listOf(
-    "紧凑" to 8f,
-    "标准" to 24f,
-    "宽松" to 48f,
-)
-
-/** 正文下边距（dp）—— 每页正文离屏幕下边的距离。上边距由「头部留白」管 */
-private val MARGIN_V_OPTIONS = listOf(
-    "紧凑" to 12f,
-    "标准" to 28f,
-    "宽松" to 48f,
-)
-
-/** 正文左右边距（dp） */
-private val MARGIN_H_OPTIONS = listOf(
-    "紧凑" to 16f,
-    "标准" to 24f,
-    "宽松" to 36f,
 )
 
 /**
@@ -949,9 +933,12 @@ private fun TypographyPanel(
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
     settings: ReaderSettings,
+    isNetBook: Boolean,
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
@@ -996,6 +983,8 @@ private fun TypographyPanel(
                         onUpdate = onUpdate,
                         onPreview = onPreview,
                         onCommit = onCommit,
+                        onSelectPaper = onSelectPaper,
+                        onCommitCustomPaper = onCommitCustomPaper,
                         typography = typography,
                         dragging = dragging,
                         onDragging = onDragging,
@@ -1003,10 +992,10 @@ private fun TypographyPanel(
                     )
                     SettingsPage.Typeset -> {
                         LayoutSchemeSection(settings, typography)
-                        TypesetTab(settings, onUpdate)
+                        TypesetTab(settings, onUpdate, typography.onAdjust)
                     }
                     SettingsPage.Flip -> FlipTab(settings, onUpdate)
-                    SettingsPage.More -> MoreTab(settings, onUpdate, textSelectionEnabled, onTextSelectionChange)
+                    SettingsPage.More -> MoreTab(settings, isNetBook, onUpdate, textSelectionEnabled, onTextSelectionChange)
                 }
             }
         }
@@ -1147,6 +1136,8 @@ private fun MainPage(
     onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
+    onSelectPaper: (String) -> Unit,
+    onCommitCustomPaper: () -> Unit,
     typography: TypographyActions,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
@@ -1178,15 +1169,15 @@ private fun MainPage(
         )
         FontSizeRow(
             settings = settings,
-            onUpdate = onUpdate,
+            onAdjust = typography.onAdjust,
             onPreview = onPreview,
             onCommit = onCommit,
             onDragging = { onDragging(if (it) SettingsSlider.FontSize else null) },
             modifier = rowModifier(SettingsSlider.FontSize),
         )
         Box(Modifier.alpha(shown)) {
-            SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
-                onUpdate(settings.copy(lineSpacingMult = it))
+            SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.001f) {
+                typography.onAdjust { copy(lineSpacingMult = it) }
             }
         }
     }
@@ -1195,14 +1186,14 @@ private fun MainPage(
     Box(Modifier.alpha(shown)) {
         ReaderGroup {
             Column(Modifier.padding(vertical = Dimens.gapS)) {
-                ThemeSwatches(settings, onUpdate, horizontalPadding = Dimens.listHorizontal)
+                ThemeSwatches(settings, onSelectPaper, horizontalPadding = Dimens.listHorizontal)
                 // 选中自定义才展开调色 —— 平时它是一整块滑块，占掉半个面板
                 if (settings.theme.id == ReaderTheme.CUSTOM_ID) {
                     Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
                         CustomPaperEditor(
                             theme = settings.theme,
                             onChange = { onPreview(settings.copy(theme = it)) },
-                            onChangeFinished = onCommit,
+                            onChangeFinished = onCommitCustomPaper,
                         )
                     }
                 }
@@ -1285,7 +1276,7 @@ private fun BrightnessRow(
 @Composable
 private fun FontSizeRow(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onDragging: (Boolean) -> Unit,
@@ -1294,6 +1285,7 @@ private fun FontSizeRow(
     val size = settings.fontSizeSp
     val min = ReaderSettings.FONT_SIZE_MIN
     val max = ReaderSettings.FONT_SIZE_MAX
+    val step = ReaderSettings.FONT_SIZE_STEP
     Row(
         modifier
             .fillMaxWidth()
@@ -1306,15 +1298,14 @@ private fun FontSizeRow(
             style = MiuixTheme.textStyles.footnote1,
             description = "字号减小",
             enabled = size > min,
-            onClick = { onUpdate(settings.copy(fontSizeSp = (size - 1).coerceAtLeast(min))) },
+            onClick = { onAdjust { copy(fontSizeSp = (fontSizeSp - step).coerceAtLeast(min)) } },
         )
         AppSlider(
             value = size,
             valueRange = min..max,
-            // 两头之间每 1sp 一档
-            steps = (max - min).toInt() - 1,
+            steps = ((max - min) / step).toInt() - 1,
             onValueChange = { v ->
-                val sp = v.roundToInt().toFloat()
+                val sp = (v / step).roundToInt() * step
                 if (sp != settings.fontSizeSp) onPreview(settings.copy(fontSizeSp = sp))
             },
             onValueChangeFinished = onCommit,
@@ -1329,10 +1320,10 @@ private fun FontSizeRow(
             style = MiuixTheme.textStyles.title3,
             description = "字号增大",
             enabled = size < max,
-            onClick = { onUpdate(settings.copy(fontSizeSp = (size + 1).coerceAtMost(max))) },
+            onClick = { onAdjust { copy(fontSizeSp = (fontSizeSp + step).coerceAtMost(max)) } },
         )
         Text(
-            "${size.toInt()}",
+            size.toString().removeSuffix(".0"),
             style = MiuixTheme.textStyles.body1,
             fontWeight = FontWeight.Medium,
             // 数字已经由滑轨念过（读屏念滑轨的当前值），这里不再念一遍
@@ -1341,7 +1332,7 @@ private fun FontSizeRow(
     }
 }
 
-/** 字号滑轨两头的小 A / 大 A：一个触控目标大小的可点区，点一下 ±1 */
+/** 排版微调按钮：带读屏标签，并保留完整触控区域。 */
 @Composable
 private fun FontSizeEnd(
     text: String,
@@ -1430,13 +1421,66 @@ private fun Modifier.reportDragging(onDragging: (Boolean) -> Unit): Modifier {
  * 从一级页挪出来，让一级页一屏就能放下字号、字体和纸色。排版方案在这页最上面（见 TypographyPanel）。
  */
 @Composable
-private fun TypesetTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun TypesetTab(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
+) {
+    ReaderGroup("排版微调", trailing = {
+        AppTextButton("恢复默认", onClick = {
+            onAdjust {
+                val defaults = ReaderSettings()
+                copy(
+                    fontSizeSp = defaults.fontSizeSp,
+                    bodyFontWeight = defaults.bodyFontWeight,
+                    lineSpacingMult = defaults.lineSpacingMult,
+                    letterSpacingEm = defaults.letterSpacingEm,
+                    headerTopSpacingDp = defaults.headerTopSpacingDp,
+                    marginVerticalDp = defaults.marginVerticalDp,
+                    marginHorizontalDp = defaults.marginHorizontalDp,
+                )
+            }
+        })
+    }) {
+        LayoutNumberRow(
+            "正文字号", settings, onAdjust, ReaderSettings::fontSizeSp,
+            ReaderSettings.FONT_SIZE_MIN..ReaderSettings.FONT_SIZE_MAX, ReaderSettings.FONT_SIZE_STEP, "sp", 1,
+        ) { copy(fontSizeSp = it) }
+
+        val fileFont = ReaderSettings.isFileFont(settings.fontId)
+        val weights = if (fileFont) {
+            listOf(ReaderSettings.FONT_WEIGHT_NORMAL, ReaderSettings.FONT_WEIGHT_BOLD)
+        } else {
+            ReaderSettings.BODY_FONT_WEIGHTS.sorted()
+        }
+        ReaderRow("正文字重", slots = weights.size) {
+            SegmentedChoice(
+                options = if (fileFont) listOf("常规", "偏粗") else listOf("偏细", "常规", "偏粗"),
+                selectedIndex = weights.indexOf(settings.bodyFontWeight).takeIf { it >= 0 }
+                    ?: weights.indexOf(ReaderSettings.FONT_WEIGHT_NORMAL),
+                onSelect = { index -> onAdjust { copy(bodyFontWeight = weights[index]) } },
+            )
+        }
+        LayoutNumberRow("行距", settings, onAdjust, ReaderSettings::lineSpacingMult, 1.2f..2.2f, 0.05f, "倍", 2) {
+            copy(lineSpacingMult = it)
+        }
+        LayoutNumberRow("字距", settings, onAdjust, ReaderSettings::letterSpacingEm, 0f..0.15f, 0.01f, "em", 2) {
+            copy(letterSpacingEm = it)
+        }
+        LayoutNumberRow("头部留白", settings, onAdjust, ReaderSettings::headerTopSpacingDp, 8f..48f, 1f, "dp") {
+            copy(headerTopSpacingDp = it)
+        }
+        LayoutNumberRow("下边距", settings, onAdjust, ReaderSettings::marginVerticalDp, 8f..48f, 1f, "dp") {
+            copy(marginVerticalDp = it)
+        }
+        LayoutNumberRow("左右边距", settings, onAdjust, ReaderSettings::marginHorizontalDp, 8f..48f, 1f, "dp") {
+            copy(marginHorizontalDp = it)
+        }
+    }
+
     ReaderGroup("间距") {
         SegmentRow("段距", PARA_SPACING_OPTIONS, settings.paragraphSpacingEm, 0.05f) {
             onUpdate(settings.copy(paragraphSpacingEm = it))
-        }
-        SegmentRow("字距", LETTER_SPACING_OPTIONS, settings.letterSpacingEm, 0.005f) {
-            onUpdate(settings.copy(letterSpacingEm = it))
         }
     }
 
@@ -1462,15 +1506,36 @@ private fun TypesetTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> U
         }
     }
 
-    ReaderGroup("页面") {
-        SegmentRow("头部留白", HEADER_TOP_OPTIONS, settings.headerTopSpacingDp, 2f) {
-            onUpdate(settings.copy(headerTopSpacingDp = it))
-        }
-        SegmentRow("下边距", MARGIN_V_OPTIONS, settings.marginVerticalDp, 2f) {
-            onUpdate(settings.copy(marginVerticalDp = it))
-        }
-        SegmentRow("左右边距", MARGIN_H_OPTIONS, settings.marginHorizontalDp, 2f) {
-            onUpdate(settings.copy(marginHorizontalDp = it))
+}
+
+@Composable
+private fun LayoutNumberRow(
+    label: String,
+    settings: ReaderSettings,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
+    read: (ReaderSettings) -> Float,
+    range: ClosedFloatingPointRange<Float>,
+    step: Float,
+    unit: String,
+    decimals: Int = 0,
+    write: ReaderSettings.(Float) -> ReaderSettings,
+) {
+    val value = read(settings)
+    fun adjust(delta: Float) = onAdjust {
+        val next = ((read(this) + delta) * 100).roundToInt() / 100f
+        write(next.coerceIn(range.start, range.endInclusive))
+    }
+    ReaderRow(label, slots = 4) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val style = MiuixTheme.textStyles.body1
+            FontSizeEnd("−", style, "减小$label", value > range.start) { adjust(-step) }
+            Text(
+                text = String.format(Locale.getDefault(), "%.${decimals}f %s", value, unit),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = style,
+            )
+            FontSizeEnd("+", style, "增大$label", value < range.endInclusive) { adjust(step) }
         }
     }
 }
@@ -1650,19 +1715,21 @@ private val TAP_ZONE_POSITIONS = listOf(
 @Composable
 private fun MoreTab(
     settings: ReaderSettings,
+    isNetBook: Boolean,
     onUpdate: (ReaderSettings) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
-    // 默认关、和从前一样只排文字。开了就地重排（停在同一个字上），说明随开关换：
-    // 关着说开了会怎样；开着提醒流量，顺带交代长按看大图（不说没人知道）
+    // 本地书默认显示，在线书默认关闭；两个开关各自记忆，调整后按同一字符位置重排。
     ReaderGroup("图片") {
         SwitchRow(
             title = "正文显示图片",
-            subtitle = if (settings.showImages) {
-                "在线书的图片要另外下载，会多用一些流量。长按图片可以看大图"
+            subtitle = if (isNetBook) {
+                if (settings.showImages) "在线书图片需要下载，会使用流量。长按图片可以看大图"
+                else "当前只显示文字。打开后显示在线书插图，会使用流量"
             } else {
-                "关着时只排文字。打开后，书里和在线章节里的插图排进正文"
+                if (settings.showImages) "显示本地书插图，无需联网。长按图片可以看大图"
+                else "当前只显示文字。打开后显示本地书插图，无需联网"
             },
             checked = settings.showImages,
             onCheckedChange = { onUpdate(settings.copy(showImages = it)) },
@@ -1921,34 +1988,37 @@ private const val TRACK_STOPS = 6
 @Composable
 private fun ThemeSwatches(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
+    onSelect: (String) -> Unit,
     /** 左右内缩放在滚动内容里：色板随内容滚到分组卡的边缘，而不是在内缩线上被截断 */
     horizontalPadding: Dp = 0.dp,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = horizontalPadding),
+            // 手指松开就停，紧接着点色板不必先截停惯性滚动。
+            .horizontalScroll(rememberScrollState(), overscrollEffect = null, flingBehavior = PaperSwatchFling)
+            .padding(horizontal = horizontalPadding)
+            .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
     ) {
         ReaderTheme.ALL.forEach { theme ->
             ThemeSwatch(
                 theme = theme,
                 selected = theme.id == settings.theme.id,
-                onClick = { onUpdate(settings.copy(theme = theme)) },
+                onClick = { onSelect(theme.id) },
             )
         }
-        // 自定义纸张：颜色不在 ReaderTheme.ALL 那张表上，得从当前 settings 里取。
-        // 没调过就先给一份暖纸的底，用户点进去再改
-        val custom = if (settings.theme.id == ReaderTheme.CUSTOM_ID) settings.theme
-        else ReaderTheme.custom(ReaderTheme.PAPER.background, ReaderTheme.PAPER.textColor)
+        val custom = if (settings.theme.id == ReaderTheme.CUSTOM_ID) settings.theme else settings.customPaper
         ThemeSwatch(
             theme = custom,
             selected = settings.theme.id == ReaderTheme.CUSTOM_ID,
-            onClick = { onUpdate(settings.copy(theme = custom)) },
+            onClick = { onSelect(ReaderTheme.CUSTOM_ID) },
         )
     }
+}
+
+private object PaperSwatchFling : FlingBehavior {
+    override suspend fun ScrollScope.performFling(initialVelocity: Float): Float = initialVelocity
 }
 
 @Composable
@@ -1956,32 +2026,30 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
     // 按下色块微微沉下去（见 sinkOnPress）
     val press = remember { MutableInteractionSource() }
     Column(
+        modifier = Modifier.selectable(
+            selected = selected,
+            interactionSource = press,
+            indication = null,
+            role = Role.RadioButton,
+            onClick = onClick,
+        ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Dimens.gapXS),
     ) {
         Box(
             Modifier
-                // 色块 52dp（Dimens.swatch，与设置页色板同尺寸），仍 ≥48dp 触控下限；
-                // clip 必须在 selectable 之前 —— 否则按压反馈是方的，会溢出这个圆形色块的边界
                 .size(Dimens.swatch)
                 .sinkOnPress(press)
                 .clip(CircleShape)
                 .background(Color(theme.background))
+                .indication(press, LocalIndication.current)
                 .border(
                     width = if (selected) Dimens.strokeThick else Dimens.strokeThin,
                     color = if (selected) MiuixTheme.colorScheme.primary
                     else MiuixTheme.colorScheme.dividerLine,
                     shape = CircleShape,
                 )
-                // 整块作为单选目标带上纸张名与选中态：否则读屏聚焦未选中色块只会念"文"，分不清是哪款
-                .selectable(
-                    selected = selected,
-                    interactionSource = press,
-                    indication = LocalIndication.current,
-                    role = Role.RadioButton,
-                    onClick = onClick,
-                )
-                .semantics { contentDescription = theme.label },
+                .clearAndSetSemantics {},
             contentAlignment = Alignment.Center,
         ) {
             // 选中的打勾；没选中的放一个"文"字，直接把这款纸的正文对比度演示出来 ——

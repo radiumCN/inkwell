@@ -5,6 +5,7 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
 import android.content.ClipData
 import android.view.WindowManager
+import com.radium.inkwell.util.UsageLog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
@@ -193,7 +194,10 @@ fun ReaderScreen(
     }
 
     LaunchedEffect(Unit) {
-        keyBus.flipEvents.collect { flipController.requestFlip(it) }
+        keyBus.flipEvents.collect {
+            UsageLog.event("reader.input.volume", "direction" to it.name)
+            flipController.requestFlip(it)
+        }
     }
     DisposableEffect(Unit) {
         onDispose { keyBus.volumeFlipEnabled = false }
@@ -259,6 +263,7 @@ fun ReaderScreen(
     // 自动翻页与音量键共用 FlipController，沿用用户选的仿真/覆盖/平移等效果
     LaunchedEffect(Unit) {
         viewModel.animatedFlipRequests.collect {
+            UsageLog.event("reader.input.auto", "direction" to it.name, "blocked" to (selection != null))
             if (selection == null) flipController.requestFlip(it)
         }
     }
@@ -384,7 +389,7 @@ fun ReaderScreen(
         // 点在图上：没取到的那条提示是「点按重试」，点了就重取、不翻页；点在真图上照旧翻页 / 开菜单
         val onImageTap: (PageItem.ImageBox) -> Boolean = { box ->
             if (box.failed) {
-                viewModel.retryImage(box.resourceId)
+                viewModel.retryImage(box)
                 true
             } else {
                 false
@@ -516,6 +521,7 @@ fun ReaderScreen(
                 session.settings.flipAnimation == FlipAnimation.SCROLL -> {
                     Box(Modifier.fillMaxSize()) {
                         ScrollPageReader(
+                            onTrace = viewModel::traceInteraction,
                             current = pageUi.page,
                             prev = pageUi.prevPage,
                             next = pageUi.nextPage,
@@ -592,6 +598,7 @@ fun ReaderScreen(
                             }
                     ) {
                         PageFlipContainer(
+                            onTrace = viewModel::traceInteraction,
                             current = pageUi.page,
                             prev = pageUi.prevPage,
                             next = pageUi.nextPage,
@@ -801,6 +808,8 @@ fun ReaderScreen(
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },
             onCommitSettings = { viewModel.commitSettings() },
+            onSelectPaper = viewModel::selectPaper,
+            onCommitCustomPaper = viewModel::commitCustomPaper,
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },
@@ -808,6 +817,7 @@ fun ReaderScreen(
             onToggleAutoFlip = { viewModel.toggleAutoFlip() },
             onDismiss = { viewModel.toggleMenu() },
             onSwipePage = { dir ->
+                UsageLog.event("reader.input.menu_swipe", "direction" to dir.name)
                 // 先关菜单再翻：菜单开着时 gesturesEnabled=false，会把正在播的 settle 掐掉。
                 viewModel.dismissMenu()
                 if (session.settings.flipAnimation == FlipAnimation.SCROLL) {
@@ -909,6 +919,7 @@ private fun buildLayoutSpec(
         fontId = settings.fontId,
         justify = settings.justify,
         letterSpacingEm = settings.letterSpacingEm,
+        bodyFontWeight = settings.bodyFontWeight,
         showImages = settings.showImages,
         density = density.density,
     )

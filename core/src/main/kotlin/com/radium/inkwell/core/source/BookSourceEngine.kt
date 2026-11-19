@@ -48,6 +48,7 @@ data class SearchResult(
      * 不交回去，后面每一步都少了请求头（七猫的接口源就是这样 401 的）。
      */
     val variables: Map<String, String> = emptyMap(),
+    val updateTime: String? = null,
 )
 
 data class SearchPage(
@@ -229,6 +230,7 @@ class BookSourceEngine(
         r.lastChapter?.let { put("latestChapter", it) }
         r.wordCount?.let { put("wordCount", it) }
         r.kind?.let { put("kind", it) }
+        r.updateTime?.let { put("updateTime", it) }
     }
 
     /**
@@ -550,14 +552,16 @@ class BookSourceEngine(
                 // 插图照收（相对地址按这一页的地址补全）；阅读页显示不显示是阅读设置的事，见 HtmlToElements
                 elements += HtmlToElements(keepImages = true, keepBlocks = false).convert(body)
             }
-            url = rule.nextContentUrl
-                ?.let { evalUrlField("content", "nextPage", it, ctx) }
-                ?.takeIf { it.isNotBlank() }
-                ?.let { resolveUrl(fetched.finalUrl, it) }
-                // 末页的「下一页」常是 javascript:void(0)：当作没有下一页。从前拿去抓会抛「非法 URL」，
-                // 前面已经攒好的几页一起作废，整章判失败、还触发自动换源
-                ?.takeIf { isFetchable(it) }
-                ?.takeIf { pageKey(it) !in stopAt } // 翻到别的章节了 → 本章结束
+            val currentPageKey = pageKey(fetched.finalUrl)
+            url = evalUrlFields("content", "nextPage", rule.nextContentUrl, ctx)
+                .asSequence()
+                .map { resolveUrl(fetched.finalUrl, it) }
+                .filter(::isFetchable)
+                .firstOrNull {
+                    // 顶部和底部的导航可能同时命中，先跳过占位、自链与其他章节，再选后续页。
+                    val key = pageKey(it)
+                    key != currentPageKey && key !in visited && key !in stopAt
+                }
         }
         // 净化超时（某条规则陷进灾难性回溯）就按未净化返回：净化只是清广告，
         // 不能让它把"这章有广告"升级成"这章打不开"。
@@ -933,6 +937,7 @@ class BookSourceEngine(
                 sourceId = source.id,
                 sourceName = source.name,
                 variables = itemCtx.js.scriptVars.toMap(),
+                updateTime = evalField(stage, "updateTime", fields["updateTime"], itemCtx),
             )
         }
         // nextPage 规则命中即可继续；书源没有该规则时，只要地址模板带 page 且这一页有结果，

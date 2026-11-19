@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
+import com.radium.inkwell.util.UsageLog
 
 /**
  * Navigation 3 返回栈薄封装：栈顶同类替换（防双击叠栈）、设置树内同级替换/下钻叠栈，
@@ -24,24 +25,30 @@ class InkwellNavigator(private val backStack: NavBackStack<NavKey>) {
         }
 
     fun back() {
+        UsageLog.event("navigation.back", "from" to backStack.lastOrNull().diagnosticName(), "to" to backStack.getOrNull(backStack.lastIndex - 1).diagnosticName())
         backStack.removeLastOrNull()
     }
 
     /** 前进。规则全在 [navigateTo] / [ensureSettingsList] 里 —— 那边能脱开 Compose 单测。 */
     fun go(key: NavKey) {
+        UsageLog.event("navigation.go", "from" to backStack.lastOrNull().diagnosticName(), "to" to key.diagnosticName())
         backStack.navigateTo(key)
         if (dualPane) backStack.ensureSettingsList()
     }
 
     /** 下面紧挨着的就是 [key] 时退回去，否则前进（见 [popIfBelow]） */
     fun goOrPop(key: NavKey) {
-        if (!backStack.popIfBelow(key)) go(key)
+        if (!backStack.popIfBelow(key)) go(key) else UsageLog.event("navigation.pop_to", "to" to key.diagnosticName())
     }
 
     fun openBook(bookId: String, origin: TransformOrigin) {
         // 阅读页已在栈顶时整个忽略：入场动画那 200ms 里四周还露着书架，能点中第二本。
         // 放行的话会改写 origin 却不换书 —— 看着 A 进来、返回却缩向 B。
-        if (backStack.lastOrNull() is ReaderRoute) return
+        if (backStack.lastOrNull() is ReaderRoute) {
+            UsageLog.event("book.open.ignored", "reason" to "reader_already_open")
+            return
+        }
+        UsageLog.event("book.open", "book" to UsageLog.reference(bookId))
         openOrigin.value = origin
         go(ReaderRoute(bookId))
     }

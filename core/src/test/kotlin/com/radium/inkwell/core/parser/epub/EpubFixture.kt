@@ -24,6 +24,8 @@ object EpubFixture {
         navExtrasFirst: Boolean = false,
         /** 第一章夹一张 img 插图、一张 svg 包着的整页插画（EPUB 的标准写法），图放在 OEBPS/images/ 下 */
         withImages: Boolean = false,
+        firstChapterExtra: String = "",
+        emptyNav: Boolean = false,
     ) {
         ZipOutputStream(file.outputStream()).use { zip ->
             fun put(name: String, content: String) {
@@ -99,6 +101,7 @@ object EpubFixture {
                       <h2>第${i}章 起承转合</h2>
                       <p>　　这是第${i}章的第一段，讲述了一些故事。</p>
                       $pictures
+                      ${if (i == 1) firstChapterExtra else ""}
                       <p>　　这是第${i}章的<b>第二段</b>，有强调文本。</p>
                     </body></html>""",
                 )
@@ -118,7 +121,7 @@ object EpubFixture {
             )
 
             if (withNav) {
-                val lis = (1..chapterCount).joinToString("") { i ->
+                val lis = (if (emptyNav) emptyList() else (1..chapterCount).toList()).joinToString("") { i ->
                     """<li><a href="text/ch$i.xhtml">Nav第${i}章</a></li>"""
                 }
                 val extras = if (!navExtrasFirst) "" else

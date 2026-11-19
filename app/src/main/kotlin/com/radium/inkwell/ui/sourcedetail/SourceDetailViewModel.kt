@@ -110,7 +110,7 @@ class SourceDetailViewModel(
                         input
                     }
 
-                    val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, bookUrl)
+                    val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, bookUrl, trackReadHealth = false)
                     step("✔ 详情: ${detail.title} tocUrl=${detail.tocUrl.take(60)}")
                     step("✔ 目录: ${toc.size} 章")
                     val firstChapter = toc.firstOrNull() ?: error("目录为空")

@@ -13,16 +13,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import com.radium.inkwell.util.RunLogRecorder
+import com.radium.inkwell.util.UsageLog
+import java.io.File
+import java.util.UUID
 
 data class FeedbackUiState(
     val content: String = "",
     val contact: String = "",
     val submitting: Boolean = false,
+    val attachLogs: Boolean = false,
+    val collectingLogs: Boolean = false,
+    val pending: Boolean = false,
+    val requestId: String = UUID.randomUUID().toString(),
     /** 提交成功后的公开 issue 地址；非空即切到成功态 */
     val successUrl: String? = null,
 ) {
     val overLimit: Boolean get() = content.length > FeedbackRepository.MAX_CONTENT_LENGTH
-    val canSubmit: Boolean get() = content.isNotBlank() && !overLimit && !submitting
+    val canSubmit: Boolean get() = content.isNotBlank() && !overLimit && !submitting && !pending
 }
 
 class FeedbackViewModel(
@@ -31,6 +40,7 @@ class FeedbackViewModel(
     private val context: Context,
     private val repo: FeedbackRepository,
     private val appPrefs: AppPrefs,
+    private val recorder: RunLogRecorder,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FeedbackUiState())
@@ -48,40 +58,82 @@ class FeedbackViewModel(
     val attachedInfo: String = listOfNotNull(appVersion(), device, osVersion).joinToString(" · ")
 
     fun setContent(v: String) {
-        _state.value = _state.value.copy(content = v)
+        if (_state.value.submitting || _state.value.pending || _state.value.content == v) return
+        _state.value = _state.value.copy(content = v, requestId = UUID.randomUUID().toString())
     }
 
     fun setContact(v: String) {
-        _state.value = _state.value.copy(contact = v)
+        if (_state.value.submitting || _state.value.pending || _state.value.contact == v) return
+        _state.value = _state.value.copy(contact = v, requestId = UUID.randomUUID().toString())
+    }
+
+    fun setAttachLogs(v: Boolean) {
+        if (_state.value.submitting || _state.value.pending || _state.value.attachLogs == v) return
+        UsageLog.event("feedback.attach_logs", "enabled" to v)
+        _state.value = _state.value.copy(attachLogs = v, requestId = UUID.randomUUID().toString())
     }
 
     fun submit() {
         val s = _state.value
         // 双击会建出两个 issue，而且是在公开仓库里 —— 拦住
         if (!s.canSubmit) return
+        UsageLog.event("ui.click", "action" to "feedback.submit", "attach_logs" to s.attachLogs)
         _state.value = s.copy(submitting = true)
         viewModelScope.launch {
-            val result = repo.submit(
-                content = s.content.trim(),
-                contact = s.contact.trim().takeIf { it.isNotEmpty() },
-                appVersion = appVersion(),
-                device = device,
-                osVersion = osVersion,
-                channel = appPrefs.updateChannel.first().name.lowercase(),
-            )
-            _state.value = _state.value.copy(submitting = false)
-            when (result) {
-                is FeedbackResult.Success ->
-                    _state.value = _state.value.copy(successUrl = result.url)
-                FeedbackResult.InvalidContent -> messages.emit("请填写反馈内容")
-                // UI 层已按 MAX_CONTENT_LENGTH 拦过，走到这里说明拦漏了
-                FeedbackResult.TooLong ->
-                    messages.emit("内容超过 ${FeedbackRepository.MAX_CONTENT_LENGTH} 字，请精简后再试")
-                is FeedbackResult.RateLimited -> messages.emit(rateLimitMessage(result.retryAfterSec))
-                // 服务端可能已经把 issue 建出来了，只是回程失败 —— 措辞别催用户重试
-                FeedbackResult.ServerDown -> messages.emit("服务暂时不可用，请稍后再试")
-                is FeedbackResult.NetworkError ->
-                    messages.emit("提交失败：${result.message ?: "网络异常"}")
+            var logs: File? = null
+            try {
+                if (s.attachLogs) {
+                    _state.value = _state.value.copy(collectingLogs = true)
+                    try {
+                        logs = recorder.exportForFeedback()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        UsageLog.event("feedback.collect.failed", "error" to e.javaClass.simpleName)
+                        messages.emit("日志收集失败，可取消勾选后提交反馈")
+                        return@launch
+                    } finally {
+                        _state.value = _state.value.copy(collectingLogs = false)
+                    }
+                }
+                val result = repo.submit(
+                    content = s.content.trim(),
+                    contact = s.contact.trim().takeIf { it.isNotEmpty() },
+                    appVersion = appVersion(),
+                    device = device,
+                    osVersion = osVersion,
+                    channel = appPrefs.updateChannel.first().name.lowercase(),
+                    requestId = s.requestId,
+                    logs = logs,
+                )
+                UsageLog.event("feedback.result", "outcome" to when (result) {
+                    is FeedbackResult.Success -> "success"
+                    FeedbackResult.Pending -> "pending"
+                    is FeedbackResult.NetworkError -> "network_error"
+                    is FeedbackResult.RateLimited -> "rate_limited"
+                    else -> "rejected"
+                })
+                when (result) {
+                    is FeedbackResult.Success ->
+                        _state.value = _state.value.copy(successUrl = result.url)
+                    FeedbackResult.InvalidContent -> messages.emit("请填写反馈内容")
+                    // UI 层已按 MAX_CONTENT_LENGTH 拦过，走到这里说明拦漏了
+                    FeedbackResult.TooLong ->
+                        messages.emit("内容超过 ${FeedbackRepository.MAX_CONTENT_LENGTH} 字，请精简后再试")
+                    FeedbackResult.AttachmentTooLarge -> messages.emit("日志附件过大，可取消勾选后提交反馈")
+                    FeedbackResult.Pending -> {
+                        _state.value = _state.value.copy(pending = true)
+                        messages.emit("提交结果待确认，请勿重复提交")
+                    }
+                    is FeedbackResult.RateLimited -> messages.emit(rateLimitMessage(result.retryAfterSec))
+                    // 服务端可能已经把 issue 建出来了，只是回程失败 —— 措辞别催用户重试
+                    FeedbackResult.ServerDown -> messages.emit("服务暂时不可用，请稍后再试")
+                    is FeedbackResult.NetworkError ->
+                        messages.emit("提交失败：${result.message ?: "网络异常"}")
+                }
+            } finally {
+                logs?.delete()
+                _state.value = _state.value.copy(submitting = false, collectingLogs = false)
             }
         }
     }

@@ -149,6 +149,8 @@ data class SearchRuleSet(
     val intro: String? = null,
     val coverUrl: String? = null,
     val bookUrl: String? = null,
+    /** 可选扩展：规则明确提取的作品更新时间。 */
+    val updateTime: String? = null,
 )
 
 /** 详情页规则（Legado ruleBookInfo）；[init] 在其余字段之前求值（常见 `@put`） */
