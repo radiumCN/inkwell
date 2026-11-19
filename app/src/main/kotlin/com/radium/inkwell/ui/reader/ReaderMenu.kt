@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.TextStyle
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -22,7 +23,6 @@ import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import kotlin.math.roundToInt
-import java.util.Locale
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
 import top.yukonga.miuix.kmp.squircle.squircleBackground
@@ -1530,7 +1530,7 @@ private fun LayoutNumberRow(
             val style = MiuixTheme.textStyles.body1
             FontSizeEnd("−", style, "减小$label", value > range.start) { adjust(-step) }
             Text(
-                text = String.format(Locale.getDefault(), "%.${decimals}f %s", value, unit),
+                text = String.format(LocalLocale.current.platformLocale, "%.${decimals}f %s", value, unit),
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
                 style = style,
