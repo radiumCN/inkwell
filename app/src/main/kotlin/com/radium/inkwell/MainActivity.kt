@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.core.os.BundleCompat
 import androidx.core.view.WindowCompat
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.nav.InkwellNavDisplay
@@ -46,7 +47,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (savedInstanceState == null) {
             receiveExternalBook(intent)
         } else {
-            externalBooks = savedInstanceState.getParcelableArrayList(EXTERNAL_BOOKS, Intent::class.java).orEmpty()
+            externalBooks = BundleCompat.getParcelableArrayList(savedInstanceState, EXTERNAL_BOOKS, Intent::class.java)
+                .orEmpty()
         }
         // 夹具开关先判：正式包里这个 extra 谁都能塞进来（桌面 alias 是 exported 的），见 ProfileSeed
         if (ProfileSeed.enabled(this) && intent.getBooleanExtra(ProfileSeed.EXTRA, false)) {
