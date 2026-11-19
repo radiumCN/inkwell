@@ -1258,10 +1258,13 @@ internal fun splitUrlOptions(url: String): Pair<String, UrlOptions>? {
 private fun parseUrlOptions(text: String): UrlOptions? {
     val obj = parseLenientJsonObject(text) ?: return null
     fun str(k: String) = (obj[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    // 阅读也认 JSON 字符串形式的 headers，例如地址脚本用 JSON.stringify(headers) 组装选项。
+    val headerObject = obj["headers"] as? kotlinx.serialization.json.JsonObject
+        ?: str("headers")?.let(::parseLenientJsonObject)
     // 值为空的头照样发（同 Legado）：接口源常把一组头（含 `AUTHORIZATION: ""` 这类空值）连同键名一起算签名，
     // 少发一个，服务端按收到的头验签就对不上 —— 七猫的接口源因此整个 401。从前这里把空值滤掉了。
     // 只丢 JSON 的 null（没有值，不是空串）
-    val hdr = (obj["headers"] as? kotlinx.serialization.json.JsonObject)
+    val hdr = headerObject
         ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { k to it } }
         ?.toMap()
         .orEmpty()
