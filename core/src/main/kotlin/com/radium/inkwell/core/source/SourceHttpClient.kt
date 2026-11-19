@@ -6,6 +6,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlin.coroutines.resumeWithException
 import okhttp3.Call
 import okhttp3.Callback
@@ -100,6 +101,11 @@ class SourceHttpClient(
     /** 允许书源访问内网地址。**只该在测试里开**（MockWebServer 跑在 127.0.0.1 上） */
     allowPrivateNetwork: Boolean = false,
     private val logger: SourceHttpLogger = SourceHttpLogger.NONE,
+    /** 仅返回这个来源显式登录的站点、且匹配请求地址的网页 Cookie。 */
+    private val webCookies: (sourceId: String, url: HttpUrl) -> String? = { _, _ -> null },
+    private val sessionStore: SourceSessionStore? = null,
+    private val updateWebCookies: (String, HttpUrl, List<Cookie>) -> Unit = { _, _, _ -> },
+    private val clearWebCookies: (String, HttpUrl) -> Unit = { _, _ -> },
 ) {
 
     private val cookieJar = MemoryCookieJar()
@@ -107,6 +113,26 @@ class SourceHttpClient(
     private val client: OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
         .guardPrivateNetwork(allowPrivate = allowPrivateNetwork)
+        .addNetworkInterceptor { chain ->
+            var request = chain.request()
+            val scope = request.tag(SourceRequest::class.java)
+            if (scope != null && scope.credentialHeaders.isNotEmpty() && request.url.sourceOrigin() != scope.origin) {
+                request = request.newBuilder().apply {
+                    scope.credentialHeaders.forEach(::removeHeader)
+                    if (scope.credentialHeaders.any { it.equals("Cookie", ignoreCase = true) }) {
+                        val cookies = nativeCookies(scope.sessionId, request.url)
+                        if (cookies.isNotEmpty()) header("Cookie", cookies)
+                    }
+                }.build()
+            }
+            val web = scope?.sessionId?.let { webCookies(it, request.url) }
+            // 网页 Cookie 每跳按实际地址重新取，跟随重定向时由目标站的 origin 决定。
+            val cookies = if (web.isNullOrBlank()) null else mergeWebCookies(request.header("Cookie").orEmpty(), web)
+            chain.proceed(
+                if (cookies == null || !isValidHeaderValue(cookies)) request
+                else request.newBuilder().header("Cookie", cookies).build(),
+            )
+        }
         // 超时必须显式配：OkHttp 默认 connect/read/write 各 10 秒，且**没有 callTimeout**。
         // 没有总闸的话，一个每 9 秒吐一个字节的站能把这次调用无限期挂住 —— 而书源脚本那条路
         // 是 runBlocking 阻塞等待的（见 EngineJsHttp），挂住的是一整根 IO 线程，
@@ -118,28 +144,69 @@ class SourceHttpClient(
         .callTimeout(CALL_TIMEOUT)
         .build()
 
-    /**
-     * 不跟随重定向的那一份（脚本的 `java.get/post/head`，见 JsHttp.fetch）。由 [client] 派生：连接池、Cookie、
-     * 私网防护（DNS 与拦截器）、超时都是同一套
-     */
-    private val noRedirectClient: OkHttpClient = client.newBuilder()
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .build()
-
-    /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
-    fun cookieOf(url: String): String = url.toHttpUrlOrNull()
-        ?.let { u -> cookieJar.loadForRequest(u).joinToString("; ") { "${it.name}=${it.value}" } }
-        .orEmpty()
-
-    fun setCookie(url: String, cookie: String) {
-        val u = url.toHttpUrlOrNull() ?: return
-        val cookies = cookie.split(';').mapNotNull { Cookie.parse(u, it.trim()) }
-        cookieJar.saveFromResponse(u, cookies)
+    private class SessionClient(val client: OkHttpClient, val jar: MemoryCookieJar) {
+        val noRedirect = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     }
 
-    fun removeCookie(url: String) {
-        url.toHttpUrlOrNull()?.let { cookieJar.clear(it) }
+    private val sharedSession = SessionClient(client, cookieJar)
+    private val sourceSessions = ConcurrentHashMap<String, SessionClient>()
+
+    private fun clientSession(sourceId: String?): SessionClient = if (sourceId == null) sharedSession else {
+        sourceSessions.computeIfAbsent(sourceId) { id ->
+            val initial = sessionStore?.read(id, SourceSessionKey.COOKIES)?.let(::decodeCookies).orEmpty()
+            val jar = MemoryCookieJar(
+                maxCookies = 256,
+                initial = initial,
+                save = { cookies ->
+                    val persistent = cookies.filter { it.persistent }
+                    val serialized = persistent.takeIf { it.isNotEmpty() }?.let { saved ->
+                        Json.encodeToString(saved.map { "${it.domain}\n$it" })
+                    }
+                    sessionStore?.write(id, SourceSessionKey.COOKIES, serialized)
+                },
+                onResponse = { url, cookies -> updateWebCookies(id, url, cookies) },
+            )
+            SessionClient(client.newBuilder().cookieJar(jar).build(), jar)
+        }
+    }
+
+    private fun decodeCookies(saved: String): List<Cookie> =
+        runCatching { Json.decodeFromString<List<String>>(saved) }.getOrDefault(emptyList()).mapNotNull { item ->
+            val host = item.substringBefore('\n')
+            val url = runCatching { HttpUrl.Builder().scheme("https").host(host).build() }.getOrNull()
+            url?.let { Cookie.parse(it, item.substringAfter('\n', "")) }
+        }
+
+    /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
+    fun cookieOf(url: String, sourceId: String? = null): String = url.toHttpUrlOrNull()
+        ?.let { target ->
+            val local = nativeCookies(sourceId, target)
+            val web = sourceId?.let { webCookies(it, target) }
+            if (web.isNullOrBlank()) local else mergeWebCookies(local, web)
+        }.orEmpty()
+
+    private fun nativeCookies(sessionId: String?, target: HttpUrl): String =
+        clientSession(sessionId).jar.loadForRequest(target).joinToString("; ") { "${it.name}=${it.value}" }
+
+    private fun mergeWebCookies(local: String, web: String): String {
+        val authenticatedNames = web.split(';').mapTo(HashSet()) { it.substringBefore('=').trim() }
+        val otherCookies = local.split(';').map(String::trim)
+            .filter { it.isNotEmpty() && it.substringBefore('=') !in authenticatedNames }
+        return (listOf(web) + otherCookies).joinToString("; ")
+    }
+
+    private data class SourceRequest(val sessionId: String?, val origin: HttpUrl, val credentialHeaders: Set<String>)
+
+    fun setCookie(url: String, cookie: String, sourceId: String? = null) {
+        val u = url.toHttpUrlOrNull() ?: return
+        val cookies = cookie.split(';').mapNotNull { Cookie.parse(u, it.trim()) }
+        clientSession(sourceId).jar.saveFromResponse(u, cookies)
+    }
+
+    fun removeCookie(url: String, sourceId: String? = null) {
+        val target = url.toHttpUrlOrNull() ?: return
+        clientSession(sourceId).jar.clear(target)
+        if (sourceId != null) clearWebCookies(sourceId, target)
     }
 
     private val buckets = ConcurrentHashMap<String, TokenBucket>()
@@ -160,19 +227,22 @@ class SourceHttpClient(
         throwOnHttpError: Boolean = true,
         /** false：3xx 原样交回（带着 Location），不往下跳 */
         followRedirects: Boolean = true,
+        sourceId: String? = null,
+        credentialHeaders: Set<String> = emptySet(),
     ): FetchedPage {
         dataUriPage(url)?.let { return it }
         val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
         if (rateLimit != null && rateLimit.intervalMs > 0) {
             buckets.computeIfAbsent(httpUrl.host) { TokenBucket(rateLimit) }.acquire()
         }
+        val session = clientSession(sourceId)
         var attempt = 0
         var disconnectRetried = false
         while (true) {
-            val request = buildRequest(httpUrl, method, body, headers, charsetOverride)
+            val request = buildRequest(httpUrl, method, body, headers, charsetOverride, sourceId, credentialHeaders)
             val startNs = System.nanoTime()
             val response = try {
-                execute((if (followRedirects) client else noRedirectClient).newCall(request))
+                execute((if (followRedirects) session.client else session.noRedirect).newCall(request))
             } catch (e: IOException) {
                 // 握手/发请求时被 RST（报错就是一句干巴巴的「Connection reset」）多半是瞬时的：
                 // 连接池里的旧连接被服务端单方面关了、移动网络切基站。再试一次就好，用户却得
@@ -233,12 +303,14 @@ class SourceHttpClient(
         url: String,
         headers: Map<String, String> = emptyMap(),
         maxBytes: Long = MAX_IMAGE_BYTES,
+        sourceId: String? = null,
+        credentialHeaders: Set<String> = emptySet(),
     ): ByteArray {
         val httpUrl = url.toHttpUrlOrNull() ?: throw IOException("非法 URL: $url")
-        val request = buildRequest(httpUrl, "GET", null, headers, null)
+        val request = buildRequest(httpUrl, "GET", null, headers, null, sourceId, credentialHeaders)
         val startNs = System.nanoTime()
         val response = try {
-            execute(client.newCall(request))
+            execute(clientSession(sourceId).client.newCall(request))
         } catch (e: IOException) {
             logger.log(true, "GET $url（图片）请求失败（${elapsedMs(startNs)}ms）: ${e.describe()}", e)
             throw e
@@ -324,8 +396,13 @@ class SourceHttpClient(
         body: String?,
         headers: Map<String, String>,
         charsetOverride: String?,
+        sourceId: String?,
+        credentialHeaders: Set<String>,
     ): Request {
         val b = Request.Builder().url(httpUrl)
+        if (sourceId != null || credentialHeaders.isNotEmpty()) {
+            b.tag(SourceRequest::class.java, SourceRequest(sourceId, httpUrl.sourceOrigin(), credentialHeaders))
+        }
         var hasUa = false
         var contentType: String? = null
         headers.forEach { (k, v) ->
@@ -463,23 +540,32 @@ class SourceHttpClient(
  * 现在不按 host 分桶，按条目总数封顶：超出时先清过期的，还不够再淘汰最早种下的。
  * 同名 + 同域 + 同路径的视为同一个，后种的替换先种的（RFC 6265 §5.3 第 11 步）。
  */
-internal class MemoryCookieJar(private val maxCookies: Int = MAX_COOKIES) : CookieJar {
+internal class MemoryCookieJar(
+    private val maxCookies: Int = MAX_COOKIES,
+    initial: List<Cookie> = emptyList(),
+    private val save: ((List<Cookie>) -> Unit)? = null,
+    private val onResponse: ((HttpUrl, List<Cookie>) -> Unit)? = null,
+) : CookieJar {
 
     private val lock = Any()
 
     /** 插入顺序 = 种下的先后（重种的挪到末尾），淘汰从头开始 */
-    private val cookies = LinkedHashMap<String, Cookie>()
+    private val cookies = LinkedHashMap<String, Cookie>().apply {
+        initial.filter { it.expiresAt > System.currentTimeMillis() }
+            .takeLast(maxCookies).forEach { put(keyOf(it), it) }
+    }
 
     val size: Int get() = synchronized(lock) { cookies.size }
 
     /** 删掉会发给这个 host 的全部 cookie（脚本的 `cookie.removeCookie(url)`） */
     fun clear(url: HttpUrl) {
         synchronized(lock) {
-            cookies.values.removeAll { domainMatches(it, url.host) }
+            if (cookies.values.removeAll { domainMatches(it, url.host) }) saveCookies()
         }
     }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        if (cookies.isEmpty()) return
         val now = System.currentTimeMillis()
         synchronized(lock) {
             for (c in cookies) {
@@ -489,6 +575,8 @@ internal class MemoryCookieJar(private val maxCookies: Int = MAX_COOKIES) : Cook
                 if (c.expiresAt > now) this.cookies[key] = c
             }
             if (this.cookies.size > maxCookies) evict(now)
+            saveCookies()
+            onResponse?.invoke(url, cookies)
         }
     }
 
@@ -507,6 +595,11 @@ internal class MemoryCookieJar(private val maxCookies: Int = MAX_COOKIES) : Cook
             }
             return out
         }
+    }
+
+    private fun saveCookies() {
+        val persist = save ?: return
+        runCatching { persist(cookies.values.toList()) }
     }
 
     private fun evict(now: Long) {

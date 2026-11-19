@@ -3,7 +3,13 @@ package com.radium.inkwell.core.source
 import com.jayway.jsonpath.Configuration
 import com.jayway.jsonpath.JsonPath
 import com.jayway.jsonpath.Option
+import com.radium.inkwell.core.source.js.LOGIN_SCOPE_BINDING
+import com.radium.inkwell.core.source.js.ScriptJson
+import com.radium.inkwell.core.source.js.SourceBridge
+import com.radium.inkwell.core.source.js.StrResponse
 import com.radium.inkwell.core.source.rss.RssXmlParser
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.Json
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -100,6 +106,7 @@ data class JsContext(
     val scriptVars: MutableMap<String, String> = ConcurrentHashMap(),
     /** 源的公共脚本库（阅读的 jsLib）：规则、模板、地址里的脚本都能调它定义的函数 */
     val jsLib: String? = null,
+    val loginSessionId: String? = null,
 )
 
 /** 规则求值器；正则按 pattern 缓存预编译；scriptRuntime 为空时 js 规则报不支持 */
@@ -107,13 +114,15 @@ class RuleEvaluator(
     private val scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
     /** 书源脚本的 HTTP 出口（java.ajax/get/post、cookie 读写）；不注入则这些方法返回空 */
     private val jsHttp: com.radium.inkwell.core.source.js.JsHttp? = null,
+    private val sessionStore: SourceSessionStore? = null,
 ) {
 
     private val jsCache = com.radium.inkwell.core.source.js.JsCache()
+    private val loginCaches = ConcurrentHashMap<String, com.radium.inkwell.core.source.js.JsCache>()
 
     /** 书源级 KV（source.put/get），按书源留存，跨抓取链路可见 */
     private val sourceStores =
-        ConcurrentHashMap<String, MutableMap<String, String>>()
+        ConcurrentHashMap<Pair<String, String?>, MutableMap<String, String>>()
 
     private val regexCache = object : LinkedHashMap<String, Regex>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex>?): Boolean =
@@ -793,6 +802,100 @@ class RuleEvaluator(
         return runJs(script, ctx, input = "")
     }
 
+    internal fun loginForm(source: BookSourceRule, ctx: EvalContext): SourceLoginForm {
+        val json = source.loginUi?.trim().orEmpty()
+        val dynamic = headerScriptOf(json)
+        val fields = when {
+            dynamic != null -> parseSourceLoginFields(
+                evalLoginScript(source, ctx, dynamic, emptyMap()) ?: "[]",
+            )
+            json.isBlank() -> emptyList()
+            else -> parseSourceLoginFields(json)
+        }
+        val stored = loginValues(sourceBridge(ctx).getLoginInfo())
+        val values = fields.filterNot { it.isButton || it.isLabel }.associate { field ->
+            field.name to (stored[field.name] ?: field.defaultValue)
+        }
+        return SourceLoginForm(fields, values, source.loginScript != null)
+    }
+
+    internal fun runLogin(
+        source: BookSourceRule,
+        ctx: EvalContext,
+        values: Map<String, String>,
+        action: String?,
+        interaction: SourceLoginInteraction? = null,
+    ) {
+        val changes = mutableMapOf<SourceSessionKey, String?>()
+        evalLoginScript(source, ctx, action ?: "login.call(this)", values, interaction, changes, submit = action == null)
+        com.radium.inkwell.core.source.js.EngineJsHttp.currentJob()?.ensureActive()
+        if (action == null && values.isNotEmpty() && SourceSessionKey.INFO !in changes) {
+            changes[SourceSessionKey.INFO] = Json.encodeToString(values)
+        }
+        // 登录脚本有时先写表单、再发登录请求。脚本失败时保留原有会话。
+        val sessionId = ctx.js.loginSessionId
+        if (sessionStore != null && sessionId != null) {
+            sessionStore.writeAll(sessionId, changes)
+        } else {
+            val bridge = sourceBridge(ctx)
+            for ((key, value) in changes) {
+                when (key) {
+                    SourceSessionKey.INFO -> bridge.putLoginInfo(value)
+                    SourceSessionKey.HEADERS -> bridge.putLoginHeader(value)
+                    SourceSessionKey.VARIABLE -> bridge.setVariable(value)
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    private fun evalLoginScript(
+        source: BookSourceRule,
+        ctx: EvalContext,
+        action: String,
+        values: Map<String, String>,
+        interaction: SourceLoginInteraction? = null,
+        changes: MutableMap<SourceSessionKey, String?>? = null,
+        submit: Boolean = false,
+    ): String? {
+        val formJson = Json.encodeToString(values)
+        return runScript(
+            ctx, ScriptJson(formJson, asObject = true), strict = true, interaction = interaction,
+            submittedInfo = formJson.takeIf { submit && values.isNotEmpty() },
+            pendingLogin = changes,
+        ) { runtime, bindings ->
+            runtime.eval(listOfNotNull(source.loginScript, action).joinToString("\n"), bindings, ctx.js.jsLib)
+        }
+    }
+
+    internal fun checkLogin(
+        source: BookSourceRule,
+        ctx: EvalContext,
+        response: StrResponse,
+        script: String,
+        retry: () -> StrResponse,
+    ): StrResponse? = runScript(
+        ctx, response, strict = true, loginRetry = retry,
+        loginAction = { runLogin(source, ctx, loginValues(sourceBridge(ctx).getLoginInfo()), action = null) },
+    ) { runtime, bindings -> runtime.evalForResponse(script, bindings, ctx.js.jsLib) }
+
+    private fun sourceBridge(
+        ctx: EvalContext,
+        loginAction: (() -> Unit)? = null,
+        submittedInfo: String? = null,
+        pendingLogin: MutableMap<SourceSessionKey, String?>? = null,
+    ): SourceBridge =
+        SourceBridge(
+            ctx.js.sourceKey,
+            sourceStores.getOrPut(ctx.js.sourceKey to ctx.js.loginSessionId) { ConcurrentHashMap() },
+            ctx.js.sourceFacts,
+            sessionStore,
+            loginAction,
+            submittedInfo,
+            pendingLogin,
+            ctx.js.loginSessionId,
+        )
+
     /**
      * 绑定书源脚本可见的全部上下文：变量（result/src/baseUrl/key/page）+ 桥对象
      * （java/cookie/cache/source/book/chapter）。Rhino 会把这些 Kotlin 对象反射成 JS 对象。
@@ -812,20 +915,29 @@ class RuleEvaluator(
     private inline fun <T : Any> runScript(
         ctx: EvalContext,
         input: Any,
+        strict: Boolean = false,
+        interaction: SourceLoginInteraction? = null,
+        noinline loginAction: (() -> Unit)? = null,
+        noinline loginRetry: (() -> StrResponse)? = null,
+        submittedInfo: String? = null,
+        pendingLogin: MutableMap<SourceSessionKey, String?>? = null,
         run: (com.radium.inkwell.core.source.js.ScriptRuntime, Map<String, Any?>) -> T?,
     ): T? {
         val runtime = scriptRuntime
             ?: throw UnsupportedRuleException("该来源需要 JS 引擎，当前版本不支持")
-        val store = sourceStores.getOrPut(ctx.js.sourceKey) { ConcurrentHashMap() }
+        val cache = ctx.js.loginSessionId?.let { id ->
+            loginCaches.computeIfAbsent(id) { com.radium.inkwell.core.source.js.JsCache() }
+        } ?: jsCache
         val java = com.radium.inkwell.core.source.js.JavaBridge(
-            jsHttp, jsCache, ctx.js.scriptVars, query = ruleQuery(ctx), chinese = runtime.chineseConverter,
-            deviceId = { runtime.androidId },
+            jsHttp, cache, ctx.js.scriptVars, query = ruleQuery(ctx), chinese = runtime.chineseConverter,
+            deviceId = { runtime.androidId }, loginInteraction = interaction, loginRetry = loginRetry,
         )
         return try {
             val inUrl = ctx.json == null && ctx.element == null
             run(
                 runtime,
                 buildMap {
+                    ctx.js.loginSessionId?.let { put(LOGIN_SCOPE_BINDING, it) }
                     put("result", input)
                     put(
                         "src",
@@ -843,8 +955,8 @@ class RuleEvaluator(
                     put("title", ctx.js.chapter.title)
                     put("java", java)
                     put("cookie", com.radium.inkwell.core.source.js.CookieBridge(jsHttp))
-                    put("cache", jsCache)
-                    put("source", com.radium.inkwell.core.source.js.SourceBridge(ctx.js.sourceKey, store, ctx.js.sourceFacts))
+                    put("cache", cache)
+                    put("source", sourceBridge(ctx, loginAction, submittedInfo, pendingLogin))
                     put("book", ctx.js.book)
                     put("chapter", ctx.js.chapter)
                 },
@@ -852,17 +964,18 @@ class RuleEvaluator(
         } catch (e: Exception) {
             // 取消不是「脚本报错」：吞掉的话，被取消的那次调用还会带着空结果把剩下的条目一个个求值完
             if (e is kotlinx.coroutines.CancellationException) throw e
+            if (strict) throw SourceException("来源登录脚本执行失败")
             null
         }
     }
 
     /**
      * 来源脚本 `source.putLoginHeader(…)` 存下的请求头（同 Legado：之后这个来源的每个请求都带上）。
-     * 只在进程内：不做登录界面，脚本自己算出来的 Cookie / token（一读这类站先过一道脚本挑战）照样接得上。
      * 没存过、存的不是 JSON 对象为空
      */
-    fun loginHeaders(sourceKey: String): Map<String, String> =
-        sourceStores[sourceKey]?.get(com.radium.inkwell.core.source.js.SourceBridge.LOGIN_HEADER)
+    fun loginHeaders(sourceKey: String, sessionId: String? = null): Map<String, String> =
+        (if (sessionId != null && sessionStore != null) sessionStore.read(sessionId, SourceSessionKey.HEADERS)
+        else sourceStores[sourceKey to sessionId]?.get(SourceBridge.LOGIN_HEADER))
             ?.let { parseHeaderJson(it) }
             .orEmpty()
 

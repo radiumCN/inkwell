@@ -2,6 +2,7 @@ package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.parser.html.HtmlToElements
+import com.radium.inkwell.core.source.js.StrResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,13 +10,16 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
+import java.util.concurrent.ConcurrentHashMap
 
 /** 书源业务错误（规则未配置/规则不匹配等） */
 class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -128,13 +132,16 @@ class BookSourceEngine(
     scriptRuntime: com.radium.inkwell.core.source.js.ScriptRuntime? = null,
     /** JS 渲染回退；未注入时行为与从前完全一致 */
     private val renderer: PageRenderer? = null,
+    private val sessionStore: SourceSessionStore? = null,
 ) {
 
     private val jsHttp = com.radium.inkwell.core.source.js.EngineJsHttp(http)
     private val evaluator = RuleEvaluator(
         scriptRuntime,
         jsHttp = jsHttp,
+        sessionStore = sessionStore,
     )
+    private val loginLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
      * 已确认需要 JS 渲染的「书源 + 阶段」；后续同一级请求先走渲染器，省掉每次先静态空跑一遍。
@@ -149,9 +156,9 @@ class BookSourceEngine(
      * 绑定走协程上下文元素而不是 set/remove：block 里第一次挂起后恢复到哪根 IO 线程
      * 不由我们定，裸 ThreadLocal 会在换线程后失联（详见 [EngineJsHttp.bindingTo]）。
      */
-    private suspend fun <T> engineIo(block: suspend () -> T): T =
+    private suspend fun <T> engineIo(source: BookSourceRule, block: suspend () -> T): T =
         withContext(Dispatchers.IO) {
-            withContext(jsHttp.bindingTo(coroutineContext[Job])) {
+            withContext(jsHttp.bindingTo(coroutineContext[Job], source.loginSessionId)) {
                 try {
                     block()
                 } catch (e: Exception) {
@@ -164,8 +171,31 @@ class BookSourceEngine(
                 }
             }
         }
+    suspend fun getLoginForm(source: BookSourceRule): SourceLoginForm = engineIo(source) {
+        evaluator.loginForm(source, urlContext(source, varsOf(source)))
+    }
+
+    suspend fun submitLogin(
+        source: BookSourceRule,
+        values: Map<String, String>,
+        action: String? = null,
+        interaction: SourceLoginInteraction? = null,
+    ) = engineIo(source) {
+        loginLocks.computeIfAbsent(source.id) { Mutex() }.withLock {
+            val context = urlContext(source, varsOf(source))
+            val url = action?.toHttpUrlOrNull()
+            if (url != null && interaction != null) interaction.openBrowser(url.toString(), source.name)
+            else evaluator.runLogin(source, context, values, action, interaction)
+        }
+        invalidateLoginPages(source)
+    }
+
+    fun invalidateLoginPages(source: BookSourceRule) {
+        synchronized(recentPages) { recentPages.keys.removeAll { it.sourceId == source.id } }
+    }
+
     suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
-        engineIo {
+        engineIo(source) {
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
                 ?: throw SourceException("来源「${source.name}」未配置搜索规则")
             val rule = source.ruleSearch ?: throw SourceException("来源「${source.name}」未配置搜索规则")
@@ -186,7 +216,7 @@ class BookSourceEngine(
      * 拿 WebView 里看到的页面去认，规则可能套不上引擎抓到的静态页。只要求有 searchUrl，不要求有 ruleSearch。
      */
     suspend fun fetchSearchPage(source: BookSourceRule, keyword: String, page: Int = 1): FetchedPage =
-        engineIo {
+        engineIo(source) {
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
                 ?: throw SourceException("来源「${source.name}」未配置搜索地址")
             val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
@@ -201,7 +231,7 @@ class BookSourceEngine(
         templates.any { it != null && PAGE_VAR.containsMatchIn(it) }
 
     suspend fun explore(source: BookSourceRule, exploreIndex: Int, page: Int = 1): SearchPage =
-        engineIo {
+        engineIo(source) {
             val item = source.explore.getOrNull(exploreIndex)
                 ?: throw SourceException("来源「${source.name}」发现页下标越界: $exploreIndex")
             // Legado：发现页列表规则缺省时复用搜索规则。「缺省」看的是 bookList 空不空，不是
@@ -242,7 +272,7 @@ class BookSourceEngine(
         bookUrl: String,
         variables: Map<String, String> = emptyMap(),
     ): RemoteBookDetail =
-        engineIo {
+        engineIo(source) {
             val url = resolveUrl(source.baseUrl, bookUrl)
             // 详情页解析不出来也不判死：书名/作者在搜索结果里早就拿到了，详情页只是「有就覆盖」。
             // 真正决定这本书能不能读的是目录 —— 让下一步去报错，那才是有信息量的错误。
@@ -325,7 +355,7 @@ class BookSourceEngine(
         bookAuthor: String = "",
         variables: Map<String, String> = emptyMap(),
     ): List<RemoteChapter> =
-        engineIo {
+        engineIo(source) {
             val rule = source.ruleToc ?: throw SourceException("来源「${source.name}」未配置目录规则")
             withRenderFallback(source, "toc") { render ->
                 collectToc(source, rule, tocUrl, render, bookUrl, bookTitle, bookAuthor, variables)
@@ -458,7 +488,7 @@ class BookSourceEngine(
         bookUrl: String = "",
         bookTitle: String = "",
         variables: Map<String, String> = emptyMap(),
-    ): RemoteChapterContent = engineIo {
+    ): RemoteChapterContent = engineIo(source) {
         val rule = source.ruleContent ?: throw SourceException("来源「${source.name}」未配置正文规则")
         val result = if (allowJsRender) {
             withRenderFallback(source, "content") { render ->
@@ -484,16 +514,17 @@ class BookSourceEngine(
      * 不一上来就带：有的图床反过来，带了别的站就回一张「禁止外链」的占位图（正常返回，没有机会重试），
      * 订阅文章的图也是这么取的（见 app 的 ImageReferer）。
      */
-    suspend fun getImage(source: BookSourceRule, imageUrl: String): ByteArray = engineIo {
+    suspend fun getImage(source: BookSourceRule, imageUrl: String): ByteArray = engineIo(source) {
         val split = splitUrlOptions(imageUrl)
         val url = resolveUrl(source.baseUrl, split?.first ?: imageUrl)
-        val headers = mergeHeaders(sourceHeaders(source), split?.second?.headers.orEmpty(), varsOf(source))
+        val headers = requestHeaders(source, url, split?.second?.headers.orEmpty(), urlContext(source, varsOf(source)))
         try {
-            http.fetchBytes(url, headers)
+            http.fetchBytes(url, headers.all, sourceId = source.loginSessionId, credentialHeaders = headers.credentials.keys)
         } catch (e: SourceHttpClient.HttpStatusException) {
             val referer = siteOrigin(source.baseUrl)
-            if (referer == null || headers.keys.any { it.equals("Referer", ignoreCase = true) }) throw e
-            http.fetchBytes(url, headers + ("Referer" to referer))
+            if (referer == null || headers.all.keys.any { it.equals("Referer", ignoreCase = true) }) throw e
+            http.fetchBytes(url, headers.all + ("Referer" to referer), sourceId = source.loginSessionId,
+                credentialHeaders = headers.credentials.keys)
         }
     }
 
@@ -635,25 +666,27 @@ class BookSourceEngine(
      * 条数、存活时间也压得很小，写入时顺手清掉过期的，别让几页响应体一直攥在单例里。只缓存不带 body 的 GET。
      * 调试书源时（[trace]）不走缓存：每次抓取都得出现在调试输出里。
      */
-    private val recentPages = object : LinkedHashMap<String, Pair<Long, FetchedPage>>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, FetchedPage>>?): Boolean =
+    private data class RecentPageKey(val sourceId: String, val sessionId: String?, val render: Boolean, val url: String)
+
+    private val recentPages = object : LinkedHashMap<RecentPageKey, Pair<Long, FetchedPage>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<RecentPageKey, Pair<Long, FetchedPage>>?): Boolean =
             size > RECENT_PAGES
     }
 
-    private fun recentKey(source: BookSourceRule, url: String, render: Boolean): String? {
+    private fun recentKey(source: BookSourceRule, url: String, render: Boolean): RecentPageKey? {
         if (trace != null) return null
         val opt = splitUrlOptions(url)?.second
         if (opt != null && (opt.body != null || !(opt.method ?: "GET").equals("GET", ignoreCase = true))) return null
-        return source.id + "\u0000" + render + "\u0000" + pageKey(url)
+        return RecentPageKey(source.id, source.loginSessionId, render, pageKey(url))
     }
 
-    private fun keepRecent(key: String, page: FetchedPage) = synchronized(recentPages) {
+    private fun keepRecent(key: RecentPageKey, page: FetchedPage) = synchronized(recentPages) {
         val now = System.nanoTime()
         recentPages.values.removeAll { (at, _) -> now - at > RECENT_PAGE_TTL_NS }
         recentPages[key] = now to page
     }
 
-    private fun takeRecent(key: String): FetchedPage? = synchronized(recentPages) {
+    private fun takeRecent(key: RecentPageKey): FetchedPage? = synchronized(recentPages) {
         val (at, page) = recentPages.remove(key) ?: return null
         // 同一页可能记在两个键下（请求地址与跳转后的 finalUrl），一起作废
         recentPages.values.removeAll { (_, p) -> p === page }
@@ -665,21 +698,7 @@ class BookSourceEngine(
         url: String,
         stage: String,
         render: Boolean,
-    ): FetchedPage {
-        val split = splitUrlOptions(url)
-        val opt = split?.second
-        // 地址自带 webView（书源声明这一页要渲染）的，不等「静态解析为空」再回退，直接渲染
-        if ((render || opt?.webView == true) && renderer != null) {
-            val staticOnly = opt != null && (opt.body != null || (opt.method ?: "GET") != "GET")
-            if (!staticOnly) {
-                val target = split?.first ?: url
-                // 源级 header 模板（{{baseUrl}} 等）要用真实变量展开，否则防盗链站拿到空 Referer 会 403
-                val headers = mergeHeaders(sourceHeaders(source), opt?.headers.orEmpty(), varsOf(source))
-                render(target, headers)?.let { return it }
-            }
-        }
-        return fetchUrl(source, url, stage)
-    }
+    ): FetchedPage = fetchUrl(source, url, stage, render)
 
     // ---- 内部 ----
 
@@ -726,83 +745,102 @@ class BookSourceEngine(
         val expanded = evaluator.expandTemplate(markKeyword(urlPart), urlCtx)
             .replace(KEYWORD_MARK, encodeUrlComponent(keyword, charset))
         val url = resolveUrl(source.baseUrl, encodeNonAsciiQuery(expanded, charset))
-        val mergedHeaders = mergeHeaders(sourceHeaders(source, js), headers, vars)
-        // 书源自己声明了要 WebView（Legado 的 webView）：搜索、发现也照办。不声明的源照旧只静态抓 ——
-        // 自动回退（[withRenderFallback]）不碰搜索，是怕上百个源一起排队等 WebView；声明了的只有寥寥几个，
-        // 而它们的结果本来就是页面脚本拉回来的，静态抓永远是空壳（七猫的网页版）。
-        // 渲染器只会 GET：带 body 的照旧静态抓。渲染失败（超时、加载出错）也退回静态抓
-        if (opt.webView && body == null && method.equals("GET", ignoreCase = true)) {
-            render(url, mergedHeaders)?.let { return it }
-        }
-        return doFetch(
-            stage = stage,
-            url = url,
-            method = method,
-            body = body,
-            headers = mergedHeaders,
-            charset = charset,
-            rateLimit = source.rateLimit,
-        )
+        return doFetch(source, stage, url, method, body, headers, charset, urlCtx, opt.webView)
     }
 
-    /** 交给渲染器；没注入渲染器或渲染失败返回 null，调用方退回静态抓取 */
-    private suspend fun render(target: String, headers: Map<String, String>): FetchedPage? {
+    private suspend fun render(source: BookSourceRule, target: String, headers: RequestHeaders): FetchedPage? {
         val r = renderer ?: return null
-        // UA 必须与静态抓取一致：站点常按 UA 给不同 DOM，规则是照静态那份写的
-        val ua = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+        val ua = headers.all.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
             ?: SourceHttpClient.DEFAULT_UA
-        return r.render(target, headers.withoutLegadoOnlyHeaders(), ua)?.also { page ->
+        val regular = headers.regular.withoutLegadoOnlyHeaders()
+        val credentials = headers.credentials.withoutLegadoOnlyHeaders()
+        val sessionId = source.loginSessionId
+        val rendered = if (sessionId != null || credentials.isNotEmpty()) {
+            r.renderForSource(sessionId, target, regular, ua, credentials)
+        } else {
+            r.render(target, regular, ua)
+        }
+        return rendered?.also { page ->
             trace?.onFetch(
                 FetchTrace(target, "RENDER", page.statusCode, page.finalUrl, page.detectedCharset, page.bodyText.take(500))
             )
         }
     }
 
-    /**
-     * detail/toc/content 阶段的抓取。从前恒 GET、且把 header 模板用 emptyMap() 展开：
-     * - 规则/JS 拼出的地址常自带 `,{method/body/charset/headers}` 选项（尤其翻页、POST 目录接口），
-     *   要用 [splitUrlOptions] 解析并透传，否则 method/body/charset 全丢、请求方式错到底。
-     * - 源级 header 里的 `{{baseUrl}}` 在这三级要展开成真实值（fix：传 varsOf(source)），否则 403。
-     */
-    private suspend fun fetchUrl(source: BookSourceRule, url: String, stage: String): FetchedPage {
-        var target = url
-        var method = "GET"
-        var body: String? = null
-        var charset: String? = source.charset
-        var headers: Map<String, String> = emptyMap()
-        splitUrlOptions(url)?.let { (bare, opt) ->
-            target = bare
-            opt.method?.let { method = it }
-            opt.body?.let { body = it }
-            opt.charset?.let { charset = it }
-            if (opt.headers.isNotEmpty()) headers = opt.headers
-        }
+    /** 详情、目录与正文的地址也允许声明方法、请求头和 WebView。 */
+    private suspend fun fetchUrl(source: BookSourceRule, url: String, stage: String, render: Boolean): FetchedPage {
+        val (target, options) = splitUrlOptions(url) ?: (url to UrlOptions())
+        val method = options.method ?: "GET"
+        val charset = options.charset ?: source.charset
         val vars = varsOf(source)
-        return doFetch(
-            stage = stage,
-            url = target,
-            method = method,
-            body = body?.let { raw ->
-                val templated =
-                    if (method.equals("POST", ignoreCase = true)) encodeKeyInFormTemplate(raw, charset) else raw
-                expandTemplate(templated, vars)
-            },
-            headers = mergeHeaders(sourceHeaders(source), headers, vars),
-            charset = charset,
-            rateLimit = source.rateLimit,
-        )
+        val body = options.body?.let { raw ->
+            val templated = if (method.equals("POST", ignoreCase = true)) encodeKeyInFormTemplate(raw, charset) else raw
+            expandTemplate(templated, vars)
+        }
+        return doFetch(source, stage, target, method, body, options.headers, charset,
+            urlContext(source, vars), render || options.webView)
     }
 
     private suspend fun doFetch(
+        source: BookSourceRule,
         stage: String,
         url: String,
         method: String,
         body: String?,
-        headers: Map<String, String>,
+        optionsHeaders: Map<String, String>,
         charset: String?,
-        rateLimit: RateLimitRule?,
+        context: EvalContext,
+        shouldRender: Boolean,
     ): FetchedPage {
-        val page = http.fetch(url, method, body, headers, charset, rateLimit)
+        val checkRule = source.loginCheckJs?.trim()?.takeIf { it.isNotEmpty() && !url.startsWith("data:", true) }
+        suspend fun fetch(): FetchedPage {
+            val headers = requestHeaders(source, url, optionsHeaders, context)
+            if (shouldRender && body == null && method.equals("GET", ignoreCase = true)) {
+                render(source, url, headers)?.let { return it }
+            }
+            return http.fetch(url, method, body, headers.all, charset, source.rateLimit,
+                throwOnHttpError = checkRule == null, sourceId = source.loginSessionId,
+                credentialHeaders = headers.credentials.keys)
+        }
+        fun asResponse(page: FetchedPage): StrResponse =
+            StrResponse(page.bodyText, page.statusCode, page.finalUrl, page.headers,
+                http.cookieOf(page.finalUrl, source.loginSessionId))
+
+        val rawPage = try {
+            fetch()
+        } catch (e: SourceHttpClient.HttpStatusException) {
+            if (e.code == 401 && source.hasLogin) throw SourceException("请在来源详情中登录后重试")
+            throw e
+        }
+        // 服务端的限流结果直接交给搜索调度，避免校验脚本立即重试。
+        val page = if (checkRule == null || rawPage.statusCode == 429) rawPage else {
+            val response = asResponse(rawPage)
+            var retriedPage: FetchedPage? = null
+            var retriedResponse: StrResponse? = null
+            val checked = loginLocks.computeIfAbsent(source.id) { Mutex() }.withLock {
+                try {
+                    evaluator.checkLogin(source, context, response, headerScriptOf(checkRule) ?: checkRule) {
+                        jsHttp.blockingUnderParent {
+                            val page = fetch()
+                            retriedPage = page
+                            asResponse(page).also { retriedResponse = it }
+                        } ?: StrResponse.empty()
+                    }
+                } catch (_: SourceException) {
+                    throw SourceException("登录校验未通过，请在来源详情中登录后重试")
+                }
+            }
+            when {
+                checked == null || checked === response -> rawPage
+                checked === retriedResponse -> checkNotNull(retriedPage)
+                else -> FetchedPage(checked.url(), checked.code(), checked.body(), rawPage.detectedCharset, checked.headerMap)
+            }
+        }
+        if (checkRule != null && page.statusCode !in 200..299) {
+            if (page.statusCode == 401 && source.hasLogin) throw SourceException("请在来源详情中登录后重试")
+            val retryAfter = page.headers.entries.firstOrNull { it.key.equals("Retry-After", true) }?.value?.firstOrNull()
+            throw SourceHttpClient.HttpStatusException(page.statusCode, page.finalUrl, retryAfter)
+        }
         trace?.onFetch(
             FetchTrace(
                 requestUrl = url,
@@ -816,26 +854,37 @@ class BookSourceEngine(
         return page
     }
 
-    private fun mergeHeaders(
-        sourceHeaders: Map<String, String>,
-        requestHeaders: Map<String, String>,
-        vars: Map<String, String>,
-    ): Map<String, String> =
-        (sourceHeaders + requestHeaders).mapValues { (_, v) -> expandTemplate(v, vars) }
+    private data class RequestHeaders(val regular: Map<String, String>, val credentials: Map<String, String>) {
+        val all get() = regular + credentials
+    }
 
-    /**
-     * 源级请求头。JSON 写法解析一次就记住（[BookSourceRule.headers]）；脚本写法（[BookSourceRule.headerScript]）
-     * 同阅读，**每次请求现跑**：脚本常拿当前时间算签名（值得阅读、书香之家），记住一份就是一份过期的签名。
-     * 脚本里有 java / source / cookie / cache / baseUrl 和源的 jsLib。
-     *
-     * 跑不出 JSON（报错、返回的不是对象）就当没有源级请求头 —— 和从前一样，别让一段坏 header 把这个源的请求全拦下。
-     * 变量表拷一份给它：header 脚本里 java.put 的东西不该混进这条链路要交回去的变量（[SearchResult.variables]）。
-     *
-     * 脚本 `source.putLoginHeader(…)` 存下的头盖在最上面（同阅读的 getHeaderMap）：一读这类站先回一段脚本挑战，
-     * 规则算出 Cookie 存进去，后面的请求就得带着它
-     */
-    private fun sourceHeaders(source: BookSourceRule, js: JsContext = jsContextOf(source)): Map<String, String> =
-        baseSourceHeaders(source, js) + evaluator.loginHeaders(source.id)
+    private fun requestHeaders(
+        source: BookSourceRule,
+        url: String,
+        requestHeaders: Map<String, String>,
+        context: EvalContext,
+    ): RequestHeaders {
+        val sessionId = source.loginSessionId
+        val baseHeaders = baseSourceHeaders(source, context.js)
+        if (sessionId == null) {
+            // 没有登录入口的旧规则也可能用 putLoginHeader 存防盗链挑战的临时请求头。
+            val regular = (baseHeaders + evaluator.loginHeaders(source.id) + requestHeaders)
+                .mapValues { (_, value) -> expandTemplate(value, context.vars) }
+            return RequestHeaders(regular, emptyMap())
+        }
+        val target = url.toHttpUrlOrNull()?.sourceOrigin()
+        val authorized = target != null && (target == source.baseUrl.toHttpUrlOrNull()?.sourceOrigin() ||
+            target.toString() in sessionStore.webLoginOrigins(sessionId))
+        val credentials = if (authorized) {
+            evaluator.loginHeaders(source.id, sessionId).filterKeys { name ->
+                requestHeaders.keys.none { it.equals(name, ignoreCase = true) }
+            }.mapValues { (_, value) -> expandTemplate(value, context.vars) }
+        } else emptyMap()
+        val regular = (baseHeaders + requestHeaders).filterKeys { name ->
+            credentials.keys.none { it.equals(name, ignoreCase = true) }
+        }.mapValues { (_, value) -> expandTemplate(value, context.vars) }
+        return RequestHeaders(regular, credentials)
+    }
 
     private fun baseSourceHeaders(source: BookSourceRule, js: JsContext): Map<String, String> {
         val script = source.headerScript ?: return source.headers
@@ -884,6 +933,7 @@ class BookSourceEngine(
         chapterIndex: Int = 0,
     ) = JsContext(
         sourceKey = source.id,
+        loginSessionId = source.loginSessionId,
         sourceFacts = source.scriptFacts,
         jsLib = source.jsLib,
         book = com.radium.inkwell.core.source.js.BookBridge(

@@ -1,5 +1,7 @@
 package com.radium.inkwell.core.source
 
+import com.radium.inkwell.core.util.toHex
+import java.security.MessageDigest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.nullable
@@ -52,12 +54,13 @@ data class BookSourceRule(
     val searchUrl: String? = null,
     @Serializable(with = LenientJsonText::class) val exploreUrl: String? = null,
     /**
-     * 阅读的登录脚本。我们不做登录，但不少来源把公用函数写在这里、规则开头 `eval(String(source.loginUrl))` 加载 ——
+     * 阅读的登录网址或脚本。不少来源也把公用函数写在这里、规则开头 `eval(String(source.loginUrl))` 加载 ——
      * 脚本里的 `source.loginUrl` 读的就是它（见 [scriptFacts]）。这个字段之前导入的来源没存它：重新导入一次才有
      */
     val loginUrl: String? = null,
-    /** 阅读的登录界面（一排控件的 JSON）。不画它，只给脚本读：聚合源拿 `typeof source.loginUi` 认 App，见 SourceBridge.loginUi */
+    /** 阅读的登录界面，可以是控件 JSON，也可以是生成控件列表的脚本 */
     @Serializable(with = LenientJsonText::class) val loginUi: String? = null,
+    val loginCheckJs: String? = null,
     // 规则集读得宽：对象、JSON 字符串都认，别的写法（`[]`、乱填的值）当没有，同阅读的导入 —— 见 [LenientRuleSet]
     @Serializable(with = LenientSearchRuleSet::class) val ruleSearch: SearchRuleSet? = null,
     @Serializable(with = LenientSearchRuleSet::class) val ruleExplore: SearchRuleSet? = null,
@@ -83,6 +86,15 @@ data class BookSourceRule(
     val baseUrl: String get() = bookSourceUrl.substringBefore('#').trimEnd('/')
 
     val group: String get() = bookSourceGroup
+
+    val hasLogin: Boolean get() = !loginUrl.isNullOrBlank() ||
+        loginUi?.filterNot(Char::isWhitespace)?.let { it.isNotEmpty() && it != "[]" } == true
+
+    /** 登录授权只属于用户当时打开的规则，同 ID 的更新不继承旧规则的凭据。 */
+    val loginSessionId: String? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        if (!hasLogin) null else MessageDigest.getInstance("SHA-256")
+            .digest(toJson().toByteArray(Charsets.UTF_8)).toHex()
+    }
 
     /** Legado 无源级编码字段；编码来自 searchUrl 的 `,{charset}` 选项或响应头 */
     val charset: String? get() = null
@@ -115,6 +127,7 @@ data class BookSourceRule(
             type = bookSourceType,
             loginUrl = loginUrl,
             loginUi = loginUi,
+            hasLogin = hasLogin,
             header = header,
             jsLib = jsLib,
             searchUrl = searchUrl,
