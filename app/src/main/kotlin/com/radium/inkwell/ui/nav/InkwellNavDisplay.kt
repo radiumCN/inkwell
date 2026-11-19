@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.nav
 
+import android.content.Intent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -20,6 +21,7 @@ import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneSt
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,7 +101,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun InkwellNavDisplay() {
+fun InkwellNavDisplay(
+    externalBook: Intent? = null,
+    onExternalBookHandled: (Intent) -> Unit = {},
+) {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
     LaunchedEffect(backStack) {
@@ -121,6 +126,19 @@ fun InkwellNavDisplay() {
             onDismissRequest = { showExit = false },
             closeOnConfirm = true,
             onConfirm = { showExit = false; activity?.moveTaskToBack(true) },
+        )
+    }
+
+    if (externalBook != null) key(externalBook) {
+        ExternalBookImportDialog(
+            request = externalBook,
+            onDismiss = { onExternalBookHandled(externalBook) },
+            onOpen = { id ->
+                nav.openOrigin.value = TransformOrigin.Center
+                if (backStack.lastOrNull() is ReaderRoute) nav.go(ReaderRoute(id))
+                else nav.openBook(id, TransformOrigin.Center)
+                onExternalBookHandled(externalBook)
+            },
         )
     }
 

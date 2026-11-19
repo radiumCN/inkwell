@@ -96,7 +96,12 @@ class ComposeTextMeasureFacade(
             fontSize = fontSizeSp,
             lineHeight = lineHeightSp,
             fontFamily = fontRegistry.resolve(style.fontId),
-            fontWeight = if (style.isBold) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = when {
+                style.isBold -> FontWeight.Bold
+                style.fontWeight == ReaderSettings.FONT_WEIGHT_LIGHT && ReaderSettings.isFileFont(style.fontId) ->
+                    FontWeight.Normal
+                else -> FontWeight(style.fontWeight)
+            },
             textIndent = TextIndent(firstLine = indentSp),
             textAlign = if (style.justify) TextAlign.Justify else TextAlign.Start,
             letterSpacing = style.letterSpacingEm.em,

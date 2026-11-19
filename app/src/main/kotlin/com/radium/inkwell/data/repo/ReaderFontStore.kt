@@ -2,6 +2,7 @@ package com.radium.inkwell.data.repo
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.FileFontRegistry
 import com.radium.inkwell.reader.measure.FontRegistry
@@ -24,6 +25,8 @@ import java.io.IOException
 /** 一个用户导入的字体。[id] 即 ReaderSettings.fontId（`file:<文件名>`） */
 data class UserFont(val id: String, val label: String)
 
+enum class FontImportStage { READING, VALIDATING }
+
 /**
  * 用户导入的阅读字体：放在 `filesDir/fonts/`，一份文件一个字体。
  *
@@ -40,6 +43,7 @@ class ReaderFontStore(context: Context) {
     val registry: FontRegistry = FileFontRegistry(dir)
 
     private val scanMutex = Mutex()
+    private val importMutex = Mutex()
     private val _fonts = MutableStateFlow<List<UserFont>>(emptyList())
     val fonts: StateFlow<List<UserFont>> = _fonts.asStateFlow()
 
@@ -57,13 +61,18 @@ class ReaderFontStore(context: Context) {
      * 从 SAF 导入一个字体文件。先写临时文件、校验能被系统解析，再 rename 成正式文件 ——
      * 不校验的话，选错一个 zip 进来，要等到分页时 Compose 加载字体才炸，那时已经在阅读页里了。
      */
-    suspend fun import(uri: Uri): Result<UserFont> = withContext(Dispatchers.IO) {
+    suspend fun import(uri: Uri, onStage: (FontImportStage) -> Unit = {}): Result<UserFont> =
+        importMutex.withLock { withContext(Dispatchers.IO) { readFont(uri, onStage) } }
+
+    private suspend fun readFont(uri: Uri, onStage: (FontImportStage) -> Unit): Result<UserFont> {
         var temp: File? = null
-        try {
+        return try {
             dir.mkdirs()
-            val displayName = queryDisplayName(uri) ?: "font.ttf"
+            val (displayName, size) = queryFileInfo(uri)
             val ext = displayName.substringAfterLast('.', "").lowercase()
             if (ext !in FONT_EXTENSIONS) error("只支持 TTF / OTF 字体文件")
+            if (size != null && size > MAX_FONT_BYTES) throw fontTooLarge(MAX_FONT_BYTES)
+            onStage(FontImportStage.READING)
             val tmp = File.createTempFile("font", ".tmp", dir)
             temp = tmp
             resolver.openInputStream(uri)?.use { input ->
@@ -72,7 +81,9 @@ class ReaderFontStore(context: Context) {
                     copyFontBytes(input, out, MAX_FONT_BYTES)
                 }
             } ?: error("无法读取所选文件")
+            onStage(FontImportStage.VALIDATING)
             if (!isParsableFont(tmp)) error("这不是能用的字体文件")
+            currentCoroutineContext().ensureActive()
 
             val dest = uniqueFile(sanitize(displayName.substringBeforeLast('.')), ext)
             if (!tmp.renameTo(dest)) throw IOException("保存字体失败")
@@ -123,11 +134,15 @@ class ReaderFontStore(context: Context) {
         false
     }
 
-    private fun queryDisplayName(uri: Uri): String? =
+    private fun queryFileInfo(uri: Uri): Pair<String, Long?> =
         resolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
-        }
+            if (!cursor.moveToFirst()) return@use null
+            val name = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val size = cursor.getColumnIndex(OpenableColumns.SIZE)
+            val displayName = if (name >= 0) cursor.getString(name) else null
+            val byteCount = if (size >= 0 && !cursor.isNull(size)) cursor.getLong(size) else null
+            (displayName ?: "font.ttf") to byteCount
+        } ?: ("font.ttf" to null)
 
     private companion object {
         const val FONTS_DIR = "fonts"
@@ -150,11 +165,14 @@ internal suspend fun copyFontBytes(input: java.io.InputStream, output: java.io.O
         val remaining = limit - copied
         val read = input.read(buffer, 0, if (remaining >= buffer.size) buffer.size else (remaining + 1).toInt())
         if (read < 0) return
-        if (read.toLong() > remaining) throw IOException("字体文件太大（超过 ${limit / 1024 / 1024} MB）")
+        if (read.toLong() > remaining) throw fontTooLarge(limit)
         output.write(buffer, 0, read)
         copied += read
     }
 }
+
+private fun fontTooLarge(limit: Long) =
+    IOException("字体文件超过 ${limit / 1024 / 1024} MiB 导入上限，请选择较小的 TTF 或 OTF 文件。")
 
 internal fun fontFileAvailable(dir: File, fontId: String): Boolean {
     if (!ReaderSettings.isFileFont(fontId)) return true

@@ -109,9 +109,13 @@ class BookRepository(
      * 同一本本地书（书名+作者）已在书架则跳过，不另建副本 —— 以前每次导入都 new UUID，
      * 同一文件选两遍书架上就会出现两本一模一样的。
      */
-    suspend fun importLocalBook(uri: Uri, initialGroup: String? = null): Result<LocalImportResult> = withContext(Dispatchers.IO) {
+    suspend fun importLocalBook(
+        uri: Uri,
+        initialGroup: String? = null,
+        selectedDisplayName: String? = null,
+    ): Result<LocalImportResult> = withContext(Dispatchers.IO) {
         try {
-            val displayName = queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
+            val displayName = selectedDisplayName ?: queryDisplayName(uri) ?: "book_${System.currentTimeMillis()}.txt"
             Result.success(
                 importCopy(displayName, initialGroup) { dest ->
                     context.contentResolver.openInputStream(uri)?.use { input ->
@@ -125,6 +129,23 @@ class BookRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun externalBookDisplayName(uri: Uri, mimeType: String?): String = withContext(Dispatchers.IO) {
+        require(uri.scheme == "content")
+        val name = queryDisplayName(uri)?.takeIf(String::isNotBlank)
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.substringAfterLast('.', "").lowercase() in BOOK_FILE_EXTENSIONS }
+        val extension = name?.substringAfterLast('.', "").orEmpty().lowercase()
+        if (extension in BOOK_FILE_EXTENSIONS) return@withContext checkNotNull(name)
+        val inferred = when (mimeType ?: context.contentResolver.getType(uri)) {
+            "text/plain" -> "txt"
+            "application/epub+zip" -> "epub"
+            "application/x-mobipocket-ebook" -> "mobi"
+            "application/vnd.amazon.ebook", "application/x-mobi8-ebook" -> "azw3"
+            else -> null
+        }
+        require(extension.isEmpty() && inferred != null) { "请选择 TXT、EPUB、MOBI 或 AZW3 书籍文件。" }
+        "${name ?: "导入书籍"}.$inferred"
     }
 
     /**
@@ -478,6 +499,7 @@ class BookRepository(
 
 /** 孤儿缓存目录至少多久没碰过才删（[BookRepository.sweepContentCache]）：刚加的书可能还没落库，别跟它抢 */
 private const val ORPHAN_GRACE_MS = 86_400_000L
+private val BOOK_FILE_EXTENSIONS = setOf("txt", "epub", "mobi", "azw", "azw3")
 
 /** 「同一本书」的判定键：书名 + 作者（去空白）。与搜索结果的合并键（SearchViewModel.merge）一致 */
 fun bookKey(title: String, author: String?): Pair<String, String> =

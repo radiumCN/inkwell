@@ -1,5 +1,7 @@
 package com.radium.inkwell.reader.measure
 
+import com.radium.inkwell.reader.api.ReaderSettings
+
 /**
  * 文本测量抽象。分页算法只依赖本接口，不触碰 Android 类型：
  * Android 实现包装 Compose TextMeasurer，JVM 测试用确定性 Fake。
@@ -37,4 +39,5 @@ data class ResolvedTextStyle(
     val isBold: Boolean = false,
     val justify: Boolean = true,
     val letterSpacingEm: Float = 0f,
+    val fontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
 )

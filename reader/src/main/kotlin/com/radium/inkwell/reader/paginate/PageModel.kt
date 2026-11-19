@@ -1,5 +1,7 @@
 package com.radium.inkwell.reader.paginate
 
+import com.radium.inkwell.reader.api.ReaderSettings
+
 /** 排版指纹：任一字段变化都必须重新分页 */
 data class LayoutSpec(
     val viewportWidthPx: Int,
@@ -26,6 +28,7 @@ data class LayoutSpec(
     val showImages: Boolean = false,
     /** 1dp 合多少 px。图按「原图一像素 = 1dp」排（见 [fitImage]），和订阅文章同一条规则 */
     val density: Float = 1f,
+    val bodyFontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
 ) {
     val contentWidthPx: Int get() = (viewportWidthPx - marginLeftPx - marginRightPx).toInt()
     val contentHeightPx: Float get() =

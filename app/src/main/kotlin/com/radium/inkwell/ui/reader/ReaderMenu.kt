@@ -22,6 +22,7 @@ import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import kotlin.math.roundToInt
+import java.util.Locale
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
 import top.yukonga.miuix.kmp.squircle.squircleBackground
@@ -73,6 +74,7 @@ import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppSlider
+import com.radium.inkwell.ui.components.AppTextButton
 import androidx.compose.animation.AnimatedVisibility
 import com.radium.inkwell.ui.components.SheetPageHeader
 import com.radium.inkwell.ui.components.SheetPages
@@ -884,13 +886,6 @@ private val PARA_SPACING_OPTIONS = listOf(
     "宽松" to 1.0f,
 )
 
-/** 字距（em）。档位很小：中文字距加到 0.1em 已经明显松散，再大就是一个个散字 */
-private val LETTER_SPACING_OPTIONS = listOf(
-    "标准" to 0f,
-    "稍宽" to 0.05f,
-    "宽" to 0.1f,
-)
-
 /** 首行缩进（字）。有的书正文自带全角空格缩进，再叠两字就成了四字 —— 给个「无」让人关掉 */
 private val INDENT_OPTIONS = listOf(
     "无" to 0f,
@@ -911,27 +906,6 @@ private val TITLE_TOP_OPTIONS = listOf(
     "小" to 12f,
     "标准" to 24f,
     "大" to 48f,
-)
-
-/** 头部留白（dp）= 正文上边距：页眉小标题落在这，正文从它下面开始。缩小 → 正文多出空间 */
-private val HEADER_TOP_OPTIONS = listOf(
-    "紧凑" to 8f,
-    "标准" to 24f,
-    "宽松" to 48f,
-)
-
-/** 正文下边距（dp）—— 每页正文离屏幕下边的距离。上边距由「头部留白」管 */
-private val MARGIN_V_OPTIONS = listOf(
-    "紧凑" to 12f,
-    "标准" to 28f,
-    "宽松" to 48f,
-)
-
-/** 正文左右边距（dp） */
-private val MARGIN_H_OPTIONS = listOf(
-    "紧凑" to 16f,
-    "标准" to 24f,
-    "宽松" to 36f,
 )
 
 /**
@@ -1018,7 +992,7 @@ private fun TypographyPanel(
                     )
                     SettingsPage.Typeset -> {
                         LayoutSchemeSection(settings, typography)
-                        TypesetTab(settings, onUpdate)
+                        TypesetTab(settings, onUpdate, typography.onAdjust)
                     }
                     SettingsPage.Flip -> FlipTab(settings, onUpdate)
                     SettingsPage.More -> MoreTab(settings, isNetBook, onUpdate, textSelectionEnabled, onTextSelectionChange)
@@ -1195,15 +1169,15 @@ private fun MainPage(
         )
         FontSizeRow(
             settings = settings,
-            onUpdate = onUpdate,
+            onAdjust = typography.onAdjust,
             onPreview = onPreview,
             onCommit = onCommit,
             onDragging = { onDragging(if (it) SettingsSlider.FontSize else null) },
             modifier = rowModifier(SettingsSlider.FontSize),
         )
         Box(Modifier.alpha(shown)) {
-            SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.05f) {
-                onUpdate(settings.copy(lineSpacingMult = it))
+            SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.001f) {
+                typography.onAdjust { copy(lineSpacingMult = it) }
             }
         }
     }
@@ -1302,7 +1276,7 @@ private fun BrightnessRow(
 @Composable
 private fun FontSizeRow(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onDragging: (Boolean) -> Unit,
@@ -1311,6 +1285,7 @@ private fun FontSizeRow(
     val size = settings.fontSizeSp
     val min = ReaderSettings.FONT_SIZE_MIN
     val max = ReaderSettings.FONT_SIZE_MAX
+    val step = ReaderSettings.FONT_SIZE_STEP
     Row(
         modifier
             .fillMaxWidth()
@@ -1323,15 +1298,14 @@ private fun FontSizeRow(
             style = MiuixTheme.textStyles.footnote1,
             description = "字号减小",
             enabled = size > min,
-            onClick = { onUpdate(settings.copy(fontSizeSp = (size - 1).coerceAtLeast(min))) },
+            onClick = { onAdjust { copy(fontSizeSp = (fontSizeSp - step).coerceAtLeast(min)) } },
         )
         AppSlider(
             value = size,
             valueRange = min..max,
-            // 两头之间每 1sp 一档
-            steps = (max - min).toInt() - 1,
+            steps = ((max - min) / step).toInt() - 1,
             onValueChange = { v ->
-                val sp = v.roundToInt().toFloat()
+                val sp = (v / step).roundToInt() * step
                 if (sp != settings.fontSizeSp) onPreview(settings.copy(fontSizeSp = sp))
             },
             onValueChangeFinished = onCommit,
@@ -1346,10 +1320,10 @@ private fun FontSizeRow(
             style = MiuixTheme.textStyles.title3,
             description = "字号增大",
             enabled = size < max,
-            onClick = { onUpdate(settings.copy(fontSizeSp = (size + 1).coerceAtMost(max))) },
+            onClick = { onAdjust { copy(fontSizeSp = (fontSizeSp + step).coerceAtMost(max)) } },
         )
         Text(
-            "${size.toInt()}",
+            size.toString().removeSuffix(".0"),
             style = MiuixTheme.textStyles.body1,
             fontWeight = FontWeight.Medium,
             // 数字已经由滑轨念过（读屏念滑轨的当前值），这里不再念一遍
@@ -1358,7 +1332,7 @@ private fun FontSizeRow(
     }
 }
 
-/** 字号滑轨两头的小 A / 大 A：一个触控目标大小的可点区，点一下 ±1 */
+/** 排版微调按钮：带读屏标签，并保留完整触控区域。 */
 @Composable
 private fun FontSizeEnd(
     text: String,
@@ -1447,13 +1421,66 @@ private fun Modifier.reportDragging(onDragging: (Boolean) -> Unit): Modifier {
  * 从一级页挪出来，让一级页一屏就能放下字号、字体和纸色。排版方案在这页最上面（见 TypographyPanel）。
  */
 @Composable
-private fun TypesetTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> Unit) {
+private fun TypesetTab(
+    settings: ReaderSettings,
+    onUpdate: (ReaderSettings) -> Unit,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
+) {
+    ReaderGroup("排版微调", trailing = {
+        AppTextButton("恢复默认", onClick = {
+            onAdjust {
+                val defaults = ReaderSettings()
+                copy(
+                    fontSizeSp = defaults.fontSizeSp,
+                    bodyFontWeight = defaults.bodyFontWeight,
+                    lineSpacingMult = defaults.lineSpacingMult,
+                    letterSpacingEm = defaults.letterSpacingEm,
+                    headerTopSpacingDp = defaults.headerTopSpacingDp,
+                    marginVerticalDp = defaults.marginVerticalDp,
+                    marginHorizontalDp = defaults.marginHorizontalDp,
+                )
+            }
+        })
+    }) {
+        LayoutNumberRow(
+            "正文字号", settings, onAdjust, ReaderSettings::fontSizeSp,
+            ReaderSettings.FONT_SIZE_MIN..ReaderSettings.FONT_SIZE_MAX, ReaderSettings.FONT_SIZE_STEP, "sp", 1,
+        ) { copy(fontSizeSp = it) }
+
+        val fileFont = ReaderSettings.isFileFont(settings.fontId)
+        val weights = if (fileFont) {
+            listOf(ReaderSettings.FONT_WEIGHT_NORMAL, ReaderSettings.FONT_WEIGHT_BOLD)
+        } else {
+            ReaderSettings.BODY_FONT_WEIGHTS.sorted()
+        }
+        ReaderRow("正文字重", slots = weights.size) {
+            SegmentedChoice(
+                options = if (fileFont) listOf("常规", "偏粗") else listOf("偏细", "常规", "偏粗"),
+                selectedIndex = weights.indexOf(settings.bodyFontWeight).takeIf { it >= 0 }
+                    ?: weights.indexOf(ReaderSettings.FONT_WEIGHT_NORMAL),
+                onSelect = { index -> onAdjust { copy(bodyFontWeight = weights[index]) } },
+            )
+        }
+        LayoutNumberRow("行距", settings, onAdjust, ReaderSettings::lineSpacingMult, 1.2f..2.2f, 0.05f, "倍", 2) {
+            copy(lineSpacingMult = it)
+        }
+        LayoutNumberRow("字距", settings, onAdjust, ReaderSettings::letterSpacingEm, 0f..0.15f, 0.01f, "em", 2) {
+            copy(letterSpacingEm = it)
+        }
+        LayoutNumberRow("头部留白", settings, onAdjust, ReaderSettings::headerTopSpacingDp, 8f..48f, 1f, "dp") {
+            copy(headerTopSpacingDp = it)
+        }
+        LayoutNumberRow("下边距", settings, onAdjust, ReaderSettings::marginVerticalDp, 8f..48f, 1f, "dp") {
+            copy(marginVerticalDp = it)
+        }
+        LayoutNumberRow("左右边距", settings, onAdjust, ReaderSettings::marginHorizontalDp, 8f..48f, 1f, "dp") {
+            copy(marginHorizontalDp = it)
+        }
+    }
+
     ReaderGroup("间距") {
         SegmentRow("段距", PARA_SPACING_OPTIONS, settings.paragraphSpacingEm, 0.05f) {
             onUpdate(settings.copy(paragraphSpacingEm = it))
-        }
-        SegmentRow("字距", LETTER_SPACING_OPTIONS, settings.letterSpacingEm, 0.005f) {
-            onUpdate(settings.copy(letterSpacingEm = it))
         }
     }
 
@@ -1479,15 +1506,36 @@ private fun TypesetTab(settings: ReaderSettings, onUpdate: (ReaderSettings) -> U
         }
     }
 
-    ReaderGroup("页面") {
-        SegmentRow("头部留白", HEADER_TOP_OPTIONS, settings.headerTopSpacingDp, 2f) {
-            onUpdate(settings.copy(headerTopSpacingDp = it))
-        }
-        SegmentRow("下边距", MARGIN_V_OPTIONS, settings.marginVerticalDp, 2f) {
-            onUpdate(settings.copy(marginVerticalDp = it))
-        }
-        SegmentRow("左右边距", MARGIN_H_OPTIONS, settings.marginHorizontalDp, 2f) {
-            onUpdate(settings.copy(marginHorizontalDp = it))
+}
+
+@Composable
+private fun LayoutNumberRow(
+    label: String,
+    settings: ReaderSettings,
+    onAdjust: (ReaderSettings.() -> ReaderSettings) -> Unit,
+    read: (ReaderSettings) -> Float,
+    range: ClosedFloatingPointRange<Float>,
+    step: Float,
+    unit: String,
+    decimals: Int = 0,
+    write: ReaderSettings.(Float) -> ReaderSettings,
+) {
+    val value = read(settings)
+    fun adjust(delta: Float) = onAdjust {
+        val next = ((read(this) + delta) * 100).roundToInt() / 100f
+        write(next.coerceIn(range.start, range.endInclusive))
+    }
+    ReaderRow(label, slots = 4) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val style = MiuixTheme.textStyles.body1
+            FontSizeEnd("−", style, "减小$label", value > range.start) { adjust(-step) }
+            Text(
+                text = String.format(Locale.getDefault(), "%.${decimals}f %s", value, unit),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = style,
+            )
+            FontSizeEnd("+", style, "增大$label", value < range.endInclusive) { adjust(step) }
         }
     }
 }

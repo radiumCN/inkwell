@@ -134,7 +134,7 @@ val appModule = module {
 
     single { BookRepository(androidContext(), get(), get(), get(), get(), get(), get(), get()) }
     single { SourceReadHealth(get<InkwellDb>().sourceReadHealthDao()) }
-    single { BookSourceRepository(get(), get(), get()) }
+    single { BookSourceRepository(get(), get(), get(), get()) }
     single { ReplaceRuleRepository(get()) }
     single { com.radium.inkwell.data.repo.LocalFolderScanner(androidContext()) }
     single { com.radium.inkwell.data.repo.LocalFolderLibrary(androidContext(), get(), get()) }

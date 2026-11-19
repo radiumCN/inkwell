@@ -68,11 +68,18 @@ data class ReaderSettings(
     val localShowImages: Boolean = true,
     /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
     val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
+    val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
 ) {
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
         const val FONT_SIZE_MIN = 12f
         const val FONT_SIZE_MAX = 32f
+        const val FONT_SIZE_STEP = 0.5f
+
+        const val FONT_WEIGHT_LIGHT = 300
+        const val FONT_WEIGHT_NORMAL = 400
+        const val FONT_WEIGHT_BOLD = 700
+        val BODY_FONT_WEIGHTS = setOf(FONT_WEIGHT_LIGHT, FONT_WEIGHT_NORMAL, FONT_WEIGHT_BOLD)
 
         const val FONT_SYSTEM = "system"
         const val FONT_SERIF = "serif"

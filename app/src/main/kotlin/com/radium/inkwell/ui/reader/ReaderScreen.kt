@@ -919,6 +919,7 @@ private fun buildLayoutSpec(
         fontId = settings.fontId,
         justify = settings.justify,
         letterSpacingEm = settings.letterSpacingEm,
+        bodyFontWeight = settings.bodyFontWeight,
         showImages = settings.showImages,
         density = density.density,
     )

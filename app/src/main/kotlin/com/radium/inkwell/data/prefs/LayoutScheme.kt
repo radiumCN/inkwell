@@ -30,10 +30,13 @@ data class LayoutScheme(
     val headerTopSpacingDp: Float = 24f,
     val marginHorizontalDp: Float = 24f,
     val marginVerticalDp: Float = 28f,
+    val bodyFontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
 ) {
     fun applyTo(s: ReaderSettings): ReaderSettings = s.copy(
         fontSizeSp = fontSizeSp,
         fontId = fontId,
+        bodyFontWeight = bodyFontWeight.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
+            ?: ReaderSettings.FONT_WEIGHT_NORMAL,
         lineSpacingMult = lineSpacingMult,
         paragraphSpacingEm = paragraphSpacingEm,
         letterSpacingEm = letterSpacingEm,
@@ -53,6 +56,7 @@ data class LayoutScheme(
     fun matches(s: ReaderSettings): Boolean =
         near(fontSizeSp, s.fontSizeSp) &&
             fontId == s.fontId &&
+            bodyFontWeight == s.bodyFontWeight &&
             near(lineSpacingMult, s.lineSpacingMult) &&
             near(paragraphSpacingEm, s.paragraphSpacingEm) &&
             near(letterSpacingEm, s.letterSpacingEm) &&
@@ -72,6 +76,7 @@ data class LayoutScheme(
             name = name,
             fontSizeSp = s.fontSizeSp,
             fontId = s.fontId,
+            bodyFontWeight = s.bodyFontWeight,
             lineSpacingMult = s.lineSpacingMult,
             paragraphSpacingEm = s.paragraphSpacingEm,
             letterSpacingEm = s.letterSpacingEm,

@@ -82,6 +82,7 @@ class ReaderPrefs(
         val AUTO_FLIP_SECONDS = intPreferencesKey("auto_flip_seconds")
         val PRELOAD_CHAPTERS = intPreferencesKey("preload_chapters")
         val FONT_ID = stringPreferencesKey("font_id")
+        val BODY_FONT_WEIGHT = intPreferencesKey("body_font_weight")
         val FIRST_LINE_INDENT = floatPreferencesKey("first_line_indent")
         val JUSTIFY = booleanPreferencesKey("justify")
         val LETTER_SPACING = floatPreferencesKey("letter_spacing")
@@ -132,6 +133,8 @@ class ReaderPrefs(
             titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING] ?: 24f,
             headerTopSpacingDp = p[Keys.HEADER_TOP_SPACING] ?: 24f,
             fontId = p[Keys.FONT_ID] ?: ReaderSettings.FONT_SYSTEM,
+            bodyFontWeight = p[Keys.BODY_FONT_WEIGHT]?.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
+                ?: ReaderSettings.FONT_WEIGHT_NORMAL,
             lineSpacingMult = p[Keys.LINE_SPACING] ?: 1.6f,
             paragraphSpacingEm = p[Keys.PARA_SPACING] ?: 0.6f,
             marginHorizontalDp = p[Keys.MARGIN_H] ?: 24f,
@@ -162,18 +165,7 @@ class ReaderPrefs(
     suspend fun update(settings: ReaderSettings, localBook: Boolean = false) {
         context.readerDataStore.edit { p ->
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
-            p[Keys.FONT_SIZE] = settings.fontSizeSp
-            p[Keys.TITLE_SCALE] = settings.titleScale
-            p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
-            p[Keys.HEADER_TOP_SPACING] = settings.headerTopSpacingDp
-            p[Keys.FONT_ID] = settings.fontId
-            p[Keys.LINE_SPACING] = settings.lineSpacingMult
-            p[Keys.PARA_SPACING] = settings.paragraphSpacingEm
-            p[Keys.MARGIN_H] = settings.marginHorizontalDp
-            p[Keys.MARGIN_V] = settings.marginVerticalDp
-            p[Keys.FIRST_LINE_INDENT] = settings.firstLineIndentEm
-            p[Keys.JUSTIFY] = settings.justify
-            p[Keys.LETTER_SPACING] = settings.letterSpacingEm
+            writeTypography(p, settings)
             p[Keys.FLIP] = settings.flipAnimation.name
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
@@ -190,6 +182,33 @@ class ReaderPrefs(
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
         }
+    }
+
+    /** 连点微调按钮时，每一次都基于 DataStore 里的最新值计算。 */
+    suspend fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
+        context.readerDataStore.edit { p ->
+            val before = readSettings(p, darkActive.value)
+            val after = before.change()
+            if (before == after) return@edit
+            writeTypography(p, after)
+            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+        }
+    }
+
+    private fun writeTypography(p: MutablePreferences, settings: ReaderSettings) {
+        p[Keys.FONT_SIZE] = settings.fontSizeSp
+        p[Keys.TITLE_SCALE] = settings.titleScale
+        p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
+        p[Keys.HEADER_TOP_SPACING] = settings.headerTopSpacingDp
+        p[Keys.FONT_ID] = settings.fontId
+        p[Keys.BODY_FONT_WEIGHT] = settings.bodyFontWeight
+        p[Keys.LINE_SPACING] = settings.lineSpacingMult
+        p[Keys.PARA_SPACING] = settings.paragraphSpacingEm
+        p[Keys.MARGIN_H] = settings.marginHorizontalDp
+        p[Keys.MARGIN_V] = settings.marginVerticalDp
+        p[Keys.FIRST_LINE_INDENT] = settings.firstLineIndentEm
+        p[Keys.JUSTIFY] = settings.justify
+        p[Keys.LETTER_SPACING] = settings.letterSpacingEm
     }
 
     suspend fun selectPaper(themeId: String) {
@@ -246,6 +265,7 @@ class ReaderPrefs(
                 "title_top_spacing" to s.titleTopSpacingDp.toString(),
                 "header_top_spacing" to s.headerTopSpacingDp.toString(),
                 "font_id" to s.fontId,
+                Keys.BODY_FONT_WEIGHT.name to s.bodyFontWeight.toString(),
                 "line_spacing" to s.lineSpacingMult.toString(),
                 "para_spacing" to s.paragraphSpacingEm.toString(),
                 "margin_h" to s.marginHorizontalDp.toString(),
@@ -336,6 +356,8 @@ internal object ReaderBackupImport {
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }
         }
         v["font_id"]?.takeIf(fontAvailable)?.let { p[keys.FONT_ID] = it }
+        v[keys.BODY_FONT_WEIGHT.name]?.toIntOrNull()?.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
+            ?.let { p[keys.BODY_FONT_WEIGHT] = it }
         v["flip"]?.takeIf { value -> FlipAnimation.entries.any { it.name == value } }
             ?.let { p[keys.FLIP] = it }
         v["tap_zones"]?.let(TapZones::decodeOrNull)?.let { p[keys.TAP_ZONES] = it.encode() }

@@ -10,8 +10,9 @@ import kotlin.test.assertTrue
 class LayoutSchemeTest {
 
     private val tight = ReaderSettings(
-        fontSizeSp = 16f, lineSpacingMult = 1.4f, paragraphSpacingEm = 0.3f, letterSpacingEm = 0.05f,
+        fontSizeSp = 16.5f, lineSpacingMult = 1.45f, paragraphSpacingEm = 0.3f, letterSpacingEm = 0.06f,
         firstLineIndentEm = 0f, justify = false, marginHorizontalDp = 16f, fontId = "file:霞鹜文楷.ttf",
+        bodyFontWeight = ReaderSettings.FONT_WEIGHT_BOLD,
     )
 
     @Test
@@ -22,6 +23,7 @@ class LayoutSchemeTest {
         assertEquals(tight.fontId, applied.fontId)
         assertEquals(tight.letterSpacingEm, applied.letterSpacingEm)
         assertEquals(tight.justify, applied.justify)
+        assertEquals(tight.bodyFontWeight, applied.bodyFontWeight)
     }
 
     @Test
@@ -39,6 +41,7 @@ class LayoutSchemeTest {
         assertTrue(scheme.matches(tight.copy(theme = ReaderTheme.NIGHT)))
         assertFalse(scheme.matches(tight.copy(fontSizeSp = 17f)))
         assertFalse(scheme.matches(tight.copy(justify = true)))
+        assertFalse(scheme.matches(tight.copy(bodyFontWeight = ReaderSettings.FONT_WEIGHT_NORMAL)))
     }
 
     @Test
@@ -55,6 +58,7 @@ class LayoutSchemeTest {
         assertEquals(20f, decoded.fontSizeSp)
         assertEquals(0f, decoded.letterSpacingEm)
         assertTrue(decoded.justify)
+        assertEquals(ReaderSettings.FONT_WEIGHT_NORMAL, decoded.bodyFontWeight)
     }
 
     @Test

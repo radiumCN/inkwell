@@ -387,6 +387,10 @@ class SourceManageViewModel(
     private val _importing = MutableStateFlow(false)
     /** 正在导入（读文件 / 下载 / 解析入库）。页面据此给一行进行中提示，别让人以为没点上、又点一遍 */
     val importing: StateFlow<Boolean> = _importing.asStateFlow()
+    private val _importPreview = MutableStateFlow<BookSourceRepository.ImportPreview?>(null)
+    val importPreview = _importPreview.asStateFlow()
+    private val _importError = MutableStateFlow<String?>(null)
+    val importError = _importError.asStateFlow()
     private var importJob: Job? = null
 
     /**
@@ -413,7 +417,7 @@ class SourceManageViewModel(
             val text = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(uri)?.use {
-                        it.readBytes().toString(Charsets.UTF_8)
+                        it.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
                     } ?: error("无法读取文件")
                 }
             }
@@ -455,9 +459,40 @@ class SourceManageViewModel(
     }
 
     private suspend fun importText(text: String) {
-        sourceRepo.importJson(text)
-            .onSuccess { messages.emit(it.summary) }
-            .onFailure { messages.emit("导入失败: ${it.message?.take(120)}") }
+        try {
+            _importError.value = null
+            _importPreview.value = sourceRepo.previewImport(text)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            messages.emit("无法读取书源：${e.message?.take(120) ?: "格式无效"}")
+        }
+    }
+
+    fun dismissImportPreview() {
+        if (_importing.value) return
+        _importPreview.value = null
+        _importError.value = null
+    }
+
+    fun confirmImport(group: String?) {
+        val preview = _importPreview.value ?: return
+        if (preview.count == 0) {
+            dismissImportPreview()
+            return
+        }
+        startImport {
+            _importError.value = null
+            try {
+                val report = sourceRepo.confirmImport(preview, group)
+                _importPreview.value = null
+                messages.emit(report.summary)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _importError.value = e.message?.take(120) ?: "写入失败，请重试"
+            }
+        }
     }
 
     fun setEnabled(id: String, enabled: Boolean) {

@@ -18,6 +18,7 @@ import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.ReaderFontStore
+import com.radium.inkwell.data.repo.FontImportStage
 import com.radium.inkwell.data.repo.ReadingClock
 import com.radium.inkwell.data.repo.ReadingStatsRepository
 import com.radium.inkwell.data.repo.UserFont
@@ -859,16 +860,41 @@ class ReaderViewModel(
 
     val userFonts: StateFlow<List<UserFont>> = fontStore.fonts
     val layoutSchemes: StateFlow<List<LayoutScheme>> = readerPrefs.layoutSchemes
+    fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
+        viewModelScope.launch {
+            try {
+                readerPrefs.adjustTypography(change)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                messageBus.emit("排版设置保存失败")
+            }
+        }
+    }
+    private val _fontImportStage = MutableStateFlow<FontImportStage?>(null)
+    val fontImportStage = _fontImportStage.asStateFlow()
+    private val _fontImportError = MutableStateFlow<String?>(null)
+    val fontImportError = _fontImportError.asStateFlow()
+
+    fun dismissFontImportError() { _fontImportError.value = null }
 
     /** 导入成功就直接用上：人是为了换字体才去导入的，导完还得再点一下才生效像没导进来 */
     fun importFont(uri: Uri) {
+        if (_fontImportStage.value != null) return
+        dismissFontImportError()
+        _fontImportStage.value = FontImportStage.READING
         viewModelScope.launch {
-            fontStore.import(uri)
-                .onSuccess { font ->
-                    persistSettings(_state.value.settings.copy(fontId = font.id))
-                    messageBus.emit("已导入字体「${font.label}」")
-                }
-                .onFailure { messageBus.emit("导入失败：${it.message ?: "未知错误"}") }
+            try {
+                val font = fontStore.import(uri) { _fontImportStage.value = it }.getOrThrow()
+                readerPrefs.adjustTypography { copy(fontId = font.id) }
+                messageBus.emit("已导入字体「${font.label}」")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _fontImportError.value = e.message ?: "无法导入所选字体"
+            } finally {
+                _fontImportStage.value = null
+            }
         }
     }
 

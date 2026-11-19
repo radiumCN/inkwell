@@ -274,6 +274,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
         firstLineIndentEm = firstLineIndentEm,
         justify = justify,
         letterSpacingEm = letterSpacingEm,
+        fontWeight = bodyFontWeight,
     )
 
     private fun LayoutSpec.titleStyle() = ResolvedTextStyle(

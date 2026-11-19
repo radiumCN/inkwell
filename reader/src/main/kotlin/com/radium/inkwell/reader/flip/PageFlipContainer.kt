@@ -733,17 +733,22 @@ private fun CurlLayer(
     val underPage = if (direction == FlipDirection.FORWARD) next else current
     // 连翻后可直接找上一轮相同内容的图，不必等后台把位图挪到新的槽位。
     val matching = bitmaps?.takeIf { it.matchesStyle(request) }
-    val front = frontPage?.let { matching?.bitmapFor(it.curlKey()) }
+    val frontBitmap = frontPage?.let { matching?.bitmapFor(it.curlKey()) }
     val under = underPage?.let { matching?.bitmapFor(it.curlKey()) }
-    val startedWithFront = remember(flipId) { front != null }
+    val startedWithFront = remember(flipId) { frontBitmap != null }
+    val front = frontBitmap.takeIf { startedWithFront }
+    // 后翻的卷曲页是上一页。连翻时分页通常已就绪，位图却要等上一次提交后才开始生成。
+    // 起手缺位图时直接在卷页可见区画正文，且这一刀保持直接绘制，避免位图就绪后换绘制方式。
+    val liveFront = frontPage.takeIf { direction == FlipDirection.BACKWARD && front == null }
     val render = when {
-        !startedWithFront || front == null -> ReaderTrace.Render.SLIDE
+        liveFront != null -> ReaderTrace.Render.CURL_LIVE_FRONT
+        front == null -> ReaderTrace.Render.SLIDE
         under != null -> ReaderTrace.Render.CURL_BITMAPS
         underPage != null -> ReaderTrace.Render.CURL_LIVE_UNDER
         else -> ReaderTrace.Render.CURL_PAPER_UNDER
     }
     val reason = when (render) {
-        ReaderTrace.Render.SLIDE -> when {
+        ReaderTrace.Render.SLIDE, ReaderTrace.Render.CURL_LIVE_FRONT -> when {
             frontPage == null -> "front_page_unavailable"
             startedWithFront -> "front_bitmap_invalidated"
             else -> "front_bitmap_not_ready_at_start"
@@ -772,6 +777,7 @@ private fun CurlLayer(
             val drawLiveUnder: (() -> Unit)? = if (under == null && underPage != null) {
                 { drawPage(underPage, layout, theme) }
             } else null
+            val drawLiveFront: (() -> Unit)? = liveFront?.let { page -> { drawPage(page, layout, theme) } }
             drawIntoCanvas { canvas ->
                 renderer.draw(
                     canvas.nativeCanvas,
@@ -780,6 +786,7 @@ private fun CurlLayer(
                     tx, touchY.floatValue, cornerBottom,
                     paperColor = theme.background.toInt(),
                     drawLiveUnder = drawLiveUnder,
+                    drawLiveFront = drawLiveFront,
                 )
             }
         }

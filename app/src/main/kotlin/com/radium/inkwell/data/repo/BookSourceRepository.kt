@@ -1,5 +1,6 @@
 package com.radium.inkwell.data.repo
 
+import androidx.room3.withWriteTransaction
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -7,6 +8,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.BookSourceTypes
+import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookSourceDao
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.entity.BookSourceEntity
@@ -27,6 +29,7 @@ class BookSourceRepository(
     private val dao: BookSourceDao,
     private val hitDao: BookSourceHitDao,
     private val readHealth: SourceReadHealth? = null,
+    private val db: InkwellDb? = null,
 ) {
 
     private val json = Json {
@@ -81,13 +84,23 @@ class BookSourceRepository(
             }
     }
 
+    class ImportPreview internal constructor(
+        internal val rules: List<BookSourceRule>,
+        val added: Int,
+        val updated: Int,
+        val skipped: List<String>,
+    ) {
+        val count get() = rules.size
+    }
+
     /**
      * 导入书源 JSON（Legado 原生格式，数组或单对象）。只收小说源（[BookSourceTypes.TEXT]）；
      * 音频/漫画/文件/视频源按类型过滤并计入 skipped。规则原文原样入库，运行期由引擎直接求值。
      */
     suspend fun importJson(text: String): Result<ImportReport> = withContext(Dispatchers.Default) {
         try {
-            Result.success(importJsonInternal(text))
+            val (rules, skipped) = parseImport(text)
+            Result.success(upsertRules(rules, skipped))
         } catch (e: CancellationException) {
             // 导入要写库（挂起）：用户离开页面是取消，别包成「导入失败」吞掉
             throw e
@@ -100,7 +113,30 @@ class BookSourceRepository(
      * 解析整份 JSON、逐条 fromJson/toJson：书源合集动辄几 MB、几千条，在主线程上跑就是几秒冻屏
      * 乃至 ANR —— 调用方是 viewModelScope（Main.immediate），所以入口自己切到 Default。
      */
-    private suspend fun importJsonInternal(text: String): ImportReport {
+    suspend fun previewImport(text: String): ImportPreview = withContext(Dispatchers.Default) {
+        val (rules, skipped) = parseImport(text)
+        val unique = rules.associateBy { it.id }.values.toList()
+        val activeIds = dao.getAllIds().toHashSet()
+        val updates = unique.count { it.id in activeIds }
+        val duplicates = rules.size - unique.size
+        ImportPreview(
+            rules = unique,
+            added = unique.size - updates,
+            updated = updates,
+            skipped = if (duplicates == 0) skipped else skipped + List(duplicates) { "重复书源地址" },
+        )
+    }
+
+    /** group=null 沿用规则自带分组，空串表示不分组。提交时以库里的最新分组为准。 */
+    suspend fun confirmImport(preview: ImportPreview, group: String?): ImportReport =
+        withContext(Dispatchers.Default) {
+            val write: suspend () -> ImportReport = {
+                upsertRules(preview.rules, preview.skipped, preserveGroups = true, newGroup = group?.trim())
+            }
+            db?.withWriteTransaction { write() } ?: write()
+        }
+
+    private fun parseImport(text: String): Pair<List<BookSourceRule>, List<String>> {
         val root = json.parseToJsonElement(text.trim())
         val objs = when (root) {
             is JsonArray -> root.toList()
@@ -109,7 +145,11 @@ class BookSourceRepository(
         val rules = ArrayList<BookSourceRule>()
         val skipped = ArrayList<String>()
         objs.forEach { el ->
-            val obj = el as? JsonObject ?: return@forEach
+            val obj = el as? JsonObject
+            if (obj == null) {
+                skipped += "条目不是 JSON 对象"
+                return@forEach
+            }
             val name = (obj["bookSourceName"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
                 ?: (obj["bookSourceUrl"] as? JsonPrimitive)?.content ?: "未命名"
             // 先看原始字段：解析失败时也不要把漫画/听书源误当成默认文本灌进去
@@ -130,7 +170,7 @@ class BookSourceRepository(
             }
             rules += rule
         }
-        return upsertRules(rules, skipped)
+        return rules to skipped
     }
 
     /**
@@ -140,6 +180,8 @@ class BookSourceRepository(
     private suspend fun upsertRules(
         rules: List<BookSourceRule>,
         skipped: List<String> = emptyList(),
+        preserveGroups: Boolean = false,
+        newGroup: String? = null,
     ): ImportReport {
         // 同 id（= bookSourceUrl）保留最后一个，避免同事务重复主键
         val deduped = rules.associateBy { it.id }.values
@@ -175,7 +217,8 @@ class BookSourceRepository(
                         ?.takeIf { !it.deleted && it.json == ruleJson && it.name == rule.name }
                         ?.updatedAt
                         ?: now,
-                    groupName = importedGroup(existing, rule),
+                    groupName = if (preserveGroups) live?.groupName ?: newGroup ?: rule.group
+                    else importedGroup(existing, rule),
                     checkStatus = keepCheck?.checkStatus ?: CheckStatus.UNCHECKED,
                     checkMessage = keepCheck?.checkMessage.orEmpty(),
                     respondTime = keepCheck?.respondTime ?: -1,
@@ -186,7 +229,7 @@ class BookSourceRepository(
                     searchAt = keepCheck?.searchAt ?: 0,
                     searchRetryAt = keepCheck?.searchRetryAt ?: 0,
                 )
-                if (existing == null) added++ else updated++
+                if (existing == null || (preserveGroups && live == null)) added++ else updated++
             } catch (e: Exception) {
                 failed += "${rule.name}: ${e.message?.take(60)}"
             }

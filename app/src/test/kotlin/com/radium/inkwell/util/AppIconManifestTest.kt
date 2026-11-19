@@ -27,6 +27,12 @@ class AppIconManifestTest {
 
     private val aliases: List<Element> = manifest.getElementsByTagName("activity-alias")
         .let { list -> (0 until list.length).map { list.item(it) as Element } }
+        .filter { alias ->
+            val categories = alias.getElementsByTagName("category")
+            (0 until categories.length).any {
+                (categories.item(it) as Element).attr("name") == "android.intent.category.LAUNCHER"
+            }
+        }
 
     private fun Element.attr(name: String): String = getAttributeNS(ns, name)
 

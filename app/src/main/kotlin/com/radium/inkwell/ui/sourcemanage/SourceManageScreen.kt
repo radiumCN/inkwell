@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
@@ -64,6 +65,8 @@ import com.radium.inkwell.ui.components.GroupFilterChip
 import com.radium.inkwell.ui.components.InlineTag
 import com.radium.inkwell.ui.components.ListSearchHeader
 import com.radium.inkwell.ui.components.LoadingState
+import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SpinnerSettingRow
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.highlightMatches
@@ -110,6 +113,8 @@ fun SourceManageScreen(
     val failedCount by viewModel.failedCount.collectAsStateWithLifecycle()
     val options by viewModel.options.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
+    val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
+    val importError by viewModel.importError.collectAsStateWithLifecycle()
 
     var showCheckOptions by remember { mutableStateOf(false) }
     var showSortPicker by remember { mutableStateOf(false) }
@@ -457,7 +462,7 @@ fun SourceManageScreen(
             onDismissRequest = { dismissUrlImport() },
             title = "从 URL 导入来源",
             text = "支持 Inkwell 与 Legado（阅读）格式的来源 JSON 链接",
-            confirmText = "导入",
+            confirmText = "预览",
             confirmEnabled = importUrl.isNotBlank(),
             onConfirm = {
                 viewModel.importFromUrl(importUrl)
@@ -472,6 +477,81 @@ fun SourceManageScreen(
             },
         )
     }
+
+    importPreview?.let { preview ->
+        SourceImportDialog(
+            preview = preview,
+            groups = groups,
+            saving = importing,
+            error = importError,
+            onDismiss = viewModel::dismissImportPreview,
+            onConfirm = viewModel::confirmImport,
+        )
+    }
+}
+
+@Composable
+private fun SourceImportDialog(
+    preview: BookSourceRepository.ImportPreview,
+    groups: List<String>,
+    saving: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit,
+) {
+    var selection by remember(preview) { mutableStateOf("original") }
+    var newGroup by remember(preview) { mutableStateOf("") }
+    val groupOptions = remember(groups) {
+        listOf(PickerOption("original", "沿用书源自带分组")) +
+            groups.map { PickerOption("group:$it", it) } +
+            listOf(PickerOption("none", "不分组"), PickerOption("new", "新建分组…"))
+    }
+    val reasons = remember(preview) {
+        preview.skipped.groupingBy { it.substringAfterLast(": ", it) }.eachCount()
+    }
+    AppAlertDialog(
+        title = "确认导入书源",
+        onDismissRequest = onDismiss,
+        confirmText = if (preview.count > 0) "导入 ${preview.count} 个书源" else "知道了",
+        dismissText = "取消".takeIf { preview.count > 0 },
+        confirmEnabled = selection != "new" || newGroup.isNotBlank(),
+        confirmLoading = saving,
+        onConfirm = {
+            val group = when (selection) {
+                "original" -> null
+                "none" -> ""
+                "new" -> newGroup.trim()
+                else -> selection.removePrefix("group:")
+            }
+            onConfirm(group)
+        },
+        content = {
+            Text("新增 ${preview.added}　更新 ${preview.updated}　跳过 ${preview.skipped.size}")
+            if (preview.added > 0) {
+                SpinnerSettingRow(
+                    title = "新增书源分组",
+                    options = groupOptions,
+                    selectedId = selection,
+                    onSelect = { selection = it.id },
+                    enabled = !saving,
+                )
+                if (selection == "new") {
+                    CompactTextField(
+                        value = newGroup,
+                        onValueChange = { newGroup = it.take(40) },
+                        placeholder = "输入分组名称",
+                    )
+                }
+            }
+            if (preview.updated > 0) {
+                Text("同地址的书源会更新规则，沿用本机分组。", style = MiuixTheme.textStyles.footnote1)
+            }
+            for ((reason, count) in reasons) {
+                Text("$count 条 · $reason", style = MiuixTheme.textStyles.footnote1)
+            }
+            error?.let { Text("导入失败：$it", color = MiuixTheme.colorScheme.error) }
+        },
+    )
 }
 
 /**
