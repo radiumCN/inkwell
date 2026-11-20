@@ -9,6 +9,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OfficialWebDavClientTest {
@@ -52,6 +53,22 @@ class OfficialWebDavClientTest {
         assertEquals("POST", req.method)
         assertEquals("/api/v1/auth/login", req.path)
         assertTrue(req.body.readUtf8().contains("\"login\":\"ada\""))
+    }
+
+    @Test
+    fun `账号配额支持超过 Int 的数值并区分缺失用量与零`() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"data":{"user":{"username":"ada","quota_bytes":5368709120,"used_bytes":0}}}""",
+            ),
+        )
+        val quota = client.me("acc").user
+        assertEquals(5368709120L, quota.quotaBytes)
+        assertEquals(0L, quota.usedBytes)
+        assertEquals("/api/v1/me", server.takeRequest().path)
+
+        server.enqueue(MockResponse().setBody("""{"ok":true,"data":{"user":{"username":"ada"}}}"""))
+        assertNull(client.me("acc").user.usedBytes)
     }
 
     @Test

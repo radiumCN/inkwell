@@ -12,6 +12,10 @@ import com.radium.inkwell.data.net.OfficialWebDavException
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+data class OfficialStorageQuota(val usedBytes: Long, val totalBytes: Long)
 
 /**
  * 官方同步的账号编排：登录成功 → 发应用码 → 写入现有 WebDAV 配置。
@@ -22,8 +26,20 @@ class OfficialWebDavRepository(
     private val api: OfficialWebDavClient,
     private val prefs: WebDavPrefs,
 ) {
+    private val sessionMutex = Mutex()
 
     suspend fun publicConfig() = wrapValue { api.publicConfig() }
+
+    suspend fun storageQuota(): Result<OfficialStorageQuota?> = wrapValue {
+        val user = withFreshAccess { access -> api.me(access).user }
+        val used = user.usedBytes
+        val total = user.quotaBytes
+        if (used != null && used >= 0 && total != null && total > 0) {
+            OfficialStorageQuota(used, total)
+        } else {
+            null
+        }
+    }
 
     suspend fun sendRegisterCode(email: String) = wrap { api.sendRegisterCode(email) }
 
@@ -88,7 +104,7 @@ class OfficialWebDavRepository(
      * 界面显示「官方已连接」，刷新令牌一用就 401。所以本地这一步放在 finally 里、且不可取消；
      * 取消本身照常往外抛。
      */
-    private suspend fun logoutThen(clearLocal: suspend () -> Unit) {
+    private suspend fun logoutThen(clearLocal: suspend () -> Unit) = sessionMutex.withLock {
         val config = prefs.config.first()
         try {
             if (config.officialAccessToken.isNotBlank() || config.officialRefreshToken.isNotBlank()) {
@@ -149,17 +165,21 @@ class OfficialWebDavRepository(
         }
     }
 
-    private suspend fun <T> withFreshAccess(block: suspend (String) -> T): T {
+    private suspend fun <T> withFreshAccess(block: suspend (String) -> T): T = sessionMutex.withLock {
         val config = prefs.config.first()
         val access = config.officialAccessToken
         val refresh = config.officialRefreshToken
-        check(refresh.isNotBlank()) { "请重新登录官方账号后再试" }
-        return try {
+        check(config.isOfficialConnected && (access.isNotBlank() || refresh.isNotBlank())) {
+            "请重新登录官方账号后再试"
+        }
+        try {
             block(access)
         } catch (e: OfficialWebDavException) {
             if (e.httpStatus != 401) throw e
-            val tokens = api.refresh(refresh)
-            prefs.saveOfficialTokens(tokens.accessToken, tokens.refreshToken)
+            check(refresh.isNotBlank()) { "请重新登录官方账号后再试" }
+            val tokens = withContext(NonCancellable) {
+                api.refresh(refresh).also { prefs.saveOfficialTokens(it.accessToken, it.refreshToken) }
+            }
             block(tokens.accessToken)
         }
     }

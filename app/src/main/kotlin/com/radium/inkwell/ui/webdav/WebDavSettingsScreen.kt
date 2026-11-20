@@ -7,6 +7,7 @@ import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SegmentedChoice
 import android.content.ClipData
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +53,7 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.ReadingProgressMeter
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -94,14 +96,26 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
+    val bookFiles = state.bookFiles
+    BackHandler(enabled = bookFiles != null, onBack = viewModel::closeBookFiles)
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = {
+            if (bookFiles == null) {
+                AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor)
+            } else {
+                AppTopBar("本地书籍备份", topBarScroll, onBack = viewModel::closeBookFiles, containerColor = pageColor)
+            }
+        },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 配置还没读回来：先空着，别先画一遍「自备 WebDAV」再跳回「官方同步」
         if (!state.loaded) return@AppScaffold
+        if (bookFiles != null) {
+            BookFilesContent(bookFiles, viewModel, Modifier.fillMaxSize().padding(padding))
+            return@AppScaffold
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -207,6 +221,7 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             subtitle = if (state.officialEmail.isBlank()) "已连接" else "官方同步 · 已连接",
             position = SettingGroupPosition.First,
         )
+        OfficialQuota(state)
         PrimaryButton(
             text = "立即同步",
             onClick = viewModel::syncNow,
@@ -226,6 +241,7 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             position = SettingGroupPosition.Alone,
         )
     }
+    BookFilesEntry(state, viewModel)
     SectionHeader("管理")
     SettingGroup {
         // 两行挨着：都是给其他设备用的那一套码
@@ -257,6 +273,24 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
         )
     }
     OfficialPrivacyNote()
+}
+
+@Composable
+private fun OfficialQuota(state: WebDavUiState) {
+    val quota = state.quota
+    val style = MiuixTheme.textStyles.footnote1
+    val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    SettingBlock {
+        if (quota == null) {
+            Text(if (state.quotaLoading) "正在获取容量…" else "暂无法获取容量", style = style, color = color)
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("已用 ${formatWebDavBytes(quota.usedBytes)}", style = style, color = color)
+                Text("总容量 ${formatWebDavBytes(quota.totalBytes)}", style = style, color = color)
+            }
+            ReadingProgressMeter((quota.usedBytes.toDouble() / quota.totalBytes).toFloat())
+        }
+    }
 }
 
 @Composable
@@ -353,6 +387,20 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
             position = SettingGroupPosition.Alone,
         )
     }
+    BookFilesEntry(state, viewModel)
+}
+
+@Composable
+private fun BookFilesEntry(state: WebDavUiState, viewModel: WebDavViewModel) {
+    if (!state.configured) return
+    SettingGroup {
+        SettingRow(
+            title = "本地书籍备份",
+            subtitle = "手动备份与恢复原文件",
+            onClick = if (state.busy) null else viewModel::openBookFiles,
+            position = SettingGroupPosition.Alone,
+        )
+    }
 }
 
 /**
@@ -402,7 +450,7 @@ private const val SYNC_TIME_TICK_MS = 60_000L
 private fun SyncFooter() {
     SettingFootnote(
         "会同步：书架、阅读进度、阅读时长、来源、订阅源、净化规则，以及阅读与应用设置（含排版方案）。\n" +
-            "不会同步：本地书的文件、导入的字体和已缓存的章节。换设备后，本地书与字体需要重新导入。\n" +
+            "本地书原文件可通过「本地书籍备份」手动上传和恢复。导入的字体与已缓存章节仅保存在本机。\n" +
             "两边都改过时，以较新的为准。",
     )
 }

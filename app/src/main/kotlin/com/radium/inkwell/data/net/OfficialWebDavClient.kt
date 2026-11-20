@@ -34,6 +34,8 @@ data class OfficialTokens(
 data class OfficialUser(
     val username: String,
     val email: String = "",
+    @SerialName("quota_bytes") val quotaBytes: Long? = null,
+    @SerialName("used_bytes") val usedBytes: Long? = null,
 )
 
 @Serializable

@@ -1,5 +1,7 @@
 package com.radium.inkwell.core.webdav
 
+import java.io.IOException
+import kotlin.io.path.createTempFile
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -38,6 +40,46 @@ class WebDavClientTest {
         assertEquals("/dav/inkwell/backup.json.gz", recorded.path)
         assertTrue(recorded.getHeader("Authorization")!!.startsWith("Basic "))
         assertContentEquals(byteArrayOf(1, 2, 3), recorded.body.readByteArray())
+    }
+
+    @Test
+    fun `book file retry is conditional and reports exhausted quota`() = runTest {
+        val file = createTempFile().toFile()
+        try {
+            file.writeText("book content")
+            server.enqueue(MockResponse().setResponseCode(412))
+            client.putFileIfAbsent("inkwell/books/book.txt", file)
+            val request = server.takeRequest()
+            assertEquals("*", request.getHeader("If-None-Match"))
+            assertEquals("book content", request.body.readUtf8())
+
+            server.enqueue(MockResponse().setResponseCode(507))
+            val error = assertFailsWith<WebDavClient.WebDavException> {
+                client.putFileIfAbsent("inkwell/books/book.txt", file)
+            }
+            assertEquals(507, error.code)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `book download enforces declared size even for chunked responses`() = runTest {
+        val file = createTempFile().toFile()
+        try {
+            val path = "inkwell/books/book.txt"
+            server.enqueue(MockResponse().setChunkedBody("book", 2))
+            client.downloadFile(path, file, 4)
+            assertEquals("book", file.readText())
+
+            server.enqueue(MockResponse().setChunkedBody("book", 2))
+            assertFailsWith<IOException> { client.downloadFile(path, file, 3) }
+
+            server.enqueue(MockResponse().setChunkedBody("boo", 2))
+            assertFailsWith<IOException> { client.downloadFile(path, file, 4) }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.radium.inkwell.core.webdav
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -10,8 +11,10 @@ import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.File
 import java.io.IOException
 import kotlin.coroutines.resumeWithException
 
@@ -56,6 +59,43 @@ class WebDavClient(
         )
         resp.use {
             if (!it.isSuccessful) throw WebDavException(it.code, "PUT 失败: ${it.code}")
+        }
+    }
+
+    /** 文件名由调用方按内容生成。并发创建了同一份时，412 也算完成。 */
+    suspend fun putFileIfAbsent(path: String, file: File) {
+        val request = request(path)
+            .header("If-None-Match", "*")
+            .put(file.asRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        execute(request).use { response ->
+            if (!response.isSuccessful && response.code != 412) {
+                throw WebDavException(response.code, "PUT 失败: ${response.code}")
+            }
+        }
+    }
+
+    /** 下载只写调用方的暂存文件，且限制为备份声明的字节数。 */
+    suspend fun downloadFile(path: String, file: File, size: Long) = withContext(Dispatchers.IO) {
+        execute(request(path).get().build()).use { response ->
+            if (!response.isSuccessful) throw WebDavException(response.code, "GET 失败: ${response.code}")
+            val body = response.body
+            val length = body.contentLength()
+            if (length >= 0 && length != size) throw IOException("远端文件大小与备份记录不符")
+            body.byteStream().use { input ->
+                file.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var remaining = size
+                    while (remaining > 0) {
+                        ensureActive()
+                        val count = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                        if (count < 0) throw IOException("远端文件下载不完整")
+                        output.write(buffer, 0, count)
+                        remaining -= count
+                    }
+                    if (input.read() != -1) throw IOException("远端文件大小与备份记录不符")
+                }
+            }
         }
     }
 

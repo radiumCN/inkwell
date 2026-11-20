@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.net.OfficialWebDav
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.prefs.WebDavProvider
+import com.radium.inkwell.data.repo.BookFileBackupItem
+import com.radium.inkwell.data.repo.LocalBookBackupRepository
+import com.radium.inkwell.data.repo.OfficialStorageQuota
 import com.radium.inkwell.data.repo.OfficialWebDavRepository
 import com.radium.inkwell.data.repo.WebDavRepository
 import com.radium.inkwell.data.repo.describeSyncError
@@ -13,6 +16,7 @@ import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.util.LocalNetworkAccess
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +34,9 @@ data class WebDavUiState(
     val provider: WebDavProvider = WebDavProvider.CUSTOM,
     val officialConnected: Boolean = false,
     val officialEmail: String = "",
+    val quota: OfficialStorageQuota? = null,
+    val quotaLoading: Boolean = false,
+    val bookFiles: BookFilesUiState? = null,
     val registrationOpen: Boolean = true,
     val officialDavUrl: String = OfficialWebDav.DAV,
     val email: String = "",
@@ -56,11 +63,22 @@ data class WebDavUiState(
     val busy: Boolean get() = testing || syncing
 }
 
+data class BookFilesUiState(
+    val restore: Boolean = false,
+    val items: List<BookFileBackupItem> = emptyList(),
+    val selected: Set<String> = emptySet(),
+    val loading: Boolean = true,
+    val transferring: Boolean = false,
+    val error: String? = null,
+    val results: Map<String, String?> = emptyMap(),
+)
+
 class WebDavViewModel(
     private val prefs: WebDavPrefs,
     private val repo: WebDavRepository,
     private val official: OfficialWebDavRepository,
     private val localNetwork: LocalNetworkAccess,
+    private val bookBackups: LocalBookBackupRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(WebDavUiState())
@@ -70,6 +88,8 @@ class WebDavViewModel(
 
     private var authJob: Job? = null
     private var cooldownJob: Job? = null
+    private var quotaJob: Job? = null
+    private var bookFilesJob: Job? = null
 
     /** 授权回来要接着做的那件事（测试并保存 / 立即同步）—— 用户点的是它，不是「授权」 */
     private var afterLocalNetworkGrant: (() -> Unit)? = null
@@ -96,7 +116,9 @@ class WebDavViewModel(
                 lastSyncErrorAt = c.lastSyncErrorAt,
                 autoSync = c.autoSync,
                 email = c.officialEmail,
+                quotaLoading = c.isOfficialConnected,
             )
+            refreshQuota()
             official.publicConfig().onSuccess { cfg ->
                 _state.update {
                     it.copy(
@@ -121,6 +143,7 @@ class WebDavViewModel(
     fun confirmSwitchToCustom() {
         _state.update { it.copy(confirmSwitchToCustom = false) }
         authJob?.cancel()
+        quotaJob?.cancel()
         viewModelScope.launch {
             official.switchToCustomKeepingDav()
             _state.update {
@@ -128,6 +151,8 @@ class WebDavViewModel(
                     provider = WebDavProvider.CUSTOM,
                     officialConnected = false,
                     officialEmail = "",
+                    quota = null,
+                    quotaLoading = false,
                     configured = it.url.isNotBlank() && it.davUsername.isNotBlank(),
                 )
             }
@@ -187,6 +212,7 @@ class WebDavViewModel(
                         code = "",
                     )
                 }
+                refreshQuota()
                 messages.emit("已开启官方同步")
             } else {
                 messages.emit(result.exceptionOrNull()?.message ?: "操作失败")
@@ -219,12 +245,15 @@ class WebDavViewModel(
     fun disconnectOfficial() {
         UsageLog.event("ui.click", "action" to "webdav.disconnect")
         _state.update { it.copy(confirmDisconnect = false) }
+        quotaJob?.cancel()
         viewModelScope.launch {
             official.disconnect()
             _state.update {
                 it.copy(
                     officialConnected = false,
                     officialEmail = "",
+                    quota = null,
+                    quotaLoading = false,
                     configured = false,
                     url = "",
                     davUsername = "",
@@ -285,8 +314,130 @@ class WebDavViewModel(
                 askLocalNetwork(then = ::syncNow)
                 return@launch
             }
+            refreshQuota()
             messages.emit(result.getOrElse { "同步失败：" + describeSyncError(it) })
         }
+    }
+
+    private fun refreshQuota() {
+        if (!_state.value.officialConnected) return
+        quotaJob?.cancel()
+        _state.update { it.copy(quotaLoading = true) }
+        quotaJob = viewModelScope.launch {
+            val quota = official.storageQuota().getOrNull()
+            _state.update { it.copy(quota = quota, quotaLoading = false) }
+        }
+    }
+
+    fun openBookFiles() {
+        val s = _state.value
+        if (s.busy || !s.configured) return
+        loadBookFiles(restore = false)
+    }
+
+    fun closeBookFiles() {
+        if (_state.value.bookFiles?.transferring == true) return
+        bookFilesJob?.cancel()
+        dismissLocalNetwork()
+        _state.update { it.copy(bookFiles = null) }
+    }
+
+    fun loadBookFiles(restore: Boolean, syncShelf: Boolean = false) {
+        if (_state.value.bookFiles?.transferring == true) return
+        bookFilesJob?.cancel()
+        _state.update { it.copy(bookFiles = BookFilesUiState(restore = restore)) }
+        bookFilesJob = viewModelScope.launch {
+            try {
+                if (syncShelf) {
+                    repo.sync().getOrThrow()
+                    updateSyncStatus()
+                }
+                val items = bookBackups.list(restore)
+                updateBookFiles { it.copy(items = items, loading = false) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateBookFiles { it.copy(loading = false, error = describeSyncError(e)) }
+                if (e is LocalNetworkPermissionMissing) {
+                    askLocalNetwork { loadBookFiles(restore, syncShelf) }
+                }
+            }
+        }
+    }
+
+    fun selectBookFile(item: BookFileBackupItem) = updateBookFiles { page ->
+        if (page.transferring || item.key in page.results && page.results[item.key] == null) {
+            return@updateBookFiles page
+        }
+        val selection = if (item.key in page.selected) {
+            page.selected - item.key
+        } else {
+            val otherVersions = page.items.filter { it.bookId == item.bookId }.map { it.key }
+            page.selected - otherVersions.toSet() + item.key
+        }
+        page.copy(selected = selection)
+    }
+
+    fun selectAllBookFiles() = updateBookFiles { page ->
+        if (page.transferring) return@updateBookFiles page
+        val keys = page.items.filter { it.key !in page.results || page.results[it.key] != null }
+            .groupBy { it.bookId }
+            .values.mapNotNull { versions -> versions.firstOrNull { it.key in page.selected } ?: versions.singleOrNull() }
+            .map { it.key }.toSet()
+        page.copy(selected = if (keys == page.selected) emptySet() else keys)
+    }
+
+    fun transferBookFiles() {
+        val page = _state.value.bookFiles ?: return
+        val selection = page.items.filter { it.key in page.selected }
+        if (page.loading || page.transferring || selection.isEmpty()) return
+        updateBookFiles { it.copy(transferring = true, error = null) }
+        bookFilesJob = viewModelScope.launch {
+            try {
+                bookBackups.transfer(page.restore, selection) { item, error ->
+                    updateBookFiles { current ->
+                        val discardedKeys = if (page.restore && error == null) {
+                            current.items.filter { it.bookId == item.bookId && it.key != item.key }.map { it.key }.toSet()
+                        } else {
+                            emptySet()
+                        }
+                        current.copy(
+                            items = current.items.filterNot { it.key in discardedKeys },
+                            results = (current.results - discardedKeys) + (item.key to error),
+                            selected = if (error == null) current.selected - item.key else current.selected,
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateBookFiles { it.copy(error = describeSyncError(e)) }
+                if (e is LocalNetworkPermissionMissing) askLocalNetwork(then = ::transferBookFiles)
+            } finally {
+                updateBookFiles { it.copy(transferring = false) }
+                if (!page.restore) refreshQuota()
+            }
+            if (!page.restore) updateSyncStatus()
+        }
+    }
+
+    fun cancelBookFileTransfer() {
+        if (_state.value.bookFiles?.transferring == true) bookFilesJob?.cancel()
+    }
+
+    private suspend fun updateSyncStatus() {
+        val config = prefs.config.first()
+        _state.update {
+            it.copy(
+                lastSyncAt = config.lastSyncAt,
+                lastSyncError = config.lastSyncError,
+                lastSyncErrorAt = config.lastSyncErrorAt,
+            )
+        }
+    }
+
+    private fun updateBookFiles(update: (BookFilesUiState) -> BookFilesUiState) {
+        _state.update { it.copy(bookFiles = it.bookFiles?.let(update)) }
     }
 
     private fun askLocalNetwork(then: () -> Unit) {
