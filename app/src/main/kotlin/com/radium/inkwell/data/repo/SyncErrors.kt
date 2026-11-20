@@ -11,6 +11,23 @@ import java.net.UnknownHostException
 import java.security.cert.CertificateException
 import javax.net.ssl.SSLException
 
+internal fun syncErrorCategory(error: Throwable): String {
+    var cause: Throwable? = error
+    repeat(MAX_CAUSE_DEPTH) {
+        val current = cause ?: return "other"
+        when (current) {
+            is LocalNetworkPermissionMissing -> return "local_network_permission"
+            is WebDavClient.WebDavException -> return "http_${current.code}"
+            is InterruptedIOException -> return "timeout"
+            is SSLException, is CertificateException -> return "tls"
+            is UnknownHostException -> return "dns"
+            is SocketException -> return "network"
+        }
+        cause = current.cause.takeUnless { it === current }
+    }
+    return "other"
+}
+
 /**
  * 同步 / 测试连接的失败原因，换成用户看得懂的一句话。调用方自己加「同步失败：」「连接失败：」这类前缀。
  *

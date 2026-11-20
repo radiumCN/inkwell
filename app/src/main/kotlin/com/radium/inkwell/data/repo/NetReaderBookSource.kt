@@ -165,11 +165,14 @@ class NetReaderBookSource(
 
     internal suspend fun upgradeTextOnlyChapter(index: Int, onStage: (String) -> Unit): String {
         val toc = toc
-        val chapter = toc.chapters.getOrNull(index) ?: return "skipped"
-        val url = chapter.url ?: return "skipped"
+        val chapter = toc.chapters.getOrNull(index) ?: return "not_needed"
+        val url = chapter.url ?: return "not_needed"
         val epoch = cacheEpoch()
-        if (cacheWritesHeld || !withContext(Dispatchers.IO) { cache.claimTextOnlyUpgrade(bookId, url, epoch) }) {
-            return "skipped"
+        if (cacheWritesHeld) return "deferred"
+        when (withContext(Dispatchers.IO) { cache.claimTextOnlyUpgrade(bookId, url, epoch) }) {
+            ChapterContentCache.UpgradeClaim.NOT_NEEDED -> return "not_needed"
+            ChapterContentCache.UpgradeClaim.DEFERRED -> return "deferred"
+            ChapterContentCache.UpgradeClaim.CLAIMED -> Unit
         }
         onStage("fetch")
         val content = fetchChapter(index, chapter, url, toc.urls)

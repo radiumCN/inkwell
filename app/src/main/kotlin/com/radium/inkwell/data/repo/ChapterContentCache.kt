@@ -9,6 +9,8 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
+internal const val TEXT_ONLY_UPGRADE_INTERVAL_MS = 10 * 60 * 1000L
+
 /**
  * 网络书正文磁盘缓存。
  *
@@ -39,6 +41,7 @@ class ChapterContentCache(private val root: File) {
     private var allEpoch = 0
     private data class UpgradeKey(val bookId: String, val chapterUrl: String, val epoch: Long)
     private val recentUpgrades = LinkedHashMap<UpgradeKey, Long>()
+    internal enum class UpgradeClaim { CLAIMED, NOT_NEEDED, DEFERRED }
 
     /** 后台补图在多个阅读会话之间共用退避，只有仍在磁盘上的旧文字缓存才需要升级。 */
     internal fun claimTextOnlyUpgrade(
@@ -46,17 +49,18 @@ class ChapterContentCache(private val root: File) {
         chapterUrl: String,
         epoch: Long,
         nowMs: Long = System.nanoTime() / 1_000_000,
-    ): Boolean = synchronized(epochLock) {
-        if (epoch(bookId) != epoch || !isTextOnly(bookId, chapterUrl)) return false
+    ): UpgradeClaim = synchronized(epochLock) {
+        if (epoch(bookId) != epoch) return UpgradeClaim.DEFERRED
+        if (!isTextOnly(bookId, chapterUrl)) return UpgradeClaim.NOT_NEEDED
         val key = UpgradeKey(bookId, chapterUrl, epoch)
         val last = recentUpgrades[key]
-        if (last != null && nowMs - last < UPGRADE_INTERVAL_MS) return false
+        if (last != null && nowMs - last < TEXT_ONLY_UPGRADE_INTERVAL_MS) return UpgradeClaim.DEFERRED
         recentUpgrades.remove(key)
         recentUpgrades[key] = nowMs
         if (recentUpgrades.size > MAX_RECENT_UPGRADES) {
             recentUpgrades.remove(recentUpgrades.keys.first())
         }
-        true
+        UpgradeClaim.CLAIMED
     }
 
     private fun isTextOnly(bookId: String, chapterUrl: String): Boolean {
@@ -389,7 +393,6 @@ class ChapterContentCache(private val root: File) {
     }
 
     private companion object {
-        const val UPGRADE_INTERVAL_MS = 10 * 60 * 1000L
         const val MAX_RECENT_UPGRADES = 256
         /** 同一本书两次清理之间至少隔多久，见 [claimPrune] */
         const val PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000L

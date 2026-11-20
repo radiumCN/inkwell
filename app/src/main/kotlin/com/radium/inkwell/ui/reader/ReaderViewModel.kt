@@ -25,6 +25,7 @@ import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
+import com.radium.inkwell.data.repo.TEXT_ONLY_UPGRADE_INTERVAL_MS
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
@@ -89,6 +90,7 @@ import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.util.RepeatedTitle
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
@@ -342,6 +344,8 @@ class ReaderViewModel(
 
     // 分页缓存：chapterIndex → 结果；spec 变化即整体作废
     private val paginated = java.util.concurrent.ConcurrentHashMap<Int, Paginator.Result>()
+    private data class RecentChapterCrossing(val from: Int, val to: Int, val at: TimeSource.Monotonic.ValueTimeMark)
+    private var recentChapterCrossing: RecentChapterCrossing? = null
     private val engineMutex = Mutex()
     /** 测量层不能并发；与 [engineMutex] 拆开，邻章排版不再堵住用户正在等的那一章的 IO */
     private val measureMutex = Mutex()
@@ -489,6 +493,7 @@ class ReaderViewModel(
         }
         // 序号整体错位了：此前开工、手里拿着旧序号的加载，结果一律作废（见 tocGeneration）
         tocGeneration++
+        recentChapterCrossing = null
         position = remap.map(position)
         pendingTarget = pendingTarget?.let { remap.map(it) }
         val rekeyed = paginated.mapNotNull { (index, result) ->
@@ -538,6 +543,7 @@ class ReaderViewModel(
             book = b
             // 打开即已知晓：书架上那个"有 N 章新的"红点该灭了；打开时间也记下来，书架按它排「最近阅读」
             bookRepo.markOpened(bookId)
+            recentChapterCrossing = null
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
             // 新会话以库里的进度为准。上一会话（换源前）没落地的目标是旧目录的序号，留着会被
             // 随后的重排（onLayoutReady 取 pendingTarget ?: position）拿去，在新目录里打开一个不相干的章
@@ -1013,12 +1019,14 @@ class ReaderViewModel(
     private var chapterRefreshJob: Job? = null
     private var legacyImageUpgradeJob: Job? = null
     private var legacyImageUpgradeKey: Pair<NetReaderBookSource, String>? = null
+    private var legacyImageUpgradeRetryAt: TimeSource.Monotonic.ValueTimeMark? = null
     private var upgradedChapterUrl: String? = null
 
     private fun stopLegacyImageUpgrade() {
         legacyImageUpgradeJob?.cancel()
         legacyImageUpgradeJob = null
         legacyImageUpgradeKey = null
+        legacyImageUpgradeRetryAt = null
     }
 
     /** 只在已出正文的当前章补全旧缓存，成功后也不重新排正在读的页。 */
@@ -1027,22 +1035,28 @@ class ReaderViewModel(
         if (spec?.showImages != true || sourceChanging || _state.value.refreshingChapter) return
         val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
         val key = src to url
-        if (key == legacyImageUpgradeKey) return
+        if (key == legacyImageUpgradeKey) {
+            if (legacyImageUpgradeRetryAt?.hasPassedNow() != true) return
+        }
         stopLegacyImageUpgrade()
         legacyImageUpgradeKey = key
         legacyImageUpgradeJob = viewModelScope.launch {
-            delay(PREFETCH_LEAD_IN_MS)
-            if (source !== src || spec?.showImages != true ||
-                src.chapters.getOrNull(position.chapterIndex)?.url != url
-            ) return@launch
             val started = TimeSource.Monotonic.markNow()
-            var stage = "check"
+            var stage = "lead_in"
             var fetchMs: Long? = null
             var fetchStarted = started
             var writeStarted = started
             var outcome = "cancelled"
             var errorType: String? = null
             try {
+                delay(PREFETCH_LEAD_IN_MS)
+                if (source !== src || spec?.showImages != true ||
+                    src.chapters.getOrNull(position.chapterIndex)?.url != url
+                ) {
+                    outcome = "superseded"
+                    return@launch
+                }
+                stage = "check"
                 outcome = withTimeoutOrNull(CONTENT_TIMEOUT_MS) {
                     src.upgradeTextOnlyChapter(position.chapterIndex) { nextStage ->
                         stage = nextStage
@@ -1061,7 +1075,13 @@ class ReaderViewModel(
                 outcome = "failed"
                 errorType = e.javaClass.simpleName
             } finally {
-                if (outcome != "skipped") {
+                if (legacyImageUpgradeKey === key && outcome != "ready" && outcome != "not_needed") {
+                    val retryDelay = if (outcome == "deferred") {
+                        UPGRADE_DEFERRED_RECHECK_MS
+                    } else TEXT_ONLY_UPGRADE_INTERVAL_MS
+                    legacyImageUpgradeRetryAt = TimeSource.Monotonic.markNow() + retryDelay.milliseconds
+                }
+                if (outcome != "not_needed") {
                     trace("chapter.cache_upgrade", "chapter" to chapterIndex, "outcome" to outcome, "stage" to stage,
                         "duration_ms" to started.elapsedNow().inWholeMilliseconds,
                         "fetch_ms" to (if (stage == "fetch") fetchStarted.elapsedNow().inWholeMilliseconds else fetchMs),
@@ -1884,6 +1904,9 @@ class ReaderViewModel(
         if (pageIndex !in result.chapter.pages.indices) return
         val oldPage = _state.value
         if (oldPage.chapterIndex != chapterIndex) {
+            recentChapterCrossing = if (oldPage.page != null && kotlin.math.abs(oldPage.chapterIndex - chapterIndex) == 1) {
+                RecentChapterCrossing(oldPage.chapterIndex, chapterIndex, TimeSource.Monotonic.markNow())
+            } else null
             val src = source as? NetReaderBookSource
             val upgradedUrl = upgradedChapterUrl
             if (upgradedUrl != null && src?.chapters?.getOrNull(oldPage.chapterIndex)?.url == upgradedUrl) {
@@ -2246,10 +2269,13 @@ class ReaderViewModel(
         neighborJobs.children.toList().forEach { it.cancelAndJoin() }
     }
 
-    /** 只保留 center±1 的分页结果（测量结果持有 TextLayoutResult，较重） */
+    /** 跨章后短暂保留出发方向的外侧一章，快速折返时可直接复用分页。 */
     private fun trimWindow(center: Int, alsoKeep: Int = center) {
-        val keep = ((center - 1)..(center + 1)).toSet() + alsoKeep
-        paginated.keys.retainAll { it in keep }
+        val crossing = recentChapterCrossing
+        val recentNeighbor = crossing?.takeIf {
+            it.to == center && it.at.elapsedNow().inWholeMilliseconds < CHAPTER_CROSSING_GRACE_MS
+        }?.let { it.from + (it.from - it.to) }
+        paginated.keys.retainAll { it in (center - 1)..(center + 1) || it == alsoKeep || it == recentNeighbor }
     }
 
     private var saveProgressJob: Job? = null
@@ -2352,6 +2378,9 @@ class ReaderViewModel(
          * 用户读完一页远不止 400ms。
          */
         const val PREFETCH_LEAD_IN_MS = 400L
+        const val CHAPTER_CROSSING_GRACE_MS = 2_000L
+        // 退避可能由上一阅读会话设置，定期复查；真正抓取仍受缓存的共享退避限制。
+        const val UPGRADE_DEFERRED_RECHECK_MS = 30_000L
 
         /**
          * 目录多久至多重读一次（[observeToc]）：预取连写几章，不该每章读一遍目录、重组一次菜单。

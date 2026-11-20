@@ -29,6 +29,7 @@ import com.radium.inkwell.data.prefs.exportForBackup
 import com.radium.inkwell.data.prefs.importFromBackup
 import com.radium.inkwell.util.LocalNetworkAccess
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
+import com.radium.inkwell.util.UsageLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlin.time.TimeSource
 
 class WebDavRepository(
     private val db: InkwellDb,
@@ -62,6 +64,7 @@ class WebDavRepository(
     private companion object {
         const val DIR = "inkwell"
         const val BACKUP = "inkwell/backup.json.gz"
+        const val UP_TO_DATE = "已是最新"
         private val backupJson = Json { ignoreUnknownKeys = true; isLenient = true }
     }
 
@@ -83,19 +86,36 @@ class WebDavRepository(
      */
     suspend fun sync(auto: Boolean = false): Result<String> = sync(auto, config = null)
 
-    private suspend fun sync(auto: Boolean, config: WebDavConfig?): Result<String> = try {
-        // 备份里装着每个书源的完整 JSON，几百个源就是几 MB：gzip、整份编解码、逐条解析书源类型
-        // 都是重活，而设置页的「立即同步」是从 viewModelScope（主线程）调进来的
-        withContext(Dispatchers.IO) {
-            syncMutex.withLock { Result.success(syncLocked(auto, config ?: prefs.config.first())) }
+    private suspend fun sync(auto: Boolean, config: WebDavConfig?): Result<String> {
+        val started = TimeSource.Monotonic.markNow()
+        var outcome = "cancelled"
+        var errorCategory: String? = null
+        try {
+            // 编解码、解析书源和双向合并都在 IO 执行，手动同步由主线程发起。
+            val message = withContext(Dispatchers.IO) {
+                syncMutex.withLock { syncLocked(auto, config ?: prefs.config.first()) }
+            }
+            outcome = if (message == UP_TO_DATE) "up_to_date" else "ok"
+            return Result.success(message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            outcome = "failed"
+            errorCategory = syncErrorCategory(e)
+            // 记录失败本身出错时，仍把原来的失败交还给设置页。
+            runCatching { prefs.markSyncFailed(describeSyncError(e), System.currentTimeMillis()) }
+            return Result.failure(e)
+        } finally {
+            val trigger = when {
+                auto -> "auto"
+                config != null -> "before_book_backup"
+                else -> "manual"
+            }
+            UsageLog.event(
+                "webdav.sync.result", "trigger" to trigger, "outcome" to outcome,
+                "duration_ms" to started.elapsedNow().inWholeMilliseconds, "error_category" to errorCategory,
+            )
         }
-    } catch (e: CancellationException) {
-        // 退到后台的自动同步被进程回收、或用户离开设置页 —— 这是取消，不是「同步失败」
-        throw e
-    } catch (e: Exception) {
-        // 记下来给设置页看。记录本身出错（存储写不进去）不能盖掉真正的失败原因
-        runCatching { prefs.markSyncFailed(describeSyncError(e), System.currentTimeMillis()) }
-        Result.failure(e)
     }
 
     private suspend fun syncLocked(auto: Boolean, config: WebDavConfig): String {
@@ -114,7 +134,7 @@ class WebDavRepository(
                 val remoteNow = remoteVersion(client)?.let { account + it }
                 if (remoteNow == mark.remote) {
                     prefs.markSynced(System.currentTimeMillis())
-                    return "已是最新"
+                    return UP_TO_DATE
                 }
             }
         }

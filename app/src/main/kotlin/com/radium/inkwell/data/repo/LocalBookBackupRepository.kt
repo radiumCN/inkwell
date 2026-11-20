@@ -4,12 +4,14 @@ import com.radium.inkwell.core.webdav.WebDavClient
 import com.radium.inkwell.data.db.dao.BookDao
 import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.data.db.entity.BookType
+import com.radium.inkwell.util.UsageLog
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.time.TimeSource
 
 data class BookFileBackupItem(
     val bookId: String,
@@ -58,23 +60,57 @@ class LocalBookBackupRepository(
         items: List<BookFileBackupItem>,
         onResult: (BookFileBackupItem, String?) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        // 书架先上云，换机时才能按原来的 ID 找回正文和进度。
-        val client = webDav.bookFilesClient(syncShelf = !restore)
-        if (!restore) {
-            client.mkcol("inkwell")
-            client.mkcol(DIRECTORY)
-        }
-        for (item in items) {
-            ensureActive()
-            val error = try {
-                if (restore) restore(client, item) else backup(client, item)
-                null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                describeSyncError(e)
+        val started = TimeSource.Monotonic.markNow()
+        var outcome = "cancelled"
+        var operationError: String? = null
+        var succeeded = 0
+        var hidden = 0
+        val failures = mutableMapOf<String, Int>()
+        try {
+            // 书架先上云，换机时才能按原来的 ID 找回正文和进度。
+            val client = webDav.bookFilesClient(syncShelf = !restore)
+            if (!restore) {
+                client.mkcol("inkwell")
+                client.mkcol(DIRECTORY)
             }
-            onResult(item, error)
+            for (item in items) {
+                ensureActive()
+                val error = try {
+                    if (restore) restore(client, item) else backup(client, item)
+                    succeeded++
+                    null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: HiddenBookFileException) {
+                    hidden++
+                    e.message
+                } catch (e: Exception) {
+                    val category = syncErrorCategory(e)
+                    failures[category] = (failures[category] ?: 0) + 1
+                    describeSyncError(e)
+                }
+                onResult(item, error)
+            }
+            outcome = when {
+                failures.isNotEmpty() -> if (succeeded > 0) "partial" else "failed"
+                hidden > 0 -> if (succeeded > 0) "partial" else "skipped"
+                else -> "ok"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            outcome = "failed"
+            operationError = syncErrorCategory(e)
+            throw e
+        } finally {
+            UsageLog.event(
+                "webdav.book_files.result", "operation" to if (restore) "restore" else "backup",
+                "outcome" to outcome, "duration_ms" to started.elapsedNow().inWholeMilliseconds,
+                "requested" to items.size, "succeeded" to succeeded,
+                "skipped_hidden" to hidden, "failed" to failures.values.sum(),
+                "error_category" to operationError,
+                "failure_categories" to failures.entries.joinToString(",") { "${it.key}=${it.value}" },
+            )
         }
     }
 
@@ -99,7 +135,7 @@ class LocalBookBackupRepository(
 
     private suspend fun bookForTransfer(id: String): BookEntity {
         val book = bookDao.getById(id)
-        check(book?.hidden != true) { "此书已移入隐藏书架，已跳过" }
+        if (book?.hidden == true) throw HiddenBookFileException()
         return checkNotNull(book?.takeIf { it.canBackUpFile() }) { "书架条目已变更，请重新打开书籍列表" }
     }
 
@@ -107,6 +143,8 @@ class LocalBookBackupRepository(
         const val DIRECTORY = "inkwell/books"
     }
 }
+
+internal class HiddenBookFileException : IllegalStateException("此书已移入隐藏书架，已跳过")
 
 internal fun BookEntity.canBackUpFile(): Boolean =
     inShelf && !deleted && !hidden && type in BookType.LOCAL_TXT..BookType.LOCAL_MOBI && BOOK_ID.matches(id)

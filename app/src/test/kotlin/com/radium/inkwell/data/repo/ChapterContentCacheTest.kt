@@ -96,10 +96,13 @@ class ChapterContentCacheTest {
         File(root, "b1").listFiles()!!.single().writeText("\u0001V4\n旧正文")
         val epoch = cache.epoch("b1")
 
-        assertTrue(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 0))
-        assertFalse(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 1000))
+        assertEquals(ChapterContentCache.UpgradeClaim.CLAIMED, cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 0))
+        assertEquals(ChapterContentCache.UpgradeClaim.DEFERRED, cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 1000))
         assertEquals(listOf(ContentElement.Paragraph("旧正文")), cache.read("b1", url)?.elements)
-        assertTrue(cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = 600_000))
+        assertEquals(
+            ChapterContentCache.UpgradeClaim.CLAIMED,
+            cache.claimTextOnlyUpgrade("b1", url, epoch, nowMs = TEXT_ONLY_UPGRADE_INTERVAL_MS),
+        )
 
         val manual = ChapterContent(listOf(ContentElement.Paragraph("手动刷新后的正文")))
         cache.write("b1", url, manual)
@@ -115,8 +118,9 @@ class ChapterContentCacheTest {
         val epoch = cache.epoch("b1")
         assertTrue(cache.writeIfEpoch("b1", url, content, epoch, onlyTextOnly = true))
         assertEquals(content.elements, cache.read("b1", url)?.elements)
-        assertFalse(cache.claimTextOnlyUpgrade("b1", url, epoch))
+        assertEquals(ChapterContentCache.UpgradeClaim.NOT_NEEDED, cache.claimTextOnlyUpgrade("b1", url, epoch))
         cache.clear("b1")
+        assertEquals(ChapterContentCache.UpgradeClaim.DEFERRED, cache.claimTextOnlyUpgrade("b1", url, epoch))
         assertFalse(cache.writeIfEpoch("b1", url, content, epoch, onlyTextOnly = true))
         assertNull(cache.read("b1", url))
     }
