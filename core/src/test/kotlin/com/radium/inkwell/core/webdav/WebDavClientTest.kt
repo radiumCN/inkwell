@@ -1,8 +1,19 @@
 package com.radium.inkwell.core.webdav
 
 import java.io.IOException
+import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempFile
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import okhttp3.Call
+import okhttp3.EventListener
+import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import kotlin.test.AfterTest
@@ -79,6 +90,34 @@ class WebDavClientTest {
             assertFailsWith<IOException> { client.downloadFile(path, file, 4) }
         } finally {
             file.delete()
+        }
+    }
+
+    @Test
+    fun `cancelling download interrupts a stalled response body`() = runBlocking {
+        val dir = Files.createTempDirectory("dav-download").toFile()
+        val file = dir.resolve("partial")
+        val callCancelled = AtomicBoolean()
+        val http = OkHttpClient.Builder().eventListener(object : EventListener() {
+            override fun canceled(call: Call) {
+                callCancelled.set(true)
+            }
+        }).build()
+        val client = WebDavClient(server.url("/dav").toString(), "user", "pass", http)
+        try {
+            server.enqueue(MockResponse().setBody("book").setBodyDelay(5, TimeUnit.SECONDS))
+            val download = launch { client.downloadFile("inkwell/books/book.txt", file, 4) }
+            withTimeout(5_000) {
+                // 暂存文件创建于收到响应头之后、第一次读正文之前。
+                while (!file.exists()) delay(10)
+            }
+            withTimeout(3_000) { download.cancelAndJoin() }
+            assertTrue(download.isCancelled)
+            assertTrue(callCancelled.get(), "收到响应头后取消仍应中断 OkHttp Call")
+            assertTrue(file.delete(), "取消完成后暂存文件已关闭")
+        } finally {
+            file.delete()
+            dir.delete()
         }
     }
 

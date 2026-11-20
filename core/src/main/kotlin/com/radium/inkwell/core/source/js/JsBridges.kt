@@ -285,6 +285,7 @@ class SourceBridge(
     private var submittedInfo: String? = null,
     private val pendingLogin: MutableMap<SourceSessionKey, String?>? = null,
     private val sessionId: String? = null,
+    private val observeLoginHeaders: (String) -> Unit = {},
 ) {
     @JvmField val bookSourceUrl: String = key
     @JvmField val bookSourceName: String = facts.name
@@ -359,11 +360,12 @@ class SourceBridge(
         putLoginInfo(null)
     }
 
-    fun getLoginHeader(): String? = sessionValue(SourceSessionKey.HEADERS, LOGIN_HEADER)
+    fun getLoginHeader(): String? = sessionValue(SourceSessionKey.HEADERS, LOGIN_HEADER)?.also(observeLoginHeaders)
 
     fun getLoginHeaderMap(): JsStringMap? = getLoginHeader()?.let(::jsonStringMap)
 
     fun putLoginHeader(header: String?) {
+        header?.let(observeLoginHeaders)
         saveSessionValue(SourceSessionKey.HEADERS, LOGIN_HEADER, header)
     }
 

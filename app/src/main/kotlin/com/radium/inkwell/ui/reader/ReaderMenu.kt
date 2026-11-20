@@ -1769,7 +1769,7 @@ private fun MoreTab(
         SwitchRow(
             title = "长按选字",
             subtitle = if (textSelectionEnabled) {
-                "长按正文可选中、复制，或建一条只对这本书生效的净化规则"
+                "长按正文后可拖动两端手柄，精确选择要复制或替换的文字"
             } else {
                 "已关闭。翻页时手指停顿久了不会再误触选中"
             },

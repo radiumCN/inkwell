@@ -46,4 +46,31 @@ class FontIoTest {
             assertFalse(fontFileAvailable(dir, "file:installed.ttf"))
         } finally { dir.deleteRecursively() }
     }
+
+    @Test fun `delete removes only the selected font and can be retried`() {
+        val dir = Files.createTempDirectory("font-delete").toFile()
+        try {
+            val selected = dir.resolve("selected.ttf").apply { writeBytes(ByteArray(4096)) }
+            val other = dir.resolve("other.otf").apply { writeBytes(ByteArray(512)) }
+            assertEquals(4608L, dir.listFiles()!!.sumOf { it.length() })
+            deleteFontFile(dir, "file:selected.ttf")
+            deleteFontFile(dir, "file:selected.ttf")
+            assertFalse(selected.exists())
+            assertEquals(512L, other.length())
+            assertEquals(512L, dir.listFiles()!!.sumOf { it.length() })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun `invalid ids and directories are never reported as deleted fonts`() {
+        val parent = Files.createTempDirectory("font-delete-invalid").toFile()
+        try {
+            val dir = parent.resolve("fonts").apply { mkdir() }
+            val outside = parent.resolve("outside.ttf").apply { writeBytes(byteArrayOf(1)) }
+            val folder = dir.resolve("folder.ttf").apply { mkdir() }
+            assertFailsWith<java.io.IOException> { deleteFontFile(dir, "file:../outside.ttf") }
+            assertFailsWith<java.io.IOException> { deleteFontFile(dir, "file:folder.ttf") }
+            assertTrue(outside.isFile)
+            assertTrue(folder.isDirectory)
+        } finally { parent.deleteRecursively() }
+    }
 }

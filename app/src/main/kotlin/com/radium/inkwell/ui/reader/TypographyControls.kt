@@ -34,6 +34,7 @@ import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.settings.formatSize
 import org.koin.compose.koinInject
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -254,11 +255,13 @@ internal fun FontSection(
     }
 
     deleting?.let { font ->
+        val size = formatSize(font.sizeBytes)
+        val deleteMessage = "将删除本机的字体文件（$size）。"
         AppAlertDialog(
             onDismissRequest = { deleting = null },
             title = "删除字体「${font.label}」？",
             // 长按删的不一定是正在用的那款：只有删的是它，正文才会换回默认字体
-            text = if (font.id == settings.fontId) "字体文件会从本机删除，正文换回默认字体" else "字体文件会从本机删除",
+            text = if (font.id == settings.fontId) "$deleteMessage 正文将换回默认字体。" else deleteMessage,
             confirmText = "删除",
             onConfirm = {
                 actions.onDeleteFont(font)

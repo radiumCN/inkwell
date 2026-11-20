@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.Font
 import com.radium.inkwell.reader.api.ReaderSettings
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 /** fontId → FontFamily 的解析 */
 interface FontRegistry {
@@ -47,21 +46,36 @@ object SystemFontRegistry : FontRegistry {
  * 就认不出是同一个，每章都要重新从磁盘解析一遍。带上修改时间是为了删掉再导入一个同名的不同字体时，
  * 不拿到旧字体的缓存。
  */
-class FileFontRegistry(private val fontsDir: File) : FontRegistry {
-    private val cache = ConcurrentHashMap<String, Pair<Long, FontFamily>>()
+class FileFontRegistry internal constructor(
+    private val fontsDir: File,
+    private val loadFontFamily: (File) -> FontFamily,
+) : FontRegistry {
+    constructor(fontsDir: File) : this(fontsDir, { FontFamily(Font(it)) })
+
+    private val cache = HashMap<String, Pair<Long, FontFamily>>()
+
+    fun evictAfterDelete(fontId: String, deleteFile: () -> Unit) {
+        synchronized(cache) {
+            // 与加载共用锁，避免系统正打开字体文件时删掉它。
+            deleteFile()
+            cache.remove(fontId)
+        }
+    }
 
     override fun resolve(fontId: String): FontFamily {
         if (!ReaderSettings.isFileFont(fontId)) return SystemFontRegistry.resolve(fontId)
-        val file = File(fontsDir, fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX))
-        // 文件名来自同步过来的设置，别让 "../" 之类的东西把读取引到字体目录外面去
-        if (file.parentFile?.canonicalPath != fontsDir.canonicalPath || !file.isFile) {
-            return FontFamily.Default
+        // 文件检查与写入缓存一起加锁，避免与删除交错时把旧字体重新放回缓存。
+        return synchronized(cache) {
+            val file = File(fontsDir, fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX))
+            // 文件名来自同步过来的设置，别让 "../" 之类的东西把读取引到字体目录外面去
+            if (file.parentFile?.canonicalPath != fontsDir.canonicalPath || !file.isFile) {
+                cache.remove(fontId)
+                return@synchronized FontFamily.Default
+            }
+            val stamp = file.lastModified()
+            cache[fontId]?.let { (at, family) -> if (at == stamp) return@synchronized family }
+            loadFontFamily(file).also { cache[fontId] = stamp to it }
         }
-        val stamp = file.lastModified()
-        cache[fontId]?.let { (at, family) -> if (at == stamp) return family }
-        val family = FontFamily(Font(file))
-        cache[fontId] = stamp to family
-        return family
     }
 }
 

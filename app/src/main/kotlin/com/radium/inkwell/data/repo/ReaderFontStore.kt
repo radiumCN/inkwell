@@ -5,7 +5,6 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.FileFontRegistry
-import com.radium.inkwell.reader.measure.FontRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -15,15 +14,18 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
 
 /** 一个用户导入的字体。[id] 即 ReaderSettings.fontId（`file:<文件名>`） */
-data class UserFont(val id: String, val label: String)
+data class UserFont(val id: String, val label: String, val sizeBytes: Long)
 
 enum class FontImportStage { READING, VALIDATING }
 
@@ -40,7 +42,7 @@ class ReaderFontStore(context: Context) {
     val dir: File = File(context.filesDir, FONTS_DIR)
 
     /** 排版用的字体解析：预设 + 本目录里的文件。整个应用共用一个，FontFamily 缓存才有意义 */
-    val registry: FontRegistry = FileFontRegistry(dir)
+    val registry = FileFontRegistry(dir)
 
     private val scanMutex = Mutex()
     private val importMutex = Mutex()
@@ -100,12 +102,11 @@ class ReaderFontStore(context: Context) {
         }
     }
 
-    suspend fun delete(font: UserFont) = withContext(Dispatchers.IO) {
-        File(dir, font.id.removePrefix(ReaderSettings.FONT_FILE_PREFIX)).let { file ->
-            // id 来自本目录扫描，但仍只删这个目录里的文件 —— 与 deleteOwnedFile 同一个顾虑
-            deleteOwnedFile(file.path, dir)
+    suspend fun delete(font: UserFont) = importMutex.withLock {
+        withContext(Dispatchers.IO + NonCancellable) {
+            registry.evictAfterDelete(font.id) { deleteFontFile(dir, font.id) }
+            refresh()
         }
-        refresh()
     }
 
     private fun scan(): List<UserFont> =
@@ -117,6 +118,7 @@ class ReaderFontStore(context: Context) {
     private fun File.toUserFont() = UserFont(
         id = ReaderSettings.FONT_FILE_PREFIX + name,
         label = nameWithoutExtension,
+        sizeBytes = length(),
     )
 
     /** 同名已存在就加序号：同名不同字体（不同字重、不同版本）不该悄悄互相覆盖 */
@@ -146,7 +148,6 @@ class ReaderFontStore(context: Context) {
 
     private companion object {
         const val FONTS_DIR = "fonts"
-        val FONT_EXTENSIONS = setOf("ttf", "otf")
         const val MAX_FONT_BYTES = 64L * 1024 * 1024
 
         /** 文件名就是界面上的字体名，也会进 fontId 同步出去：去掉路径分隔与控制字符，别的原样保留 */
@@ -176,8 +177,24 @@ private fun fontTooLarge(limit: Long) =
 
 internal fun fontFileAvailable(dir: File, fontId: String): Boolean {
     if (!ReaderSettings.isFileFont(fontId)) return true
-    val file = File(dir, fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX))
-    val extension = file.extension.lowercase()
-    if (extension != "ttf" && extension != "otf") return false
-    return runCatching { file.parentFile?.canonicalPath == dir.canonicalPath && file.isFile }.getOrDefault(false)
+    return localFontFile(dir, fontId)?.isFile == true
+}
+
+internal fun deleteFontFile(dir: File, fontId: String) {
+    val file = localFontFile(dir, fontId) ?: throw IOException("字体文件路径无效")
+    if (!deleteOwnedFile(file.path, dir) && !Files.notExists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+        throw IOException("无法删除字体文件")
+    }
+}
+
+private val FONT_EXTENSIONS = setOf("ttf", "otf")
+
+private fun localFontFile(dir: File, fontId: String): File? {
+    if (!ReaderSettings.isFileFont(fontId)) return null
+    val name = fontId.removePrefix(ReaderSettings.FONT_FILE_PREFIX)
+    val file = File(dir, name)
+    if (file.name != name || file.extension.lowercase() !in FONT_EXTENSIONS) return null
+    return file.takeIf {
+        runCatching { it.canonicalFile == File(dir.canonicalFile, name) }.getOrDefault(false)
+    }
 }

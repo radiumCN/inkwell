@@ -5,6 +5,9 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class FileFontRegistryTest {
 
@@ -29,6 +32,25 @@ class FileFontRegistryTest {
             assertEquals(FontFamily.Default, registry.resolve("file:../${outside.name}"))
         } finally {
             outside.delete()
+        }
+    }
+
+    @Test
+    fun `清除字体缓存后同名同时间文件也生成新字体对象`() {
+        val file = File(dir, "cached.ttf").apply { writeBytes(byteArrayOf(0)) }
+        val id = "file:${file.name}"
+        val stamp = file.lastModified()
+        val families = listOf(FontFamily.Serif, FontFamily.Monospace).iterator()
+        val registry = FileFontRegistry(dir) { families.next() }
+        try {
+            val first = registry.resolve(id)
+            assertSame(first, registry.resolve(id))
+            registry.evictAfterDelete(id) { assertTrue(file.delete()) }
+            file.writeBytes(byteArrayOf(1))
+            assertTrue(file.setLastModified(stamp))
+            assertNotSame(first, registry.resolve(id))
+        } finally {
+            file.delete()
         }
     }
 }

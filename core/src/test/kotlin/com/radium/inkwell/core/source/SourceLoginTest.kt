@@ -167,6 +167,46 @@ class SourceLoginTest {
     }
 
     @Test
+    fun `脚本登录重试仅向授权来源发送持久化请求头`() = runBlocking {
+        MockWebServer().use { server ->
+            MockWebServer().use { other ->
+                val base = server.url("/").toString().trimEnd('/')
+                val source = fixture(base).copy(
+                    loginUrl = """
+                        function login() {
+                          source.putLoginHeader('{"X-Session":"fixture"}');
+                          java.getStrResponse('${other.url("/direct")}', '{"x-session":"fixture","X-Request":"keep"}');
+                        }
+                    """.trimIndent(),
+                    loginCheckJs = """
+                        if (result.code() === 401) {
+                          source.login();
+                          var saved = JSON.parse(String(source.getLoginHeader()));
+                          var headers = JSON.stringify({'x-session': saved['X-Session'], 'X-Request': 'keep'});
+                          java.getStrResponse(result.request().url(), headers);
+                        } else result;
+                    """.trimIndent(),
+                )
+                val sessions = Sessions()
+                server.enqueue(MockResponse().setResponseCode(401))
+                server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", other.url("/redirect")))
+                other.enqueue(MockResponse().setBody("ok"))
+                other.enqueue(books())
+
+                assertEquals("样例", engine(http(sessions), sessions).search(source, "样例").items.single().title)
+                assertNull(server.takeRequest().getHeader("X-Session"))
+                assertEquals("fixture", server.takeRequest().getHeader("X-Session"))
+                for (path in listOf("/direct", "/redirect")) {
+                    val request = other.takeRequest()
+                    assertEquals(path, request.path)
+                    assertNull(request.getHeader("X-Session"))
+                    assertEquals("keep", request.getHeader("X-Request"))
+                }
+            }
+        }
+    }
+
+    @Test
     fun `无参登录重试保留 POST 请求体和请求选项并重算登录头`() = runBlocking {
         MockWebServer().use { server ->
             val base = server.url("/").toString().trimEnd('/')

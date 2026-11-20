@@ -4,6 +4,7 @@ import com.jayway.jsonpath.Configuration
 import com.jayway.jsonpath.JsonPath
 import com.jayway.jsonpath.Option
 import com.radium.inkwell.core.source.js.LOGIN_SCOPE_BINDING
+import com.radium.inkwell.core.source.js.EngineJsHttp
 import com.radium.inkwell.core.source.js.ScriptJson
 import com.radium.inkwell.core.source.js.SourceBridge
 import com.radium.inkwell.core.source.js.StrResponse
@@ -894,6 +895,7 @@ class RuleEvaluator(
             submittedInfo,
             pendingLogin,
             ctx.js.loginSessionId,
+            observeLoginHeaders = { (jsHttp as? EngineJsHttp)?.rememberLoginHeaders(it) },
         )
 
     /**

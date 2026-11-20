@@ -42,7 +42,7 @@ import com.radium.inkwell.ui.components.smallGlassHighlight
  * 给了 [pageBackdrop] 时和阅读菜单一样是毛玻璃（[readerGlass]）：浮层色只叠八成，底下的正文隐约透出来，
  * 再描一圈边缘高光（浅色纸用亮模式那档、深色纸用暗模式那档）。
  *
- * 位置由调用方给（落在页脚那行正上方，同自动换源的提示胶囊）。
+ * 位置由调用方根据手柄位置决定，避免挡住可拖动的边界。
  *
  * @param replacePreview 原文 → 本章的命中数与预览，见 [ReplaceTextDialog]
  * @param onReplace (原文, 换成)；换成为空就是删掉

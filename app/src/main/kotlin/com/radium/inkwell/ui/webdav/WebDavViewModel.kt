@@ -3,6 +3,7 @@ package com.radium.inkwell.ui.webdav
 import com.radium.inkwell.util.UsageLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.radium.inkwell.data.net.OfficialSessionExpiredException
 import com.radium.inkwell.data.net.OfficialWebDav
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.prefs.WebDavProvider
@@ -36,6 +37,8 @@ data class WebDavUiState(
     val officialEmail: String = "",
     val quota: OfficialStorageQuota? = null,
     val quotaLoading: Boolean = false,
+    val officialSessionExpired: Boolean = false,
+    val showOfficialReauth: Boolean = false,
     val bookFiles: BookFilesUiState? = null,
     val registrationOpen: Boolean = true,
     val officialDavUrl: String = OfficialWebDav.DAV,
@@ -153,6 +156,8 @@ class WebDavViewModel(
                     officialEmail = "",
                     quota = null,
                     quotaLoading = false,
+                    officialSessionExpired = false,
+                    showOfficialReauth = false,
                     configured = it.url.isNotBlank() && it.davUsername.isNotBlank(),
                 )
             }
@@ -194,11 +199,14 @@ class WebDavViewModel(
     }
 
     fun submitOfficial() {
-        UsageLog.event("ui.click", "action" to "webdav.connect")
         val s = _state.value
-        if (s.busy) return
+        if (s.busy || (s.officialConnected && !s.showOfficialReauth)) return
+        val reauth = s.showOfficialReauth
+        UsageLog.event("ui.click", "action" to if (reauth) "webdav.reauthorize" else "webdav.connect")
         runAuth {
-            val result = official.loginWithCode(s.email.trim(), s.code.trim())
+            val email = s.email.trim()
+            val code = s.code.trim()
+            val result = if (reauth) official.reauthorizeWithCode(email, code) else official.loginWithCode(email, code)
             if (result.isSuccess) {
                 val c = prefs.config.first()
                 _state.update {
@@ -210,14 +218,20 @@ class WebDavViewModel(
                         davPassword = c.password,
                         configured = true,
                         code = "",
+                        officialSessionExpired = false,
+                        showOfficialReauth = false,
                     )
                 }
                 refreshQuota()
-                messages.emit("已开启官方同步")
+                messages.emit(if (reauth) "已重新验证官方账号" else "已开启官方同步")
             } else {
                 messages.emit(result.exceptionOrNull()?.message ?: "操作失败")
             }
         }
+    }
+
+    fun showOfficialReauth(show: Boolean) = _state.update {
+        if (it.busy || !it.officialConnected) it else it.copy(showOfficialReauth = show, email = it.officialEmail, code = "")
     }
 
     fun showConnectionInfo(show: Boolean) = _state.update { it.copy(showConnectionInfo = show) }
@@ -234,6 +248,9 @@ class WebDavViewModel(
                 _state.update { it.copy(davPassword = c.password) }
                 messages.emit("已生成新应用码，旧码已失效")
             } else {
+                if (result.exceptionOrNull() is OfficialSessionExpiredException) {
+                    _state.update { it.copy(officialSessionExpired = true, quota = null) }
+                }
                 messages.emit(result.exceptionOrNull()?.message ?: "生成失败")
             }
         }
@@ -254,6 +271,8 @@ class WebDavViewModel(
                     officialEmail = "",
                     quota = null,
                     quotaLoading = false,
+                    officialSessionExpired = false,
+                    showOfficialReauth = false,
                     configured = false,
                     url = "",
                     davUsername = "",
@@ -319,13 +338,22 @@ class WebDavViewModel(
         }
     }
 
-    private fun refreshQuota() {
-        if (!_state.value.officialConnected) return
+    fun refreshQuota() {
+        val state = _state.value
+        if (!state.officialConnected || state.officialSessionExpired) return
         quotaJob?.cancel()
         _state.update { it.copy(quotaLoading = true) }
         quotaJob = viewModelScope.launch {
-            val quota = official.storageQuota().getOrNull()
-            _state.update { it.copy(quota = quota, quotaLoading = false) }
+            val result = official.storageQuota()
+            val expired = result.exceptionOrNull() is OfficialSessionExpiredException
+            val quota = result.getOrNull()
+            val outcome = when {
+                expired -> "session_expired"
+                quota != null -> "ok"
+                else -> "unavailable"
+            }
+            UsageLog.event("webdav.quota", "outcome" to outcome)
+            _state.update { it.copy(quota = quota, quotaLoading = false, officialSessionExpired = expired) }
         }
     }
 

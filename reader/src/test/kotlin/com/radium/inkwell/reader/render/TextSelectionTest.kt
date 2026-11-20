@@ -113,4 +113,36 @@ class TextSelectionTest {
         assertEquals(0, extended.start)
         assertTrue(extended.text.endsWith("world"), "选区应从段首延伸到锚点词末尾: ${extended.text}")
     }
+
+    @Test
+    fun `分别向内拖两个端点可把整句缩到一个词`() {
+        val p = page("前文，词汇仍在。")
+        val initial = assertNotNull(p.selectWordAt(70f, 10f, spec()))
+        assertEquals("前文，词汇仍在。", initial.text)
+        val startMoved = p.moveSelectionEnd(initial, SelectionEnd.START, 60f, 10f, spec())
+        assertEquals("词汇仍在。", startMoved.text)
+        val word = p.moveSelectionEnd(startMoved, SelectionEnd.END, 100f, 10f, spec())
+        assertEquals("词汇", word.text)
+        assertEquals(3, word.start)
+        assertEquals(5, word.end)
+    }
+
+    @Test
+    fun `手柄经过表情时保留完整字符并且不能把选区拖空`() {
+        val p = page("甲😀乙")
+        val initial = assertNotNull(p.selectWordAt(30f, 10f, spec()))
+        val startMoved = p.moveSelectionEnd(initial, SelectionEnd.START, 40f, 10f, spec())
+        val emoji = p.moveSelectionEnd(startMoved, SelectionEnd.END, 0f, 10f, spec())
+        assertEquals("😀", emoji.text)
+        assertEquals(emoji, p.moveSelectionEnd(emoji, SelectionEnd.START, 200f, 10f, spec()))
+    }
+
+    @Test
+    fun `跨页长段落的选区限制在可见页内`() {
+        val p = page("字".repeat(300), pageIndex = 1)
+        val selected = assertNotNull(p.selectWordAt(20f, 5f, spec()))
+        assertEquals(150, selected.start)
+        assertEquals(300, selected.end)
+        assertEquals(selected, p.moveSelectionEnd(selected, SelectionEnd.START, 0f, -100f, spec()))
+    }
 }

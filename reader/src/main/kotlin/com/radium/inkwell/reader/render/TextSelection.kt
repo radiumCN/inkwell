@@ -1,7 +1,13 @@
 package com.radium.inkwell.reader.render
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.ResolvedTextDirection
+import com.radium.inkwell.reader.measure.MeasuredParagraph
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
+import java.text.BreakIterator
+import java.util.Locale
 
 /**
  * 正文里选中的一段文字。
@@ -20,6 +26,10 @@ data class TextSelection(
     val isEmpty: Boolean get() = end <= start || text.isBlank()
 }
 
+enum class SelectionEnd { START, END }
+
+data class SelectionHandlePosition(val anchor: Offset, val lineCenterY: Float)
+
 /**
  * 触点 → 选中的词。自绘正文没有系统级的文字选择，命中测试只能自己做：
  * 先按 y 找到触点落在哪个段落切片上，再换算成段内坐标，交给测量层定位字符。
@@ -27,19 +37,22 @@ data class TextSelection(
 fun RenderablePage.selectWordAt(x: Float, y: Float, layout: LayoutSpec): TextSelection? {
     val (slice, offset) = hitTest(x, y, layout) ?: return null
     val para = measured[slice.elementIndex] ?: return null
-    val word = para.wordBoundary(offset)
+    val visibleStart = para.lineStartOffset(slice.startLine)
+    val visibleEnd = para.lineEndOffset(slice.endLine).coerceAtMost(para.text.length)
+    if (visibleStart >= visibleEnd) return null
+    val word = para.wordBoundary(offset.coerceIn(visibleStart, visibleEnd - 1))
     if (word.isEmpty()) return null
-    return TextSelection(
-        elementIndex = slice.elementIndex,
-        start = word.first,
-        end = word.last + 1,
-        text = para.text.substring(word.first, (word.last + 1).coerceAtMost(para.text.length)),
-    )
+    val start = maxOf(word.first, visibleStart)
+    val end = minOf(word.last + 1, visibleEnd)
+    if (start >= end) return null
+    val breaks = characterBreaks(para.text)
+    val from = breaks.boundaryAt(start, SelectionEnd.START)
+    val to = breaks.boundaryAt(end, SelectionEnd.END)
+    return TextSelection(slice.elementIndex, from, to, para.text.substring(from, to))
 }
 
 /**
- * 拖动扩展选区。锚点固定在长按选中的那个词，只在同一段落内延伸 ——
- * 手指移到别的段落上时保持原样，而不是跳段（跳段会让选区突然面目全非）。
+ * 长按期间拖动会扩展选区，固定触点所在的词，并限制在本页的同一段落内。
  */
 fun RenderablePage.extendSelection(
     anchor: TextSelection,
@@ -48,22 +61,87 @@ fun RenderablePage.extendSelection(
     layout: LayoutSpec,
 ): TextSelection {
     val para = measured[anchor.elementIndex] ?: return anchor
-    val slice = spec.items.firstOrNull {
-        it is PageItem.TextSlice && it.elementIndex == anchor.elementIndex
-    } as? PageItem.TextSlice ?: return anchor
-
-    val local = toParagraphLocal(slice, x, y, layout, para)
-    val offset = para.offsetForPosition(local.first, local.second)
-        .coerceIn(0, para.text.length)
-
+    val slice = textSlice(anchor.elementIndex) ?: return anchor
+    val offset = offsetOnSlice(slice, x, y, layout, para)
+    val breaks = characterBreaks(para.text)
     // 往回拖就往前扩：锚点词整体始终包含在选区里
-    val start = minOf(anchor.start, offset)
-    val end = maxOf(anchor.end, offset)
-    return anchor.copy(
-        start = start,
-        end = end,
-        text = para.text.substring(start, end.coerceAtMost(para.text.length)),
+    val start = breaks.boundaryAt(minOf(anchor.start, offset), SelectionEnd.START)
+    val end = breaks.boundaryAt(maxOf(anchor.end, offset), SelectionEnd.END)
+    return anchor.copy(start = start, end = end, text = para.text.substring(start, end))
+}
+
+/** 松手后单独移动一个边界，允许缩小默认选区。另一边固定，至少保留一个可见字符。 */
+fun RenderablePage.moveSelectionEnd(
+    selection: TextSelection,
+    edge: SelectionEnd,
+    x: Float,
+    y: Float,
+    layout: LayoutSpec,
+): TextSelection {
+    val para = measured[selection.elementIndex] ?: return selection
+    val slice = textSlice(selection.elementIndex) ?: return selection
+    if (selection.start !in 0 until selection.end || selection.end > para.text.length) return selection
+    val breaks = characterBreaks(para.text)
+    val target = breaks.boundaryAt(offsetOnSlice(slice, x, y, layout, para), edge)
+    val start = if (edge == SelectionEnd.START) minOf(target, breaks.preceding(selection.end)) else selection.start
+    val end = if (edge == SelectionEnd.END) maxOf(target, breaks.following(selection.start)) else selection.end
+    val text = para.text.substring(start, end)
+    return if (text.isBlank()) selection else selection.copy(start = start, end = end, text = text)
+}
+
+/** 用边界旁的被选字符定位，行末手柄留在本行，避免跳到换行后的下一行。 */
+fun RenderablePage.selectionHandlePosition(
+    selection: TextSelection,
+    edge: SelectionEnd,
+    layout: LayoutSpec,
+): SelectionHandlePosition? {
+    val slice = textSlice(selection.elementIndex) ?: return null
+    val para = measured[selection.elementIndex] ?: return null
+    val result = para.renderHandle as? TextLayoutResult ?: return null
+    val start = edge == SelectionEnd.START
+    val adjacent = if (start) selection.start else selection.end - 1
+    if (adjacent !in para.text.indices) return null
+    val line = result.getLineForOffset(adjacent)
+    if (line !in slice.lineRange) return null
+    val rtl = result.getBidiRunDirection(adjacent) == ResolvedTextDirection.Rtl
+    val boundary = if (start) selection.start else selection.end
+    val clusterStart = if (start) adjacent else characterBreaks(para.text).preceding(boundary)
+    val box = result.getBoundingBox(clusterStart)
+    val x = if (start != rtl) box.left else box.right
+    val top = layout.marginTopPx + layout.headerHeightPx + slice.yTopInPage - para.lineTop(slice.startLine)
+    val bottom = para.lineBottom(line)
+    return SelectionHandlePosition(
+        anchor = Offset(layout.marginLeftPx + x, top + bottom),
+        lineCenterY = top + (para.lineTop(line) + bottom) / 2f,
     )
+}
+
+private fun RenderablePage.textSlice(elementIndex: Int): PageItem.TextSlice? =
+    spec.items.firstOrNull { it is PageItem.TextSlice && it.elementIndex == elementIndex } as? PageItem.TextSlice
+
+private fun offsetOnSlice(
+    slice: PageItem.TextSlice,
+    x: Float,
+    y: Float,
+    layout: LayoutSpec,
+    para: MeasuredParagraph,
+): Int {
+    val (localX, localY) = toParagraphLocal(slice, x, y, layout, para)
+    val top = para.lineTop(slice.startLine)
+    val bottom = para.lineBottom(slice.endLine)
+    if (localY < top) return para.lineStartOffset(slice.startLine)
+    if (localY >= bottom) return para.lineEndOffset(slice.endLine)
+    return para.offsetForPosition(localX, localY)
+        .coerceIn(para.lineStartOffset(slice.startLine), para.lineEndOffset(slice.endLine))
+}
+
+private fun characterBreaks(text: String): BreakIterator =
+    BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(text) }
+
+private fun BreakIterator.boundaryAt(offset: Int, edge: SelectionEnd): Int = when {
+    isBoundary(offset) -> offset
+    edge == SelectionEnd.START -> preceding(offset)
+    else -> following(offset)
 }
 
 /**

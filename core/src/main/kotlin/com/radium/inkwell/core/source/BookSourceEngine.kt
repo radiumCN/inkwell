@@ -158,7 +158,14 @@ class BookSourceEngine(
      */
     private suspend fun <T> engineIo(source: BookSourceRule, block: suspend () -> T): T =
         withContext(Dispatchers.IO) {
-            withContext(jsHttp.bindingTo(coroutineContext[Job], source.loginSessionId)) {
+            val sessionId = source.loginSessionId
+            val binding = jsHttp.bindingTo(
+                job = coroutineContext[Job],
+                sourceId = sessionId,
+                loginHeaderNames = { evaluator.loginHeaders(source.id, sessionId).keys },
+                allowsLoginOrigin = { url -> allowsLoginOrigin(source, url, sessionId) },
+            )
+            withContext(binding) {
                 try {
                     block()
                 } catch (e: Exception) {
@@ -872,9 +879,7 @@ class BookSourceEngine(
                 .mapValues { (_, value) -> expandTemplate(value, context.vars) }
             return RequestHeaders(regular, emptyMap())
         }
-        val target = url.toHttpUrlOrNull()?.sourceOrigin()
-        val authorized = target != null && (target == source.baseUrl.toHttpUrlOrNull()?.sourceOrigin() ||
-            target.toString() in sessionStore.webLoginOrigins(sessionId))
+        val authorized = allowsLoginOrigin(source, url, sessionId)
         val credentials = if (authorized) {
             evaluator.loginHeaders(source.id, sessionId).filterKeys { name ->
                 requestHeaders.keys.none { it.equals(name, ignoreCase = true) }
@@ -884,6 +889,12 @@ class BookSourceEngine(
             credentials.keys.none { it.equals(name, ignoreCase = true) }
         }.mapValues { (_, value) -> expandTemplate(value, context.vars) }
         return RequestHeaders(regular, credentials)
+    }
+
+    private fun allowsLoginOrigin(source: BookSourceRule, url: String, sessionId: String?): Boolean {
+        val target = url.toHttpUrlOrNull()?.sourceOrigin() ?: return false
+        return target == source.baseUrl.toHttpUrlOrNull()?.sourceOrigin() ||
+            (sessionId != null && target.toString() in sessionStore.webLoginOrigins(sessionId))
     }
 
     private fun baseSourceHeaders(source: BookSourceRule, js: JsContext): Map<String, String> {

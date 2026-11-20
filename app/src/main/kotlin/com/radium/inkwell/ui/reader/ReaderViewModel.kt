@@ -898,14 +898,24 @@ class ReaderViewModel(
         }
     }
 
-    /** 删的是正在用的字体 → 先切回默认再删文件，别让分页撞上一个刚消失的字体文件 */
     fun deleteFont(font: UserFont) {
         viewModelScope.launch {
-            val current = _state.value.settings
-            if (current.fontId == font.id) {
-                persistSettings(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
+            try {
+                fontStore.delete(font)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                messageBus.emit("删除字体「${font.label}」失败，请重试")
+                return@launch
             }
-            fontStore.delete(font)
+            try {
+                readerPrefs.adjustTypography {
+                    if (fontId == font.id) copy(fontId = ReaderSettings.FONT_SYSTEM) else this
+                }
+            } catch (_: java.io.IOException) {
+                messageBus.emit("字体「${font.label}」已删除，排版设置保存失败")
+                return@launch
+            }
             messageBus.emit("已删除字体「${font.label}」")
         }
     }

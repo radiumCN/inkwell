@@ -1,6 +1,8 @@
 package com.radium.inkwell.core.source.js
 
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.parseHeaderJson
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -47,7 +49,28 @@ class EngineJsHttp(
      * [asContextElement] 在每次恢复时重设、挂起时还原，线程怎么跳都拿到自己的 Job。
      */
     fun bindingTo(job: Job?, sourceId: String? = null): CoroutineContext =
-        parentJob.asContextElement(job) + currentSource.asContextElement(sourceId)
+        parentJob.asContextElement(job) + currentSource.asContextElement(SourceScope(sourceId))
+
+    internal fun bindingTo(
+        job: Job?,
+        sourceId: String?,
+        loginHeaderNames: () -> Set<String>,
+        allowsLoginOrigin: (String) -> Boolean,
+    ): CoroutineContext = parentJob.asContextElement(job) +
+        currentSource.asContextElement(SourceScope(sourceId, loginHeaderNames, allowsLoginOrigin))
+
+    private data class SourceScope(
+        val id: String?,
+        val loginHeaderNames: () -> Set<String> = { emptySet() },
+        val allowsLoginOrigin: (String) -> Boolean = { true },
+    ) {
+        val observedLoginHeaderNames: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    }
+
+    // 交互登录脚本可能在会话正式保存前就用新请求头做校验。
+    internal fun rememberLoginHeaders(header: String) {
+        currentSource.get()?.observedLoginHeaderNames?.addAll(parseHeaderJson(header).keys)
+    }
 
     companion object {
         /**
@@ -55,13 +78,14 @@ class EngineJsHttp(
          * 放在伴生对象上是为了让脚本运行时也读得到：见 [currentJob]。
          */
         private val parentJob = ThreadLocal<Job?>()
-        private val currentSource = ThreadLocal<String?>()
+        private val currentSource = ThreadLocal<SourceScope?>()
 
         /** 此刻这根线程上跑的那次引擎调用的 Job；脚本运行时靠它响应取消（RhinoScriptRuntime） */
         internal fun currentJob(): Job? = parentJob.get()
 
         /** `java.ajaxAll` 同时在飞的请求数 */
         private const val AJAX_ALL_PARALLEL = 6
+        private val AUTH_HEADER_NAMES = setOf("Authorization", "Proxy-Authorization", "Cookie")
     }
 
     override fun fetch(
@@ -71,8 +95,8 @@ class EngineJsHttp(
         headers: Map<String, String>,
         followRedirects: Boolean,
     ): StrResponse? = runCatching {
-        val sourceId = currentSource.get()
-        blockingUnderParent { request(url, method, body, headers, followRedirects, sourceId) }
+        val scope = currentSource.get()
+        blockingUnderParent { request(url, method, body, headers, followRedirects, scope) }
     }.getOrNull()
 
     /**
@@ -81,14 +105,14 @@ class EngineJsHttp(
      */
     override fun fetchAll(requests: List<JsHttpRequest>): List<StrResponse?> =
         runCatching {
-            val sourceId = currentSource.get()
+            val scope = currentSource.get()
             blockingUnderParent {
                 val gate = Semaphore(AJAX_ALL_PARALLEL)
                 requests.map { r ->
                     async {
                         gate.withPermit {
                             try {
-                                request(r.url, r.method, r.body, r.headers, followRedirects = true, sourceId = sourceId)
+                                request(r.url, r.method, r.body, r.headers, followRedirects = true, scope = scope)
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (_: Exception) {
@@ -106,21 +130,35 @@ class EngineJsHttp(
         body: String?,
         headers: Map<String, String>,
         followRedirects: Boolean,
-        sourceId: String?,
+        scope: SourceScope?,
     ): StrResponse {
+        val loginNames = if (headers.isEmpty() || scope == null) emptySet()
+        else scope.loginHeaderNames() + scope.observedLoginHeaderNames
+        val persisted = headers.keys.filterTo(mutableSetOf()) { name ->
+            loginNames.any { it.equals(name, ignoreCase = true) }
+        }
+        val scopedHeaders = if (persisted.isNotEmpty() && scope?.allowsLoginOrigin?.invoke(url) == false) {
+            headers - persisted
+        } else {
+            headers
+        }
+        val credentialHeaders = scopedHeaders.keys.filterTo(mutableSetOf()) { name ->
+            name in persisted || AUTH_HEADER_NAMES.any { it.equals(name, ignoreCase = true) }
+        }
         // 4xx/5xx 也要交给脚本看 statusCode，不能在这儿抛成 ajax 空串
         val page = http.fetch(
-            url, method = method, body = body, headers = headers,
+            url, method = method, body = body, headers = scopedHeaders,
             throwOnHttpError = false,
             followRedirects = followRedirects,
-            sourceId = sourceId,
+            sourceId = scope?.id,
+            credentialHeaders = credentialHeaders,
         )
         return StrResponse(
             bodyText = page.bodyText,
             status = page.statusCode,
             finalUrl = page.finalUrl,
             headerMap = page.headers,
-            cookieStr = http.cookieOf(page.finalUrl, sourceId),
+            cookieStr = http.cookieOf(page.finalUrl, scope?.id),
         )
     }
 
@@ -158,9 +196,9 @@ class EngineJsHttp(
         }
     }
 
-    override fun cookieOf(url: String): String = http.cookieOf(url, currentSource.get())
+    override fun cookieOf(url: String): String = http.cookieOf(url, currentSource.get()?.id)
 
-    override fun setCookie(url: String, cookie: String) = http.setCookie(url, cookie, currentSource.get())
+    override fun setCookie(url: String, cookie: String) = http.setCookie(url, cookie, currentSource.get()?.id)
 
-    override fun removeCookie(url: String) = http.removeCookie(url, currentSource.get())
+    override fun removeCookie(url: String) = http.removeCookie(url, currentSource.get()?.id)
 }

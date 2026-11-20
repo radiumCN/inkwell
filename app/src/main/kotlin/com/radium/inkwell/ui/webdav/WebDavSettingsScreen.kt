@@ -48,6 +48,7 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppSurface
+import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
@@ -221,7 +222,7 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             subtitle = if (state.officialEmail.isBlank()) "已连接" else "官方同步 · 已连接",
             position = SettingGroupPosition.First,
         )
-        OfficialQuota(state)
+        OfficialQuota(state, viewModel)
         PrimaryButton(
             text = "立即同步",
             onClick = viewModel::syncNow,
@@ -276,19 +277,50 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
 }
 
 @Composable
-private fun OfficialQuota(state: WebDavUiState) {
+private fun OfficialQuota(state: WebDavUiState, viewModel: WebDavViewModel) {
     val quota = state.quota
     val style = MiuixTheme.textStyles.footnote1
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     SettingBlock {
-        if (quota == null) {
-            Text(if (state.quotaLoading) "正在获取容量…" else "暂无法获取容量", style = style, color = color)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("已用 ${formatWebDavBytes(quota.usedBytes)}", style = style, color = color)
-                Text("总容量 ${formatWebDavBytes(quota.totalBytes)}", style = style, color = color)
+        when {
+            state.showOfficialReauth -> {
+                Text("使用当前官方账号的邮箱验证码恢复容量查询。", style = style, color = color)
+                OfficialLoginFields(state, viewModel)
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                    SecondaryButton(
+                        "取消",
+                        onClick = { viewModel.showOfficialReauth(false) },
+                        enabled = !state.busy,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PrimaryButton(
+                        "验证账号",
+                        onClick = viewModel::submitOfficial,
+                        enabled = !state.busy && state.email.isNotBlank() && state.code.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            ReadingProgressMeter((quota.usedBytes.toDouble() / quota.totalBytes).toFloat())
+            state.officialSessionExpired -> {
+                Text("官方账号登录已失效，重新验证后可查看容量。", style = style, color = color)
+                AppTextButton(
+                    "重新验证",
+                    onClick = { viewModel.showOfficialReauth(true) },
+                    enabled = !state.busy,
+                )
+            }
+            quota != null -> {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("已用 ${formatWebDavBytes(quota.usedBytes)}", style = style, color = color)
+                    Text("总容量 ${formatWebDavBytes(quota.totalBytes)}", style = style, color = color)
+                }
+                ReadingProgressMeter((quota.usedBytes.toDouble() / quota.totalBytes).toFloat())
+            }
+            state.quotaLoading -> Text("正在获取容量…", style = style, color = color)
+            else -> {
+                Text("暂无法获取容量", style = style, color = color)
+                AppTextButton("重试", onClick = viewModel::refreshQuota, enabled = !state.busy)
+            }
         }
     }
 }
@@ -307,14 +339,7 @@ private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            AppFormField(
-                value = state.email,
-                onValueChange = viewModel::setEmail,
-                label = "邮箱",
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            )
-            CodeRow(state, viewModel)
+            OfficialLoginFields(state, viewModel)
             PrimaryButton(
                 text = "验证并开启同步",
                 onClick = viewModel::submitOfficial,
@@ -325,6 +350,19 @@ private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
         }
     }
     OfficialPrivacyNote()
+}
+
+@Composable
+private fun OfficialLoginFields(state: WebDavUiState, viewModel: WebDavViewModel) {
+    AppFormField(
+        value = state.email,
+        onValueChange = viewModel::setEmail,
+        label = "邮箱",
+        singleLine = true,
+        enabled = !state.showOfficialReauth || state.officialEmail.isBlank(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+    )
+    CodeRow(state, viewModel)
 }
 
 @Composable

@@ -39,6 +39,9 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.SelectionEnd
+import com.radium.inkwell.reader.render.moveSelectionEnd
+import com.radium.inkwell.reader.render.selectionHandlePosition
 import com.radium.inkwell.reader.render.imageAt
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.extendSelection
@@ -223,6 +226,19 @@ fun ReaderScreen(
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
+    LaunchedEffect(pageUi.page?.spec, spec, session.textSelectionEnabled, overlay.menuVisible) {
+        selection = null
+        anchor = null
+    }
+    val selectionHandles = remember(pageUi.page, spec, selection) {
+        val page = pageUi.page
+        val selected = selection
+        if (page == null || spec == null || selected == null) emptyMap()
+        else SelectionEnd.entries.mapNotNull { edge ->
+            page.selectionHandlePosition(selected, edge, spec)?.let { edge to it }
+        }.toMap()
+    }
+    val selectionHandlesLatest = rememberUpdatedState(selectionHandles)
     /** 长按看大图：正在看的那张图（resourceId）；null = 没在看 */
     var viewingImage by remember { mutableStateOf<String?>(null) }
     /** 正在双指调字号 / 右边缘调亮度时的读数（见 QuickAdjustOverlay）；null = 没在调 */
@@ -553,6 +569,13 @@ fun ReaderScreen(
                     Box(
                         Modifier
                             .fillMaxSize()
+                            .dragSelectionHandles(selectionHandlesLatest) { edge, position ->
+                                val selected = selection ?: return@dragSelectionHandles
+                                val currentPage = pageLatest.value ?: return@dragSelectionHandles
+                                selection = currentPage.moveSelectionEnd(
+                                    selected, edge, position.x, position.y, layoutLatest.value,
+                                )
+                            }
                             // 长按选字。放在**父节点**上而不是覆盖一层同级的 Box：
                             // 同级的覆盖层会把所有手势从翻页容器手里抢走（Compose 命中测试
                             // 只把事件给最上面那个兄弟节点）。父节点则是在子节点之后收到事件，
@@ -564,6 +587,7 @@ fun ReaderScreen(
                                 if (!selectText && !viewImages) return@pointerInput
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = { pos ->
+                                        anchor = null
                                         val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
                                         if (viewImages) {
                                             val image = p.imageAt(pos.x, pos.y, layoutLatest.value)
@@ -581,6 +605,8 @@ fun ReaderScreen(
                                             selection = sel
                                         }
                                     },
+                                    onDragEnd = { anchor = null },
+                                    onDragCancel = { anchor = null },
                                     onDrag = { change, _ ->
                                         val a = anchor ?: return@detectDragGesturesAfterLongPress
                                         val p = pageLatest.value ?: return@detectDragGesturesAfterLongPress
@@ -626,6 +652,7 @@ fun ReaderScreen(
                             onImageTap = onImageTap,
                         )
                         PageInfoBar(pageUi, session, layout)
+                        SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
             }
@@ -725,6 +752,17 @@ fun ReaderScreen(
         }
 
         selection?.let { sel ->
+            val header = layout?.let { with(density) { (it.marginTopPx + it.headerHeightPx).toDp() } } ?: 0.dp
+            val toolbarSpace = 96.dp
+            val closeToTop = selectionHandles.values.any { with(density) { it.anchor.y.toDp() } < header + toolbarSpace }
+            val closeToBottom = selectionHandles.values.any {
+                with(density) { (viewport.height - it.anchor.y).toDp() } < hintBottom + toolbarSpace
+            }
+            val toolbarPosition = when {
+                closeToTop && closeToBottom -> Modifier.align(Alignment.Center)
+                closeToBottom -> Modifier.align(Alignment.TopCenter).padding(top = header + Dimens.gapS)
+                else -> Modifier.align(Alignment.BottomCenter).padding(bottom = hintBottom + Dimens.gapS)
+            }
             SelectionToolbar(
                 selectedText = sel.text,
                 onCopy = {
@@ -747,11 +785,7 @@ fun ReaderScreen(
                 replacePreview = { find ->
                     replacePreview(viewModel.currentChapterParagraphs(), find, anchor = sel.elementIndex to sel.start)
                 },
-                // 同自动换源的提示胶囊：落在页脚那行正上方，页码 · 进度 · 时间照样露着。
-                // 选字时一定是沉浸态（菜单收着才能选），系统栏是藏起来的，不用再让导航栏
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = hintBottom + Dimens.gapS),
+                modifier = toolbarPosition,
                 pageBackdrop = pageBackdrop,
             )
         }

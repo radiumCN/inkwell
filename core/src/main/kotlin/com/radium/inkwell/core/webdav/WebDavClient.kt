@@ -1,8 +1,12 @@
 package com.radium.inkwell.core.webdav
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -77,25 +81,42 @@ class WebDavClient(
 
     /** 下载只写调用方的暂存文件，且限制为备份声明的字节数。 */
     suspend fun downloadFile(path: String, file: File, size: Long) = withContext(Dispatchers.IO) {
-        execute(request(path).get().build()).use { response ->
-            if (!response.isSuccessful) throw WebDavException(response.code, "GET 失败: ${response.code}")
-            val body = response.body
-            val length = body.contentLength()
-            if (length >= 0 && length != size) throw IOException("远端文件大小与备份记录不符")
-            body.byteStream().use { input ->
-                file.outputStream().buffered().use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var remaining = size
-                    while (remaining > 0) {
-                        ensureActive()
-                        val count = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
-                        if (count < 0) throw IOException("远端文件下载不完整")
-                        output.write(buffer, 0, count)
-                        remaining -= count
+        val call = http.newCall(request(path).get().build())
+        val download = coroutineContext.job
+        // 一直监听到正文读完。仅在等待响应头时注册取消，无法打断响应体的阻塞读。
+        val cancelCall = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (download.isCancelled) call.cancel()
+            }
+        }
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) throw WebDavException(response.code, "GET 失败: ${response.code}")
+                val body = response.body
+                val length = body.contentLength()
+                if (length >= 0 && length != size) throw IOException("远端文件大小与备份记录不符")
+                body.byteStream().use { input ->
+                    file.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var remaining = size
+                        while (remaining > 0) {
+                            ensureActive()
+                            val count = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                            if (count < 0) throw IOException("远端文件下载不完整")
+                            output.write(buffer, 0, count)
+                            remaining -= count
+                        }
+                        if (input.read() != -1) throw IOException("远端文件大小与备份记录不符")
                     }
-                    if (input.read() != -1) throw IOException("远端文件大小与备份记录不符")
                 }
             }
+        } catch (e: IOException) {
+            ensureActive()
+            throw e
+        } finally {
+            cancelCall.cancel()
         }
     }
 
