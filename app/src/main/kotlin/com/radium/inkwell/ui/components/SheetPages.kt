@@ -74,6 +74,7 @@ fun <T> SheetPages(
     onBack: () -> Unit,
     background: Color,
     modifier: Modifier = Modifier,
+    wrapContentHeight: Boolean = false,
     content: @Composable (T) -> Unit,
 ) {
     val animate = animationsEnabled()
@@ -127,19 +128,18 @@ fun <T> SheetPages(
     // 二级页完全盖住时一级页移出组合；只在「盖没盖住」翻转时重组，不是每一帧
     val covered by remember { derivedStateOf { subX.value <= 0f } }
     val rootShown = shownSub == null || !covered
+    val pageSize = if (wrapContentHeight) Modifier.fillMaxWidth() else Modifier.fillMaxSize()
     Box(modifier.clipToBounds()) {
         if (rootShown) {
             Box(
-                Modifier
-                    .fillMaxSize()
+                pageSize
                     .graphicsLayer { translationX = rootX.value * size.width },
             ) { content(root) }
         }
         if (shownSub != null) {
             key(shownSub) {
                 Box(
-                    Modifier
-                        .fillMaxSize()
+                    pageSize
                         .graphicsLayer { translationX = subX.value * size.width }
                         .then(if (rootShown) Modifier.background(background) else Modifier),
                 ) { content(shownSub) }

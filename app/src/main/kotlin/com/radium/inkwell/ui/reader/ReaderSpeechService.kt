@@ -52,6 +52,7 @@ internal class ReaderSpeechService : Service() {
     private var resumeAfterLoad = true
     private var utteranceSequence = 0L
     private var utterance: String? = null
+    private var chunkStart = 0
     private var nextChunk = 0
     private var paragraphStarted = false
     private var foreground = false
@@ -122,7 +123,9 @@ internal class ReaderSpeechService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    fun retryVoice() {
+    val defaultEnginePackage: String? get() = tts?.defaultEngine
+
+    fun retryVoice(keepPaused: Boolean = false) {
         val current = owner ?: return
         if (!enterForeground()) return
         val state = current.state.value
@@ -134,22 +137,27 @@ internal class ReaderSpeechService : Service() {
         stopUtterance()
         tts?.shutdown()
         tts = null
-        initializeEngine()
+        initializeEngine(autoplay = !keepPaused)
     }
 
-    private fun initializeEngine() {
+    private fun initializeEngine(autoplay: Boolean = true) {
         val current = owner ?: return
-        publish(current.state.value.copy(status = SpeechStatus.LOADING, error = null))
+        selectedVoice = null
+        publish(current.state.value.copy(status = SpeechStatus.LOADING, error = null, voiceError = null))
         // 部分引擎创建失败时立即回调。在主线程下一轮读取实例，避免读到尚未赋值的 tts。
         lateinit var engine: TextToSpeech
         engine = TextToSpeech(applicationContext) { result ->
             handler.post {
                 if (owner !== current || tts !== engine) return@post
                 voices = if (result == TextToSpeech.SUCCESS) {
-                    engine.voices.orEmpty()
+                    val available = engine.voices.orEmpty()
                         .filter { it.locale.language == "zh" && !it.isNetworkConnectionRequired }
                         .filterNot { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in it.features.orEmpty() }
-                        .sortedWith(compareByDescending<Voice> { it.locale.country == "CN" }.thenBy { it.name })
+                        .sortedWith(
+                            compareByDescending<Voice> { it.locale.country == "CN" }
+                                .thenBy { it.name }.thenBy { it.locale.toLanguageTag() }.thenByDescending { it.quality },
+                        )
+                    available.distinctBy { it.name }
                 } else {
                     emptyList()
                 }
@@ -157,7 +165,8 @@ internal class ReaderSpeechService : Service() {
                 selectedVoice = voices.firstOrNull { it.name == preferredVoice && engine.setVoice(it) == TextToSpeech.SUCCESS }
                     ?: voices.firstOrNull { engine.setVoice(it) == TextToSpeech.SUCCESS }
                 if (selectedVoice == null) {
-                    publish(current.state.value.copy(status = SpeechStatus.NO_VOICE))
+                    releaseFocus()
+                    publish(current.state.value.copy(status = SpeechStatus.NO_VOICE, voices = emptyList(), selectedVoice = null))
                     leaveForeground()
                     return@post
                 }
@@ -170,7 +179,7 @@ internal class ReaderSpeechService : Service() {
                 })
                 val state = current.state.value
                 publish(state.copy(voices = voices.map { it.name }, selectedVoice = selectedVoice?.name))
-                seek(current.targetChapter, current.targetOffset, state.status != SpeechStatus.PAUSED)
+                seek(current.targetChapter, current.targetOffset, autoplay && state.status != SpeechStatus.PAUSED)
             }
         }
         tts = engine
@@ -178,9 +187,23 @@ internal class ReaderSpeechService : Service() {
 
     fun selectVoice(name: String) {
         val state = owner?.state?.value ?: return
-        selectedVoice = voices.firstOrNull { it.name == name } ?: return
+        val engine = tts ?: return
+        if (state.status == SpeechStatus.LOADING || state.selectedVoice == name) return
+        val voice = voices.firstOrNull { it.name == name } ?: return
+        if (engine.setVoice(voice) != TextToSpeech.SUCCESS) {
+            publish(state.copy(voiceError = "语音引擎无法切换到此音色。"))
+            return
+        }
+        selectedVoice = voice
         preferences.edit().putString("voice", name).apply()
-        publish(state.copy(selectedVoice = name))
+        publish(state.copy(selectedVoice = name, voiceError = null))
+        if (state.status == SpeechStatus.PLAYING) {
+            // 用新音色重播当前播报片段，避免等到整段结束；章节进度仍用原锚点。
+            val restart = chunkStart
+            stopUtterance()
+            nextChunk = restart
+            speakNextChunk()
+        }
     }
 
     fun setRate(rate: Float) {
@@ -354,6 +377,7 @@ internal class ReaderSpeechService : Service() {
             paragraphStarted = true
         }
         val start = nextChunk
+        chunkStart = start
         val end = speechChunkEnd(paragraph.text, start, TextToSpeech.getMaxSpeechInputLength())
         val id = (++utteranceSequence).toString()
         utterance = id
@@ -413,6 +437,7 @@ internal class ReaderSpeechService : Service() {
 
     private fun stopUtterance() {
         utterance = null
+        chunkStart = 0
         nextChunk = 0
         paragraphStarted = false
         tts?.stop()

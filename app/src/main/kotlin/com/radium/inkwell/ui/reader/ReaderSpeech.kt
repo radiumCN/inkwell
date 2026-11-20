@@ -51,6 +51,7 @@ internal data class SpeechState(
     val paragraphStart: Int = 0,
     val voices: List<String> = emptyList(),
     val selectedVoice: String? = null,
+    val voiceError: String? = null,
     val rate: Float = 1f,
     // null = 关闭，0 = 本章结束，正数 = 分钟。
     val timer: Int? = null,
