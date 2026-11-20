@@ -38,6 +38,20 @@ class SourceLoginTest {
         BookSourceEngine(http, scriptRuntime = RhinoScriptRuntime(), sessionStore = sessions)
 
     @Test
+    fun `仅配置登录校验脚本的来源有独立会话且不显示登录入口`() {
+        val source = fixture("https://books.example").copy(loginCheckJs = "result")
+        val other = source.copy(bookSourceUrl = "${source.bookSourceUrl}#other")
+        val updated = source.copy(loginCheckJs = "result;")
+
+        assertFalse(source.hasLogin)
+        assertTrue(source.loginSessionId != null)
+        assertTrue(source.loginSessionId != other.loginSessionId)
+        assertTrue(source.loginSessionId != updated.loginSessionId)
+        assertEquals(source.loginSessionId, BookSourceRule.fromJson(source.toJson()).loginSessionId)
+        assertNull(source.copy(loginCheckJs = " ").loginSessionId)
+    }
+
+    @Test
     fun `登录表单保存会话并在响应要求登录时续期重试`(): Unit = runBlocking {
         MockWebServer().use { server ->
             val base = server.url("/").toString().trimEnd('/')

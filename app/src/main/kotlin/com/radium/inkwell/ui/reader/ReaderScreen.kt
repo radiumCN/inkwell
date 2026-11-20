@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -28,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -41,22 +43,20 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.SelectionEnd
 import com.radium.inkwell.reader.render.moveSelectionEnd
+import com.radium.inkwell.reader.render.stepSelectionEnd
 import com.radium.inkwell.reader.render.selectionHandlePosition
 import com.radium.inkwell.reader.render.imageAt
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.selectWordAt
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.LocalBarBackdrop
 import com.radium.inkwell.ui.components.AppAlertDialog
-import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppLoadingIndicator
-import com.radium.inkwell.ui.components.PrimaryButton
-import com.radium.inkwell.ui.components.SecondaryButton
 import androidx.compose.runtime.snapshotFlow
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.Motion
@@ -127,6 +127,27 @@ fun ReaderScreen(
     val pageUi by viewModel.page.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
     val overlay by viewModel.overlay.collectAsStateWithLifecycle()
+    val speech = viewModel.speech
+    val speechState by speech.state.collectAsStateWithLifecycle()
+    val readerContext = LocalContext.current
+    var showSpeechSheet by rememberSaveable { mutableStateOf(false) }
+    var miniPlayerHeight by remember { mutableStateOf(0.dp) }
+    val speechInset = if (speechState.active && miniPlayerHeight > 0.dp) miniPlayerHeight + Dimens.gapS else 0.dp
+    LaunchedEffect(speechState.active) {
+        if (!speechState.active) showSpeechSheet = false
+    }
+    val speechChapter = speechState.chapter?.index
+    val speechParagraph = speechState.paragraph
+    val speechOffset = speechState.chapterOffset
+    LaunchedEffect(speechChapter, speechOffset, speechState.status) {
+        if (speechChapter != null && speechOffset != null && speechState.status != SpeechStatus.LOADING) {
+            viewModel.followSpeech(speechChapter, speechOffset)
+        }
+    }
+    val speechSelection = speechParagraph?.takeIf {
+        speechChapter == pageUi.chapterIndex && speechState.status != SpeechStatus.LOADING
+    }
+        ?.let { TextSelection(it.elementIndex, 0, it.text.length, it.text) }
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -183,9 +204,9 @@ fun ReaderScreen(
 
     // 页眉页脚小字的行高：分页给那两条带的预留按它兜底（见 pageInfoTextStyle）
     val infoLineHeight = pageInfoTextStyle().lineHeight
-    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight) {
+    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight, speechInset) {
         if (viewport.width <= 0 || viewport.height <= 0) null
-        else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight)
+        else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() })
     }
 
     // 导入的字体与预设走同一个注册表；应用级单例，FontFamily 缓存跨章、跨书都有效
@@ -257,6 +278,7 @@ fun ReaderScreen(
     // - 选字中不翻：选区和工具条还亮着，底下那页翻走了，复制/净化拿到的是上一页的字。
     // - 菜单、目录/设置面板、换源面板、加入书架确认开着时，与翻页手势同一套开关。
     val volumeFlip = session.settings.volumeKeyFlip &&
+        !speechState.active &&
         session.settings.flipAnimation != FlipAnimation.SCROLL &&
         !overlay.menuVisible &&
         !overlay.readerSheetOpen &&
@@ -280,7 +302,7 @@ fun ReaderScreen(
     LaunchedEffect(Unit) {
         viewModel.animatedFlipRequests.collect {
             UsageLog.event("reader.input.auto", "direction" to it.name, "blocked" to (selection != null))
-            if (selection == null) flipController.requestFlip(it)
+            if (selection == null && !viewModel.overlay.value.menuVisible) flipController.requestFlip(it)
         }
     }
 
@@ -310,7 +332,7 @@ fun ReaderScreen(
     // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复；露出来时图标明暗跟纸走、退出阅读页还给 App 主题
     ImmersiveEffect(
         activity,
-        immersive = !overlay.menuVisible,
+        immersive = !overlay.menuVisible && !showSpeechSheet,
         lightPaper = !session.settings.theme.isDark,
         lightApp = MiuixTheme.colorScheme.surface.luminance() > 0.5f,
     )
@@ -324,7 +346,7 @@ fun ReaderScreen(
     // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
     // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明。
     // 自动换源的提示胶囊也是这块玻璃：它只亮 8 秒（AUTO_CHANGED_HINT_MS），这几秒录着不值一提
-    val needsGlass = overlay.menuVisible || selection != null || overlay.autoChangedTo != null
+    val needsGlass = speechState.active || overlay.menuVisible || selection != null || overlay.autoChangedTo != null
     var glassLingering by remember { mutableStateOf(false) }
     LaunchedEffect(needsGlass) {
         if (needsGlass) {
@@ -454,38 +476,16 @@ fun ReaderScreen(
                     }
                 }
 
-                // 包在 ReaderThemeScope 里：重试/换源按钮跟着**纸张主题**走，
-                // 不再是米色纸面上浮着两颗 App 主题色的按钮（阅读主题与 App 主题常不一致）。
                 pageUi.error != null -> ReaderThemeScope(session.settings.theme) {
-                    Column(
-                        Modifier.align(Alignment.Center).padding(Dimens.gapXXL),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            pageUi.error!!,
-                            color = Color(session.settings.theme.textColor),
-                            style = MiuixTheme.textStyles.body1,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(Dimens.gapXL))
-                        // 「正文规则未匹配到内容」正是最该换源的时刻。从前这里只有一行字，
-                        // 菜单又呼不出来（翻页容器压根没渲染），用户只能退出去 —— 死路一条。
-                        Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                            SecondaryButton(text = "重试", onClick = { viewModel.retry() })
-                            if (session.isNetBook) {
-                                PrimaryButton(
-                                    text = "换源",
-                                    onClick = { viewModel.searchOtherSources() },
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(Dimens.gapS))
-                        AppTextButton(
-                            text = "返回书架",
-                            onClick = requestExit,
-                            contentColor = Color(session.settings.theme.footerColor),
-                        )
-                    }
+                    ErrorState(
+                        title = "章节加载失败",
+                        message = checkNotNull(pageUi.error),
+                        onRetry = viewModel::retry,
+                        secondaryLabel = if (session.isNetBook) "换源" else null,
+                        onSecondary = if (session.isNetBook) ({ viewModel.searchOtherSources() }) else null,
+                        tertiaryLabel = "返回书架",
+                        onTertiary = requestExit,
+                    )
                 }
                 // 头 READER_SPLASH_DELAY_MS 内纸面保持干净（连转圈都不出），让展开动画那段不被打扰；
                 // 之后仍没就位才亮出封面 + 转圈。包一层 ReaderThemeScope，让书封的表面色/圆角跟纸张
@@ -538,6 +538,7 @@ fun ReaderScreen(
                     Box(Modifier.fillMaxSize()) {
                         ScrollPageReader(
                             onTrace = viewModel::traceInteraction,
+                            selection = speechSelection,
                             current = pageUi.page,
                             prev = pageUi.prevPage,
                             next = pageUi.nextPage,
@@ -648,7 +649,7 @@ fun ReaderScreen(
                             onCenterTap = { viewModel.toggleMenu() },
                             controller = flipController,
                             tapZones = session.settings.tapZones,
-                            selection = selection,
+                            selection = selection ?: speechSelection,
                             onImageTap = onImageTap,
                         )
                         PageInfoBar(pageUi, session, layout)
@@ -676,7 +677,7 @@ fun ReaderScreen(
             ?: Dimens.touchTarget
         AnimatedVisibility(
             // 阅读菜单、选字工具条也在底部：它们亮着时胶囊先让开（倒计时照走），免得两层玻璃叠在一起
-            visible = overlay.autoChangedTo != null && !overlay.menuVisible && selection == null,
+            visible = overlay.autoChangedTo != null && !overlay.menuVisible && selection == null && !speechState.active,
             // 和别的底部悬浮胶囊同一套：从底下升起、降下去（均尊重系统"移除动画"）
             enter = bottomBarEnter(),
             exit = bottomBarExit(),
@@ -737,6 +738,39 @@ fun ReaderScreen(
 
         QuickAdjustOverlay(quickAdjust)
 
+        if (showSpeechSheet && speechState.active) {
+            ReaderSpeechSheet(
+                speech = speech,
+                state = speechState,
+                onDismiss = { showSpeechSheet = false },
+                onStop = viewModel::endSpeech,
+                onRetry = {
+                    val service = speech.service
+                    if (service == null) {
+                        speech.stop()
+                        viewModel.startSpeech(readerContext)
+                    } else if (speechState.status == SpeechStatus.NO_VOICE) {
+                        service.retryVoice()
+                    } else {
+                        service.play()
+                    }
+                },
+            )
+        }
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.gapS)) {
+            CompositionLocalProvider(LocalBarBackdrop provides pageBackdrop) {
+                MiniSpeechPlayer(
+                    speech = speech,
+                    state = speechState,
+                    visible = speechState.active && !showSpeechSheet && !overlay.menuVisible &&
+                        !overlay.readerSheetOpen && overlay.sourceCandidates == null && selection == null &&
+                        viewingImage == null && !addShelfPrompt,
+                    onOpen = { showSpeechSheet = true },
+                    onHeightChange = { miniPlayerHeight = it },
+                )
+            }
+        }
+
         overlay.sourceCandidates?.let { candidates ->
             ChangeSourceSheet(
                 overlay = overlay,
@@ -765,6 +799,13 @@ fun ReaderScreen(
             }
             SelectionToolbar(
                 selectedText = sel.text,
+                onStepBoundary = step@{ edge, forward ->
+                    val active = selection ?: return@step false
+                    val updated = pageUi.page?.stepSelectionEnd(active, edge, forward) ?: return@step false
+                    if (updated == active) return@step false
+                    selection = updated
+                    true
+                },
                 onCopy = {
                     scope.launch {
                         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("selection", sel.text)))
@@ -837,7 +878,7 @@ fun ReaderScreen(
             pageUi = pageUi,
             toc = viewModel.toc,
             onExit = requestExit,
-            onGotoChapter = { viewModel.gotoChapter(it) },
+            onGotoChapter = viewModel::jumpFromReaderMenu,
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },
@@ -848,7 +889,12 @@ fun ReaderScreen(
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },
             onRefreshChapter = { viewModel.refreshCurrentChapter() },
-            onToggleAutoFlip = { viewModel.toggleAutoFlip() },
+            onToggleAutoFlip = viewModel::toggleAutoFlip,
+            onReadAloud = {
+                if (speechState.active) viewModel.dismissMenu() else viewModel.startSpeech(readerContext)
+                showSpeechSheet = speech.state.value.active
+            },
+            speechActive = speechState.active,
             onDismiss = { viewModel.toggleMenu() },
             onSwipePage = { dir ->
                 UsageLog.event("reader.input.menu_swipe", "direction" to dir.name)
@@ -922,6 +968,7 @@ private fun buildLayoutSpec(
     density: androidx.compose.ui.unit.Density,
     cutout: IntInsets,
     infoLineHeight: TextUnit,
+    speechInsetPx: Float,
 ): LayoutSpec = with(density) {
     val fontSizePx = settings.fontSizeSp.sp.toPx()
     // 页眉页脚小字一行的高度（随系统字号缩放）。不是 sp（主题里被改成 em/未指定）就只按下面的 dp 兜底
@@ -935,7 +982,7 @@ private fun buildLayoutSpec(
         // 上边距 = 头部留白：它就是正文顶端的位置（页眉小标题落在这条带里）。缩小它，
         // 正文顶跟着上移、多出显示空间。下边距用 marginVerticalDp。
         marginTopPx = settings.headerTopSpacingDp.dp.toPx() + cutout.top,
-        marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom,
+        marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom + speechInsetPx,
         // 正文首行落在 marginTop + headerHeight，而页眉章节名画在 marginTop —— 两者的间距就是
         // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
         // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。

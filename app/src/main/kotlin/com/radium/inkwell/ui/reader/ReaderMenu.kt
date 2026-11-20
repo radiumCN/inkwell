@@ -139,8 +139,6 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.ListView
-import top.yukonga.miuix.kmp.icon.extended.Pause
-import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -164,6 +162,7 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.VolumeUp
 
 @Composable
 fun ReaderMenu(
@@ -185,6 +184,8 @@ fun ReaderMenu(
     onSearchSources: () -> Unit,
     onRefreshChapter: () -> Unit,
     onToggleAutoFlip: () -> Unit,
+    onReadAloud: () -> Unit,
+    speechActive: Boolean,
     onDismiss: () -> Unit,
     onSwipePage: (FlipDirection) -> Unit,
     onReaderSheetOpen: (Boolean) -> Unit,
@@ -308,29 +309,44 @@ fun ReaderMenu(
                                 )
                             }
                         }
-                        if (session.isNetBook) {
-                            Box {
-                                AppIconButton(onClick = { showMore = true }) {
-                                    Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
-                                }
-                                AppDropdownMenu(
-                                    expanded = showMore,
-                                    onDismissRequest = { showMore = false },
-                                    items = listOf(
-                                        AppMenuItem(
-                                            text = when {
-                                                overlay.refreshingChapter -> "正在重新获取本章…"
-                                                overlay.chapterRefreshFailed -> "重试获取本章"
-                                                else -> "重新获取本章"
-                                            },
-                                            summary = "从当前书源获取最新内容",
-                                            enabled = !overlay.refreshingChapter && !overlay.changingSource &&
-                                                !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
-                                            onClick = onRefreshChapter,
-                                        ),
-                                    ),
-                                )
+                        Box {
+                            val scrollMode = session.settings.flipAnimation == FlipAnimation.SCROLL
+                            AppIconButton(onClick = { showMore = true }) {
+                                Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
                             }
+                            AppDropdownMenu(
+                                expanded = showMore,
+                                onDismissRequest = { showMore = false },
+                                items = buildList {
+                                    add(
+                                        AppMenuItem(
+                                            text = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
+                                            summary = when {
+                                                scrollMode -> "滚动模式不可用"
+                                                speechActive -> "结束朗读后可用"
+                                                else -> null
+                                            },
+                                            enabled = !scrollMode && !speechActive && !pageUi.loading && pageUi.page != null,
+                                            onClick = onToggleAutoFlip,
+                                        ),
+                                    )
+                                    if (session.isNetBook) {
+                                        add(
+                                            AppMenuItem(
+                                                text = when {
+                                                    overlay.refreshingChapter -> "正在重新获取本章…"
+                                                    overlay.chapterRefreshFailed -> "重试获取本章"
+                                                    else -> "重新获取本章"
+                                                },
+                                                summary = "从当前书源获取最新内容",
+                                                enabled = !overlay.refreshingChapter && !overlay.changingSource &&
+                                                    !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
+                                                onClick = onRefreshChapter,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -360,10 +376,10 @@ fun ReaderMenu(
                         )
                         MenuActions(
                             session = session,
-                            overlay = overlay,
+                            readAloudEnabled = speechActive || (!pageUi.loading && pageUi.page != null),
                             onShowToc = { showToc = true },
                             onSearchSources = onSearchSources,
-                            onToggleAutoFlip = onToggleAutoFlip,
+                            onReadAloud = onReadAloud,
                             onShowSettings = { showSettings = true },
                         )
                     }
@@ -552,15 +568,15 @@ private fun progressLabel(page: ReaderPageUi, chapterCount: Int): String = build
  *
  * 四个动作同一种样式（图标在上、字在下）、平分宽度。曾把「设置」做成实心主按钮突出它，可那是
  * 图标在左、字在右的另一种排法，一排四个里只有它横着，看着像拼错了 —— 宁可四个一样。
- * 本地书 / 滚动模式下不适用的动作保留占位并禁用，位置不跳。
+ * 本地书的换源保留占位并禁用，位置不跳。
  */
 @Composable
 private fun MenuActions(
     session: ReaderSessionUi,
-    overlay: ReaderOverlayUi,
+    readAloudEnabled: Boolean,
     onShowToc: () -> Unit,
     onSearchSources: () -> Unit,
-    onToggleAutoFlip: () -> Unit,
+    onReadAloud: () -> Unit,
     onShowSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -579,10 +595,10 @@ private fun MenuActions(
             modifier = Modifier.weight(1f),
         )
         BarAction(
-            icon = if (overlay.autoFlipping) MiuixIcons.Pause else MiuixIcons.Play,
-            label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
-            onClick = { UsageLog.event("ui.click", "action" to "reader.auto_flip"); onToggleAutoFlip() },
-            enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
+            icon = MiuixIcons.VolumeUp,
+            label = "朗读",
+            onClick = { UsageLog.event("ui.click", "action" to "reader.read_aloud"); onReadAloud() },
+            enabled = readAloudEnabled,
             modifier = Modifier.weight(1f),
         )
         BarAction(
@@ -597,7 +613,7 @@ private fun MenuActions(
 /**
  * 操作条上的一个动作：图标在上、字在下（[IconLabelButton]，多选态的底部操作条也是它）。四格均分整条宽，左右不再加内边距。
  *
- * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、自动翻页 Play/Pause、设置 Tune）：
+ * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、朗读 VolumeUp、设置 Tune）：
  * 同一排里混两套线宽一眼就看得出，所以要换就整排一起换。
  */
 @Composable

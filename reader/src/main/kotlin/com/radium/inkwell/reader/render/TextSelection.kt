@@ -80,13 +80,35 @@ fun RenderablePage.moveSelectionEnd(
 ): TextSelection {
     val para = measured[selection.elementIndex] ?: return selection
     val slice = textSlice(selection.elementIndex) ?: return selection
-    if (selection.start !in 0 until selection.end || selection.end > para.text.length) return selection
     val breaks = characterBreaks(para.text)
     val target = breaks.boundaryAt(offsetOnSlice(slice, x, y, layout, para), edge)
-    val start = if (edge == SelectionEnd.START) minOf(target, breaks.preceding(selection.end)) else selection.start
-    val end = if (edge == SelectionEnd.END) maxOf(target, breaks.following(selection.start)) else selection.end
-    val text = para.text.substring(start, end)
-    return if (text.isBlank()) selection else selection.copy(start = start, end = end, text = text)
+    return selection.moveEnd(edge, target, para.text, breaks)
+}
+
+/** 按字符移动选区端点，供读屏操作使用。只允许在当前页的同一个段落切片内移动。 */
+fun RenderablePage.stepSelectionEnd(
+    selection: TextSelection,
+    edge: SelectionEnd,
+    forward: Boolean,
+): TextSelection {
+    val para = measured[selection.elementIndex] ?: return selection
+    val slice = textSlice(selection.elementIndex) ?: return selection
+    val offset = if (edge == SelectionEnd.START) selection.start else selection.end
+    if (offset !in 0..para.text.length) return selection
+    val breaks = characterBreaks(para.text)
+    val target = if (forward) breaks.following(offset) else breaks.preceding(offset)
+    val min = para.lineStartOffset(slice.startLine)
+    val max = para.lineEndOffset(slice.endLine).coerceAtMost(para.text.length)
+    if (target !in min..max) return selection
+    return selection.moveEnd(edge, target, para.text, breaks)
+}
+
+private fun TextSelection.moveEnd(edge: SelectionEnd, target: Int, paragraph: String, breaks: BreakIterator): TextSelection {
+    if (start !in 0 until end || end > paragraph.length) return this
+    val from = if (edge == SelectionEnd.START) minOf(target, breaks.preceding(end)) else start
+    val to = if (edge == SelectionEnd.END) maxOf(target, breaks.following(start)) else end
+    val selected = paragraph.substring(from, to)
+    return if (selected.isBlank()) this else copy(start = from, end = to, text = selected)
 }
 
 /** 用边界旁的被选字符定位，行末手柄留在本行，避免跳到换行后的下一行。 */

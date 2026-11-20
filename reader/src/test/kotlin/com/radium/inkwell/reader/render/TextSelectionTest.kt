@@ -138,11 +138,27 @@ class TextSelectionTest {
     }
 
     @Test
+    fun `读屏可独立调整端点并保留完整字符`() {
+        val p = page("甲😀乙")
+        val all = TextSelection(1, 0, 4, "甲😀乙")
+        val startMoved = p.stepSelectionEnd(all, SelectionEnd.START, forward = true)
+        val emoji = p.stepSelectionEnd(startMoved, SelectionEnd.END, forward = false)
+
+        assertEquals("😀乙", startMoved.text)
+        assertEquals(TextSelection(1, 1, 3, "😀"), emoji)
+        assertEquals(emoji, p.stepSelectionEnd(emoji, SelectionEnd.START, forward = true))
+        assertEquals(emoji, p.stepSelectionEnd(emoji, SelectionEnd.END, forward = false))
+        assertEquals(startMoved, p.stepSelectionEnd(emoji, SelectionEnd.END, forward = true))
+    }
+
+    @Test
     fun `跨页长段落的选区限制在可见页内`() {
         val p = page("字".repeat(300), pageIndex = 1)
         val selected = assertNotNull(p.selectWordAt(20f, 5f, spec()))
         assertEquals(150, selected.start)
         assertEquals(300, selected.end)
         assertEquals(selected, p.moveSelectionEnd(selected, SelectionEnd.START, 0f, -100f, spec()))
+        assertEquals(selected, p.stepSelectionEnd(selected, SelectionEnd.START, forward = false))
+        assertEquals(selected, p.stepSelectionEnd(selected, SelectionEnd.END, forward = true))
     }
 }

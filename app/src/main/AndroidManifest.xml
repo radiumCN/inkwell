@@ -2,6 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
     <!-- 应用内下载更新包后拉起系统安装器（中转服务器源） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!--
@@ -32,6 +40,11 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true">
+
+        <service
+            android:name=".ui.reader.ReaderSpeechService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!--
           MainActivity 自己**不带** LAUNCHER 入口，桌面入口全部由下面的 activity-alias 提供。

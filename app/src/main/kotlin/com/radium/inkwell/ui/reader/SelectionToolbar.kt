@@ -14,6 +14,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.radium.inkwell.reader.render.SelectionEnd
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.IconLabelButton
@@ -51,6 +56,7 @@ import com.radium.inkwell.ui.components.smallGlassHighlight
 internal fun SelectionToolbar(
     selectedText: String,
     onCopy: () -> Unit,
+    onStepBoundary: (SelectionEnd, Boolean) -> Boolean,
     onPurify: () -> Unit,
     onReplace: (find: String, replacement: String) -> Unit,
     replacePreview: (String) -> ReplacePreview?,
@@ -71,12 +77,27 @@ internal fun SelectionToolbar(
         // 位置由调用方垫好；默认的 12/8dp 外边距再叠一层，药丸就离页脚太远
         outSidePadding = PaddingValues(0.dp),
         shadowElevation = 0.dp,
+        showDivider = pageBackdrop == null,
     ) {
         Row(
             Modifier.padding(horizontal = Dimens.gapXS),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconLabelButton(MiuixIcons.Copy, "复制", onCopy)
+            IconLabelButton(
+                MiuixIcons.Copy,
+                "复制",
+                onCopy,
+                // 保持在现有按钮焦点上，读屏可浏览选区并从操作菜单调整两端。
+                modifier = Modifier.semantics {
+                    stateDescription = "已选择：$selectedText"
+                    customActions = listOf(
+                        CustomAccessibilityAction("起点向前移动一个字符") { onStepBoundary(SelectionEnd.START, false) },
+                        CustomAccessibilityAction("起点向后移动一个字符") { onStepBoundary(SelectionEnd.START, true) },
+                        CustomAccessibilityAction("终点向前移动一个字符") { onStepBoundary(SelectionEnd.END, false) },
+                        CustomAccessibilityAction("终点向后移动一个字符") { onStepBoundary(SelectionEnd.END, true) },
+                    )
+                },
+            )
             // 最常用的动作：把这句话从本书里删掉
             IconLabelButton(MiuixIcons.Clear, "删除", onPurify)
             IconLabelButton(MiuixIcons.Replace, "替换", { replacing = true })

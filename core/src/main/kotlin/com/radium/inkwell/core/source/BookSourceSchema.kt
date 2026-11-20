@@ -90,9 +90,9 @@ data class BookSourceRule(
     val hasLogin: Boolean get() = !loginUrl.isNullOrBlank() ||
         loginUi?.filterNot(Char::isWhitespace)?.let { it.isNotEmpty() && it != "[]" } == true
 
-    /** 登录授权只属于用户当时打开的规则，同 ID 的更新不继承旧规则的凭据。 */
+    /** 登录校验脚本也能写会话。按完整规则隔离会话，登录入口仍单独由 [hasLogin] 决定。 */
     val loginSessionId: String? by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        if (!hasLogin) null else MessageDigest.getInstance("SHA-256")
+        if (!hasLogin && loginCheckJs.isNullOrBlank()) null else MessageDigest.getInstance("SHA-256")
             .digest(toJson().toByteArray(Charsets.UTF_8)).toHex()
     }
 
