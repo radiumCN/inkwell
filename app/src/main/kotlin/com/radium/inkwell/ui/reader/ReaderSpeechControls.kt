@@ -61,6 +61,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private enum class SpeechPanel { CONTROLS, SETTINGS, VOICES }
 
 private const val TTS_SETTINGS_ACTION = "com.android.settings.TTS_SETTINGS"
+private const val MANAGE_VOICES = "管理系统音色"
+private const val MISSING_VOICE_HINT = "请在系统文字转语音设置中选择支持中文的引擎，并安装中文离线音色。"
 
 private val speechRates = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
 private val sleepTimers = listOf(null, 15, 30, 45, 60, 0)
@@ -74,19 +76,19 @@ internal fun ReaderSpeechSheet(
     onRetry: () -> Unit,
 ) {
     var page by remember { mutableStateOf(SpeechPanel.CONTROLS) }
-    var installMessage by remember { mutableStateOf<String?>(null) }
-    val installLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    var settingsMessage by remember { mutableStateOf<String?>(null) }
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val service = speech.service
         if (service != null) {
             service.retryVoice(keepPaused = state.status == SpeechStatus.PAUSED)
-            installMessage = "已刷新音色。若未找到所需音色，请在系统语音设置中检查语音引擎。"
+            settingsMessage = null
         } else {
-            installMessage = "请重新打开朗读以检查已安装的音色。"
+            settingsMessage = "请重新打开朗读以检查已安装的音色。"
         }
     }
     val launch: (Intent) -> Boolean = { intent ->
         try {
-            installLauncher.launch(intent)
+            settingsLauncher.launch(intent)
             true
         } catch (_: ActivityNotFoundException) {
             false
@@ -94,18 +96,15 @@ internal fun ReaderSpeechSheet(
             false
         }
     }
-    val openSettings: () -> Unit = {
-        installMessage = when {
+    val manageVoices: () -> Unit = {
+        val engineInstaller = speech.service?.defaultEnginePackage?.let { engine ->
+            Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).setPackage(engine)
+        }
+        settingsMessage = when {
             launch(Intent(TTS_SETTINGS_ACTION)) -> null
+            engineInstaller != null && launch(engineInstaller) -> null
             launch(Intent(Settings.ACTION_SETTINGS)) -> "请在系统设置中搜索「文字转语音」或「文字转语音输出」。"
             else -> "无法打开系统设置，请手动搜索「文字转语音」。"
-        }
-    }
-    val install: () -> Unit = {
-        installMessage = null
-        val engine = speech.service?.defaultEnginePackage
-        if (engine == null || !launch(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).setPackage(engine))) {
-            openSettings()
         }
     }
     val back: () -> Unit = {
@@ -155,11 +154,10 @@ internal fun ReaderSpeechSheet(
                                 EmptyState(
                                     icon = MiuixIcons.VolumeUp,
                                     title = "缺少中文离线音色",
-                                    hint = installMessage ?: "安装后可从当前位置继续。",
-                                    actionLabel = "安装语音数据",
-                                    onAction = install,
+                                    hint = settingsMessage ?: MISSING_VOICE_HINT,
+                                    actionLabel = MANAGE_VOICES,
+                                    onAction = manageVoices,
                                 )
-                                AppTextButton("打开系统语音设置", onClick = openSettings)
                             }
                             SpeechStatus.ERROR -> ErrorState(
                                 title = "朗读已暂停",
@@ -202,7 +200,7 @@ internal fun ReaderSpeechSheet(
                         }
                         SpeechPanel.VOICES -> {
                             ReaderGroup {
-                                val size = state.voices.size + 2
+                                val size = state.voices.size + 1
                                 state.voices.forEachIndexed { index, name ->
                                     SettingRow(
                                         title = voiceTitle(index, state.voices.size),
@@ -214,18 +212,18 @@ internal fun ReaderSpeechSheet(
                                     )
                                 }
                                 SettingRow(
-                                    title = "安装语音数据",
-                                    onClick = install,
-                                    position = groupPosition(size - 2, size),
-                                )
-                                SettingRow(
-                                    title = "打开系统语音设置",
-                                    onClick = openSettings,
+                                    title = MANAGE_VOICES,
+                                    subtitle = "选择语音引擎或安装离线音色",
+                                    onClick = manageVoices,
                                     position = groupPosition(size - 1, size),
                                 )
                             }
-                            val message = state.voiceError ?: installMessage
-                                ?: if (state.voices.size == 1) "当前语音引擎只提供一种可用的中文离线音色。" else null
+                            val message = state.voiceError ?: settingsMessage ?: when {
+                                state.status == SpeechStatus.LOADING -> "正在检查音色…"
+                                state.voices.isEmpty() -> MISSING_VOICE_HINT
+                                state.voices.size == 1 -> "当前语音引擎只提供一种可用的中文离线音色。"
+                                else -> null
+                            }
                             if (message != null) {
                                 Text(
                                     message,
