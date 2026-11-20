@@ -10,6 +10,7 @@ import com.radium.inkwell.core.webdav.BackupRssSource
 import com.radium.inkwell.core.webdav.mergeBackupRssSource
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
+import com.radium.inkwell.core.webdav.WebDavQuota
 import androidx.room3.withWriteTransaction
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
@@ -144,6 +145,16 @@ class WebDavRepository(
         val url = if (OfficialWebDav.isLegacyDav(config.url)) OfficialWebDav.DAV else config.url
         if (syncShelf) sync(auto = false, config).getOrThrow()
         return clientFor(config, url)
+    }
+
+    suspend fun officialQuota(): Result<WebDavQuota?> = try {
+        val config = prefs.config.first()
+        check(config.isOfficialConnected) { "请先连接官方同步" }
+        Result.success(clientFor(config, OfficialWebDav.resolveDavUrl(config.url)).quota())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     private suspend fun clientFor(config: WebDavConfig, url: String): WebDavClient {

@@ -202,6 +202,22 @@ class WebDavClient(
         }
     }
 
+    /** 读取账号根目录的 RFC 4331 配额。服务器未提供两项属性时返回 null。 */
+    suspend fun quota(): WebDavQuota? = withContext(Dispatchers.IO) {
+        val body = """<d:propfind xmlns:d="DAV:"><d:prop>
+            <d:quota-used-bytes/><d:quota-available-bytes/>
+            </d:prop></d:propfind>""".toRequestBody("application/xml; charset=utf-8".toMediaType())
+        val request = request("").method("PROPFIND", body).header("Depth", "0").build()
+        execute(request).use { response ->
+            if (response.code != 207) {
+                throw WebDavException(response.code, "PROPFIND 失败: ${response.code}")
+            }
+            val source = response.body.source()
+            if (source.request(64L * 1024 + 1)) throw IOException("WebDAV 容量响应过大")
+            parseWebDavQuota(response.body.string())
+        }
+    }
+
     /** 连接与认证探活 */
     suspend fun check(): Result<Unit> = try {
         list("")

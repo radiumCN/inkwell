@@ -4,6 +4,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.NonCancellable
 import android.os.Build
 import com.radium.inkwell.core.webdav.WebDavClient
+import com.radium.inkwell.core.webdav.WebDavQuota
 import com.radium.inkwell.data.net.OfficialAppPassword
 import com.radium.inkwell.data.net.OfficialAuthData
 import com.radium.inkwell.data.net.OfficialSessionExpiredException
@@ -15,8 +16,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-
-data class OfficialStorageQuota(val usedBytes: Long, val totalBytes: Long)
 
 /**
  * 官方同步的账号编排：登录成功 → 发应用码 → 写入现有 WebDAV 配置。
@@ -31,12 +30,13 @@ class OfficialWebDavRepository(
 
     suspend fun publicConfig() = wrapValue { api.publicConfig() }
 
-    suspend fun storageQuota(): Result<OfficialStorageQuota?> = wrapValue {
+    /** 兼容尚未通过 DAV 返回配额的旧服务端。 */
+    suspend fun storageQuota(): Result<WebDavQuota?> = wrapValue {
         val user = withFreshAccess { access -> api.me(access).user }
         val used = user.usedBytes
         val total = user.quotaBytes
         if (used != null && used >= 0 && total != null && total > 0) {
-            OfficialStorageQuota(used, total)
+            WebDavQuota(used, total)
         } else {
             null
         }

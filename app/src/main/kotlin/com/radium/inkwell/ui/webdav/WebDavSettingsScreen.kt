@@ -244,6 +244,32 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
     }
     BookFilesEntry(state, viewModel)
     SectionHeader("管理")
+    if (state.showOfficialReauth) {
+        SettingGroup {
+            SettingBlock {
+                Text(
+                    "重新生成应用码前，请验证官方账号。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                OfficialLoginFields(state, viewModel)
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                    SecondaryButton(
+                        "取消",
+                        onClick = viewModel::dismissOfficialReauth,
+                        enabled = !state.busy,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PrimaryButton(
+                        "验证账号",
+                        onClick = viewModel::submitOfficial,
+                        enabled = !state.busy && state.email.isNotBlank() && state.code.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
     SettingGroup {
         // 两行挨着：都是给其他设备用的那一套码
         SettingRow(
@@ -283,31 +309,8 @@ private fun OfficialQuota(state: WebDavUiState, viewModel: WebDavViewModel) {
     val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     SettingBlock {
         when {
-            state.showOfficialReauth -> {
-                Text("使用当前官方账号的邮箱验证码恢复容量查询。", style = style, color = color)
-                OfficialLoginFields(state, viewModel)
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
-                    SecondaryButton(
-                        "取消",
-                        onClick = { viewModel.showOfficialReauth(false) },
-                        enabled = !state.busy,
-                        modifier = Modifier.weight(1f),
-                    )
-                    PrimaryButton(
-                        "验证账号",
-                        onClick = viewModel::submitOfficial,
-                        enabled = !state.busy && state.email.isNotBlank() && state.code.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            state.officialSessionExpired -> {
-                Text("官方账号登录已失效，重新验证后可查看容量。", style = style, color = color)
-                AppTextButton(
-                    "重新验证",
-                    onClick = { viewModel.showOfficialReauth(true) },
-                    enabled = !state.busy,
-                )
+            state.quotaAppPasswordInvalid -> {
+                Text("WebDAV 应用码已失效，请在下方管理中重新生成。", style = style, color = color)
             }
             quota != null -> {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
