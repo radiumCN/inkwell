@@ -3,6 +3,7 @@ package com.radium.inkwell.util
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
 import androidx.annotation.DrawableRes
 import com.radium.inkwell.R
 
@@ -13,11 +14,16 @@ import com.radium.inkwell.R
  *
  * [key] 是资源名里的那一段（`ic_launcher_fg_<key>_<纸色>`），清单和单测按它对。
  */
-enum class IconShape(val key: String, val label: String, val description: String) {
-    MARK("mark", "书签", "小写 i：竖是一条书签丝带，点是一个句号"),
-    TURN("turn", "翻页", "一页纸，右下角正翻过去"),
-    GLASS("glass", "叠页", "磨砂玻璃的一页，叠在彩色的一页上"),
-    PARA("para", "段落", "一段中文：首行缩进两格，句末一个句号"),
+enum class IconShape(
+    val key: String,
+    val label: String,
+    val description: String,
+    @DrawableRes val notificationIcon: Int,
+) {
+    MARK("mark", "书签", "小写 i：竖是一条书签丝带，点是一个句号", R.drawable.ic_stat_inkwell_mark),
+    TURN("turn", "翻页", "一页纸，右下角正翻过去", R.drawable.ic_stat_inkwell_turn),
+    GLASS("glass", "叠页", "磨砂玻璃的一页，叠在彩色的一页上", R.drawable.ic_stat_inkwell_glass),
+    PARA("para", "段落", "一段中文：首行缩进两格，句末一个句号", R.drawable.ic_stat_inkwell_para),
 }
 
 /**
@@ -116,6 +122,13 @@ object AppIconManager {
         }
         // 谁都没被显式启用 = 还没切过，走清单里 android:enabled 的默认值
         return enabled ?: AppIcon.DEFAULT
+    }
+
+    /** 系统媒体卡片用实际启用的 alias 图标，保留自适应图标的图形、纸色和系统蒙版。 */
+    fun drawable(context: Context, icon: AppIcon): Drawable = try {
+        context.packageManager.getActivityIcon(componentOf(context, icon))
+    } catch (_: PackageManager.NameNotFoundException) {
+        context.applicationInfo.loadIcon(context.packageManager)
     }
 
     /**

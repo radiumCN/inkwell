@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -22,8 +23,11 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import androidx.core.graphics.drawable.toBitmap
 import com.radium.inkwell.MainActivity
 import com.radium.inkwell.R
+import com.radium.inkwell.util.AppIcon
+import com.radium.inkwell.util.AppIconManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +47,9 @@ internal class ReaderSpeechService : Service() {
     private lateinit var focus: AudioFocusRequest
     private val preferences by lazy { getSharedPreferences(CHANNEL, MODE_PRIVATE) }
     private var owner: ReaderSpeech? = null
+    private var notificationIcon = AppIcon.DEFAULT.shape.notificationIcon
+    private var notificationArt: Bitmap? = null
+    private var publishedTitle: String? = null
     private var tts: TextToSpeech? = null
     private var voices = emptyList<Voice>()
     private var selectedVoice: Voice? = null
@@ -108,6 +115,10 @@ internal class ReaderSpeechService : Service() {
                     it.update(SpeechState())
                 }
                 owner = current
+                val icon = AppIconManager.current(this)
+                notificationIcon = icon.shape.notificationIcon
+                notificationArt = AppIconManager.drawable(this, icon).toBitmap(ART_SIZE_PX, ART_SIZE_PX, Bitmap.Config.ARGB_8888)
+                publishedTitle = null
                 current.service = this
                 current.update(current.state.value.copy(rate = preferences.getFloat("rate", 1f)))
                 media.isActive = true
@@ -479,12 +490,15 @@ internal class ReaderSpeechService : Service() {
                 )
                 .build(),
         )
-        media.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, displayTitle(current, state))
+        val title = displayTitle(current, state)
+        if (publishedTitle != title) {
+            val metadata = MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, getString(R.string.app_name))
-                .build(),
-        )
+            notificationArt?.let { metadata.putBitmap(MediaMetadata.METADATA_KEY_ART, it) }
+            media.setMetadata(metadata.build())
+            publishedTitle = title
+        }
         if (foreground || state.chapter != null) notifications.notify(NOTIFICATION, notification(current, state))
     }
 
@@ -518,7 +532,8 @@ internal class ReaderSpeechService : Service() {
     private fun notification(current: ReaderSpeech, state: SpeechState): Notification {
         val playing = state.status == SpeechStatus.PLAYING || state.status == SpeechStatus.LOADING
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher_mono_mark)
+            .setSmallIcon(notificationIcon)
+            .setLargeIcon(notificationArt)
             .setContentTitle(displayTitle(current, state))
             .setContentText(if (playing) "朗读中" else "朗读已暂停")
             .setContentIntent(openReader())
@@ -569,6 +584,7 @@ internal class ReaderSpeechService : Service() {
     }
 
     companion object {
+        private const val ART_SIZE_PX = 128
         private const val CHANNEL = "reader_read_aloud"
         private const val NOTIFICATION = 20261120
         private const val START = "reader.tts.START"
