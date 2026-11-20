@@ -27,7 +27,7 @@ class LocalBookBackupRepository(
     private val books: BookRepository,
 ) {
     suspend fun list(restore: Boolean): List<BookFileBackupItem> = withContext(Dispatchers.IO) {
-        val shelf = bookDao.getAll().filter { it.canBackUpFile() }.associateBy { it.id }
+        val shelf = bookDao.getAllVisible().filter { it.canBackUpFile() }.associateBy { it.id }
         val items = if (restore) {
             val client = webDav.bookFilesClient()
             val names = try {
@@ -79,20 +79,28 @@ class LocalBookBackupRepository(
     }
 
     private suspend fun backup(client: WebDavClient, item: BookFileBackupItem) {
-        val book = bookDao.getById(item.bookId)?.takeIf { it.canBackUpFile() }
-        val file = checkNotNull(book?.existingFile()) { "本机原文件已移除" }
+        val file = checkNotNull(bookForTransfer(item.bookId).existingFile()) { "本机原文件已移除" }
         check(file.extension.equals(item.extension, ignoreCase = true)) { "本机文件格式已变更，请重新打开备份列表" }
         val name = RemoteBookFile(item.bookId, item.extension, file.length(), file.sha256()).name
+        // 大文件校验期间书架仍可通过同步更新，发出 PUT 前再检查当前状态。
+        check(bookForTransfer(item.bookId).localPath == file.path) { "本机原文件已变更，请重新打开备份列表" }
         client.putFileIfAbsent("$DIRECTORY/$name", file)
     }
 
     private suspend fun restore(client: WebDavClient, item: BookFileBackupItem) {
         val remote = checkNotNull(RemoteBookFile.parse(item.remoteName.orEmpty()))
         check(remote.bookId == item.bookId) { "云端文件与书架条目不匹配" }
+        bookForTransfer(item.bookId)
         books.restoreLocalBook(item.bookId, remote.extension) { dest ->
             client.downloadFile("$DIRECTORY/${remote.name}", dest, remote.size)
             check(dest.sha256() == remote.hash) { "云端文件校验失败" }
         }
+    }
+
+    private suspend fun bookForTransfer(id: String): BookEntity {
+        val book = bookDao.getById(id)
+        check(book?.hidden != true) { "此书已移入隐藏书架，已跳过" }
+        return checkNotNull(book?.takeIf { it.canBackUpFile() }) { "书架条目已变更，请重新打开书籍列表" }
     }
 
     companion object {
@@ -100,8 +108,8 @@ class LocalBookBackupRepository(
     }
 }
 
-private fun BookEntity.canBackUpFile(): Boolean =
-    inShelf && !deleted && type in BookType.LOCAL_TXT..BookType.LOCAL_MOBI && BOOK_ID.matches(id)
+internal fun BookEntity.canBackUpFile(): Boolean =
+    inShelf && !deleted && !hidden && type in BookType.LOCAL_TXT..BookType.LOCAL_MOBI && BOOK_ID.matches(id)
 
 private fun BookEntity.existingFile(): File? = localPath?.let(::File)?.takeIf { it.isFile }
 

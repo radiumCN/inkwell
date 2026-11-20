@@ -242,7 +242,8 @@ class BookRepository(
                 val chapters = book.chapters.map { ChapterEntity(restoreId, it.index, it.title) }
                 db.withWriteTransaction {
                     val existing = bookDao.getById(restoreId)
-                    check(existing != null && existing.inShelf && !existing.deleted && existing.type == type) {
+                    check(existing?.hidden != true) { "此书已移入隐藏书架，已跳过" }
+                    check(existing != null && existing.canBackUpFile() && existing.type == type) {
                         "书架条目已变更，请同步书架后重试"
                     }
                     check(!existing.hasLocalFile()) { "本机已有原文件" }
