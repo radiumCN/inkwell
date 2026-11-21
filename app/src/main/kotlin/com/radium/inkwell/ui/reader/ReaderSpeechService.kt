@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -489,6 +490,9 @@ internal class ReaderSpeechService : Service() {
         voices = emptyList()
     }
 
+    // 不要 POST_NOTIFICATIONS：这条是带 MediaSession 的 MediaStyle 通知（见 notification()），Android 13 起媒体会话通知
+    // 豁免通知权限，没授权也照常显示锁屏、通知栏控件。声明权限也不会自动授予，还得为它另做运行时申请
+    @SuppressLint("NotificationPermission")
     private fun publish(state: SpeechState) {
         val current = owner ?: return
         current.update(state)
