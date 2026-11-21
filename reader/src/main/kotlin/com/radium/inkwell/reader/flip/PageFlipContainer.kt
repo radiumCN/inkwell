@@ -140,7 +140,7 @@ fun PageFlipContainer(
     val touchY = remember { mutableFloatStateOf(0f) }
     var downX by remember { mutableFloatStateOf(0f) }
     var cornerBottom by remember { mutableStateOf(true) }
-    // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
+    // 钉 Y（揪整页，卷出竖直圆柱：中间横划、所有后翻）vs 前翻从上下三分之一起手（揪角）。见 curlGrip
     var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var lastCommittedDirection by remember { mutableStateOf<FlipDirection?>(null) }
@@ -420,17 +420,11 @@ fun PageFlipContainer(
                                 // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
                                 if (flippable && effectiveAnim != FlipAnimation.NONE) {
                                     val h = size.height.toFloat()
-                                    // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
-                                    // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
-                                    cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
-                                    // 从屏幕**中间那一带**起手 = 想翻整页，不是揪角。这时把触点 Y 钉到卷角所在的
-                                    // 页边（不跟手指的 Y），折痕于是接近竖直、页面绕竖轴卷过去 —— 真书翻页的样子。
-                                    // 只有从上/下三分之一起手才让 Y 跟手，卷出斜的揪角效果。
-                                    //
-                                    // 从前一律跟手，中间横划就卷出一条贯穿全页的大斜折（"天差地别"那张图）。
-                                    // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
-                                    // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
-                                    flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
+                                    // 卷角与触点 Y 在手势开始时锁定：后翻一律右下角、一律钉 Y；
+                                    // 前翻中间那一带钉 Y、上下三分之一揪角。两条互相牵连，规则与来由见 curlGrip
+                                    val grip = curlGrip(dir, down.position.y, h)
+                                    cornerBottom = grip.cornerBottom
+                                    flatSwipe = grip.pinTouchY
                                     touchY.floatValue = if (flatSwipe) {
                                         if (cornerBottom) h else 0f
                                     } else {
@@ -451,7 +445,7 @@ fun PageFlipContainer(
                                 val width = size.width.toFloat()
                                 val dir = dragDir
                                 // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
-                                // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
+                                // 钉 Y 时（中间横划、所有后翻）Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
                                 touchY.floatValue = if (flatSwipe) {
                                     if (cornerBottom) size.height.toFloat() else 0f
                                 } else {

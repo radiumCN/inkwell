@@ -123,6 +123,38 @@ inline fun TapAction.dispatch(onMenu: () -> Unit, onFlip: (FlipDirection) -> Uni
     }
 }
 
+/** 仿真卷页起手时锁定的握法，见 [curlGrip]。 */
+data class CurlGrip(
+    /** 卷角在右下（true）还是右上（false） */
+    val cornerBottom: Boolean,
+    /** 触点 Y 钉到卷角所在的页边（折痕竖直、整页绕竖轴卷过去），不跟手指上下走 */
+    val pinTouchY: Boolean,
+)
+
+/**
+ * 仿真卷页拖拽过 slop 那一刻锁定卷角与触点 Y 的取法，拖拽中不再改变（避免翻页中途跳变）。
+ * 两条规则互相牵连，放在一起定：
+ *
+ * - **后翻一律用右下角**：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
+ * - **钉 Y**：从屏幕中间那一带（H/3 ~ 2H/3）起手 = 想翻整页，不是揪角；**所有后翻**也钉。
+ *   只有前翻从上 / 下三分之一起手才让 Y 跟手，卷出斜的揪角。从前中间横划也跟手，就卷出一条
+ *   贯穿全页的大斜折；钉边曾因退化处理把控制点塌回卷角而崩过，已在 CurlRenderer 用 ÷0.1 修好。
+ *
+ * 后翻必须钉，否则和第一条相克：卷角锁在右下，后翻的触点 X 又是相对位移（起手时贴着左边），
+ * 这时 Y 再停在上半屏，触点到卷角的连线陡得很，CurlRenderer 的防撕裂钳制（折线底端不许越过书脊）
+ * 会沿连线把触点一路拽回右下 —— 手指在左上，卷角在右下离它一千多像素，手指走一屏卷角只挪半屏，
+ * 松手后还缩回角里而不是整页扫过去（0.6.1 反馈「左上角往回翻不跟手」）。legado 同样是后翻一律钉
+ * （「上一页滑动不出现对角」）。这一半在修大斜折时被漏掉过一次，所以抽出来让单测钉着。
+ */
+fun curlGrip(direction: FlipDirection, downY: Float, height: Float): CurlGrip {
+    val backward = direction == FlipDirection.BACKWARD
+    val middleBand = downY > height / 3f && downY < height * 2f / 3f
+    return CurlGrip(
+        cornerBottom = backward || downY > height / 2f,
+        pinTouchY = backward || middleBand,
+    )
+}
+
 /** 相对落点的总位移种进 offset。快甩时 UP 没有 positionChange，累加会少最后一截。 */
 fun seedFlipOffset(dx: Float, direction: FlipDirection, width: Float): Float {
     val w = width.coerceAtLeast(1f)
