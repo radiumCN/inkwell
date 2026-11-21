@@ -291,6 +291,14 @@ class BookSourceRepository(
 
     suspend fun getRule(id: String): BookSourceRule? = loadEntity(id)?.let { decode(it) }
 
+    /**
+     * 现存来源的登录会话标识（规则里写了登录的才有）：SourceLoginSessions.prune 拿它认出没人用的会话。
+     * 走 [getRule]，和引擎拿到的是同一份规则 —— 算出来的标识差一点，就会把正用着的登录态当垃圾删掉
+     */
+    suspend fun loginSessionIds(): Set<String> = withContext(Dispatchers.IO) {
+        dao.getLoginCandidateIds().mapNotNullTo(HashSet()) { getRule(it)?.loginSessionId }
+    }
+
     // ---- 规则解码缓存 ----
 
     /**

@@ -1,6 +1,8 @@
 package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.source.js.RhinoScriptRuntime
+import com.radium.inkwell.core.source.js.StrResponse
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -334,6 +336,120 @@ class SourceLoginTest {
             assertEquals(429, error.code)
             assertEquals("180", error.retryAfter)
             assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test
+    fun `同一站点按注册域名认`() {
+        val base = "https://www.a.com".toHttpUrl()
+        assertTrue(base.sharesSiteWith("https://api.a.com/search".toHttpUrl()))
+        assertTrue(base.sharesSiteWith("https://a.com/".toHttpUrl()))
+        assertFalse(base.sharesSiteWith("https://a.com.evil.net/".toHttpUrl()))
+        // https 登录的凭据不降级发给 http
+        assertFalse(base.sharesSiteWith("http://api.a.com/".toHttpUrl()))
+        // 公共后缀底下各家是各家
+        assertFalse("https://a.com.cn".toHttpUrl().sharesSiteWith("https://b.com.cn/".toHttpUrl()))
+        // 没有注册域名的（IP、localhost）只认同一个源
+        assertTrue("http://127.0.0.1:1".toHttpUrl().sharesSiteWith("http://127.0.0.1:1/x".toHttpUrl()))
+        assertFalse("http://127.0.0.1:1".toHttpUrl().sharesSiteWith("http://127.0.0.1:2/".toHttpUrl()))
+    }
+
+    @Test
+    fun `登录凭据发给同一站点的子域名，不发给别家站`() = runBlocking {
+        // 主页 www、接口 api 是常见的分法：从前只认主页那一个源，api 上的请求拿不到 token，登录了也搜不到。
+        // 走渲染器看每个请求拿到的凭据（不连网：SourceHttpClient 用自己的 DNS，测试里没法把几个域名指到本机）
+        val sent = mutableMapOf<String, Map<String, String>>()
+        val renderer = object : PageRenderer {
+            override suspend fun render(url: String, headers: Map<String, String>, userAgent: String?) =
+                error("需要带来源会话渲染")
+
+            override suspend fun renderForSource(
+                sessionId: String?,
+                url: String,
+                headers: Map<String, String>,
+                userAgent: String?,
+                credentialHeaders: Map<String, String>,
+            ): FetchedPage {
+                sent[url.toHttpUrl().host] = credentialHeaders
+                return FetchedPage(url, 200, """{"items":[{"title":"样例","url":"/book"}]}""", "UTF-8")
+            }
+        }
+        val sessions = Sessions()
+        val engine = BookSourceEngine(http(sessions), scriptRuntime = RhinoScriptRuntime(), sessionStore = sessions, renderer = renderer)
+        val source = fixture("https://www.a.com").copy(
+            searchUrl = """https://api.a.com/search,{"webView":true}""",
+            loginUrl = """function login() { source.putLoginHeader('{"Authorization":"Bearer fixture"}'); }""",
+            ruleToc = TocRuleSet(chapterList = "$.items", chapterName = "title", chapterUrl = "url"),
+        )
+        engine.submitLogin(source, emptyMap())
+        assertEquals("样例", engine.search(source, "样例").items.single().title)
+        engine.getToc(source, """https://cdn.other.com/toc,{"webView":true}""")
+        assertEquals(mapOf("Authorization" to "Bearer fixture"), sent["api.a.com"])
+        assertEquals(emptyMap(), sent["cdn.other.com"])
+    }
+
+    @Test
+    fun `没有登录入口的来源，脚本请求和页面请求一样带上存下的请求头`() = runBlocking {
+        // 没登录入口的旧规则拿 putLoginHeader 存防盗链挑战的临时头，页面请求一直是处处带的；脚本请求从前却给剥了
+        MockWebServer().use { server ->
+            MockWebServer().use { other ->
+                val source = fixture(server.url("/").toString().trimEnd('/')).copy(
+                    searchUrl = "<js>source.putLoginHeader('{\"X-Challenge\":\"ok\"}');" +
+                        " java.ajax('${other.url("/api")},' + JSON.stringify({headers: {'X-Challenge': 'ok'}})); '/search'</js>",
+                )
+                server.enqueue(books())
+                other.enqueue(MockResponse().setBody("ok"))
+                assertEquals("样例", engine(http()).search(source, "样例").items.single().title)
+                assertEquals("ok", other.takeRequest().getHeader("X-Challenge"))
+                assertEquals("ok", server.takeRequest().getHeader("X-Challenge"))
+            }
+        }
+    }
+
+    @Test
+    fun `脚本写的 Cookie 重启后还在，服务端下发的会话 Cookie 同阅读只留在这一次`() = runBlocking {
+        // 登录脚本常用 cookie.setCookie 存登录态，阅读把它落库；没写过期时间，从前在我们这里算会话 Cookie，重启就登出了
+        MockWebServer().use { server ->
+            val url = server.url("/").toString()
+            val sessions = Sessions()
+            server.enqueue(MockResponse().setHeader("Set-Cookie", "PHPSESSID=server; Path=/"))
+            http(sessions).apply {
+                setCookie(url, "token=script", "s1")
+                fetch(url, sourceId = "s1")
+                assertEquals(setOf("token=script", "PHPSESSID=server"), cookieOf(url, "s1").split("; ").toSet())
+            }
+            assertEquals("token=script", http(sessions).cookieOf(url, "s1"))
+        }
+    }
+
+    @Test
+    fun `登录网页开着的时候，这个来源的抓取不排队等它`() = runBlocking {
+        // 登录锁从前把整个网页登录（等人操作，可能几分钟）都包在里面：带登录校验的来源，离线缓存、目录全卡在锁上
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest) = books()
+            }
+            val base = server.url("/").toString().trimEnd('/')
+            val source = fixture(base).copy(loginUrl = "function login() {}", loginCheckJs = "result")
+            val engine = engine(http())
+            val opened = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val closed = kotlinx.coroutines.CompletableDeferred<StrResponse?>()
+            val browser = object : SourceLoginInteraction {
+                override fun message(text: String) = Unit
+                override fun updateFields(values: Map<String, String>) = Unit
+                override suspend fun openBrowser(url: String, title: String): StrResponse? {
+                    opened.complete(Unit)
+                    return closed.await()
+                }
+            }
+            val login = launch(kotlinx.coroutines.Dispatchers.Default) {
+                engine.submitLogin(source, emptyMap(), action = "$base/sign-in", interaction = browser)
+            }
+            opened.await()
+            val found = kotlinx.coroutines.withTimeoutOrNull(5_000) { engine.search(source, "样例") }
+            closed.complete(null)
+            login.join()
+            assertEquals("样例", found?.items?.single()?.title)
         }
     }
 

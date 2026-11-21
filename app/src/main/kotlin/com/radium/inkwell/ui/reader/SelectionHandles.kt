@@ -10,7 +10,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.unit.dp
 import com.radium.inkwell.reader.render.SelectionEnd
 import com.radium.inkwell.reader.render.SelectionHandlePosition
 import com.radium.inkwell.ui.components.Dimens
@@ -29,7 +28,7 @@ internal fun SelectionHandles(
     Canvas(modifier) {
         handles.values.forEach { handle ->
             val center = handle.anchor + Offset(0f, handleStem.toPx())
-            drawLine(color, handle.anchor, center, strokeWidth = 2.dp.toPx())
+            drawLine(color, handle.anchor, center, strokeWidth = Dimens.strokeThick.toPx())
             drawCircle(color, handleRadius.toPx(), center)
         }
     }

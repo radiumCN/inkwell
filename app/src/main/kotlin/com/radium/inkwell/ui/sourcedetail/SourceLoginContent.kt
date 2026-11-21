@@ -8,7 +8,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -24,21 +23,21 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewCompat
-import com.radium.inkwell.core.source.SourceLoginField
 import com.radium.inkwell.core.source.SourceLoginForm
 import com.radium.inkwell.data.source.WebViewNetworkGuard
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.data.source.sourceLoginHttpUrl
-import com.radium.inkwell.ui.components.AppDropdownMenu
-import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppFormField
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
+import com.radium.inkwell.ui.components.PickerOption
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
+import com.radium.inkwell.ui.components.SettingGroupPosition
+import com.radium.inkwell.ui.components.SpinnerSettingRow
 import com.radium.inkwell.ui.components.ToolbarTitle
 import org.json.JSONTokener
 import top.yukonga.miuix.kmp.basic.Icon
@@ -65,7 +64,15 @@ internal fun SourceLoginFields(
                 text = field.name, onClick = { onSubmit(command) },
                 enabled = !busy, modifier = Modifier.fillMaxWidth(),
             )
-            field.choices.isNotEmpty() -> LoginChoice(field, value, busy) { onChange(field.name, it) }
+            field.choices.isNotEmpty() -> SpinnerSettingRow(
+                title = field.name,
+                options = field.choices.map { PickerOption(it, it) },
+                selectedId = value,
+                onSelect = { onChange(field.name, it.id) },
+                // 已经在「来源登录」那张卡里：不再自己套一张卡
+                position = SettingGroupPosition.Alone,
+                enabled = !busy,
+            )
             else -> {
                 val password = field.type.equals("password", ignoreCase = true)
                 AppFormField(
@@ -85,20 +92,6 @@ internal fun SourceLoginFields(
             text = "确认", onClick = { onSubmit(null) }, enabled = !busy,
             loading = busy, modifier = Modifier.fillMaxWidth(),
         )
-    }
-}
-
-@Composable
-private fun LoginChoice(field: SourceLoginField, value: String, busy: Boolean, onChange: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        SecondaryButton(
-            text = if (value.isBlank()) field.name else "${field.name} · $value",
-            onClick = { open = true }, enabled = !busy, modifier = Modifier.fillMaxWidth(),
-        )
-        AppDropdownMenu(open, { open = false }, field.choices.map { option ->
-            AppMenuItem(text = option, selected = option == value, onClick = { onChange(option) })
-        })
     }
 }
 

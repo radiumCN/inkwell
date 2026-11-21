@@ -110,6 +110,11 @@ class InkwellApp : Application(), SingletonImageLoader.Factory {
                 // 订阅页缓存的文章跟同一个天数走：订阅源里撤下、这么多天没再取到的清掉（见 RssFeedRepository.prune）
                 koin.get<RssFeedRepository>().prune(days)
             }.onFailure { if (it is CancellationException) throw it }
+            // 规则更新过、删掉了的来源留下的登录会话（见 SourceLoginSessions.prune）
+            runCatching {
+                koin.get<com.radium.inkwell.data.source.SourceLoginSessions>()
+                    .prune { koin.get<com.radium.inkwell.data.repo.BookSourceRepository>().loginSessionIds() }
+            }.onFailure { if (it is CancellationException) throw it }
         }
 
         // 退到后台时再同步一次。

@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * 源级 header 写成脚本（`@js:` / `<js>`）、规则里读 `source` 的字段：
@@ -218,6 +219,17 @@ class SourceScriptHeaderTest {
         engine().search(src, "斗破")
         assertEquals(SourceHttpClient.DEFAULT_UA, nextRequest().getHeader("User-Agent"))
         assertEquals(SourceHttpClient.DEFAULT_UA, nextRequest().getHeader("User-Agent"))
+    }
+
+    @Test
+    fun `请求头脚本自己发请求取 token，不会一层套一层地重跑自己`() = runBlocking {
+        // 脚本请求没写 UA 时补的是「请求头脚本给的 UA」，可请求头脚本里的请求也要补 UA：从前就这样绕回来，
+        // 一直套到栈溢出，退栈时每一层各发一次请求
+        val src = source(header = "@js:java.ajax(baseUrl + '/token'); JSON.stringify({'X-T': 'ok'})")
+        assertEquals(listOf("斗破苍穹"), engine().search(src, "斗破").items.map { it.title })
+        val tokenHits = List(server.requestCount) { nextRequest() }.count { it.path == "/token" }
+        // 第一次要先跑一遍请求头脚本算出 UA（那一遍里的请求发默认 UA），之后就是每个页面请求跑一回
+        assertTrue(tokenHits <= 2, "token 请求了 $tokenHits 次")
     }
 
     @Test

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
@@ -133,11 +134,50 @@ internal class SourceLoginSessions(context: Context) : SourceSessionStore {
         }
     }
 
+    /**
+     * 清掉没有规则再用的会话。会话标识跟着规则内容走（见 BookSourceRule.loginSessionId）：规则一更新、来源一删，
+     * 旧的加密文件和 WebView profile（Cookie、本地存储、缓存）就没人再读，一直堆着。
+     * 目录里没有过期的就到此为止 —— 不查库，也不拉起 WebView（ProfileStore 要在主线程上加载它）。
+     * 先列目录、再取 [liveSessionIds]：列完之后才登录的新会话，文件不在列出来的名单里，删不到它
+     */
+    suspend fun prune(liveSessionIds: suspend () -> Set<String>) {
+        val names = withContext(Dispatchers.IO) { directory.list()?.toList().orEmpty() }
+        if (names.isEmpty()) return
+        val live = liveSessionIds()
+        val stale = staleSessionFiles(names, live)
+        if (stale.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            synchronized(this@SourceLoginSessions) {
+                stale.forEach { File(directory, it).delete() }
+                values.keys.retainAll(live)
+            }
+        }
+        managers.keys.retainAll(live)
+        withContext(Dispatchers.Main) {
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return@withContext
+            val store = ProfileStore.getInstance()
+            val liveNames = live.mapTo(HashSet(), ::loginProfileName)
+            for (name in store.allProfileNames) {
+                if (!name.startsWith(PROFILE_PREFIX) || name in liveNames) continue
+                // 正开着的（登录网页还没关）删不掉，下次启动再来
+                runCatching { store.deleteProfile(name) }
+            }
+        }
+    }
+
     private fun file(sourceId: String): AtomicFile = AtomicFile(File(directory, loginProfileName(sourceId)))
 }
 
-internal fun loginProfileName(sourceId: String): String = "source-" + MessageDigest.getInstance("SHA-256")
+private const val PROFILE_PREFIX = "source-"
+
+internal fun loginProfileName(sourceId: String): String = PROFILE_PREFIX + MessageDigest.getInstance("SHA-256")
     .digest(sourceId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+/** 会话目录里哪些文件没有规则再用（AtomicFile 写到一半留下的 `.new` / `.bak` 跟着它的正身走） */
+internal fun staleSessionFiles(names: Collection<String>, liveSessionIds: Set<String>): List<String> {
+    val live = liveSessionIds.mapTo(HashSet(), ::loginProfileName)
+    return names.filter { it.substringBefore('.') !in live }
+}
 
 internal fun String.sourceLoginHttpUrl(): HttpUrl? = toHttpUrlOrNull()?.takeIf {
     it.isHttps && it.username.isEmpty() && it.password.isEmpty() && !isPrivateNetworkLiteral(it.host)

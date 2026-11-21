@@ -199,7 +199,10 @@ class SourceHttpClient(
 
     fun setCookie(url: String, cookie: String, sourceId: String? = null) {
         val u = url.toHttpUrlOrNull() ?: return
+        // 脚本写的同阅读的 CookieStore.setCookie，存下来、重启后还在：登录脚本常这样存登录态。没写过期时间的在 OkHttp 里
+        // 是会话 Cookie、不落盘（见 clientSession），补一个远期的。服务端下发的会话 Cookie 不动，同阅读只留在这一次运行里
         val cookies = cookie.split(';').mapNotNull { Cookie.parse(u, it.trim()) }
+            .map { if (it.persistent) it else it.newBuilder().expiresAt(Long.MAX_VALUE).build() }
         clientSession(sourceId).jar.saveFromResponse(u, cookies)
     }
 

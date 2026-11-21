@@ -58,6 +58,10 @@ interface BookSourceDao {
     @Query("SELECT id FROM book_source")
     suspend fun getAllIdsIncludingDeleted(): List<String>
 
+    /** 规则里写了登录（loginUrl / loginUi / loginCheckJs）的来源，只取 id：清理登录会话用，见 BookSourceRepository.loginSessionIds */
+    @Query("SELECT id FROM book_source WHERE deleted = 0 AND json LIKE '%\"login%'")
+    suspend fun getLoginCandidateIds(): List<String>
+
     /**
      * 启停、排序、分组都会跨设备同步，合并按 updatedAt 做 LWW —— 改它们必须同时盖时间戳，
      * 否则改动同步不出去，还会被别的设备上那份旧副本反向覆盖回来。

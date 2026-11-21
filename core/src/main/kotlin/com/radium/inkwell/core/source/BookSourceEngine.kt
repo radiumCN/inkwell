@@ -10,9 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
@@ -141,7 +139,6 @@ class BookSourceEngine(
         jsHttp = jsHttp,
         sessionStore = sessionStore,
     )
-    private val loginLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
      * 已确认需要 JS 渲染的「书源 + 阶段」；后续同一级请求先走渲染器，省掉每次先静态空跑一遍。
@@ -162,12 +159,22 @@ class BookSourceEngine(
             // 脚本请求没写 UA 时发的：和页面请求同一个（请求头是脚本的也跑一遍 —— 晋江这类 `java.getWebViewUA()` 要的是手机页，
             // 页面发手机 UA、脚本请求发桌面 UA，站点给两套东西）。第一次脚本请求时才算，不发请求的不白跑请求头脚本
             val scriptUa = lazy(LazyThreadSafetyMode.PUBLICATION) { effectiveUserAgent(source) }
+            // 请求头脚本自己也可能发请求（先取 token 再拼头）：那些请求要 UA 时，正在算的就是它。给默认的，
+            // 别回头再跑请求头脚本 —— 从前就这样一层套一层，套到栈溢出，退栈时每一层各发一次请求
+            val computingUa = java.util.concurrent.atomic.AtomicBoolean()
             val binding = jsHttp.bindingTo(
                 job = coroutineContext[Job],
                 sourceId = sessionId,
                 loginHeaderNames = { evaluator.loginHeaders(source.id, sessionId).keys },
-                allowsLoginOrigin = { url -> allowsLoginOrigin(source, url, sessionId) },
-                userAgent = { scriptUa.value },
+                // 没有登录入口的来源，存下的头页面请求是处处带的（见 sourceRequestHeaders），脚本请求也一样
+                allowsLoginOrigin = { url -> sessionId == null || allowsLoginOrigin(source, url, sessionId) },
+                userAgent = {
+                    when {
+                        scriptUa.isInitialized() -> scriptUa.value
+                        !computingUa.compareAndSet(false, true) -> source.defaultUserAgent
+                        else -> try { scriptUa.value } finally { computingUa.set(false) }
+                    }
+                },
             )
             withContext(binding) {
                 try {
@@ -204,12 +211,11 @@ class BookSourceEngine(
         action: String? = null,
         interaction: SourceLoginInteraction? = null,
     ) = engineIo(source) {
-        loginLocks.computeIfAbsent(source.id) { Mutex() }.withLock {
-            val context = urlContext(source, varsOf(source))
-            val url = action?.toHttpUrlOrNull()
-            if (url != null && interaction != null) interaction.openBrowser(url.toString(), source.name)
-            else evaluator.runLogin(source, context, values, action, interaction)
-        }
+        // 不加锁：网页登录是等人操作，可能几分钟，锁着的话这个来源的抓取全排在后面。登录本身的串行在 runLogin 里
+        val context = urlContext(source, varsOf(source))
+        val url = action?.toHttpUrlOrNull()
+        if (url != null && interaction != null) interaction.openBrowser(url.toString(), source.name)
+        else evaluator.runLogin(source, context, values, action, interaction)
         invalidateLoginPages(source)
     }
 
@@ -383,9 +389,11 @@ class BookSourceEngine(
     ): List<RemoteChapter> =
         engineIo(source) {
             val rule = source.ruleToc ?: throw SourceException("来源「${source.name}」未配置目录规则")
+            // 有书名、全都没地址的目录（见 collectToc）静态、渲染两回都是这样才用：链接是脚本填进去的站，渲染后才有地址
+            var unlinked: List<RemoteChapter>? = null
             withRenderFallback(source, "toc") { render ->
-                collectToc(source, rule, tocUrl, render, bookUrl, bookTitle, bookAuthor, variables)
-            } ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
+                collectToc(source, rule, tocUrl, render, bookUrl, bookTitle, bookAuthor, variables) { unlinked = unlinked ?: it }
+            } ?: unlinked ?: throw SourceException("目录规则未匹配到章节: $tocUrl")
         }
 
     private suspend fun collectToc(
@@ -397,6 +405,7 @@ class BookSourceEngine(
         bookTitle: String,
         bookAuthor: String,
         variables: Map<String, String>,
+        onUnlinked: (List<RemoteChapter>) -> Unit,
     ): List<RemoteChapter>? {
         // Legado：chapterList 前导 `-` 表示整体倒序；`+` 是写明「正序」，同样去掉（Legado 先认 `-` 再认 `+`）。
         // 从前只认 `-`：`+@js:…` 整条当规则求值，一个节点都没有 —— 蓝海搜书、雁北堂这一类目录全空
@@ -446,10 +455,14 @@ class BookSourceEngine(
                 }
             }
         }
-        val chapters = collected.ifEmpty { urlless.distinctBy { it.second } }
-        if (chapters.isEmpty()) return null
-        val ordered = if (reverse) chapters.asReversed() else chapters
-        return ordered.mapIndexed { i, (title, u, vars) -> RemoteChapter(i, title, u, vars) }
+        fun numbered(list: List<Triple<String, String, String>>) =
+            (if (reverse) list.asReversed() else list).mapIndexed { i, (title, u, vars) -> RemoteChapter(i, title, u, vars) }
+        if (collected.isEmpty()) {
+            // 全都没地址：先当没取到，好让 withRenderFallback 换个方式再抓一回；那一回也这样，调用方才用它
+            if (urlless.isNotEmpty()) onUnlinked(numbered(urlless.distinctBy { it.second }))
+            return null
+        }
+        return numbered(collected)
     }
 
     /**
@@ -891,18 +904,17 @@ class BookSourceEngine(
             val response = asResponse(rawPage)
             var retriedPage: FetchedPage? = null
             var retriedResponse: StrResponse? = null
-            val checked = loginLocks.computeIfAbsent(source.id) { Mutex() }.withLock {
-                try {
-                    evaluator.checkLogin(source, context, response, headerScriptOf(checkRule) ?: checkRule) {
-                        jsHttp.blockingUnderParent {
-                            val page = fetch()
-                            retriedPage = page
-                            asResponse(page).also { retriedResponse = it }
-                        } ?: StrResponse.empty()
-                    }
-                } catch (_: SourceException) {
-                    throw SourceException("登录校验未通过，请在来源详情中登录后重试")
+            // 校验脚本并发跑，不排队：它多半只看一眼响应。要重新登录（source.login()）时才串行，锁在 runLogin 里
+            val checked = try {
+                evaluator.checkLogin(source, context, response, headerScriptOf(checkRule) ?: checkRule) {
+                    jsHttp.blockingUnderParent {
+                        val page = fetch()
+                        retriedPage = page
+                        asResponse(page).also { retriedResponse = it }
+                    } ?: StrResponse.empty()
                 }
+            } catch (_: SourceException) {
+                throw SourceException("登录校验未通过，请在来源详情中登录后重试")
             }
             when {
                 checked == null || checked === response -> rawPage
@@ -972,9 +984,9 @@ class BookSourceEngine(
     }
 
     private fun allowsLoginOrigin(source: BookSourceRule, url: String, sessionId: String?): Boolean {
-        val target = url.toHttpUrlOrNull()?.sourceOrigin() ?: return false
-        return target == source.baseUrl.toHttpUrlOrNull()?.sourceOrigin() ||
-            (sessionId != null && target.toString() in sessionStore.webLoginOrigins(sessionId))
+        val target = url.toHttpUrlOrNull() ?: return false
+        return source.baseUrl.toHttpUrlOrNull()?.sharesSiteWith(target) == true ||
+            (sessionId != null && target.sourceOrigin().toString() in sessionStore.webLoginOrigins(sessionId))
     }
 
     private fun baseSourceHeaders(source: BookSourceRule, js: JsContext): Map<String, String> {
@@ -1510,16 +1522,46 @@ internal fun fillKeywordInBody(body: String, keyword: String, method: String, ch
  * 从前原样发出去：脚本拼的体里常有 Base64（书耽的 `secret_content=`、各家签名），`+` 到服务端成了空格、`/` `=` 也可能被拆坏，
  * 解不开就回一段加密的错误，搜索一本都没有；写在体里的中文（`submit=搜索`）也是裸 UTF-8 字节。
  * 和 Legado 的差别：给了站点编码时 Legado 一律重新编码，已经编码过的会编两遍；我们照样先看是不是已编码 ——
- * 关键词在 [fillKeywordInBody] 里已经按站点编码转好了。
+ * 关键词在 [fillKeywordInBody] 里已经按站点编码转好了。字段里除了编好的关键词还有别的要编的字符
+ * （`params={"key":"{{key}}"}`）时，只编那些字符、`%XX` 原样留着（[encodeFormPart]），不再整段重编把关键词的 `%` 编成 `%25`。
  */
 internal fun encodeFormBody(body: String, charsetName: String?): String {
     val cs = charsetOrUtf8(charsetName).name()
-    fun part(s: String) = if (isFormEncoded(s)) s else java.net.URLEncoder.encode(s, cs)
+    fun part(s: String) = if (isFormEncoded(s)) s else encodeFormPart(s, cs)
     return body.split('&').joinToString("&") { field ->
         val eq = field.indexOf('=')
         if (eq < 0) part(field) else part(field.substring(0, eq)) + "=" + part(field.substring(eq + 1))
     }
 }
+
+/**
+ * 没编完的字段：合法的 `%XX` 和 `a-zA-Z0-9*-._` 原样留着，其余一段段按站点编码 URL 编码。没有 `%XX` 的字段结果和整段
+ * URLEncoder 一样；`+` 照 [isFormEncoded] 的规矩 —— 字段里有 `%XX` 才当它是编过的空格
+ */
+private fun encodeFormPart(s: String, charset: String): String {
+    val escaped = FORM_ESCAPE.containsMatchIn(s)
+    val out = StringBuilder()
+    val raw = StringBuilder()
+    fun flush() {
+        if (raw.isNotEmpty()) out.append(java.net.URLEncoder.encode(raw.toString(), charset)).also { raw.clear() }
+    }
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        val keep = when {
+            c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c in "*-._" -> 1
+            c == '+' && escaped -> 1
+            c == '%' && i + 2 < s.length && s[i + 1].isHexDigit() && s[i + 2].isHexDigit() -> 3
+            else -> 0
+        }
+        if (keep == 0) raw.append(c) else { flush(); out.append(s, i, i + keep) }
+        i += maxOf(keep, 1)
+    }
+    flush()
+    return out.toString()
+}
+
+private val FORM_ESCAPE = Regex("%[0-9A-Fa-f]{2}")
 
 /** 见 [encodeFormBody]：POST、体不是 JSON / XML、请求头里没写 Content-Type（同 Legado，只认这个大小写） */
 internal fun needsFormEncoding(method: String, body: String?, headers: Map<String, String>): Boolean {

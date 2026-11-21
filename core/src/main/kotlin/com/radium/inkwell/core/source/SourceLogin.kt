@@ -15,6 +15,19 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 fun HttpUrl.sourceOrigin(): HttpUrl = newBuilder().encodedPath("/").query(null).fragment(null)
     .username("").password("").build()
 
+/**
+ * 来源（this）的登录凭据能不能发给 [target]：同一个站点就行 —— 注册域名相同，`www.a.com` 是主页、接口在 `api.a.com`
+ * 是常见分法，只认主页那一个源的话，登录了接口照样拿不到 token。第三方（图床、跳去的别家站）不给。
+ * IP、localhost 这类没有注册域名的只认同一个源；https 的不降级发给 http。
+ * 公共后缀表查不出来（Android 上表在 assets 里、靠 androidx-startup 初始化）也退回只认同一个源
+ */
+internal fun HttpUrl.sharesSiteWith(target: HttpUrl): Boolean {
+    if (isHttps && !target.isHttps) return false
+    if (sourceOrigin() == target.sourceOrigin()) return true
+    val site = runCatching { topPrivateDomain() }.getOrNull() ?: return false
+    return site == runCatching { target.topPrivateDomain() }.getOrNull()
+}
+
 fun BookSourceRule.allowsLoginReturn(start: HttpUrl, current: HttpUrl): Boolean =
     current.isHttps && (current.sourceOrigin() == start.sourceOrigin() ||
         current.sourceOrigin() == baseUrl.toHttpUrlOrNull()?.sourceOrigin())

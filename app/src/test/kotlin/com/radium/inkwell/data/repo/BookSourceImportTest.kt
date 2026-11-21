@@ -52,6 +52,7 @@ class BookSourceImportTest {
         }
         override suspend fun getAllIds() = store.values.filter { !it.deleted }.map { it.id }
         override suspend fun getAllIdsIncludingDeleted() = store.keys.toList()
+        override suspend fun getLoginCandidateIds() = store.values.filter { !it.deleted && "\"login" in it.json }.map { it.id }
         override suspend fun setEnabled(id: String, enabled: Boolean, now: Long) {}
         // 软删除：打标记而不是移除 —— 墓碑得留着，否则 WebDAV 同步会把删掉的源拉回来
         override suspend fun softDeleteById(id: String, now: Long) {

@@ -37,6 +37,8 @@ class LegadoParityEngineTest {
                     "/toc/plus" -> """<ul><li><a href="/c/1">一</a></li><li><a href="/c/2">二</a></li></ul>"""
                     "/toc/single" -> "<h1>唯一一章</h1><div id=\"content\">正文</div>"
                     "/toc/mixed" -> """<ul><li>第一卷</li><li><a href="/c/1">一</a></li></ul>"""
+                    // 链接是脚本填的：静态页上只有书名
+                    "/toc/js" -> """<ul><li><a>一</a></li><li><a>二</a></li></ul>"""
                     "/toc/p1" -> """<ul><li><a href="/c/1">一</a></li></ul><a id="next" href="/toc/p2">下一页</a>"""
                     "/toc/p2" -> """<ul><li><a href="/c/2">二</a></li></ul><a id="next" href="/toc/p3">下一页</a>"""
                     "/api/book" -> if (request.method == "POST") """{"list":[{"t":"一","id":"1"}]}""" else """{"error":"GET"}"""
@@ -88,6 +90,24 @@ class LegadoParityEngineTest {
     fun `正常目录里没有链接的分卷行照旧丢掉`() {
         val chapters = toc(""""ruleToc": { "chapterList": "tag.li", "chapterName": "text", "chapterUrl": "tag.a@href" }""", "/toc/mixed")
         assertEquals(listOf("一"), chapters.map { it.title })
+    }
+
+    @Test
+    fun `只有书名没有地址的目录先换渲染再试，渲染也没地址才记成目录页本身`() = runBlocking {
+        // 从前「没地址就记成目录页本身」一兜底，静态那一回就算取到了，渲染那一回轮不到：整本书只剩一章，校验还报可用
+        val rendered = """<ul><li><a href="/c/1">一</a></li><li><a href="/c/2">二</a></li></ul>"""
+        val eng = BookSourceEngine(
+            SourceHttpClient(OkHttpClient(), retryBaseDelayMs = 1, allowPrivateNetwork = true),
+            scriptRuntime = com.radium.inkwell.core.source.js.RhinoScriptRuntime(),
+            renderer = object : PageRenderer {
+                override suspend fun render(url: String, headers: Map<String, String>, userAgent: String?) =
+                    FetchedPage(url, 200, if (url.endsWith("/toc/js")) rendered else "<h1>唯一一章</h1>", "UTF-8")
+            },
+        )
+        val linked = eng.getToc(source(""""ruleToc": { "chapterList": "tag.li", "chapterName": "text", "chapterUrl": "tag.a@href" }"""), "$base/toc/js")
+        assertEquals(listOf("一" to "$base/c/1", "二" to "$base/c/2"), linked.map { it.title to it.url })
+        val single = eng.getToc(source(""""ruleToc": { "chapterList": "tag.h1", "chapterName": "text", "chapterUrl": "@href" }"""), "$base/toc/single")
+        assertEquals(listOf("唯一一章" to "$base/toc/single"), single.map { it.title to it.url })
     }
 
     @Test
@@ -204,6 +224,15 @@ class LegadoParityEngineTest {
     @Test
     fun `关键词里的空格只编一次`() {
         assertEquals("q=a%20b%2Bc", searchBody("""/s,{"method":"POST","body":"q={{key}}"}""", "a b+c"))
+    }
+
+    @Test
+    fun `关键词和别的字符挤在一个字段里，关键词也只编一次`() {
+        // 体里拼了一段 JSON：字段里有 { " :，要编；关键词代进来时已经编过，它的 % 不能再编成 %25
+        assertEquals(
+            "params=%7B%22key%22%3A%22%E6%88%91%22%7D",
+            searchBody("""/s,{"method":"POST","body":"params={\"key\":\"{{key}}\"}"}""", "我"),
+        )
     }
 
     @Test

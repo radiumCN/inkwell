@@ -131,6 +131,8 @@ internal class ReaderSpeechService : Service() {
             TOGGLE -> if (owner?.state?.value?.status in setOf(SpeechStatus.PLAYING, SpeechStatus.LOADING)) pause() else play()
             STOP -> finishPlayback()
         }
+        // 进程被杀后点了、划掉残留的通知：新起的实例没有朗读在跟，上面几样都无事可做，别留一个空服务挂着
+        if (intent?.action != START && owner == null) stopSelf(startId)
         return START_NOT_STICKY
     }
 
@@ -210,19 +212,23 @@ internal class ReaderSpeechService : Service() {
         selectedVoice = voice
         preferences.edit().putString("voice", name).apply()
         publish(state.copy(selectedVoice = name, voiceError = null))
-        if (state.status == SpeechStatus.PLAYING) {
-            // 用新音色重播当前播报片段，避免等到整段结束；章节进度仍用原锚点。
-            val restart = chunkStart
-            stopUtterance()
-            nextChunk = restart
-            speakNextChunk()
-        }
+        if (state.status == SpeechStatus.PLAYING) restartChunk()
     }
 
     fun setRate(rate: Float) {
         val state = owner?.state?.value ?: return
         preferences.edit().putFloat("rate", rate).apply()
         publish(state.copy(rate = rate))
+        // 倍速只在一段的第一片设给引擎（见 speakNextChunk）：不重播的话，要等这一段（一片最长几千字）读完才变
+        if (state.status == SpeechStatus.PLAYING) restartChunk()
+    }
+
+    /** 用新音色 / 倍速重播当前播报片段，不用等到整段结束；章节进度仍用原锚点 */
+    private fun restartChunk() {
+        val restart = chunkStart
+        stopUtterance()
+        nextChunk = restart
+        speakNextChunk()
     }
 
     fun setTimer(minutes: Int?) {

@@ -125,6 +125,9 @@ class RuleEvaluator(
     private val sourceStores =
         ConcurrentHashMap<Pair<String, String?>, MutableMap<String, String>>()
 
+    /** 每个来源一把，见 [runLogin] */
+    private val loginLocks = ConcurrentHashMap<String, Any>()
+
     private val regexCache = object : LinkedHashMap<String, Regex>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Regex>?): Boolean =
             size > 256
@@ -909,7 +912,9 @@ class RuleEvaluator(
         values: Map<String, String>,
         action: String?,
         interaction: SourceLoginInteraction? = null,
-    ) {
+    ) = synchronized(loginLocks.computeIfAbsent(source.id) { Any() }) {
+        // 同一个来源的登录一个一个来：会话过期时几路抓取的校验脚本同时 source.login()，别同时写会话。
+        // 只锁登录本身：校验脚本、网页登录（等人操作）都不在锁里，免得这个来源的抓取全排在后面
         val changes = mutableMapOf<SourceSessionKey, String?>()
         evalLoginScript(source, ctx, action ?: "login.call(this)", values, interaction, changes, submit = action == null)
         com.radium.inkwell.core.source.js.EngineJsHttp.currentJob()?.ensureActive()

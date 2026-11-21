@@ -756,6 +756,7 @@ class ReaderViewModel(
     fun flip(direction: FlipDirection) {
         trace("flip.commit_requested", "direction" to direction.name, "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter)
         progressHeld = false
+        releaseSpeechPosition()
         val s = _state.value
         val result = paginated[s.chapterIndex] ?: run {
             trace("flip.blocked", "reason" to "chapter_not_paginated")
@@ -820,6 +821,15 @@ class ReaderViewModel(
         }
     }
 
+    /**
+     * 朗读没在读（暂停、读完、出错）时用户自己翻了页：进度跟人走，不再记朗读停下的那一处。
+     * 否则暂停后手动往后读，存盘的是朗读的旧位置；暂停超时收场、退出阅读页时还会把人拽回去
+     */
+    private fun releaseSpeechPosition() {
+        val status = speech.state.value.status
+        if (status != SpeechStatus.PLAYING && status != SpeechStatus.LOADING) speechPosition = null
+    }
+
     internal fun followSpeech(chapter: Int, offset: Int) {
         if (speechPosition != ReadPosition(chapter, offset)) return
         followSpeech(ReadPosition(chapter, offset))
@@ -861,6 +871,7 @@ class ReaderViewModel(
         val count = _state.value.chapterCount
         if (index !in 0 until count) return
         progressHeld = false
+        releaseSpeechPosition()
         val target = ReadPosition(index, charOffset)
         // 同一个目标还在路上（慢源上连点「下一章」）：接着等它，别取消重来 —— 否则每点一下超时就从头算
         if (navJob?.isActive == true && navTarget == target) return

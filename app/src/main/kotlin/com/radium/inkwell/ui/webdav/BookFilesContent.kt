@@ -24,6 +24,7 @@ import com.radium.inkwell.ui.components.ContentListDefaults
 import com.radium.inkwell.ui.components.ContentListItem
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SegmentedChoice
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
@@ -108,21 +109,19 @@ internal fun BookFilesContent(page: BookFilesUiState, viewModel: WebDavViewModel
                 } else if (page.items.isEmpty() && page.error == null) {
                     SettingFootnote(if (page.restore) "没有可恢复的书籍" else "书架上没有可备份的本地书籍")
                 } else if (page.items.isNotEmpty()) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = cardMargin() + Dimens.listHorizontal),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("选择要${action}的书籍", style = MiuixTheme.textStyles.body2)
-                        if (unambiguous.isNotEmpty()) {
-                            val allSelected = unambiguous.all { it.key in page.selected }
-                            AppTextButton(
-                                if (allSelected) "取消全选" else "全选",
-                                onClick = viewModel::selectAllBookFiles,
-                                enabled = enabled,
-                            )
-                        }
-                    }
+                    SectionHeader(
+                        "选择要${action}的书籍",
+                        trailing = if (unambiguous.isEmpty()) null else {
+                            {
+                                val allSelected = unambiguous.all { it.key in page.selected }
+                                AppTextButton(
+                                    if (allSelected) "取消全选" else "全选",
+                                    onClick = viewModel::selectAllBookFiles,
+                                    enabled = enabled,
+                                )
+                            }
+                        },
+                    )
                 }
             }
             // 一张卡装下整个列表（HyperOS 的灰底白卡），不是一本一张小卡
