@@ -202,13 +202,18 @@ class BookRepository(
     ): Unit = withContext(Dispatchers.IO) {
         val fileId = UUID.randomUUID().toString()
         val dest = File(booksDir(), "$fileId.$extension")
+        // 先下进缓存目录、下完校验过了再挪进 books/：下到一半进程被杀，回滚那段根本轮不到跑，
+        // 直接下进 books/ 的话就留下半截文件，库里没有它、也没人删。缓存目录里的残留系统会清
+        val part = File.createTempFile("restore", ".part", context.cacheDir)
         try {
-            receive(dest)
+            receive(part)
+            check(part.renameTo(dest)) { "无法写入书籍文件" }
             localImportMutex.withLock {
                 insertCopiedLocal(dest, dest.name, fileId, extension, restoreId = bookId)
             }
         } catch (e: Exception) {
             withContext(NonCancellable) {
+                part.delete()
                 if (bookDao.countByLocalPath(dest.absolutePath) == 0) {
                     parserRegistry.evictCaches(dest)
                     dest.delete()

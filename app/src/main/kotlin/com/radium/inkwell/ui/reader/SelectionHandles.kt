@@ -13,10 +13,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.reader.render.SelectionEnd
 import com.radium.inkwell.reader.render.SelectionHandlePosition
+import com.radium.inkwell.ui.components.Dimens
 
-private val handleStem = 7.dp
-private val handleRadius = 5.dp
-private val handleTouchRadius = 24.dp
+private val handleStem = Dimens.selectionHandleStem
+private val handleRadius = Dimens.selectionHandleKnob / 2
+private val handleTouchRadius = Dimens.touchTarget / 2
 
 @Composable
 internal fun SelectionHandles(

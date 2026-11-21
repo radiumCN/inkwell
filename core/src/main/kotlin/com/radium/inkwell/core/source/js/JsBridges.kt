@@ -184,7 +184,6 @@ class JsStringMap(private val map: Map<String, String>) : ScriptableObject() {
 interface JsRuleQuery {
     fun getString(rule: String): String
     fun getStringList(rule: String): Array<String>
-    fun getElement(rule: String): JsElement?
     fun getElements(rule: String): JsElements
 
     /**
@@ -667,7 +666,13 @@ class JavaBridge(
     private fun on(content: Any?): JsRuleQuery? =
         if (content == null) this.content else (this.content ?: query)?.withContent(content, null)
 
-    fun getElement(rule: String): JsElement? = content?.getElement(rule)
+    /**
+     * 同阅读：Jsoup 内容上的 `getElement` 返回的是**全部**匹配（AnalyzeRule.getElement 走的就是 getElements），不是第一个。
+     * 来源照这个写：`d = java.getElement(".list > div"); for (i = 0; i < d.length; i++) d.select(…)`。
+     * 从前只给第一个元素，`d.length` 是 undefined，循环一次都不跑 —— 凡人小说的目录、正文全空。
+     * 单个元素上常用的 `text()` / `attr()` / `select()` 在整组上照样能用（同 jsoup 的 Elements）。
+     */
+    fun getElement(rule: String): JsElements = getElements(rule)
 
     /** 同阅读给的是 Elements：`size()` / `get(i)` / `text()`，下标和 length 也认（见 BridgeWrapFactory） */
     fun getElements(rule: String): JsElements = content?.getElements(rule) ?: JsElements(emptyList())
@@ -831,8 +836,9 @@ class JavaBridge(
     fun androidId(): String = deviceId()
 
     /**
-     * 阅读给的是系统 WebView 的 UA；我们抓取、渲染一律用 [SourceHttpClient.DEFAULT_UA]（站点按 UA 给不同的页面，
-     * 规则是照同一份写的），这里也给它。header 脚本里 `"User-Agent": java.getWebViewUA()` 的来源（晋江、太极小说）靠它
+     * 阅读给的是系统 WebView 的 UA（手机的），不是它抓取默认发的桌面 UA；我们给同样是手机 Chrome 的
+     * [SourceHttpClient.DEFAULT_UA]。header 脚本里 `"User-Agent": java.getWebViewUA()` 的来源（晋江、太极小说）靠它，
+     * 要的就是手机那一套页面 —— 别改成来源的默认 UA
      */
     fun getWebViewUA(): String = SourceHttpClient.DEFAULT_UA
 

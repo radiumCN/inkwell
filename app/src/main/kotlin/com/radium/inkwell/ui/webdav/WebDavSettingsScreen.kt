@@ -114,7 +114,7 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
         // 配置还没读回来：先空着，别先画一遍「自备 WebDAV」再跳回「官方同步」
         if (!state.loaded) return@AppScaffold
         if (bookFiles != null) {
-            BookFilesContent(bookFiles, viewModel, Modifier.fillMaxSize().padding(padding))
+            BookFilesContent(bookFiles, viewModel, padding)
             return@AppScaffold
         }
         Column(

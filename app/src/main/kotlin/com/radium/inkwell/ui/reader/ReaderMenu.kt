@@ -322,11 +322,15 @@ fun ReaderMenu(
                                         AppMenuItem(
                                             text = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
                                             summary = when {
+                                                overlay.autoFlipping -> null
                                                 scrollMode -> "滚动模式不可用"
                                                 speechActive -> "结束朗读后可用"
                                                 else -> null
                                             },
-                                            enabled = !scrollMode && !speechActive && !pageUi.loading && pageUi.page != null,
+                                            // 只拦「开」：停是随时都得能点的。点正文不会停自动翻页，这里就是唯一的出口 ——
+                                            // 从前翻进一章加载中 / 读不出来的，这一项灰掉，自动翻页停不下来
+                                            enabled = overlay.autoFlipping ||
+                                                (!scrollMode && !speechActive && !pageUi.loading && pageUi.page != null),
                                             onClick = onToggleAutoFlip,
                                         ),
                                     )
@@ -338,7 +342,7 @@ fun ReaderMenu(
                                                     overlay.chapterRefreshFailed -> "重试获取本章"
                                                     else -> "重新获取本章"
                                                 },
-                                                summary = "从当前书源获取最新内容",
+                                                summary = "从当前来源获取最新内容",
                                                 enabled = !overlay.refreshingChapter && !overlay.changingSource &&
                                                     !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
                                                 onClick = onRefreshChapter,
@@ -1736,6 +1740,34 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
+    // 关掉的那一边，正文顺势占用那条带（见 buildLayoutSpec），按同一字符位置重排。
+    // 页脚关了电量就无从谈起：那一行收起来而不是变灰，再打开页脚时连同原来的开关状态一起回来
+    ReaderGroup("页眉页脚") {
+        SwitchRow(
+            title = "显示页眉",
+            subtitle = "正文上方的章节名",
+            checked = settings.showHeader,
+            onCheckedChange = { onUpdate(settings.copy(showHeader = it)) },
+            position = SettingGroupPosition.First,
+        )
+        SwitchRow(
+            title = "显示页脚",
+            subtitle = if (settings.showFooter) "正文下方的页码、进度和时间" else "已隐藏，正文向下多排一行左右",
+            checked = settings.showFooter,
+            onCheckedChange = { onUpdate(settings.copy(showFooter = it)) },
+            position = if (settings.showFooter) SettingGroupPosition.Middle else SettingGroupPosition.Last,
+        )
+        if (settings.showFooter) {
+            SwitchRow(
+                title = "页脚显示电量",
+                subtitle = "页脚右侧的电池图标",
+                checked = settings.showBattery,
+                onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
+                position = SettingGroupPosition.Last,
+            )
+        }
+    }
+
     // 本地书默认显示，在线书默认关闭；两个开关各自记忆，调整后按同一字符位置重排。
     ReaderGroup("图片") {
         SwitchRow(
@@ -1764,19 +1796,12 @@ private fun MoreTab(
     }
 
     ReaderGroup {
-        // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
+        // 常亮一直存在于 ReaderSettings 里，从前却**没有 UI 能改**（同批补上的电量开关挪进了上面的「页眉页脚」）
         SwitchRow(
             title = "阅读时保持屏幕常亮",
             checked = settings.keepScreenOn,
             onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
             position = SettingGroupPosition.First,
-        )
-        SwitchRow(
-            title = "页脚显示电量",
-            subtitle = "阅读页右下角的电池图标。关掉后仍显示页码、进度和时间",
-            checked = settings.showBattery,
-            onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
-            position = SettingGroupPosition.Middle,
         )
 
         // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨

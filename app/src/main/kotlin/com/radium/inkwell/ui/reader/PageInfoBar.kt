@@ -26,13 +26,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -41,12 +44,15 @@ import com.radium.inkwell.ui.components.Dimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 页眉章节名 + 页脚信息层。
  * 左下：章内页码；右下：全书进度百分比 · 时间 ·（可选）电池图标。
+ * 页眉、页脚各有开关（ReaderSettings.showHeader / showFooter）：关掉的那一边不画，
+ * 分页时那条带也让给了正文（buildLayoutSpec），这里画了就压在正文上。
  */
 @Composable
 fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec) {
@@ -57,14 +63,19 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
     }
     val footerStyle = pageInfoTextStyle()
     val footerNumStyle = remember(footerStyle) { footerStyle.copy(fontFeatureSettings = "tnum") }
-    val showBattery = session.settings.showBattery
+    val showHeader = session.settings.showHeader
+    val showFooter = session.settings.showFooter
+    // 页脚关了，电量也就不看了：连 BATTERY_CHANGED 都不注册
+    val showBattery = showFooter && session.settings.showBattery
 
     var time by remember { mutableStateOf(currentTime()) }
     // 关掉电量时连 sticky BATTERY_CHANGED 都不读，少一次系统广播。
     var battery by remember { mutableIntStateOf(if (showBattery) readBattery(context) else 100) }
 
-    // 整点/每分钟系统会发 TIME_TICK，不必自己 30s 轮询。
-    DisposableEffect(context) {
+    // 整点/每分钟系统会发 TIME_TICK，不必自己 30s 轮询。页脚关了就不听（时间只画在页脚上）
+    DisposableEffect(context, showFooter) {
+        if (!showFooter) return@DisposableEffect onDispose {}
+        time = currentTime()
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 time = currentTime()
@@ -109,44 +120,48 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
 
     Box(Modifier.fillMaxSize()) {
         // 页眉：章节名，落在正文上方的页眉带里
-        Text(
-            pageUi.chapterTitle,
-            Modifier
-                .align(Alignment.TopStart)
-                .padding(start = marginH, end = marginH, top = headerTop),
-            color = footerColor,
-            style = footerStyle,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (showHeader) {
+            Text(
+                pageUi.chapterTitle,
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = marginH, end = marginH, top = headerTop),
+                color = footerColor,
+                style = footerStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
 
         // 页脚：左页码、右「进度 · 时间 · 电量」，同一条基线
-        Row(
-            Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(start = marginH, end = marginH, bottom = footerBottom),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "${pageUi.pageInChapter + 1} / ${pageUi.pageCount}",
-                color = footerColor,
-                style = footerNumStyle,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${"%.1f".format(bookPercent)}%",
-                color = footerColor,
-                style = footerNumStyle,
-            )
-            Text(
-                "  ·  $time",
-                color = footerColor,
-                style = footerNumStyle,
-            )
-            if (showBattery) {
-                Spacer(Modifier.width(Dimens.gapS))
-                BatteryIndicator(level = battery, color = footerColor)
+        if (showFooter) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(start = marginH, end = marginH, bottom = footerBottom),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${pageUi.pageInChapter + 1} / ${pageUi.pageCount}",
+                    color = footerColor,
+                    style = footerNumStyle,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${"%.1f".format(bookPercent)}%",
+                    color = footerColor,
+                    style = footerNumStyle,
+                )
+                Text(
+                    "  ·  $time",
+                    color = footerColor,
+                    style = footerNumStyle,
+                )
+                if (showBattery) {
+                    Spacer(Modifier.width(Dimens.gapS))
+                    BatteryIndicator(level = battery, color = footerColor)
+                }
             }
         }
     }
@@ -167,40 +182,61 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
 @ReadOnlyComposable
 internal fun pageInfoTextStyle(): TextStyle = MiuixTheme.textStyles.footnote1.copy(lineHeight = 18.sp)
 
-/** 小电池图标：描边外框 + 正极触点 + 按电量填充 */
+/**
+ * 小电池图标：描边外框 + 正极触点 + 按电量填充。
+ *
+ * 几何都从外框推出来：填充块离外框内沿四边留一样宽的缝、圆角与外框同心，触点贴在外框右边。
+ * 从前填充块的宽另算了一遍，左边空 1.3dp、右边只剩 0.3dp，满电时像顶到了右边框上；
+ * 触点和外框之间还夹着半个 dp 的缝，抗锯齿后是一道发虚的细线，看着像画坏了（被指出过）。
+ * 线宽、缝宽、触点尺寸取整像素（画布本身由 Row 放在整像素上）：边都落在像素格上，不会一边实一边虚。
+ */
 @Composable
 private fun BatteryIndicator(level: Int, color: Color) {
     Canvas(Modifier.size(width = 20.dp, height = 10.dp)) {
-        val strokeWidth = 1.dp.toPx()
-        val tipWidth = 2.dp.toPx()
-        val bodyWidth = size.width - tipWidth - strokeWidth
-        val corner = CornerRadius(2.dp.toPx())
-        // 外框
+        fun snapPx(dp: Dp) = dp.toPx().roundToInt().coerceAtLeast(1).toFloat()
+        val stroke = snapPx(1.dp)
+        val gap = snapPx(1.dp)
+        val tipWidth = snapPx(1.5.dp)
+        val bodyWidth = size.width - tipWidth
+        // 外沿 3dp：往里减掉线宽与缝，填充块还剩 1dp 圆角；再小，填充块就成了直角，套在圆角框里发硬
+        val bodyRadius = 3.dp.toPx()
+        // 外框：描边以路径为中线，往里缩半个线宽，外沿才正好落在画布边上
         drawRoundRect(
             color = color,
-            topLeft = Offset(strokeWidth / 2, strokeWidth / 2),
-            size = Size(bodyWidth - strokeWidth, size.height - strokeWidth),
-            cornerRadius = corner,
-            style = Stroke(strokeWidth),
+            topLeft = Offset(stroke / 2, stroke / 2),
+            size = Size(bodyWidth - stroke, size.height - stroke),
+            cornerRadius = CornerRadius(bodyRadius - stroke / 2),
+            style = Stroke(stroke),
         )
-        // 正极
-        drawRoundRect(
+        // 正极：紧贴外框外沿，只圆右边两个角（左边圆了会在接缝处缺两个小口），上下留白取整、居中
+        val tipInset = ((size.height - 4.dp.toPx()) / 2).roundToInt().toFloat()
+        val tipRadius = CornerRadius(minOf(tipWidth, (size.height - tipInset * 2) / 2))
+        drawPath(
+            Path().apply {
+                addRoundRect(
+                    RoundRect(
+                        left = bodyWidth,
+                        top = tipInset,
+                        right = size.width,
+                        bottom = size.height - tipInset,
+                        topRightCornerRadius = tipRadius,
+                        bottomRightCornerRadius = tipRadius,
+                    ),
+                )
+            },
             color = color,
-            topLeft = Offset(bodyWidth + strokeWidth / 2, size.height * 0.3f),
-            size = Size(tipWidth, size.height * 0.4f),
-            cornerRadius = CornerRadius(1.dp.toPx()),
         )
-        // 电量填充
-        val inset = strokeWidth * 1.8f
-        val fillMax = bodyWidth - strokeWidth - inset * 2 + strokeWidth
+        // 电量填充：四边离外框内沿都是 gap
+        val fillInset = stroke + gap
+        val fillMax = bodyWidth - fillInset * 2
         drawRoundRect(
             color = color,
-            topLeft = Offset(strokeWidth / 2 + inset, strokeWidth / 2 + inset),
+            topLeft = Offset(fillInset, fillInset),
             size = Size(
                 (fillMax * level.coerceIn(0, 100) / 100f).coerceAtLeast(1f),
-                size.height - strokeWidth - inset * 2,
+                size.height - fillInset * 2,
             ),
-            cornerRadius = CornerRadius(1.dp.toPx()),
+            cornerRadius = CornerRadius((bodyRadius - fillInset).coerceAtLeast(0f)),
         )
     }
 }

@@ -11,6 +11,12 @@ import org.mozilla.javascript.ScriptableObject
 
 internal const val LOGIN_SCOPE_BINDING = "_inkwellLoginScope"
 
+/**
+ * 读到才算的绑定：脚本第一次读这个变量时才调 [compute]，之后读同一个值；脚本给它赋值就换成赋的值。
+ * 给算起来要花工夫、多数脚本又不读的变量用（`src`：列表里每一项都要序列化一遍，见 RuleEvaluator.runJs）
+ */
+class LazyBinding(val compute: () -> Any?)
+
 /** JS 规则执行器抽象；不注入时含 js: 规则的求值会明确报不支持 */
 interface ScriptRuntime {
     /**
@@ -230,8 +236,25 @@ class RhinoScriptRuntime(
                 it.parentScope = null
             }
             bindings.forEach { (name, value) ->
-                if (name != LOGIN_SCOPE_BINDING) {
-                    holder.put(name, holder, if (value is ScriptJson) jsonValue(cx, holder, value) else Context.javaToJS(value, holder))
+                when {
+                    name == LOGIN_SCOPE_BINDING -> Unit
+                    value is LazyBinding -> {
+                        var cached: Any? = null
+                        var ready = false
+                        (holder as ScriptableObject).defineProperty(
+                            name,
+                            {
+                                if (!ready) {
+                                    cached = Context.javaToJS(value.compute(), holder)
+                                    ready = true
+                                }
+                                cached
+                            },
+                            { assigned -> cached = assigned; ready = true },
+                            ScriptableObject.EMPTY,
+                        )
+                    }
+                    else -> holder.put(name, holder, if (value is ScriptJson) jsonValue(cx, holder, value) else Context.javaToJS(value, holder))
                 }
             }
             val loginScope = bindings[LOGIN_SCOPE_BINDING] as? String

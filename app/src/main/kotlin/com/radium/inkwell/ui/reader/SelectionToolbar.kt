@@ -49,12 +49,16 @@ import com.radium.inkwell.ui.components.smallGlassHighlight
  *
  * 位置由调用方根据手柄位置决定，避免挡住可拖动的边界。
  *
+ * 选区跨了段（[canPurify] = false）就只剩「复制」：净化规则逐段匹配，带换行的原文删不掉也换不了，
+ * 留着两个按钮点了只会建出一条永远不生效的规则。
+ *
  * @param replacePreview 原文 → 本章的命中数与预览，见 [ReplaceTextDialog]
  * @param onReplace (原文, 换成)；换成为空就是删掉
  */
 @Composable
 internal fun SelectionToolbar(
     selectedText: String,
+    canPurify: Boolean,
     onCopy: () -> Unit,
     onStepBoundary: (SelectionEnd, Boolean) -> Boolean,
     onPurify: () -> Unit,
@@ -99,8 +103,10 @@ internal fun SelectionToolbar(
                 },
             )
             // 最常用的动作：把这句话从本书里删掉
-            IconLabelButton(MiuixIcons.Clear, "删除", onPurify)
-            IconLabelButton(MiuixIcons.Replace, "替换", { replacing = true })
+            if (canPurify) {
+                IconLabelButton(MiuixIcons.Clear, "删除", onPurify)
+                IconLabelButton(MiuixIcons.Replace, "替换", { replacing = true })
+            }
         }
     }
 

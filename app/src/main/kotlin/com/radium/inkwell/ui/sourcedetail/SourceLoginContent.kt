@@ -24,7 +24,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewCompat
-import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.SourceLoginField
 import com.radium.inkwell.core.source.SourceLoginForm
 import com.radium.inkwell.data.source.WebViewNetworkGuard
@@ -34,16 +33,19 @@ import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
-import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppFormField
+import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.ToolbarTitle
 import org.json.JSONTokener
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -122,9 +124,10 @@ internal fun SourceLoginBrowser(
             AppToolbar(
                 navigationIcon = { BackButton(onBack) },
                 actions = {
-                    AppTextButton("完成", enabled = ready, onClick = {
-                        val view = webView ?: return@AppTextButton
-                        val url = view.url ?: return@AppTextButton
+                    // 栏里只放图标按钮（文字按钮会被装进玻璃胶囊）：「完成」是一枚勾
+                    AppIconButton(enabled = ready, onClick = {
+                        val view = webView ?: return@AppIconButton
+                        val url = view.url ?: return@AppIconButton
                         val origin = url.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
                         val initialOrigin = page.url.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
                         val approved = origin != null && (origin == initialOrigin || origin == page.returnOrigin)
@@ -138,7 +141,9 @@ internal fun SourceLoginBrowser(
                                 }
                             }
                         }
-                    })
+                    }) {
+                        Icon(MiuixIcons.Basic.Check, contentDescription = "完成")
+                    }
                 },
                 title = { ToolbarTitle(host.ifEmpty { page.title.ifBlank { "来源登录" } }) },
             )
@@ -155,7 +160,8 @@ internal fun SourceLoginBrowser(
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    settings.userAgentString = SourceHttpClient.DEFAULT_UA
+                    // 和抓取同一个 UA：阅读导入的来源发桌面 UA，这里也得是它，登录拿到的会话抓取时才认
+                    settings.userAgentString = page.userAgent
                     webViewClient = object : WebViewClient() {
                         private val guard = WebViewNetworkGuard()
 

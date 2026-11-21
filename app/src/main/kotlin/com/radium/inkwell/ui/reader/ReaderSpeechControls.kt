@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -52,6 +50,7 @@ import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Pause
 import top.yukonga.miuix.kmp.icon.extended.Play
@@ -110,7 +109,7 @@ internal fun ReaderSpeechSheet(
     val back: () -> Unit = {
         page = if (page == SpeechPanel.VOICES) SpeechPanel.SETTINGS else SpeechPanel.CONTROLS
     }
-    AppBottomSheet(onDismissRequest = onDismiss, enableWindowDim = false) {
+    AppBottomSheet(onDismissRequest = onDismiss) {
         val panelHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
         SheetPages(
             page = page,
@@ -132,7 +131,7 @@ internal fun ReaderSpeechSheet(
                             fontWeight = FontWeight.Medium,
                         )
                         AppIconButton(onClick = { dismiss {} }, modifier = Modifier.align(Alignment.CenterEnd)) {
-                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "收起朗读面板")
+                            Icon(MiuixIcons.ExpandMore, contentDescription = "收起朗读面板")
                         }
                     }
                 } else {

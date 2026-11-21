@@ -19,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
  *
  * 我们的脚本沙箱只放行桥对象所在的包（[RhinoScriptRuntime.BRIDGE_ONLY]），`Packages`、`JavaImporter` 根本不存在，
  * 这类来源的正文一律是空的。**不放宽沙箱**：真把 JDK 类交给脚本，`getClass()`、反射、`Runtime` 的口子就又开了。
- * 改成在这个包里照 JDK 的样子写几样**纯计算**的替身 —— Base64、Arrays、String、Cipher 和三种密钥 / 参数规格、MessageDigest、Inflater、Thread.sleep，
+ * 改成在这个包里照 JDK 的样子写几样**纯计算**的替身 —— Base64、Arrays、ArrayList、String、Cipher 和三种密钥 / 参数规格、MessageDigest、Inflater、Thread.sleep，
  * 方法名、参数照 JDK，脚本不用改；真正的 JDK 对象都攥在这些类的私有字段里，不交给脚本。
  * 阅读跑在 Android 上，另有一批来源（连城读书、书耽、柚免费耽美……）导的是 `Packages.android.util`，
  * Base64 用的是 Android 那套 `decode(字节, 2)` / `encodeToString(字节, NO_WRAP)`，也照它做了（[AndroidBase64]）。
@@ -180,6 +180,29 @@ class JdkCompat {
     copyOfRange: function (a, from, to) { return jdk.copyOfRange(a, from, to); },
     copyOf: function (a, n) { return jdk.copyOf(a, n); }
   });
+  // java.util.ArrayList：来源拿它攒一组结果、整个交回去（星辰小说的书单、蓝海搜书的目录）。
+  // 给的就是一个 JS 数组，列表规则本来就认；再挂上 Java 那几个方法，挂成不可枚举的 —— `for (i in list)` 不会把方法也走一遍。
+  // 从前没有它：`new Packages.java.util.ArrayList()` 是「undefined 不是函数」，整段脚本作废，书单、目录一条都没有
+  function jlist(a) {
+    var m = {
+      add: function (i, x) { if (arguments.length > 1) this.splice(i, 0, x); else this.push(i); return true; },
+      addAll: function (c) { if (c) for (var k = 0; k < c.length; k++) this.push(c[k]); return true; },
+      size: function () { return this.length; },
+      get: function (i) { return this[i]; },
+      set: function (i, x) { var old = this[i]; this[i] = x; return old; },
+      isEmpty: function () { return this.length === 0; },
+      contains: function (x) { return this.indexOf(x) >= 0; },
+      clear: function () { this.length = 0; },
+      toArray: function () { return this.slice(); }
+    };
+    for (var k in m) Object.defineProperty(a, k, { value: m[k], enumerable: false, writable: true });
+    return a;
+  }
+  var AList = cls('ArrayList', function (init) {
+    var a = jlist([]);
+    if (init != null && typeof init !== 'number' && typeof init.length === 'number') a.addAll(init);
+    return a;
+  });
   var Ciph = cls('Cipher', null, {
     getInstance: function (t) { return jdk.cipher(String(t)); },
     ENCRYPT_MODE: 1, DECRYPT_MODE: 2, WRAP_MODE: 3, UNWRAP_MODE: 4
@@ -215,7 +238,7 @@ class JdkCompat {
   var TxtNode = cls('TextNode', function (t) { return jdk.jsoupTextNode(str(t)); });
   var Elem = cls('Element', function (tag) { return jdk.jsoupElement(String(tag)); });
   var pkgs = {
-    java: { lang: { String: Str, Thread: Thr }, util: { Base64: B64, Arrays: Arr, zip: { Inflater: Infl } }, security: { MessageDigest: Md },
+    java: { lang: { String: Str, Thread: Thr }, util: { Base64: B64, Arrays: Arr, ArrayList: AList, zip: { Inflater: Infl } }, security: { MessageDigest: Md },
       net: { URLEncoder: UrlEnc, URLDecoder: UrlDec } },
     javax: { crypto: { Cipher: Ciph, spec: { SecretKeySpec: Key, IvParameterSpec: Iv, GCMParameterSpec: Gcm } } },
     android: { util: { Base64: B64 } },

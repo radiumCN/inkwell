@@ -55,6 +55,8 @@ internal class ReaderSpeechService : Service() {
     private var selectedVoice: Voice? = null
     private var loadJob: Job? = null
     private var timerJob: Job? = null
+    /** 暂停太久就收场（见 [pause]） */
+    private var pausedJob: Job? = null
     private var failedTarget: Pair<Int, Int>? = null
     private var resumeAfterLoad = true
     private var utteranceSequence = 0L
@@ -243,6 +245,7 @@ internal class ReaderSpeechService : Service() {
             SpeechStatus.NO_VOICE -> { retryVoice(); return }
             else -> Unit
         }
+        pausedJob?.cancel()
         if (!enterForeground()) return
         val current = owner ?: return
         val target = failedTarget
@@ -261,7 +264,14 @@ internal class ReaderSpeechService : Service() {
         stopUtterance()
         releaseFocus()
         publish(state.copy(status = SpeechStatus.PAUSED))
-        leaveForeground()
+        // 暂停时留在前台，同媒体 App：出了前台就是个普通后台服务，App 退到后台一分钟左右就被系统收掉 ——
+        // onDestroy 清掉朗读状态，通知、锁屏控件一起没了，回来想继续都没处点。继续时也不用再从后台进前台（Android 12 起会被拒）。
+        // 也不一直挂着：暂停超过 PAUSED_TIMEOUT_MS 就当是不听了，记下位置、收掉通知
+        pausedJob?.cancel()
+        pausedJob = scope.launch {
+            delay(PAUSED_TIMEOUT_MS)
+            finishPlayback()
+        }
     }
 
     fun step(direction: Int) {
@@ -462,6 +472,7 @@ internal class ReaderSpeechService : Service() {
     private fun resetEngine() {
         loadJob?.cancel()
         timerJob?.cancel()
+        pausedJob?.cancel()
         failedTarget = null
         resumeAfterLoad = true
         stopUtterance()
@@ -585,6 +596,8 @@ internal class ReaderSpeechService : Service() {
 
     companion object {
         private const val ART_SIZE_PX = 128
+        /** 暂停多久算不听了：够接个电话、吃顿饭 */
+        private const val PAUSED_TIMEOUT_MS = 30 * 60 * 1000L
         private const val CHANNEL = "reader_read_aloud"
         private const val NOTIFICATION = 20261120
         private const val START = "reader.tts.START"

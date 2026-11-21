@@ -28,6 +28,16 @@ data class ReaderSettings(
      * 关掉只少一个图标，页码和时间还在。
      */
     val showBattery: Boolean = true,
+    /**
+     * 正文上方画不画章节名（页眉）。关掉后页眉那条带让给正文（buildLayoutSpec 里带高给 0），约多排一行；
+     * 「头部留白」照旧，正文顶端仍然避开挖孔。默认开。
+     */
+    val showHeader: Boolean = true,
+    /**
+     * 正文下方画不画「页码 · 进度 · 时间 · 电量」（页脚）。关掉后页脚那条带让给正文，「下边距」照旧；
+     * [showBattery] 这时不起作用（设置里那一行也收起来）。默认开。
+     */
+    val showFooter: Boolean = true,
     val volumeKeyFlip: Boolean = true,
     /**
      * 翻页时震一下。**默认关** —— 读小说是连续翻页，每页都震很烦，而且费电。

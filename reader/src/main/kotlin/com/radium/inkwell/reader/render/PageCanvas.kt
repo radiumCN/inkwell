@@ -90,7 +90,7 @@ fun DrawScope.drawPageItems(
                 val handle = page.measured[item.elementIndex]?.renderHandle as? TextLayoutResult
                     ?: return@forEach
                 // 高亮先画，文字后画 —— 否则半透明的色块会盖在字上
-                if (selection != null && selection.elementIndex == item.elementIndex) {
+                if (selection != null && selection.covers(item.elementIndex)) {
                     drawSelection(
                         handle, item, selection,
                         left = contentLeft, top = originY,
@@ -242,6 +242,7 @@ fun renderPageBitmap(
 /**
  * 选区高亮。用与 drawTextSlice 完全相同的 translate + clipRect ——
  * 差一点点，色块就会飘到字的上方或糊到相邻页去。
+ * 跨段选区：起点那段从起点亮到段尾、终点那段从段首亮到终点，中间的段整段亮（clip 只留本页的行）。
  */
 private fun DrawScope.drawSelection(
     layoutResult: TextLayoutResult,
@@ -252,8 +253,8 @@ private fun DrawScope.drawSelection(
     color: Color,
 ) {
     val len = layoutResult.layoutInput.text.length
-    val start = selection.start.coerceIn(0, len)
-    val end = selection.end.coerceIn(start, len)
+    val start = (if (slice.elementIndex == selection.elementIndex) selection.start else 0).coerceIn(0, len)
+    val end = (if (slice.elementIndex == selection.endElementIndex) selection.end else len).coerceIn(start, len)
     if (end <= start) return
     val sliceTopInParagraph = layoutResult.getLineTop(slice.startLine)
     translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {

@@ -112,8 +112,13 @@ fun PageFlipContainer(
     /** 点击分区：哪一格翻上一页、下一页、开菜单。见 [TapZones] */
     tapZones: TapZones = TapZones.DEFAULT,
     modifier: Modifier = Modifier,
-    /** 长按选中的文字；只在静止态（没在翻页）才可能非空 */
+    /** 长按选中的文字；只在静止态（没在翻页）才可能非空。非空时不接程序化翻页 */
     selection: TextSelection? = null,
+    /**
+     * 只画不拦的高亮（朗读到的那一段）。和 [selection] 分开：从前朗读高亮也从 selection 传进来，
+     * 被当成「正在选字」，菜单上滑动翻页、音量键这些程序化翻页全被拦下
+     */
+    highlight: TextSelection? = null,
     /**
      * 点在当前页的一张图上（含没取到的那条提示）。返回 true = 这一下处理掉了（点提示条重试），不再翻页 / 开菜单；
      * 点在真图上照旧按点击分区走，由调用方返回 false。
@@ -558,19 +563,20 @@ fun PageFlipContainer(
                 }
             },
     ) {
+        val painted = selection ?: highlight
         when (effectiveAnim) {
             // 滚动模式根本不该走到这里 —— 它是另一条渲染路径，由 ReaderScreen 分流。
             // 万一走到了（比如设置迁移遗漏），静态画当前页，总好过崩溃或白屏。
             FlipAnimation.NONE, FlipAnimation.SCROLL ->
-                PageCanvas(shownCurrent, layout, theme, selection = selection)
+                PageCanvas(shownCurrent, layout, theme, selection = painted)
             FlipAnimation.SLIDE -> SlideLayers(
-                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.COVER -> CoverLayers(
-                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.CURL -> CurlLayer(
-                selection = selection,
+                selection = painted,
                 current = shownCurrent, prev = shownPrev, next = shownNext,
                 // heldPages 只有两页。预渲染跟随真实邻页，避免短暂的空槽淘汰仍可复用的位图。
                 request = CurlRequest(current, prev, next, layout, theme, density),

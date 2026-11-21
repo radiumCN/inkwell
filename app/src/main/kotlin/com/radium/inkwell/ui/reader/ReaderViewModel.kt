@@ -1044,12 +1044,13 @@ class ReaderViewModel(
     }
 
     fun toggleAutoFlip() {
-        if (speech.state.value.active || _state.value.settings.flipAnimation == FlipAnimation.SCROLL) return
         trace("auto_flip.toggle", "was_active" to _state.value.autoFlipping)
+        // 停在前面：停是任何时候都得停得下来的，只有「开」才看朗读、滚动模式
         if (_state.value.autoFlipping) {
             stopAutoFlip()
             return
         }
+        if (speech.state.value.active || _state.value.settings.flipAnimation == FlipAnimation.SCROLL) return
         _state.value = _state.value.copy(autoFlipping = true, menuVisible = false)
         autoFlipJob = viewModelScope.launch {
             while (true) {
@@ -1206,7 +1207,7 @@ class ReaderViewModel(
                 engineMutex.withLock {
                     // 抓取期间可能换源或插章：不把旧请求的结果写到新会话里。
                     if (source !== src || tocGeneration != generation || sourceChanging) {
-                        messageBus.emit("书源或目录已变化，请重新获取本章")
+                        messageBus.emit("来源或目录已变化，请重新获取本章")
                         return@withLock
                     }
                     stopPrefetch()

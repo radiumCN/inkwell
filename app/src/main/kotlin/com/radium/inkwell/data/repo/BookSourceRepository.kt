@@ -123,7 +123,7 @@ class BookSourceRepository(
             rules = unique,
             added = unique.size - updates,
             updated = updates,
-            skipped = if (duplicates == 0) skipped else skipped + List(duplicates) { "重复书源地址" },
+            skipped = if (duplicates == 0) skipped else skipped + List(duplicates) { "重复来源地址" },
         )
     }
 

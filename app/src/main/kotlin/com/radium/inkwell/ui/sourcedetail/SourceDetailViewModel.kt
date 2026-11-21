@@ -54,6 +54,8 @@ data class SourceDetailUiState(
 
 data class SourceLoginBrowserPage(
     val url: String, val title: String, val requireCookies: Boolean, val profile: String, val returnOrigin: String?,
+    /** 登录网页的 UA：和抓取这个来源发的同一个（BookSourceEngine.userAgentOf） */
+    val userAgent: String,
 )
 
 class SourceDetailViewModel internal constructor(
@@ -178,10 +180,13 @@ class SourceDetailViewModel internal constructor(
                 messages.emit("请更新 Android 系统 WebView 后再打开登录网页")
                 return@withContext null
             }
+            val userAgent = engine.userAgentOf(source)
             val result = CompletableDeferred<StrResponse?>()
             browserResult = result
             val returnOrigin = source.baseUrl.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
-            val page = SourceLoginBrowserPage(target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin)
+            val page = SourceLoginBrowserPage(
+                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent,
+            )
             _state.update { it.copy(loginBrowser = page) }
             try {
                 result.await()

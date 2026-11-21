@@ -493,10 +493,22 @@ class SourceHttpClient(
         /**
          * 书源规则是照着这个 UA 抓到的页面写的，JS 渲染器必须沿用同一个，否则站点可能
          * 按 UA 给出另一套 DOM（创世中文网就会在移动 UA 下跳转到 m. 站），规则随即全部落空。
+         *
+         * 这是**我们自己**的 UA：「新建来源」的向导、登录网页之外的非来源请求用它，向导识别规则时看的就是这一套页面。
+         * 从阅读导入、自己没写 User-Agent 的来源发的是 [LEGADO_UA]，见 BookSourceRule.defaultUserAgent
          */
         const val DEFAULT_UA =
             "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+        /**
+         * 阅读（Legado）在来源没写 User-Agent 时发的 UA：Windows 桌面版 Chrome（AppConfig.getPrefUserAgent，
+         * 版本号是它打包的 Cronet 主版本）。阅读的来源作者照着这一套页面写规则：发手机 UA 的话，站点跳去手机站、
+         * 给新版页面，规则对不上 —— 若夏的目录、瀚海书阁的详情、久久小说的搜索就是这么空的。
+         */
+        const val LEGADO_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
         private val RETRY_CODES = setOf(403, 429)
         private const val MAX_RETRIES = 2

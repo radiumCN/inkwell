@@ -3,6 +3,7 @@ package com.radium.inkwell.core.source.js
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.parseHeaderJson
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -56,16 +57,32 @@ class EngineJsHttp(
         sourceId: String?,
         loginHeaderNames: () -> Set<String>,
         allowsLoginOrigin: (String) -> Boolean,
+        userAgent: () -> String? = { null },
     ): CoroutineContext = parentJob.asContextElement(job) +
-        currentSource.asContextElement(SourceScope(sourceId, loginHeaderNames, allowsLoginOrigin))
+        currentSource.asContextElement(SourceScope(sourceId, loginHeaderNames, allowsLoginOrigin, userAgent))
 
     private data class SourceScope(
         val id: String?,
         val loginHeaderNames: () -> Set<String> = { emptySet() },
         val allowsLoginOrigin: (String) -> Boolean = { true },
+        /**
+         * 脚本请求没写 User-Agent 时发的：和这个来源的页面请求同一个 UA（见 BookSourceEngine.engineIo）。
+         * 同阅读：`java.ajax` 带着来源的请求头发，`java.get` / `post` 走 Jsoup、默认也是桌面 UA。
+         * 从前一律落到 SourceHttpClient 的手机 UA，同一个来源，页面是一套、脚本请求是另一套。交回 null = 不管（订阅源）。
+         * 是个函数：要跑请求头脚本才算得出来，没有脚本请求的调用就不算
+         */
+        val userAgent: () -> String? = { null },
     ) {
         val observedLoginHeaderNames: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        /** 这一次引擎调用里脚本发出去的请求数，见 [requestCount] */
+        val requests = AtomicInteger()
     }
+
+    /**
+     * 这一次引擎调用里，脚本到目前为止发出去的请求数（java.ajax、Jsoup 替身、ajaxAll 都算）。
+     * 正文抓页失败后放脚本兜底时，引擎拿它判断脚本是不是真自己取了正文（见 BookSourceEngine.collectContent）
+     */
+    internal fun requestCount(): Int = currentSource.get()?.requests?.get() ?: 0
 
     // 交互登录脚本可能在会话正式保存前就用新请求头做校验。
     internal fun rememberLoginHeaders(header: String) {
@@ -145,9 +162,15 @@ class EngineJsHttp(
         val credentialHeaders = scopedHeaders.keys.filterTo(mutableSetOf()) { name ->
             name in persisted || AUTH_HEADER_NAMES.any { it.equals(name, ignoreCase = true) }
         }
+        scope?.requests?.incrementAndGet()
+        val sent = if (scope == null || scopedHeaders.keys.any { it.equals("User-Agent", ignoreCase = true) }) {
+            scopedHeaders
+        } else {
+            scope.userAgent()?.let { scopedHeaders + ("User-Agent" to it) } ?: scopedHeaders
+        }
         // 4xx/5xx 也要交给脚本看 statusCode，不能在这儿抛成 ajax 空串
         val page = http.fetch(
-            url, method = method, body = body, headers = scopedHeaders,
+            url, method = method, body = body, headers = sent,
             throwOnHttpError = false,
             followRedirects = followRedirects,
             sourceId = scope?.id,

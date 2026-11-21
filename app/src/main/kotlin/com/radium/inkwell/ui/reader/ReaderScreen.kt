@@ -649,7 +649,9 @@ fun ReaderScreen(
                             onCenterTap = { viewModel.toggleMenu() },
                             controller = flipController,
                             tapZones = session.settings.tapZones,
-                            selection = selection ?: speechSelection,
+                            selection = selection,
+                            // 朗读到的那一段只画不拦：传进 selection 会被当成在选字，菜单上滑动翻页没反应
+                            highlight = speechSelection,
                             onImageTap = onImageTap,
                         )
                         PageInfoBar(pageUi, session, layout)
@@ -787,7 +789,7 @@ fun ReaderScreen(
 
         selection?.let { sel ->
             val header = layout?.let { with(density) { (it.marginTopPx + it.headerHeightPx).toDp() } } ?: 0.dp
-            val toolbarSpace = 96.dp
+            val toolbarSpace = Dimens.selectionToolbarClearance
             val closeToTop = selectionHandles.values.any { with(density) { it.anchor.y.toDp() } < header + toolbarSpace }
             val closeToBottom = selectionHandles.values.any {
                 with(density) { (viewport.height - it.anchor.y).toDp() } < hintBottom + toolbarSpace
@@ -799,6 +801,7 @@ fun ReaderScreen(
             }
             SelectionToolbar(
                 selectedText = sel.text,
+                canPurify = sel.isSingleParagraph,
                 onStepBoundary = step@{ edge, forward ->
                     val active = selection ?: return@step false
                     val updated = pageUi.page?.stepSelectionEnd(active, edge, forward) ?: return@step false
@@ -943,7 +946,7 @@ fun ReaderScreen(
 }
 
 /** 挖孔的四边留白，单位 px。只是个不带 Android 类型的小载体，方便比较相等。 */
-private data class IntInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
+internal data class IntInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
 /**
  * 同步读窗口当前的挖孔 inset。
@@ -962,7 +965,7 @@ private fun rootDisplayCutout(view: android.view.View): IntInsets {
     return IntInsets(insets.left, insets.top, insets.right, insets.bottom)
 }
 
-private fun buildLayoutSpec(
+internal fun buildLayoutSpec(
     viewport: IntSize,
     settings: ReaderSettings,
     density: androidx.compose.ui.unit.Density,
@@ -989,8 +992,11 @@ private fun buildLayoutSpec(
         //
         // 页眉页脚的字走排版令牌（footnote1，见 pageInfoTextStyle），会跟着系统字号放大：放大到行高
         // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 18sp，两条带仍是 26/18dp，排版不变。
-        headerHeightPx = maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()),
-        footerHeightPx = maxOf(18.dp.toPx(), infoLinePx),
+        //
+        // 页眉 / 页脚关掉了，那条带就给 0：正文顶到头部留白 / 下边距为止，多排出一行左右（同阅读）。
+        // 边距不跟着收 —— 头部留白里折着挖孔，收了正文就钻到摄像头底下
+        headerHeightPx = if (settings.showHeader) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
+        footerHeightPx = if (settings.showFooter) maxOf(18.dp.toPx(), infoLinePx) else 0f,
         fontSizePx = fontSizePx,
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,

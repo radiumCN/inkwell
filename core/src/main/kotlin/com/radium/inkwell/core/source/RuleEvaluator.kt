@@ -167,6 +167,8 @@ class RuleEvaluator(
     fun evalToNodes(node: RuleNode, ctx: EvalContext): List<EvalContext> = when (node) {
         is RuleNode.Legado -> bareJsonPath(node.rule, ctx)
             ?.let { path -> evalToNodes(LegadoRuleAnalyzer.analyzeAsJson(node.rule) ?: RuleNode.JsonPath(path), ctx) }
+            ?: implicitXPath(node.rule, ctx)
+                ?.let { path -> xpathNodes(withGetVars(path, ctx), ctx).map { ctx.copy(element = it, json = null) } }
             ?: ctx.element
                 ?.let { LegadoSelector.elements(it, withGetVars(node.rule, ctx)) }
                 ?.map { ctx.copy(element = it, json = null) }
@@ -178,7 +180,7 @@ class RuleEvaluator(
             else -> listOf(ctx.copy(element = null, json = r))
         }
         is RuleNode.RegexRule ->
-            regexExtract(node.pattern, ctx).map { ctx.copy(element = null, json = it) }
+            regexMatches(node.pattern, ctx).map { ctx.copy(element = null, json = RegexGroups(it)) }
         is RuleNode.Literal ->
             expandTemplate(node.template, ctx)
                 .takeIf { it.isNotBlank() }
@@ -331,7 +333,7 @@ class RuleEvaluator(
 
     /** 求值为字符串列表；空串结果被丢弃 */
     fun evalToStrings(node: RuleNode, ctx: EvalContext): List<String> = when (node) {
-        is RuleNode.Legado -> {
+        is RuleNode.Legado -> regexGroupRule(node.rule, ctx) ?: run {
             val resolved = withGetVars(node.rule, ctx)
             // `@get:{n}` 整段就是取值（init 里 @put 之后的 name/author 常这么写）。
             // 代入后再当选择器会去找名为「魔道修真」的标签，必然空。
@@ -339,13 +341,17 @@ class RuleEvaluator(
                 if (resolved.isEmpty()) emptyList() else listOf(resolved)
             } else {
                 bareJsonPath(node.rule, ctx)?.let { path ->
-                    LegadoRuleAnalyzer.analyzeAsJson(node.rule)?.let { evalToStrings(it, ctx) } ?: jsonToStrings(readJsonPath(path, ctx))
+                    expandInnerJson(node.rule, ctx)?.let { listOf(it) }
+                        ?: LegadoRuleAnalyzer.analyzeAsJson(node.rule)?.let { evalToStrings(it, ctx) }
+                        ?: jsonToStrings(readJsonPath(path, ctx))
                 }
+                    ?: implicitXPath(node.rule, ctx)?.let { xpathStrings(resolved, ctx) }
                     ?: ctx.element?.let { LegadoSelector.strings(it, resolved) }.orEmpty()
             }
         }
         is RuleNode.XPath -> xpathStrings(node.path, ctx)
-        is RuleNode.JsonPath -> jsonToStrings(readJsonPath(node.path, ctx))
+        is RuleNode.JsonPath -> expandInnerJson(node.path, ctx)?.let { listOf(it) }
+            ?: jsonToStrings(readJsonPath(node.path, ctx))
         is RuleNode.RegexRule -> regexExtract(node.pattern, ctx)
         is RuleNode.Literal ->
             expandTemplate(node.template, ctx).let { if (it.isEmpty()) emptyList() else listOf(it) }
@@ -361,6 +367,56 @@ class RuleEvaluator(
             node.ops.fold(evalToStrings(node.source, ctx)) { acc, op -> applyOp(op, acc, ctx) }
                 .filter { it.isNotEmpty() }
     }
+
+    /**
+     * JSON 内容上的单花括号内嵌规则 `{$.x}`：`/books?bookId={$.bookId}`、
+     * `https://…/{$.bookId}_{$.chapterId}.txt?md5={$.content_md5}`、`@json:{$.classname}`。
+     * 同 Legado 的 AnalyzeByJSonPath.getString：先把每处 `{$.…}` 换成它的值，值为空的那处原样留着；
+     * 一处都没换成功返回 null，调用方再把整条规则当 JSONPath 读。
+     *
+     * 从前只认双花括号 `{{$.x}}`：这种写法被当成 Jsoup 选择器拿去选 JSON，书的地址、章节地址全空 ——
+     * 悦读、红薯、米读看书这几个接口源一本书都搜不到、目录一章都没有。只在 JSON 上下文里展开，同 Legado（HTML 页面上不认）。
+     */
+    private fun expandInnerJson(rule: String, ctx: EvalContext): String? {
+        var at = rule.indexOf("{$.")
+        if (at < 0) return null
+        val out = StringBuilder()
+        var from = 0
+        while (at >= 0) {
+            val close = closingBrace(rule, at)
+            if (close < 0) break
+            val value = nestedJsonRule(rule.substring(at + 1, close), ctx)
+            if (value.isNotEmpty()) {
+                out.append(rule, from, at).append(value)
+                from = close + 1
+            }
+            at = rule.indexOf("{$.", if (value.isNotEmpty()) from else at + 3)
+        }
+        if (from == 0) return null
+        return out.append(rule, from, rule.length).toString()
+    }
+
+    /** 从 `{`（下标 open）起按花括号配对找到匹配的 `}`；JSONPath 过滤器里的 `{…}` 一并计入。找不到返回 -1 */
+    private fun closingBrace(s: String, open: Int): Int {
+        var depth = 0
+        for (i in open until s.length) {
+            when (s[i]) {
+                '{' -> depth++
+                '}' -> if (--depth == 0) return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * 不带前缀、以单个 `/` 开头的规则是 XPath（`/a/p[1]/text()`、`/a/@href`，相对当前条目），同 Legado 的判定顺序：
+     * 内容是 JSON 的先走 JSONPath（[bareJsonPath] 在前面），其次 `/` 开头的走 XPath，剩下的才是 Jsoup。
+     * `//` 开头的分析阶段就认成了 [RuleNode.XPath]，到不了这里。
+     *
+     * 从前只认 `//`：单斜杠的整条交给 Jsoup，选择器没有以 `/` 开头的写法，一律空 —— 飘天文学搜到十本、书名书链全空。
+     */
+    private fun implicitXPath(rule: String, ctx: EvalContext): String? =
+        rule.takeIf { ctx.element != null && it.startsWith("/") }
 
     /**
      * 模板里的 JSONPath 规则（`{{$.recommend_count||$.booknum}}`、`{{$.tags[*]##\n##•}}`）：照 Legado 的 getString
@@ -511,6 +567,32 @@ class RuleEvaluator(
 
     // ---- regex ----
 
+    /**
+     * 列表规则是整体正则（`:href="(/book/[^"]+)"[^>]*>([^<]+)`，阅读的 AllInOne）：每个匹配一项，**全部分组**都留着，
+     * 字段规则用 `$1` `$2` 取（[regexGroupRule]）。从前每项只留第 1 组的文字，`$2` 一律取空 ——
+     * 爱丽丝书屋、978 小说的目录有上千项，书名全是空的，一章都没有。
+     */
+    private fun regexMatches(pattern: String, ctx: EvalContext): List<List<String>> {
+        val target = contextText(ctx)
+        if (target.isEmpty()) return emptyList()
+        val regex = runCatching { regexOf(pattern) }.getOrElse { return emptyList() }
+        return withRegexBudget(pattern, emptyList()) {
+            regex.findAll(guarded(target)).map { it.groupValues }.toList()
+        }
+    }
+
+    /**
+     * 整体正则列表里的一项（[regexMatches]）上，带 `$1` `$2`（一到两位数字）的字段规则：同阅读的 makeUpRule，
+     * 每处换成那一组的文字，其余照抄 —— `$2$3`、`https://…/content/$1`、`$5,$7,$10`。没有那一组的换成空。
+     * 当前项不是正则分组、规则里也没有 `$n` 的返回 null，照常求值。
+     */
+    private fun regexGroupRule(rule: String, ctx: EvalContext): List<String>? {
+        val groups = (ctx.json as? RegexGroups)?.values ?: return null
+        if (!GROUP_REF.containsMatchIn(rule)) return null
+        val filled = GROUP_REF.replace(rule) { m -> groups.getOrNull(m.groupValues[1].toInt()).orEmpty() }
+        return if (filled.isEmpty()) emptyList() else listOf(filled)
+    }
+
     private fun regexExtract(pattern: String, ctx: EvalContext): List<String> {
         val target = contextText(ctx)
         if (target.isEmpty()) return emptyList()
@@ -631,7 +713,8 @@ class RuleEvaluator(
             if (pipe == "encode" || pipe.startsWith("encode:")) {
                 val v = varValue(name, ctx)
                 val cs = if (pipe == "encode") Charsets.UTF_8 else charsetOf(pipe.removePrefix("encode:"))
-                return URLEncoder.encode(v, cs.name())
+                // 空格写成 %20：查询串、路径、表单里都是空格；`+` 在表单体里还会被发送前的按字段编码当成没编码的字再转一遍
+                return URLEncoder.encode(v, cs.name()).replace("+", "%20")
             }
         }
         // 嵌套规则（Legado：@ / $. / $[ / // 开头）
@@ -909,7 +992,16 @@ class RuleEvaluator(
      * 它只在 AnalyzeUrl 里绑这两个，规则脚本里没有。从前处处都绑，光遇聚合的列表脚本 `const {key, tab, page} = res`
      * 撞上已有的同名变量，Rhino 报「变量 page 被重新声明」，整个搜索一本都没有。
      * [input] 是脚本的 `result`：多数时候是文字；是 JSON、脚本又读它的字段时是 ScriptJson（[scriptInput]）；
-     * 元素列表接脚本时是那组元素（[wholeElementPipe]），这时 `src` 给整页原文
+     * 元素列表接脚本时是那组元素（[wholeElementPipe]）。
+     *
+     * `src` 同 Legado 是**这一次求值的内容本身**（`bindings["src"] = content`）：页面一级是整页原文，列表里是那一条
+     * （元素给 outerHtml、JSON 给 JSON 文本），和 `result`（上一步的结果）无关。从前文字结果直接当 `src`：
+     * `@href<js>…String(src).match(…)</js>` 拿到的是链接本身，不是那一条目录项 —— 废纸文学这一类站把真地址
+     * base64 藏在目录项的属性里，章节地址全空；`text.下一页@text @js:src.match(…)` 要的是整页，拿到的是「下一页」三个字。
+     * 拼地址的脚本（`inUrl`：没有页面）照旧给 `result`，Legado 在那里根本不绑 src。
+     * 算 src 要序列化一遍当前内容（列表里每一项一次 outerHtml），所以是**读到才算**（[LazyBinding]）。
+     * 不按「脚本里有没有 src 这几个字」判断：公用函数常常是运行时才 eval 进来的（`eval(String(source.loginUrl))`、
+     * `eval(java.ajax(库地址))`），扫脚本原文看不见，函数里读 src 拿到的就成了空串。
      */
     private fun runJs(script: String, ctx: EvalContext, input: Any): String? =
         runScript(ctx, input) { runtime, bindings -> runtime.eval(script, bindings, ctx.js.jsLib) }
@@ -943,9 +1035,10 @@ class RuleEvaluator(
                     put("result", input)
                     put(
                         "src",
-                        when (input) {
-                            is String -> input
-                            is com.radium.inkwell.core.source.js.ScriptJson -> input.text
+                        when {
+                            !inUrl -> com.radium.inkwell.core.source.js.LazyBinding { contextText(ctx) }
+                            input is String -> input
+                            input is com.radium.inkwell.core.source.js.ScriptJson -> input.text
                             else -> contextText(ctx)
                         },
                     )
@@ -989,9 +1082,6 @@ class RuleEvaluator(
         override fun getStringList(rule: String): Array<String> =
             runCatching { evalToStrings(LegadoRuleAnalyzer.analyze(rule), ctx).toTypedArray() }
                 .getOrDefault(emptyArray())
-
-        override fun getElement(rule: String): com.radium.inkwell.core.source.js.JsElement? =
-            getElements(rule).first()
 
         override fun getElements(rule: String): com.radium.inkwell.core.source.js.JsElements =
             com.radium.inkwell.core.source.js.JsElements(
@@ -1259,6 +1349,18 @@ private val STRING_MEMBERS = setOf(
 
 /** 一段 HTML 开头的标签名（`<tr class=…>` → tr），见 RuleEvaluator.htmlFragment */
 private val FIRST_TAG = Regex("^<([a-zA-Z][a-zA-Z0-9]*)")
+
+/** 字段规则里的正则分组引用 `$1`、`$10`（同阅读的 `\$\d{1,2}`），见 RuleEvaluator.regexGroupRule */
+private val GROUP_REF = Regex("\\$(\\d{1,2})")
+
+/**
+ * 整体正则列表里的一项：一次匹配的全部分组（[0] 是整个匹配），见 RuleEvaluator.regexMatches。
+ * 包一层是为了和 JSON 数组的条目分开：只有它上面的 `$n` 是分组引用。
+ * 当文字用（脚本的 result、再套一层 `:正则`）时是第 1 组（没有分组时是整个匹配）—— 从前每项就是这个，不用 `$n` 的写法照旧
+ */
+internal class RegexGroups(val values: List<String>) {
+    override fun toString(): String = values.getOrNull(1) ?: values.firstOrNull().orEmpty()
+}
 
 /** 字符集解析；GBK/GB2312 一律按 GB18030 处理 */
 internal fun charsetOf(name: String): Charset = when (name.trim().lowercase()) {

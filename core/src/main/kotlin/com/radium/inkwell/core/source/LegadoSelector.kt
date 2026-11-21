@@ -184,7 +184,9 @@ object LegadoSelector {
             head == "class" && name.isNotEmpty() ->
                 cssSelect(el, name.split(' ', '.').filter { it.isNotBlank() }.joinToString(".", prefix = "."))
             head == "id" && name.isNotEmpty() -> cssSelect(el, "#$name")
-            head == "tag" && name.isNotEmpty() -> el.getElementsByTag(name).toList()
+            // 标签名里不会有点：`tag.div.bg-light-secondary` 同 Legado 只认 `div`（它按 `.` 切开只取第二段，后面不是数字就不当索引）。
+            // 从前整串当标签名，一个都选不到 —— 瀚海书阁的书链全空、一本书都搜不到
+            head == "tag" && name.isNotEmpty() -> el.getElementsByTag(name.substringBefore('.')).toList()
             head == "text" && name.isNotEmpty() -> el.getElementsContainingOwnText(name).toList()
             else -> cssSelect(el, selector)
         }
