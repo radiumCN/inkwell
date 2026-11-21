@@ -146,7 +146,7 @@ FG = {"mark": fg_mark, "turn": fg_turn, "glass": fg_glass, "para": fg_para}
 MONO_SCALE = 0.8
 
 
-def mono(shape):
+def mono(shape, scale=MONO_SCALE):
     if shape == "mark":
         body = [Path(circle(54, 31, 7.2), stroke=MONO, width=5), Path(RIBBON, fill=MONO)]
     elif shape == "turn":
@@ -165,7 +165,7 @@ def mono(shape):
     else:
         body = [Group([Path(line(x1, x2, y), stroke=MONO, width=5.6) for x1, x2, y in PARA_LINES]
                       + [Path(circle(63, 79, 4.2), stroke=MONO, width=3.6)], ty=-3.5)]
-    return [Group(body, scale=MONO_SCALE)]
+    return [Group(body, scale=scale)]
 
 
 # ---------- VectorDrawable ----------
@@ -223,12 +223,12 @@ def vd_node(node, indent):
 HEADER = "<!-- 由 tools/gen_launcher_icons.py 生成，改图形改脚本再跑一遍，别手改 -->\n"
 
 
-def vector(nodes):
+def vector(nodes, size=108):
     body = "".join(vd_node(n, 4) for n in nodes)
     return ('<?xml version="1.0" encoding="utf-8"?>\n' + HEADER +
             '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
             '    xmlns:aapt="http://schemas.android.com/aapt"\n'
-            '    android:width="108dp"\n    android:height="108dp"\n'
+            f'    android:width="{size}dp"\n    android:height="{size}dp"\n'
             '    android:viewportWidth="108"\n    android:viewportHeight="108">\n' + body + '</vector>\n')
 
 
@@ -262,6 +262,8 @@ def generate():
     written = set()
     for shape in SHAPES:
         write(os.path.join(drawable, f"ic_launcher_mono_{shape}.xml"), vector(mono(shape)))
+        # 通知没有自适应图标蒙版，直接用单色层会留下过多透明边。
+        write(os.path.join(drawable, f"ic_stat_inkwell_{shape}.xml"), vector(mono(shape, scale=1.35), size=24))
         for p in PAPERS:
             bg_name, bg_nodes, fg_name = layers(shape, p)
             if bg_name not in written:

@@ -10,6 +10,7 @@ import com.radium.inkwell.core.webdav.BackupRssSource
 import com.radium.inkwell.core.webdav.mergeBackupRssSource
 import com.radium.inkwell.core.webdav.BackupSource
 import com.radium.inkwell.core.webdav.WebDavClient
+import com.radium.inkwell.core.webdav.WebDavQuota
 import androidx.room3.withWriteTransaction
 import com.radium.inkwell.data.db.InkwellDb
 import com.radium.inkwell.data.db.dao.BookDao
@@ -22,11 +23,13 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import com.radium.inkwell.data.net.OfficialWebDav
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.ReaderPrefs
+import com.radium.inkwell.data.prefs.WebDavConfig
 import com.radium.inkwell.data.prefs.WebDavPrefs
 import com.radium.inkwell.data.prefs.exportForBackup
 import com.radium.inkwell.data.prefs.importFromBackup
 import com.radium.inkwell.util.LocalNetworkAccess
 import com.radium.inkwell.util.LocalNetworkPermissionMissing
+import com.radium.inkwell.util.UsageLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -36,6 +39,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlin.time.TimeSource
 
 class WebDavRepository(
     private val db: InkwellDb,
@@ -60,6 +64,7 @@ class WebDavRepository(
     private companion object {
         const val DIR = "inkwell"
         const val BACKUP = "inkwell/backup.json.gz"
+        const val UP_TO_DATE = "已是最新"
         private val backupJson = Json { ignoreUnknownKeys = true; isLenient = true }
     }
 
@@ -79,29 +84,43 @@ class WebDavRepository(
      * @param auto 自动同步（冷启动、退到后台）。两边都没动过就整次跳过，见 [syncLocked]；
      *   设置页手点的「立即同步」照常完整走一遍 —— 那是用户明说要同步。
      */
-    suspend fun sync(auto: Boolean = false): Result<String> = try {
-        // 备份里装着每个书源的完整 JSON，几百个源就是几 MB：gzip、整份编解码、逐条解析书源类型
-        // 都是重活，而设置页的「立即同步」是从 viewModelScope（主线程）调进来的
-        withContext(Dispatchers.IO) {
-            syncMutex.withLock { Result.success(syncLocked(auto)) }
+    suspend fun sync(auto: Boolean = false): Result<String> = sync(auto, config = null)
+
+    private suspend fun sync(auto: Boolean, config: WebDavConfig?): Result<String> {
+        val started = TimeSource.Monotonic.markNow()
+        var outcome = "cancelled"
+        var errorCategory: String? = null
+        try {
+            // 编解码、解析书源和双向合并都在 IO 执行，手动同步由主线程发起。
+            val message = withContext(Dispatchers.IO) {
+                syncMutex.withLock { syncLocked(auto, config ?: prefs.config.first()) }
+            }
+            outcome = if (message == UP_TO_DATE) "up_to_date" else "ok"
+            return Result.success(message)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            outcome = "failed"
+            errorCategory = syncErrorCategory(e)
+            // 记录失败本身出错时，仍把原来的失败交还给设置页。
+            runCatching { prefs.markSyncFailed(describeSyncError(e), System.currentTimeMillis()) }
+            return Result.failure(e)
+        } finally {
+            val trigger = when {
+                auto -> "auto"
+                config != null -> "before_book_backup"
+                else -> "manual"
+            }
+            UsageLog.event(
+                "webdav.sync.result", "trigger" to trigger, "outcome" to outcome,
+                "duration_ms" to started.elapsedNow().inWholeMilliseconds, "error_category" to errorCategory,
+            )
         }
-    } catch (e: CancellationException) {
-        // 退到后台的自动同步被进程回收、或用户离开设置页 —— 这是取消，不是「同步失败」
-        throw e
-    } catch (e: Exception) {
-        // 记下来给设置页看。记录本身出错（存储写不进去）不能盖掉真正的失败原因
-        runCatching { prefs.markSyncFailed(describeSyncError(e), System.currentTimeMillis()) }
-        Result.failure(e)
     }
 
-    private suspend fun syncLocked(auto: Boolean): String {
-        val config = prefs.config.first()
-        check(config.isConfigured) { "尚未配置 WebDAV" }
+    private suspend fun syncLocked(auto: Boolean, config: WebDavConfig): String {
         val url = if (OfficialWebDav.isLegacyDav(config.url)) OfficialWebDav.DAV else config.url
-        // 局域网 NAS 缺 Android 17 的局域网权限时，连接不报错、只会挂到超时 ——
-        // 先拦下来，给一句看得懂的话（设置页据此弹授权）。后台自动同步也不必白等十几秒
-        if (localNetwork.isBlocked(url)) throw LocalNetworkPermissionMissing()
-        val client = WebDavClient(url, config.username, config.password, http)
+        val client = clientFor(config, url)
         // 版本标记连同是哪个地址、哪个账号一起记：换了账号，旧标记不能被当成「远端没变」
         val account = url + "\u0000" + config.username + "\u0000"
 
@@ -115,7 +134,7 @@ class WebDavRepository(
                 val remoteNow = remoteVersion(client)?.let { account + it }
                 if (remoteNow == mark.remote) {
                     prefs.markSynced(System.currentTimeMillis())
-                    return "已是最新"
+                    return UP_TO_DATE
                 }
             }
         }
@@ -139,6 +158,29 @@ class WebDavRepository(
         prefs.markSynced(System.currentTimeMillis())
         prefs.saveSyncMark(localStamp, result.remoteVersion?.let { account + it })
         return if (applied > 0) "同步完成，合并了 $applied 项远端更新" else "同步完成"
+    }
+
+    internal suspend fun bookFilesClient(syncShelf: Boolean = false): WebDavClient {
+        val config = prefs.config.first()
+        val url = if (OfficialWebDav.isLegacyDav(config.url)) OfficialWebDav.DAV else config.url
+        if (syncShelf) sync(auto = false, config).getOrThrow()
+        return clientFor(config, url)
+    }
+
+    suspend fun officialQuota(): Result<WebDavQuota?> = try {
+        val config = prefs.config.first()
+        check(config.isOfficialConnected) { "请先连接官方同步" }
+        Result.success(clientFor(config, OfficialWebDav.resolveDavUrl(config.url)).quota())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    private suspend fun clientFor(config: WebDavConfig, url: String): WebDavClient {
+        check(config.isConfigured) { "尚未配置 WebDAV" }
+        if (localNetwork.isBlocked(url)) throw LocalNetworkPermissionMissing()
+        return WebDavClient(url, config.username, config.password, http)
     }
 
     /**
@@ -235,17 +277,12 @@ class WebDavRepository(
         if (resourced.isNotEmpty()) {
             withContext(Dispatchers.IO) { resourced.forEach { cache.clear(it) } }
         }
-        // 别的设备删掉的书：本地删书（BookRepository.deleteBook）会顺手清掉导入的书文件、本地封面、
-        // 正文缓存和目录行，同步过来的删除从前只打了墓碑 —— 这些东西就永远躺在磁盘上，没有任何入口能清。
-        // 先记下要清的（事务里会改掉 deleted），目录行随事务删，文件 IO 放在事务之后
-        val remotelyDeleted = merged.changedBooks.mapNotNull { b ->
-            val existing = bookDao.getById(b.id) ?: return@mapNotNull null
-            existing.takeIf { applySyncedBook(it, b).deletedRemotely }
-        }
+        // 事务内记录要清理的最新路径，包含同步期间刚恢复的本地文件。
+        val remotelyDeleted = mutableListOf<BookEntity>()
 
         // 几十条逐行写 + 三张表：中途被杀不留半套。远端设置的导入是 DataStore，在事务外。
         val appliedRows = db.withWriteTransaction {
-            var n = applyBooks(merged)
+            var n = applyBooks(merged, remotelyDeleted)
             n += applySources(merged)
             merged.changedReplaceRules.forEach { r ->
                 // 快照后用户刚禁用、编辑或删除的规则不能被旧合并结果盖掉。
@@ -277,13 +314,17 @@ class WebDavRepository(
     }
 
     /** @return 真正写了库的书目数。合并结果里「变了」的条目，到了事务里按最新行可能一条都不采纳 */
-    private suspend fun applyBooks(merged: BackupMerger.MergeResult): Int {
+    private suspend fun applyBooks(
+        merged: BackupMerger.MergeResult,
+        remotelyDeleted: MutableList<BookEntity>,
+    ): Int {
         var applied = 0
         merged.changedBooks.forEach { b ->
             val existing = bookDao.getById(b.id)
             if (existing != null) {
                 // 拿事务里的最新行裁决：本地在拍快照之后又改过（时间戳已经比合并结果新），那一块就保留本地的
                 val synced = applySyncedBook(existing, b)
+                if (synced.deletedRemotely) remotelyDeleted += existing
                 if (synced.sourceChanged || synced.deletedRemotely) chapterDao.deleteByBook(b.id)
                 // 一个字段都没变就别写：整表 Flow 白重发一轮，还会把这条算进「合并了 N 项」
                 if (synced.entity != existing) {

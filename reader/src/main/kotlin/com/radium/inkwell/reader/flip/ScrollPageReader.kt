@@ -33,6 +33,7 @@ import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.render.RenderablePage
+import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.drawPageItems
 import com.radium.inkwell.reader.render.imageAt
 
@@ -64,6 +65,7 @@ fun ScrollPageReader(
     /** 长按一张图（看大图）。null = 不接长按 */
     onImageLongPress: ((PageItem.ImageBox) -> Unit)? = null,
     onTrace: (ReaderTrace) -> Unit = {},
+    selection: TextSelection? = null,
 ) {
     val traceLatest = rememberUpdatedState(onTrace)
     fun trace(action: ReaderTrace.Action, dir: FlipDirection? = null) {
@@ -288,7 +290,7 @@ fun ScrollPageReader(
                         }
                     },
             ) {
-                ScrollPageLayer(current, layout, theme, baseY = contentTop, offset = offset)
+                ScrollPageLayer(current, layout, theme, baseY = contentTop, offset = offset, selection = selection)
                 ScrollPageLayer(next, layout, theme, baseY = contentTop + curH, offset = offset)
                 ScrollPageLayer(prev, layout, theme, baseY = contentTop - prevH, offset = offset)
             }
@@ -311,6 +313,7 @@ private fun ScrollPageLayer(
     theme: ReaderTheme,
     baseY: Float,
     offset: FloatState,
+    selection: TextSelection? = null,
 ) {
     if (page == null) return
     Spacer(
@@ -318,7 +321,7 @@ private fun ScrollPageLayer(
             .fillMaxSize()
             .graphicsLayer { translationY = baseY + offset.floatValue }
             .drawBehind {
-                drawPageItems(page, layout, theme, originY = 0f)
+                drawPageItems(page, layout, theme, originY = 0f, selection = selection)
             },
     )
 }

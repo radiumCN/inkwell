@@ -151,9 +151,12 @@ class SourceChecker(
         // 走到哪一步了：失败原因前面写上它（「详情页被拒」「正文超时」）。超时是外层 withTimeout 掐断的，
         // 掐断时停在哪一步也只有靠它知道
         var step = CheckStep.SEARCH
+        // 来源自己指定了校验词就用它（同阅读的 getCheckKeyword：来源的优先于校验设置里的）：
+        // 只收某一类书、按分类名搜的站，拿通用的词去搜必然「搜索无结果」，好好的源被判失效
+        val keyword = rule.search?.checkKeyWord?.trim()?.takeIf { it.isNotEmpty() } ?: opts.keyword
         return runCatching {
             withTimeout(opts.timeoutMs) {
-                val hit = engine.search(rule, opts.keyword).items.firstOrNull()
+                val hit = engine.search(rule, keyword).items.firstOrNull()
                     ?: throw CheckFailed("搜索无结果")
                 if (!opts.checkDetail && !opts.checkToc && !opts.checkContent) {
                     return@withTimeout ok(chars = -1, startedAt)

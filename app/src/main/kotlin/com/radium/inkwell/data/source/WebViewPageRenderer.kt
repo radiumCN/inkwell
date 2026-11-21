@@ -7,9 +7,14 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.CustomHeader
+import androidx.webkit.Profile
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import androidx.core.net.toUri
 import com.radium.inkwell.core.source.FetchedPage
 import com.radium.inkwell.core.source.PageRenderer
+import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.core.source.isPrivateNetworkHost
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -28,10 +33,11 @@ import org.json.JSONTokener
  * WebView 只能在主线程上操作，且一个实例同时只能加载一个页面，故全局串行化（Mutex）。
  * 这也是引擎不在搜索阶段回退到渲染的原因：并发扇出会在这里排成长队。
  */
-class WebViewPageRenderer(
+class WebViewPageRenderer internal constructor(
     private val context: Context,
     /** 单页渲染总超时；含加载与 JS 执行 */
     private val timeoutMs: Long = 25_000,
+    private val sessions: SourceLoginSessions? = null,
 ) : PageRenderer {
 
     private val mutex = Mutex()
@@ -40,25 +46,66 @@ class WebViewPageRenderer(
         url: String,
         headers: Map<String, String>,
         userAgent: String?,
+    ): FetchedPage? = renderWithProfile(url, headers, userAgent, null, emptyMap())
+
+    override suspend fun renderForSource(
+        sessionId: String?,
+        url: String,
+        headers: Map<String, String>,
+        userAgent: String?,
+        credentialHeaders: Map<String, String>,
+    ): FetchedPage? {
+        val target = url.sourceLoginHttpUrl()
+        if (credentialHeaders.isNotEmpty() && (target == null || sessionId == null)) return null
+        val profile = if (sessionId != null && target != null &&
+            (credentialHeaders.isNotEmpty() || sessions?.hasWebLogin(sessionId, target) == true)
+        ) loginProfileName(sessionId) else null
+        return renderWithProfile(url, headers, userAgent, profile, credentialHeaders)
+    }
+
+    private suspend fun renderWithProfile(
+        url: String,
+        headers: Map<String, String>,
+        userAgent: String?,
+        profile: String?,
+        credentialHeaders: Map<String, String>,
     ): FetchedPage? {
         // 书源给的地址先过一道内网判定（要解析 DNS，不能在主线程）。拦下来就返回 null：
         // 引擎退回静态抓取，那条路上的 OkHttp 会以「拒绝访问内网地址」报出来
         val host = url.toUri().host ?: return null
         if (withContext(Dispatchers.IO) { isPrivateNetworkHost(host) }) return null
-        return renderLocked(url, headers, userAgent)
+        return renderLocked(url, headers, userAgent, profile, credentialHeaders)
     }
 
     private suspend fun renderLocked(
         url: String,
         headers: Map<String, String>,
         userAgent: String?,
+        profile: String?,
+        credentialHeaders: Map<String, String>,
     ): FetchedPage? = mutex.withLock {
         withContext(Dispatchers.Main) {
+            if (credentialHeaders.isNotEmpty() &&
+                (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) ||
+                    !WebViewFeature.isFeatureSupported(WebViewFeature.CUSTOM_REQUEST_HEADERS))
+            ) return@withContext null
             var view: WebView? = null
+            var configuredProfile: Profile? = null
+            val registered = mutableListOf<CustomHeader>()
             try {
                 withTimeout(timeoutMs) {
-                    val wv = createWebView(userAgent)
+                    val wv = createWebView(userAgent, profile)
                     view = wv
+                    if (credentialHeaders.isNotEmpty()) {
+                        val origin = requireNotNull(url.sourceLoginHttpUrl()).sourceOrigin().toString().removeSuffix("/")
+                        val current = WebViewCompat.getProfile(wv)
+                        configuredProfile = current
+                        credentialHeaders.forEach { (name, value) ->
+                            val header = CustomHeader(name, value, setOf(origin))
+                            current.addCustomHeader(header)
+                            registered += header
+                        }
+                    }
                     loadPage(wv, url, headers)
                     val html = awaitSettledHtml(wv)
                     FetchedPage(
@@ -72,10 +119,15 @@ class WebViewPageRenderer(
                 null // 超时 → 调用方沿用静态抓取的结果
             } catch (e: RenderFailed) {
                 null
+            } catch (_: IllegalArgumentException) {
+                null
             } finally {
                 view?.let {
                     it.stopLoading()
                     it.destroy() // 每次用完即销毁：长期持有的离屏 WebView 容易泄漏 Activity/内存
+                }
+                configuredProfile?.let { current ->
+                    registered.forEach { current.clearCustomHeader(it.name, it.value) }
                 }
             }
         }
@@ -84,7 +136,11 @@ class WebViewPageRenderer(
     private class RenderFailed(message: String) : Exception(message)
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(userAgent: String?): WebView = WebView(context).apply {
+    private fun createWebView(userAgent: String?, profile: String?): WebView = WebView(context).apply {
+        if (profile != null && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            WebViewCompat.setProfile(this, profile)
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         // 正文只需要 DOM，图片按书源规则里的 URL 另行下载，这里不必真的拉图

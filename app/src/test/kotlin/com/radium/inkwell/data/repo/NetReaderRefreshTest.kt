@@ -109,7 +109,7 @@ class NetReaderRefreshTest {
         try {
             assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null)
             assertEquals(old, source.loadChapter(0))
-            assertEquals("skipped", source.upgradeTextOnlyChapter(0) {})
+            assertEquals("deferred", source.upgradeTextOnlyChapter(0) {})
             assertEquals(1, server.requestCount)
         } finally {
             release.countDown()

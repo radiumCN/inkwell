@@ -1,7 +1,12 @@
 package com.radium.inkwell.core.webdav
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -10,8 +15,10 @@ import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.File
 import java.io.IOException
 import kotlin.coroutines.resumeWithException
 
@@ -56,6 +63,60 @@ class WebDavClient(
         )
         resp.use {
             if (!it.isSuccessful) throw WebDavException(it.code, "PUT 失败: ${it.code}")
+        }
+    }
+
+    /** 文件名由调用方按内容生成。并发创建了同一份时，412 也算完成。 */
+    suspend fun putFileIfAbsent(path: String, file: File) {
+        val request = request(path)
+            .header("If-None-Match", "*")
+            .put(file.asRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        execute(request).use { response ->
+            if (!response.isSuccessful && response.code != 412) {
+                throw WebDavException(response.code, "PUT 失败: ${response.code}")
+            }
+        }
+    }
+
+    /** 下载只写调用方的暂存文件，且限制为备份声明的字节数。 */
+    suspend fun downloadFile(path: String, file: File, size: Long) = withContext(Dispatchers.IO) {
+        val call = http.newCall(request(path).get().build())
+        val download = coroutineContext.job
+        // 一直监听到正文读完。仅在等待响应头时注册取消，无法打断响应体的阻塞读。
+        val cancelCall = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                if (download.isCancelled) call.cancel()
+            }
+        }
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) throw WebDavException(response.code, "GET 失败: ${response.code}")
+                val body = response.body
+                val length = body.contentLength()
+                if (length >= 0 && length != size) throw IOException("远端文件大小与备份记录不符")
+                body.byteStream().use { input ->
+                    file.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var remaining = size
+                        while (remaining > 0) {
+                            ensureActive()
+                            val count = input.read(buffer, 0, minOf(remaining, buffer.size.toLong()).toInt())
+                            if (count < 0) throw IOException("远端文件下载不完整")
+                            output.write(buffer, 0, count)
+                            remaining -= count
+                        }
+                        if (input.read() != -1) throw IOException("远端文件大小与备份记录不符")
+                    }
+                }
+            }
+        } catch (e: IOException) {
+            ensureActive()
+            throw e
+        } finally {
+            cancelCall.cancel()
         }
     }
 
@@ -138,6 +199,22 @@ class WebDavClient(
             }
             val xml = withContext(Dispatchers.IO) { it.body.string() }
             return parseHrefs(xml, path)
+        }
+    }
+
+    /** 读取账号根目录的 RFC 4331 配额。服务器未提供两项属性时返回 null。 */
+    suspend fun quota(): WebDavQuota? = withContext(Dispatchers.IO) {
+        val body = """<d:propfind xmlns:d="DAV:"><d:prop>
+            <d:quota-used-bytes/><d:quota-available-bytes/>
+            </d:prop></d:propfind>""".toRequestBody("application/xml; charset=utf-8".toMediaType())
+        val request = request("").method("PROPFIND", body).header("Depth", "0").build()
+        execute(request).use { response ->
+            if (response.code != 207) {
+                throw WebDavException(response.code, "PROPFIND 失败: ${response.code}")
+            }
+            val source = response.body.source()
+            if (source.request(64L * 1024 + 1)) throw IOException("WebDAV 容量响应过大")
+            parseWebDavQuota(response.body.string())
         }
     }
 

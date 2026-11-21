@@ -7,6 +7,7 @@ import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SegmentedChoice
 import android.content.ClipData
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,11 +48,13 @@ import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppSurface
+import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.ReadingProgressMeter
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -94,14 +97,26 @@ fun WebDavSettingsScreen(onBack: () -> Unit, viewModel: WebDavViewModel) {
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
+    val bookFiles = state.bookFiles
+    BackHandler(enabled = bookFiles != null, onBack = viewModel::closeBookFiles)
     AppScaffold(
         modifier = Modifier.topBarScroll(topBarScroll),
         containerColor = pageColor,
-        topBar = { AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor) },
+        topBar = {
+            if (bookFiles == null) {
+                AppTopBar("WebDAV 同步", topBarScroll, onBack = onBack, containerColor = pageColor)
+            } else {
+                AppTopBar("本地书籍备份", topBarScroll, onBack = viewModel::closeBookFiles, containerColor = pageColor)
+            }
+        },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         // 配置还没读回来：先空着，别先画一遍「自备 WebDAV」再跳回「官方同步」
         if (!state.loaded) return@AppScaffold
+        if (bookFiles != null) {
+            BookFilesContent(bookFiles, viewModel, padding)
+            return@AppScaffold
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -207,6 +222,7 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             subtitle = if (state.officialEmail.isBlank()) "已连接" else "官方同步 · 已连接",
             position = SettingGroupPosition.First,
         )
+        OfficialQuota(state, viewModel)
         PrimaryButton(
             text = "立即同步",
             onClick = viewModel::syncNow,
@@ -226,7 +242,34 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
             position = SettingGroupPosition.Alone,
         )
     }
+    BookFilesEntry(state, viewModel)
     SectionHeader("管理")
+    if (state.showOfficialReauth) {
+        SettingGroup {
+            SettingBlock {
+                Text(
+                    "重新生成应用码前，请验证官方账号。",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                OfficialLoginFields(state, viewModel)
+                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.gapM)) {
+                    SecondaryButton(
+                        "取消",
+                        onClick = viewModel::dismissOfficialReauth,
+                        enabled = !state.busy,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PrimaryButton(
+                        "验证账号",
+                        onClick = viewModel::submitOfficial,
+                        enabled = !state.busy && state.email.isNotBlank() && state.code.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
     SettingGroup {
         // 两行挨着：都是给其他设备用的那一套码
         SettingRow(
@@ -260,6 +303,32 @@ private fun OfficialConnected(state: WebDavUiState, viewModel: WebDavViewModel) 
 }
 
 @Composable
+private fun OfficialQuota(state: WebDavUiState, viewModel: WebDavViewModel) {
+    val quota = state.quota
+    val style = MiuixTheme.textStyles.footnote1
+    val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    SettingBlock {
+        when {
+            state.quotaAppPasswordInvalid -> {
+                Text("WebDAV 应用码已失效，请在下方管理中重新生成。", style = style, color = color)
+            }
+            quota != null -> {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("已用 ${formatWebDavBytes(quota.usedBytes)}", style = style, color = color)
+                    Text("总容量 ${formatWebDavBytes(quota.totalBytes)}", style = style, color = color)
+                }
+                ReadingProgressMeter((quota.usedBytes.toDouble() / quota.totalBytes).toFloat())
+            }
+            state.quotaLoading -> Text("正在获取容量…", style = style, color = color)
+            else -> {
+                Text("暂无法获取容量", style = style, color = color)
+                AppTextButton("重试", onClick = viewModel::refreshQuota, enabled = !state.busy)
+            }
+        }
+    }
+}
+
+@Composable
 private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
     SectionHeader("登录")
     SettingGroup {
@@ -273,14 +342,7 @@ private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            AppFormField(
-                value = state.email,
-                onValueChange = viewModel::setEmail,
-                label = "邮箱",
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            )
-            CodeRow(state, viewModel)
+            OfficialLoginFields(state, viewModel)
             PrimaryButton(
                 text = "验证并开启同步",
                 onClick = viewModel::submitOfficial,
@@ -291,6 +353,19 @@ private fun OfficialAuth(state: WebDavUiState, viewModel: WebDavViewModel) {
         }
     }
     OfficialPrivacyNote()
+}
+
+@Composable
+private fun OfficialLoginFields(state: WebDavUiState, viewModel: WebDavViewModel) {
+    AppFormField(
+        value = state.email,
+        onValueChange = viewModel::setEmail,
+        label = "邮箱",
+        singleLine = true,
+        enabled = !state.showOfficialReauth || state.officialEmail.isBlank(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+    )
+    CodeRow(state, viewModel)
 }
 
 @Composable
@@ -353,6 +428,20 @@ private fun CustomSection(state: WebDavUiState, viewModel: WebDavViewModel) {
             position = SettingGroupPosition.Alone,
         )
     }
+    BookFilesEntry(state, viewModel)
+}
+
+@Composable
+private fun BookFilesEntry(state: WebDavUiState, viewModel: WebDavViewModel) {
+    if (!state.configured) return
+    SettingGroup {
+        SettingRow(
+            title = "本地书籍备份",
+            subtitle = "手动备份与恢复原文件",
+            onClick = if (state.busy) null else viewModel::openBookFiles,
+            position = SettingGroupPosition.Alone,
+        )
+    }
 }
 
 /**
@@ -402,7 +491,7 @@ private const val SYNC_TIME_TICK_MS = 60_000L
 private fun SyncFooter() {
     SettingFootnote(
         "会同步：书架、阅读进度、阅读时长、来源、订阅源、净化规则，以及阅读与应用设置（含排版方案）。\n" +
-            "不会同步：本地书的文件、导入的字体和已缓存的章节。换设备后，本地书与字体需要重新导入。\n" +
+            "本地书原文件可通过「本地书籍备份」手动上传和恢复。导入的字体与已缓存章节仅保存在本机。\n" +
             "两边都改过时，以较新的为准。",
     )
 }

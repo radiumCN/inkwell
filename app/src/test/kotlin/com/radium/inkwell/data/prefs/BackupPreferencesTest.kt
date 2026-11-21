@@ -78,4 +78,17 @@ class BackupPreferencesTest {
         assertEquals(true, p[keys.LOCAL_SHOW_IMAGES])
         assertEquals(false, p[keys.SHOW_IMAGES])
     }
+
+    @Test fun `header and footer switches restore from backup, older backups leave them alone`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf(keys.UPDATED_AT to 100L)
+        // 0.6.1 之前的备份没有这两项：照旧不写，读出来是默认的「显示」
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, mapOf("show_battery" to "false"))) { true })
+        assertFalse(p.contains(keys.SHOW_HEADER))
+        assertFalse(p.contains(keys.SHOW_FOOTER))
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf("show_header" to "false", "show_footer" to "false"))) { true })
+        assertEquals(false, p[keys.SHOW_HEADER])
+        assertEquals(false, p[keys.SHOW_FOOTER])
+        assertEquals(false, p[keys.SHOW_BATTERY])
+    }
 }

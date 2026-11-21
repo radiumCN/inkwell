@@ -23,6 +23,8 @@ class OfficialWebDavException(
     override val message: String,
 ) : IOException(message)
 
+class OfficialSessionExpiredException : IOException("官方账号登录已失效，请重新验证")
+
 @Serializable
 data class OfficialTokens(
     @SerialName("access_token") val accessToken: String,
@@ -34,6 +36,8 @@ data class OfficialTokens(
 data class OfficialUser(
     val username: String,
     val email: String = "",
+    @SerialName("quota_bytes") val quotaBytes: Long? = null,
+    @SerialName("used_bytes") val usedBytes: Long? = null,
 )
 
 @Serializable
@@ -53,7 +57,9 @@ data class OfficialMe(
     val user: OfficialUser,
     @SerialName("webdav_url") val webdavUrl: String = "",
     @SerialName("webdav_user") val webdavUser: String = "",
-)
+) {
+    fun davUsername(accountUsername: String): String = webdavUser.ifBlank { accountUsername }
+}
 
 @Serializable
 data class OfficialAppPassword(
@@ -127,8 +133,12 @@ class OfficialWebDavClient(
     suspend fun me(accessToken: String): OfficialMe =
         request(GET, "/api/v1/me", access = accessToken)
 
-    suspend fun refresh(refreshToken: String): OfficialTokens =
+    suspend fun refresh(refreshToken: String): OfficialTokens = try {
         request(POST, "/api/v1/auth/refresh", """{"refresh_token":${refreshToken.json()}}""")
+    } catch (e: OfficialWebDavException) {
+        if (e.httpStatus == 401) throw OfficialSessionExpiredException()
+        throw e
+    }
 
     suspend fun listAppPasswords(accessToken: String): OfficialAppPasswordList =
         request(GET, "/api/v1/app-passwords", access = accessToken)

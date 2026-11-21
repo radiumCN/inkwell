@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.reader
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.radium.inkwell.util.UsageLog
@@ -25,6 +26,7 @@ import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.data.repo.BookRepository
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.ChapterContentCache
+import com.radium.inkwell.data.repo.TEXT_ONLY_UPGRADE_INTERVAL_MS
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
@@ -89,6 +91,7 @@ import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.util.RepeatedTitle
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
@@ -321,6 +324,19 @@ class ReaderViewModel(
     private var book: BookEntity? = null
     private var source: ReaderBookSource? = null
     private var position = ReadPosition(0, 0)
+    private var speechPosition: ReadPosition? = null
+    internal val speech = ReaderSpeech(
+        bookTitle = { _state.value.bookTitle },
+        isPrivate = { book?.hidden == true },
+        chapterCount = { _state.value.chapterCount },
+        load = ::loadSpeechChapter,
+        onPosition = { chapter, offset ->
+            speechPosition = ReadPosition(chapter, offset)
+            progressHeld = false
+            saveProgress()
+        },
+        onServiceEnded = { settleSpeechPosition(returnToText = true) },
+    )
     /**
      * 用户要去、但还没显示出来的位置（进书/翻章/跳目录都经 [showPosition] 记下，[showPage] 成功即清）。
      *
@@ -342,6 +358,8 @@ class ReaderViewModel(
 
     // 分页缓存：chapterIndex → 结果；spec 变化即整体作废
     private val paginated = java.util.concurrent.ConcurrentHashMap<Int, Paginator.Result>()
+    private data class RecentChapterCrossing(val from: Int, val to: Int, val at: TimeSource.Monotonic.ValueTimeMark)
+    private var recentChapterCrossing: RecentChapterCrossing? = null
     private val engineMutex = Mutex()
     /** 测量层不能并发；与 [engineMutex] 拆开，邻章排版不再堵住用户正在等的那一章的 IO */
     private val measureMutex = Mutex()
@@ -474,6 +492,7 @@ class ReaderViewModel(
         // 只在末尾追加了新章（连载追更的常态）：手里记着的序号一个都没动，补上章数、刷新「下一章/书末」即可
         val held = buildSet {
             add(position.chapterIndex)
+            speechPosition?.let { add(it.chapterIndex) }
             add(s.chapterIndex)
             pendingTarget?.let { add(it.chapterIndex) }
             addAll(paginated.keys)
@@ -487,8 +506,10 @@ class ReaderViewModel(
             }
             return
         }
+        stopSpeech(returnToText = false)
         // 序号整体错位了：此前开工、手里拿着旧序号的加载，结果一律作废（见 tocGeneration）
         tocGeneration++
+        recentChapterCrossing = null
         position = remap.map(position)
         pendingTarget = pendingTarget?.let { remap.map(it) }
         val rekeyed = paginated.mapNotNull { (index, result) ->
@@ -538,6 +559,7 @@ class ReaderViewModel(
             book = b
             // 打开即已知晓：书架上那个"有 N 章新的"红点该灭了；打开时间也记下来，书架按它排「最近阅读」
             bookRepo.markOpened(bookId)
+            recentChapterCrossing = null
             position = ReadPosition(b.readChapterIndex, b.readCharOffset)
             // 新会话以库里的进度为准。上一会话（换源前）没落地的目标是旧目录的序号，留着会被
             // 随后的重排（onLayoutReady 取 pendingTarget ?: position）拿去，在新目录里打开一个不相干的章
@@ -678,7 +700,7 @@ class ReaderViewModel(
         // 「正文显示图片」也在排版指纹里：开关一拨走到这里，按同一个字符偏移重排。
         if (!spec.showImages) stopLegacyImageUpgrade()
         // 加载途中旋转/改字号：用户点的那一章还没出来，重排要接着去那一章，别退回旧章
-        navigate(invalidate = true) { pendingTarget ?: position }
+        navigate(invalidate = true) { pendingTarget ?: speechPosition ?: position }
     }
 
     /**
@@ -734,6 +756,7 @@ class ReaderViewModel(
     fun flip(direction: FlipDirection) {
         trace("flip.commit_requested", "direction" to direction.name, "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter)
         progressHeld = false
+        releaseSpeechPosition()
         val s = _state.value
         val result = paginated[s.chapterIndex] ?: run {
             trace("flip.blocked", "reason" to "chapter_not_paginated")
@@ -767,11 +790,88 @@ class ReaderViewModel(
         }
     }
 
+    internal fun startSpeech(context: Context) {
+        val page = _state.value.page ?: return
+        if (sourceChanging || _state.value.loading) return
+        stopAutoFlip()
+        dismissMenu()
+        speech.start(context, _state.value.chapterIndex, page.spec.startCharOffset)
+    }
+
+    internal fun endSpeech() {
+        val hadPosition = speechPosition != null
+        stopSpeech(returnToText = true)
+        if (hadPosition) viewModelScope.launch { messageBus.emit("已回到朗读位置") }
+    }
+
+    private fun stopSpeech(returnToText: Boolean) {
+        if (!speech.state.value.active) return
+        speech.stop()
+        settleSpeechPosition(returnToText)
+    }
+
+    private fun settleSpeechPosition(returnToText: Boolean) {
+        val anchor = speechPosition
+        speechPosition = null
+        if (anchor != null) {
+            if (returnToText) followSpeech(anchor)
+            // 离开前刷盘仍要用朗读位置，即使锁屏期间 UI 没有重新分页。
+            position = anchor
+            saveProgress()
+        }
+    }
+
+    /**
+     * 朗读没在读（暂停、读完、出错）时用户自己翻了页：进度跟人走，不再记朗读停下的那一处。
+     * 否则暂停后手动往后读，存盘的是朗读的旧位置；暂停超时收场、退出阅读页时还会把人拽回去
+     */
+    private fun releaseSpeechPosition() {
+        val status = speech.state.value.status
+        if (status != SpeechStatus.PLAYING && status != SpeechStatus.LOADING) speechPosition = null
+    }
+
+    internal fun followSpeech(chapter: Int, offset: Int) {
+        if (speechPosition != ReadPosition(chapter, offset)) return
+        followSpeech(ReadPosition(chapter, offset))
+    }
+
+    private fun followSpeech(anchor: ReadPosition) {
+        val state = _state.value
+        val currentPage = state.page?.spec
+        if (state.chapterIndex == anchor.chapterIndex && currentPage != null &&
+            anchor.charOffset in currentPage.startCharOffset until currentPage.endCharOffset
+        ) return
+        if (navJob?.isActive == true && navTarget == anchor) return
+        navigate { anchor }
+        navTarget = anchor
+    }
+
+    internal fun jumpFromReaderMenu(index: Int) {
+        if (speech.state.value.active && index in 0 until _state.value.chapterCount) {
+            speechPosition = null
+            speech.seek(index, 0)
+        }
+        gotoChapter(index)
+    }
+
+    private suspend fun loadSpeechChapter(index: Int): SpeechChapter {
+        val src = checkNotNull(source)
+        val generation = tocGeneration
+        val title = src.chapterTitle(index).orEmpty()
+        val raw = withTimeoutOrNull(CONTENT_TIMEOUT_MS) { src.loadChapter(index) }
+            ?: throw ContentTimeoutException()
+        val purified = loadPurified(raw, index)
+        check(source === src && generation == tocGeneration)
+        val content = purified.copy(elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()))
+        return withContext(Dispatchers.Default) { speechChapter(index, title, content) }
+    }
+
     fun gotoChapter(index: Int, charOffset: Int = 0) {
         trace("chapter.request", "chapter" to index, "offset" to charOffset)
         val count = _state.value.chapterCount
         if (index !in 0 until count) return
         progressHeld = false
+        releaseSpeechPosition()
         val target = ReadPosition(index, charOffset)
         // 同一个目标还在路上（慢源上连点「下一章」）：接着等它，别取消重来 —— 否则每点一下超时就从头算
         if (navJob?.isActive == true && navTarget == target) return
@@ -795,16 +895,14 @@ class ReaderViewModel(
         // 进度条拖的是眼前这一章：还在路上的跳章（慢源上刚点的下一章）作废，否则它一落地就把人拽走
         cancelNavigation()
         showPage(s.chapterIndex, chapter.pageIndexFor(offset))
+        if (speech.state.value.active) {
+            speechPosition = null
+            speech.seek(s.chapterIndex, offset)
+        }
     }
 
     fun toggleMenu() {
         trace("menu.toggle", "was_open" to _state.value.menuVisible)
-        // 一点屏幕就停自动翻页：想接着自动翻，再点一次「自动」就是了 ——
-        // 反过来（点了没反应、页面还在自己翻）会让人以为应用卡死了
-        if (_state.value.autoFlipping) {
-            stopAutoFlip()
-            return
-        }
         _state.value = _state.value.copy(menuVisible = !_state.value.menuVisible)
     }
 
@@ -898,14 +996,24 @@ class ReaderViewModel(
         }
     }
 
-    /** 删的是正在用的字体 → 先切回默认再删文件，别让分页撞上一个刚消失的字体文件 */
     fun deleteFont(font: UserFont) {
         viewModelScope.launch {
-            val current = _state.value.settings
-            if (current.fontId == font.id) {
-                persistSettings(current.copy(fontId = ReaderSettings.FONT_SYSTEM))
+            try {
+                fontStore.delete(font)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                messageBus.emit("删除字体「${font.label}」失败，请重试")
+                return@launch
             }
-            fontStore.delete(font)
+            try {
+                readerPrefs.adjustTypography {
+                    if (fontId == font.id) copy(fontId = ReaderSettings.FONT_SYSTEM) else this
+                }
+            } catch (_: java.io.IOException) {
+                messageBus.emit("字体「${font.label}」已删除，排版设置保存失败")
+                return@launch
+            }
             messageBus.emit("已删除字体「${font.label}」")
         }
     }
@@ -948,10 +1056,12 @@ class ReaderViewModel(
 
     fun toggleAutoFlip() {
         trace("auto_flip.toggle", "was_active" to _state.value.autoFlipping)
+        // 停在前面：停是任何时候都得停得下来的，只有「开」才看朗读、滚动模式
         if (_state.value.autoFlipping) {
             stopAutoFlip()
             return
         }
+        if (speech.state.value.active || _state.value.settings.flipAnimation == FlipAnimation.SCROLL) return
         _state.value = _state.value.copy(autoFlipping = true, menuVisible = false)
         autoFlipJob = viewModelScope.launch {
             while (true) {
@@ -963,6 +1073,14 @@ class ReaderViewModel(
                     continue
                 }
                 val s = _state.value
+                if (s.settings.flipAnimation == FlipAnimation.SCROLL) {
+                    stopAutoFlip()
+                    break
+                }
+                if (s.menuVisible || s.readerSheetOpen || s.sourceCandidates != null) {
+                    _state.first { !it.menuVisible && !it.readerSheetOpen && it.sourceCandidates == null }
+                    continue
+                }
                 // 到书末就停下，而不是每隔几秒弹一次"已经是最后一页了"
                 if (!s.hasNext) {
                     stopAutoFlip()
@@ -1003,12 +1121,14 @@ class ReaderViewModel(
     private var chapterRefreshJob: Job? = null
     private var legacyImageUpgradeJob: Job? = null
     private var legacyImageUpgradeKey: Pair<NetReaderBookSource, String>? = null
+    private var legacyImageUpgradeRetryAt: TimeSource.Monotonic.ValueTimeMark? = null
     private var upgradedChapterUrl: String? = null
 
     private fun stopLegacyImageUpgrade() {
         legacyImageUpgradeJob?.cancel()
         legacyImageUpgradeJob = null
         legacyImageUpgradeKey = null
+        legacyImageUpgradeRetryAt = null
     }
 
     /** 只在已出正文的当前章补全旧缓存，成功后也不重新排正在读的页。 */
@@ -1017,22 +1137,28 @@ class ReaderViewModel(
         if (spec?.showImages != true || sourceChanging || _state.value.refreshingChapter) return
         val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
         val key = src to url
-        if (key == legacyImageUpgradeKey) return
+        if (key == legacyImageUpgradeKey) {
+            if (legacyImageUpgradeRetryAt?.hasPassedNow() != true) return
+        }
         stopLegacyImageUpgrade()
         legacyImageUpgradeKey = key
         legacyImageUpgradeJob = viewModelScope.launch {
-            delay(PREFETCH_LEAD_IN_MS)
-            if (source !== src || spec?.showImages != true ||
-                src.chapters.getOrNull(position.chapterIndex)?.url != url
-            ) return@launch
             val started = TimeSource.Monotonic.markNow()
-            var stage = "check"
+            var stage = "lead_in"
             var fetchMs: Long? = null
             var fetchStarted = started
             var writeStarted = started
             var outcome = "cancelled"
             var errorType: String? = null
             try {
+                delay(PREFETCH_LEAD_IN_MS)
+                if (source !== src || spec?.showImages != true ||
+                    src.chapters.getOrNull(position.chapterIndex)?.url != url
+                ) {
+                    outcome = "superseded"
+                    return@launch
+                }
+                stage = "check"
                 outcome = withTimeoutOrNull(CONTENT_TIMEOUT_MS) {
                     src.upgradeTextOnlyChapter(position.chapterIndex) { nextStage ->
                         stage = nextStage
@@ -1051,7 +1177,13 @@ class ReaderViewModel(
                 outcome = "failed"
                 errorType = e.javaClass.simpleName
             } finally {
-                if (outcome != "skipped") {
+                if (legacyImageUpgradeKey === key && outcome != "ready" && outcome != "not_needed") {
+                    val retryDelay = if (outcome == "deferred") {
+                        UPGRADE_DEFERRED_RECHECK_MS
+                    } else TEXT_ONLY_UPGRADE_INTERVAL_MS
+                    legacyImageUpgradeRetryAt = TimeSource.Monotonic.markNow() + retryDelay.milliseconds
+                }
+                if (outcome != "not_needed") {
                     trace("chapter.cache_upgrade", "chapter" to chapterIndex, "outcome" to outcome, "stage" to stage,
                         "duration_ms" to started.elapsedNow().inWholeMilliseconds,
                         "fetch_ms" to (if (stage == "fetch") fetchStarted.elapsedNow().inWholeMilliseconds else fetchMs),
@@ -1072,6 +1204,7 @@ class ReaderViewModel(
         val url = src.chapters.getOrNull(chapterIndex)?.url ?: return
         val generation = tocGeneration
         val cacheEpoch = src.cacheEpoch()
+        stopSpeech(returnToText = false)
         stopAutoFlip()
         _state.update { it.copy(refreshingChapter = true, chapterRefreshFailed = false) }
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -1085,7 +1218,7 @@ class ReaderViewModel(
                 engineMutex.withLock {
                     // 抓取期间可能换源或插章：不把旧请求的结果写到新会话里。
                     if (source !== src || tocGeneration != generation || sourceChanging) {
-                        messageBus.emit("书源或目录已变化，请重新获取本章")
+                        messageBus.emit("来源或目录已变化，请重新获取本章")
                         return@withLock
                     }
                     stopPrefetch()
@@ -1149,6 +1282,7 @@ class ReaderViewModel(
     fun purifySelection(selected: String, replacement: String = "") {
         val text = selected.trim()
         if (text.isEmpty()) return
+        stopSpeech(returnToText = false)
         viewModelScope.launch {
             replaceRules.createFromSelection(bookId, text, replacement)
             _state.value = _state.value.copy(error = null)
@@ -1544,6 +1678,7 @@ class ReaderViewModel(
      * 旧源的正文成了新目录里的「已缓存」。
      */
     private suspend fun beginSourceChange() {
+        stopSpeech(returnToText = false)
         sourceChangesInFlight++
         (source as? NetReaderBookSource)?.cacheWritesHeld = true
         val upgrade = legacyImageUpgradeJob
@@ -1874,6 +2009,9 @@ class ReaderViewModel(
         if (pageIndex !in result.chapter.pages.indices) return
         val oldPage = _state.value
         if (oldPage.chapterIndex != chapterIndex) {
+            recentChapterCrossing = if (oldPage.page != null && kotlin.math.abs(oldPage.chapterIndex - chapterIndex) == 1) {
+                RecentChapterCrossing(oldPage.chapterIndex, chapterIndex, TimeSource.Monotonic.markNow())
+            } else null
             val src = source as? NetReaderBookSource
             val upgradedUrl = upgradedChapterUrl
             if (upgradedUrl != null && src?.chapters?.getOrNull(oldPage.chapterIndex)?.url == upgradedUrl) {
@@ -2236,10 +2374,13 @@ class ReaderViewModel(
         neighborJobs.children.toList().forEach { it.cancelAndJoin() }
     }
 
-    /** 只保留 center±1 的分页结果（测量结果持有 TextLayoutResult，较重） */
+    /** 跨章后短暂保留出发方向的外侧一章，快速折返时可直接复用分页。 */
     private fun trimWindow(center: Int, alsoKeep: Int = center) {
-        val keep = ((center - 1)..(center + 1)).toSet() + alsoKeep
-        paginated.keys.retainAll { it in keep }
+        val crossing = recentChapterCrossing
+        val recentNeighbor = crossing?.takeIf {
+            it.to == center && it.at.elapsedNow().inWholeMilliseconds < CHAPTER_CROSSING_GRACE_MS
+        }?.let { it.from + (it.from - it.to) }
+        paginated.keys.retainAll { it in (center - 1)..(center + 1) || it == alsoKeep || it == recentNeighbor }
     }
 
     private var saveProgressJob: Job? = null
@@ -2256,7 +2397,7 @@ class ReaderViewModel(
 
     /** 试读结束：正式上架。调用方等它完成再退页，避免和丢弃竞态。 */
     suspend fun commitToShelf() = withContext(NonCancellable) {
-        val p = position
+        val p = speechPosition ?: position
         bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
         bookRepo.commitToShelf(bookId)
         book = book?.copy(inShelf = true, deleted = false, removedFromShelf = false)
@@ -2280,7 +2421,7 @@ class ReaderViewModel(
 
     private suspend fun persistProgress() {
         if (skipProgressFlush || progressHeld) return
-        val p = position
+        val p = speechPosition ?: position
         withContext(Dispatchers.IO + NonCancellable) {
             bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
         }
@@ -2290,7 +2431,7 @@ class ReaderViewModel(
     fun flushProgress() {
         if (skipProgressFlush || progressHeld) return
         saveProgressJob?.cancel()
-        val p = position
+        val p = speechPosition ?: position
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO + NonCancellable).launch {
             bookRepo.saveProgress(bookId, p.chapterIndex, p.charOffset)
         }
@@ -2324,6 +2465,7 @@ class ReaderViewModel(
 
     override fun onCleared() {
         trace("closed")
+        stopSpeech(returnToText = false)
         onReaderStopped()
         flushProgress()
         (source as? AutoCloseable)?.close()
@@ -2342,6 +2484,9 @@ class ReaderViewModel(
          * 用户读完一页远不止 400ms。
          */
         const val PREFETCH_LEAD_IN_MS = 400L
+        const val CHAPTER_CROSSING_GRACE_MS = 2_000L
+        // 退避可能由上一阅读会话设置，定期复查；真正抓取仍受缓存的共享退避限制。
+        const val UPGRADE_DEFERRED_RECHECK_MS = 30_000L
 
         /**
          * 目录多久至多重读一次（[observeToc]）：预取连写几章，不该每章读一遍目录、重组一次菜单。

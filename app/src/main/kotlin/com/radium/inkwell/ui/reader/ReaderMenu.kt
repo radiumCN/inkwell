@@ -139,8 +139,6 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.ListView
-import top.yukonga.miuix.kmp.icon.extended.Pause
-import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -164,6 +162,7 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.VolumeUp
 
 @Composable
 fun ReaderMenu(
@@ -185,6 +184,8 @@ fun ReaderMenu(
     onSearchSources: () -> Unit,
     onRefreshChapter: () -> Unit,
     onToggleAutoFlip: () -> Unit,
+    onReadAloud: () -> Unit,
+    speechActive: Boolean,
     onDismiss: () -> Unit,
     onSwipePage: (FlipDirection) -> Unit,
     onReaderSheetOpen: (Boolean) -> Unit,
@@ -308,29 +309,48 @@ fun ReaderMenu(
                                 )
                             }
                         }
-                        if (session.isNetBook) {
-                            Box {
-                                AppIconButton(onClick = { showMore = true }) {
-                                    Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
-                                }
-                                AppDropdownMenu(
-                                    expanded = showMore,
-                                    onDismissRequest = { showMore = false },
-                                    items = listOf(
-                                        AppMenuItem(
-                                            text = when {
-                                                overlay.refreshingChapter -> "正在重新获取本章…"
-                                                overlay.chapterRefreshFailed -> "重试获取本章"
-                                                else -> "重新获取本章"
-                                            },
-                                            summary = "从当前书源获取最新内容",
-                                            enabled = !overlay.refreshingChapter && !overlay.changingSource &&
-                                                !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
-                                            onClick = onRefreshChapter,
-                                        ),
-                                    ),
-                                )
+                        Box {
+                            val scrollMode = session.settings.flipAnimation == FlipAnimation.SCROLL
+                            AppIconButton(onClick = { showMore = true }) {
+                                Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
                             }
+                            AppDropdownMenu(
+                                expanded = showMore,
+                                onDismissRequest = { showMore = false },
+                                items = buildList {
+                                    add(
+                                        AppMenuItem(
+                                            text = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
+                                            summary = when {
+                                                overlay.autoFlipping -> null
+                                                scrollMode -> "滚动模式不可用"
+                                                speechActive -> "结束朗读后可用"
+                                                else -> null
+                                            },
+                                            // 只拦「开」：停是随时都得能点的。点正文不会停自动翻页，这里就是唯一的出口 ——
+                                            // 从前翻进一章加载中 / 读不出来的，这一项灰掉，自动翻页停不下来
+                                            enabled = overlay.autoFlipping ||
+                                                (!scrollMode && !speechActive && !pageUi.loading && pageUi.page != null),
+                                            onClick = onToggleAutoFlip,
+                                        ),
+                                    )
+                                    if (session.isNetBook) {
+                                        add(
+                                            AppMenuItem(
+                                                text = when {
+                                                    overlay.refreshingChapter -> "正在重新获取本章…"
+                                                    overlay.chapterRefreshFailed -> "重试获取本章"
+                                                    else -> "重新获取本章"
+                                                },
+                                                summary = "从当前来源获取最新内容",
+                                                enabled = !overlay.refreshingChapter && !overlay.changingSource &&
+                                                    !overlay.autoChanging && !pageUi.loading && pageUi.page != null,
+                                                onClick = onRefreshChapter,
+                                            ),
+                                        )
+                                    }
+                                },
+                            )
                         }
                     }
                 }
@@ -360,10 +380,10 @@ fun ReaderMenu(
                         )
                         MenuActions(
                             session = session,
-                            overlay = overlay,
+                            readAloudEnabled = speechActive || (!pageUi.loading && pageUi.page != null),
                             onShowToc = { showToc = true },
                             onSearchSources = onSearchSources,
-                            onToggleAutoFlip = onToggleAutoFlip,
+                            onReadAloud = onReadAloud,
                             onShowSettings = { showSettings = true },
                         )
                     }
@@ -552,15 +572,15 @@ private fun progressLabel(page: ReaderPageUi, chapterCount: Int): String = build
  *
  * 四个动作同一种样式（图标在上、字在下）、平分宽度。曾把「设置」做成实心主按钮突出它，可那是
  * 图标在左、字在右的另一种排法，一排四个里只有它横着，看着像拼错了 —— 宁可四个一样。
- * 本地书 / 滚动模式下不适用的动作保留占位并禁用，位置不跳。
+ * 本地书的换源保留占位并禁用，位置不跳。
  */
 @Composable
 private fun MenuActions(
     session: ReaderSessionUi,
-    overlay: ReaderOverlayUi,
+    readAloudEnabled: Boolean,
     onShowToc: () -> Unit,
     onSearchSources: () -> Unit,
-    onToggleAutoFlip: () -> Unit,
+    onReadAloud: () -> Unit,
     onShowSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -579,10 +599,10 @@ private fun MenuActions(
             modifier = Modifier.weight(1f),
         )
         BarAction(
-            icon = if (overlay.autoFlipping) MiuixIcons.Pause else MiuixIcons.Play,
-            label = if (overlay.autoFlipping) "停止翻页" else "自动翻页",
-            onClick = { UsageLog.event("ui.click", "action" to "reader.auto_flip"); onToggleAutoFlip() },
-            enabled = session.settings.flipAnimation != FlipAnimation.SCROLL,
+            icon = MiuixIcons.VolumeUp,
+            label = "朗读",
+            onClick = { UsageLog.event("ui.click", "action" to "reader.read_aloud"); onReadAloud() },
+            enabled = readAloudEnabled,
             modifier = Modifier.weight(1f),
         )
         BarAction(
@@ -597,7 +617,7 @@ private fun MenuActions(
 /**
  * 操作条上的一个动作：图标在上、字在下（[IconLabelButton]，多选态的底部操作条也是它）。四格均分整条宽，左右不再加内边距。
  *
- * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、自动翻页 Play/Pause、设置 Tune）：
+ * 四个图标都取 Miuix 图标集（目录 ListView、换源 Replace、朗读 VolumeUp、设置 Tune）：
  * 同一排里混两套线宽一眼就看得出，所以要换就整排一起换。
  */
 @Composable
@@ -1720,6 +1740,34 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
+    // 关掉的那一边，正文顺势占用那条带（见 buildLayoutSpec），按同一字符位置重排。
+    // 页脚关了电量就无从谈起：那一行收起来而不是变灰，再打开页脚时连同原来的开关状态一起回来
+    ReaderGroup("页眉页脚") {
+        SwitchRow(
+            title = "显示页眉",
+            subtitle = "正文上方的章节名",
+            checked = settings.showHeader,
+            onCheckedChange = { onUpdate(settings.copy(showHeader = it)) },
+            position = SettingGroupPosition.First,
+        )
+        SwitchRow(
+            title = "显示页脚",
+            subtitle = if (settings.showFooter) "正文下方的页码、进度和时间" else "已隐藏，正文向下多排一行左右",
+            checked = settings.showFooter,
+            onCheckedChange = { onUpdate(settings.copy(showFooter = it)) },
+            position = if (settings.showFooter) SettingGroupPosition.Middle else SettingGroupPosition.Last,
+        )
+        if (settings.showFooter) {
+            SwitchRow(
+                title = "页脚显示电量",
+                subtitle = "页脚右侧的电池图标",
+                checked = settings.showBattery,
+                onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
+                position = SettingGroupPosition.Last,
+            )
+        }
+    }
+
     // 本地书默认显示，在线书默认关闭；两个开关各自记忆，调整后按同一字符位置重排。
     ReaderGroup("图片") {
         SwitchRow(
@@ -1748,19 +1796,12 @@ private fun MoreTab(
     }
 
     ReaderGroup {
-        // 这两个设置一直存在于 ReaderSettings 里，却**从来没有 UI 能改**
+        // 常亮一直存在于 ReaderSettings 里，从前却**没有 UI 能改**（同批补上的电量开关挪进了上面的「页眉页脚」）
         SwitchRow(
             title = "阅读时保持屏幕常亮",
             checked = settings.keepScreenOn,
             onCheckedChange = { onUpdate(settings.copy(keepScreenOn = it)) },
             position = SettingGroupPosition.First,
-        )
-        SwitchRow(
-            title = "页脚显示电量",
-            subtitle = "阅读页右下角的电池图标。关掉后仍显示页码、进度和时间",
-            checked = settings.showBattery,
-            onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
-            position = SettingGroupPosition.Middle,
         )
 
         // 存储仍在 AppPrefs（不在 ReaderSettings）：它本就存在那儿，搬进 ReaderSettings 要跨
@@ -1769,7 +1810,7 @@ private fun MoreTab(
         SwitchRow(
             title = "长按选字",
             subtitle = if (textSelectionEnabled) {
-                "长按正文可选中、复制，或建一条只对这本书生效的净化规则"
+                "长按正文后可拖动两端手柄，精确选择要复制或替换的文字"
             } else {
                 "已关闭。翻页时手指停顿久了不会再误触选中"
             },

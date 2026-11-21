@@ -2,22 +2,35 @@ package com.radium.inkwell.ui.sourcedetail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.webkit.WebViewFeature
 import com.radium.inkwell.core.source.BookSourceEngine
+import com.radium.inkwell.core.source.BookSourceRule
+import com.radium.inkwell.core.source.allowsLoginReturn
+import com.radium.inkwell.core.source.sourceOrigin
+import com.radium.inkwell.core.source.SourceLoginForm
+import com.radium.inkwell.core.source.SourceLoginInteraction
+import com.radium.inkwell.core.source.js.StrResponse
+import com.radium.inkwell.core.source.webLoginUrl
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
+import com.radium.inkwell.data.source.SourceLoginSessions
+import com.radium.inkwell.data.source.loginProfileName
+import com.radium.inkwell.data.source.sourceLoginHttpUrl
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
  * 书源详情（只读）。书源不在手机上编辑 —— 手机上编辑 JSON 体验差，规则一律靠导入。
- * 这里只做两件事：展示规则原文（只读）、跑一键全链路冒烟测试帮用户判断源好不好。
+ * 可打开来源登录、查看规则原文，或跑一键全链路测试。
  */
 data class SourceDetailUiState(
     /** 库读回来了没有。没读回来时转圈；读回来了却没有这一行（[missing]）给空态，别是一片空白还能点「测试」 */
@@ -33,13 +46,24 @@ data class SourceDetailUiState(
     val testKeyword: String = "剑",
     val testing: Boolean = false,
     val testReport: String = "",
+    val hasLogin: Boolean = false,
+    val loginForm: SourceLoginForm? = null,
+    val loginBusy: Boolean = false,
+    val loginBrowser: SourceLoginBrowserPage? = null,
 )
 
-class SourceDetailViewModel(
+data class SourceLoginBrowserPage(
+    val url: String, val title: String, val requireCookies: Boolean, val profile: String, val returnOrigin: String?,
+    /** 登录网页的 UA：和抓取这个来源发的同一个（BookSourceEngine.userAgentOf） */
+    val userAgent: String,
+)
+
+class SourceDetailViewModel internal constructor(
     private val sourceId: String,
     private val sourceRepo: BookSourceRepository,
     private val netBookRepo: NetBookRepository,
     private val engine: BookSourceEngine,
+    private val sessions: SourceLoginSessions,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SourceDetailUiState())
@@ -47,6 +71,8 @@ class SourceDetailViewModel(
 
     /** 一次性提示：与其他管理页一样走共享 MessageBus + CollectMessages */
     val messages = MessageBus()
+    private var rule: BookSourceRule? = null
+    private var browserResult: CompletableDeferred<StrResponse?>? = null
 
     init {
         viewModelScope.launch {
@@ -57,12 +83,14 @@ class SourceDetailViewModel(
             }
             // 解析 + 美化一整份规则 JSON（带大段脚本的源几十 KB），别在主线程上做
             val pretty = withContext(Dispatchers.Default) { prettyOrRaw(entity.json) }
-            val searchable = sourceRepo.getRule(sourceId)?.search != null
+            rule = sourceRepo.getRule(sourceId)
+            val searchable = rule?.search != null
             _state.value = _state.value.copy(
                 loaded = true,
                 name = entity.name,
                 jsonText = pretty,
                 searchable = searchable,
+                hasLogin = rule?.hasLogin == true,
                 // 不能搜索的源要的是网址，预填的搜索词留着只会被当成网址去抓
                 testKeyword = if (searchable) _state.value.testKeyword else "",
             )
@@ -75,6 +103,128 @@ class SourceDetailViewModel(
 
     fun setTestKeyword(text: String) {
         _state.value = _state.value.copy(testKeyword = text)
+    }
+
+    fun openLogin() = launchLogin { source ->
+        val webUrl = source.webLoginUrl
+        if (webUrl == null) {
+            val form = engine.getLoginForm(source)
+            _state.update { it.copy(loginForm = form) }
+        } else if (openBrowser(webUrl, source.name, requireCookies = true) != null) {
+            messages.emit("已同步网页会话，可以重新校验来源")
+        }
+    }
+
+    fun updateLoginField(name: String, value: String) {
+        _state.update { state ->
+            state.copy(loginForm = state.loginForm?.let { it.copy(values = it.values + (name to value)) })
+        }
+    }
+
+    fun submitLogin(action: String? = null) = launchLogin { source ->
+        val submitted = _state.value.loginForm?.values.orEmpty()
+        var showedMessage = false
+        val interaction = object : SourceLoginInteraction {
+            override fun message(text: String) {
+                showedMessage = true
+                messages.emit(text)
+            }
+
+            override fun updateFields(values: Map<String, String>) {
+                values.forEach { (key, value) -> updateLoginField(key, value) }
+            }
+
+            override suspend fun openBrowser(url: String, title: String): StrResponse? =
+                this@SourceDetailViewModel.openBrowser(url, title, requireCookies = false)
+        }
+        engine.submitLogin(source, submitted, action, interaction)
+        val form = engine.getLoginForm(source)
+        _state.update { state ->
+            val edits = state.loginForm?.values.orEmpty().filter { (key, value) -> submitted[key] != value }
+            val values = form.values.mapValues { (key, value) ->
+                edits[key] ?: value.ifEmpty { submitted[key].orEmpty() }
+            }
+            state.copy(loginForm = form.copy(values = values))
+        }
+        if (action == null && !showedMessage) messages.emit("登录请求已完成，可以重新校验来源")
+    }
+
+    private fun launchLogin(block: suspend (BookSourceRule) -> Unit) {
+        val source = rule ?: return
+        if (_state.value.loginBusy) return
+        _state.update { it.copy(loginBusy = true) }
+        viewModelScope.launch {
+            try {
+                block(source)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // 来源脚本的异常可能含表单内容或请求凭据，不展示或记录原文。
+                messages.emit("来源登录操作失败")
+            } finally {
+                _state.update { it.copy(loginBusy = false) }
+            }
+        }
+    }
+
+    private suspend fun openBrowser(url: String, title: String, requireCookies: Boolean): StrResponse? =
+        withContext(Dispatchers.Main.immediate) {
+            val source = rule ?: return@withContext null
+            val sessionId = source.loginSessionId ?: return@withContext null
+            val target = url.sourceLoginHttpUrl()
+            if (target == null) {
+                messages.emit("该登录地址无法打开，请检查来源的 HTTPS 地址")
+                return@withContext null
+            }
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                messages.emit("请更新 Android 系统 WebView 后再打开登录网页")
+                return@withContext null
+            }
+            val userAgent = engine.userAgentOf(source)
+            val result = CompletableDeferred<StrResponse?>()
+            browserResult = result
+            val returnOrigin = source.baseUrl.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
+            val page = SourceLoginBrowserPage(
+                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent,
+            )
+            _state.update { it.copy(loginBrowser = page) }
+            try {
+                result.await()
+            } finally {
+                browserResult = null
+                _state.update { it.copy(loginBrowser = null) }
+            }
+        }
+
+    fun closeLoginBrowser() {
+        browserResult?.complete(null)
+    }
+
+    fun finishLoginBrowser(url: String, html: String) {
+        val page = _state.value.loginBrowser ?: return
+        val result = browserResult ?: return
+        val start = page.url.sourceLoginHttpUrl() ?: return
+        val source = rule ?: return
+        val sessionId = source.loginSessionId ?: return
+        val current = url.sourceLoginHttpUrl()?.takeIf { source.allowsLoginReturn(start, it) }
+        viewModelScope.launch {
+            val cookies = withContext(Dispatchers.IO) {
+                if (current == null) null else runCatching {
+                    if (sessions.rememberWebLogin(sessionId, start, current)) {
+                        sessions.webCookies(sessionId, current).orEmpty()
+                    } else null
+                }.getOrNull()
+            }
+            if (result !== browserResult) return@launch
+            if (page.requireCookies && cookies == null) {
+                messages.emit("未找到登录会话，请在来源网页完成登录后再试")
+                return@launch
+            }
+            if (cookies != null) rule?.let(engine::invalidateLoginPages)
+            result.complete(StrResponse(bodyText = html.takeIf { current != null }.orEmpty(),
+                status = if (current == null) 0 else 200, finalUrl = current?.toString().orEmpty(),
+                cookieStr = cookies.orEmpty()))
+        }
     }
 
     /** 搜索→取第1本→详情→目录→第1章正文，一键冒烟；不能搜索的源从用户给的网址开始 */
@@ -99,18 +249,20 @@ class SourceDetailViewModel(
             }
             val finished = withTimeoutOrNull(TEST_TIMEOUT_MS) {
                 try {
-                    val bookUrl = if (rule.search != null) {
+                    val hit = if (rule.search != null) {
                         val page = engine.search(rule, input)
                         step("✔ 搜索: ${page.items.size} 条结果")
                         val first = page.items.firstOrNull() ?: error("搜索无结果")
                         step("  首条: ${first.title} / ${first.author ?: "?"}")
-                        first.bookUrl
+                        first
                     } else {
                         step("· 不能搜索，从网址开始")
-                        input
+                        null
                     }
 
-                    val (detail, toc) = netBookRepo.fetchDetailAndToc(rule, bookUrl, trackReadHealth = false)
+                    val (detail, toc) = netBookRepo.fetchDetailAndToc(
+                        rule, hit?.bookUrl ?: input, hit?.variables.orEmpty(), trackReadHealth = false,
+                    )
                     step("✔ 详情: ${detail.title} tocUrl=${detail.tocUrl.take(60)}")
                     step("✔ 目录: ${toc.size} 章")
                     val firstChapter = toc.firstOrNull() ?: error("目录为空")

@@ -417,7 +417,7 @@ class SearchViewModel(
                 currentCoroutineContext().ensureActive()
                 _state.update { it.copy(searching = false) }
                 logSummary("source_load_failed")
-                messages.emit("读取书源失败，请重试")
+                messages.emit("读取来源失败，请重试")
                 return@launch
             }
             sourceMetaById = enabled.associateBy { it.rule.id }

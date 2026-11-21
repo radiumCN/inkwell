@@ -95,6 +95,38 @@ class ApiAndWebViewSourceTest {
     }
 
     @Test
+    fun `地址脚本和 java_ajax 都能发送 JSON 字符串形式的请求头`() = runBlocking {
+        val source = apiSource().copy(
+            jsLib = """
+                function api(path) {
+                    const headers = {
+                        'User-Agent': 'yuedu_app',
+                        'Authorization': String(cookie.getCookie(baseUrl))
+                    };
+                    return baseUrl + path + ',' + JSON.stringify({headers: JSON.stringify(headers)});
+                }
+            """.trimIndent(),
+            searchUrl = "<js>api('/api/search?wd={{key}}')</js>",
+            ruleSearch = apiSource().ruleSearch!!.copy(bookUrl = "/api/detail?id={{\$.id}}"),
+            ruleBookInfo = BookInfoRuleSet(
+                init = "<js>JSON.parse(java.ajax(api('/api/detail?id=17'))).data.book</js>",
+                name = "title",
+            ),
+        )
+        val engine = engine()
+        val hit = engine.search(source, "斗破").items.first()
+        assertEquals("斗破苍穹", engine.getDetail(source, hit.bookUrl).title)
+
+        val search = server.takeRequest()
+        server.takeRequest() // 详情页自身的请求，随后 init 脚本再调用 java.ajax。
+        val ajax = server.takeRequest()
+        for (request in listOf(search, ajax)) {
+            assertEquals("yuedu_app", request.getHeader("User-Agent"))
+            assertEquals("", request.getHeader("Authorization"))
+        }
+    }
+
+    @Test
     fun `内容是 JSON 时页面一级的裸规则按 JSONPath —— data_books 不是 CSS 选择器`() = runBlocking {
         val items = engine().search(apiSource(), "斗破").items
         assertEquals(listOf("斗破苍穹", "斗破苍穹之举族飞升"), items.map { it.title })

@@ -4,7 +4,12 @@ import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Base64
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.SourceLoginInteraction
+import com.radium.inkwell.core.source.SourceSessionKey
+import com.radium.inkwell.core.source.SourceSessionStore
 import com.radium.inkwell.core.source.splitUrlOptions
+import kotlinx.coroutines.runBlocking
+import kotlin.coroutines.EmptyCoroutineContext
 import com.radium.inkwell.core.util.toHex
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -179,7 +184,6 @@ class JsStringMap(private val map: Map<String, String>) : ScriptableObject() {
 interface JsRuleQuery {
     fun getString(rule: String): String
     fun getStringList(rule: String): Array<String>
-    fun getElement(rule: String): JsElement?
     fun getElements(rule: String): JsElements
 
     /**
@@ -275,6 +279,12 @@ class SourceBridge(
     private val key: String,
     private val store: MutableMap<String, String> = ConcurrentHashMap(),
     private val facts: SourceFacts = SourceFacts(),
+    private val session: SourceSessionStore? = null,
+    private val loginAction: (() -> Unit)? = null,
+    private var submittedInfo: String? = null,
+    private val pendingLogin: MutableMap<SourceSessionKey, String?>? = null,
+    private val sessionId: String? = null,
+    private val observeLoginHeaders: (String) -> Unit = {},
 ) {
     @JvmField val bookSourceUrl: String = key
     @JvmField val bookSourceName: String = facts.name
@@ -296,7 +306,7 @@ class SourceBridge(
      * 阅读的 BaseSource.loginUi() 是个**方法**（把登录界面的 JSON 解成一排控件），同名的字段被它盖住 ——
      * 所以在阅读里 `typeof source.loginUi == 'function'`。书山聚合、大灰狼聚合、光遇聚合、魔丸这一批聚合源
      * 靠这一句认「是不是官方阅读」：不是函数就当成某个改版 App，搜索、目录走另一套接口，在我们这儿一章目录都解不出来。
-     * 我们不画登录界面，返回界面的原文
+     * 脚本调用时返回界面配置的原文。
      */
     fun loginUi(): String? = facts.loginUi
 
@@ -321,44 +331,61 @@ class SourceBridge(
 
     fun get(k: String): String = store[k].orEmpty()
 
-    fun getVariable(): String = store["\$variable"].orEmpty()
+    fun getVariable(): String = sessionValue(SourceSessionKey.VARIABLE, "\$variable").orEmpty()
 
     fun putVariable(v: String?): String {
-        store["\$variable"] = v.orEmpty()
+        saveSessionValue(SourceSessionKey.VARIABLE, "\$variable", v)
         return v.orEmpty()
     }
 
     fun setVariable(v: String?): String = putVariable(v)
 
-    // ---- 登录信息 ----
-    // 不做登录界面：没人填过，就是阅读里「还没登录」的样子 —— getLoginInfo / getLoginInfoMap 为 null。
-    // 从前这几个方法不存在，一调就 ReferenceError：霹雳书屋的 jsLib 拼地址前先读一下登录信息，整个源搜不了；
-    // 订阅源的 header 脚本包在 try 里倒是不死，但请求头一个也没算出来。
-    // 脚本自己存进来的（一读先过一道脚本挑战、算出 Cookie 后 putLoginHeader）照存，只在进程内
+    fun login() {
+        val action = loginAction ?: error("请在来源详情中登录")
+        action()
+    }
 
-    fun getLoginInfo(): String? = store[LOGIN_INFO]
+    fun getLoginInfo(): String? = submittedInfo ?: sessionValue(SourceSessionKey.INFO, LOGIN_INFO)
 
     fun getLoginInfoMap(): JsStringMap? = getLoginInfo()?.let(::jsonStringMap)
 
     fun putLoginInfo(info: String?): Boolean {
-        if (info.isNullOrBlank()) store.remove(LOGIN_INFO) else store[LOGIN_INFO] = info
+        submittedInfo = null
+        saveSessionValue(SourceSessionKey.INFO, LOGIN_INFO, info)
         return true
     }
 
     fun removeLoginInfo() {
-        store.remove(LOGIN_INFO)
+        putLoginInfo(null)
     }
 
-    fun getLoginHeader(): String? = store[LOGIN_HEADER]
+    fun getLoginHeader(): String? = sessionValue(SourceSessionKey.HEADERS, LOGIN_HEADER)?.also(observeLoginHeaders)
 
     fun getLoginHeaderMap(): JsStringMap? = getLoginHeader()?.let(::jsonStringMap)
 
     fun putLoginHeader(header: String?) {
-        if (header.isNullOrBlank()) store.remove(LOGIN_HEADER) else store[LOGIN_HEADER] = header
+        header?.let(observeLoginHeaders)
+        saveSessionValue(SourceSessionKey.HEADERS, LOGIN_HEADER, header)
     }
 
     fun removeLoginHeader() {
-        store.remove(LOGIN_HEADER)
+        putLoginHeader(null)
+    }
+
+    private fun sessionValue(field: SourceSessionKey, storeKey: String): String? = when {
+        pendingLogin?.containsKey(field) == true -> pendingLogin[field]
+        session != null && sessionId != null -> session.read(sessionId, field)
+        else -> store[storeKey]
+    }
+
+    private fun saveSessionValue(field: SourceSessionKey, storeKey: String, value: String?) {
+        val saved = value?.takeIf { it.isNotBlank() }
+        when {
+            pendingLogin != null -> pendingLogin[field] = saved
+            session != null && sessionId != null -> session.write(sessionId, field, saved)
+            saved == null -> store.remove(storeKey)
+            else -> store[storeKey] = saved
+        }
     }
 
     private fun jsonStringMap(json: String): JsStringMap? = runCatching {
@@ -392,6 +419,7 @@ class SourceFacts(
     val exploreUrl: String? = null,
     /** 规则集按阅读的字段名：`ruleSearch` → { bookList, name, … }；没写的规则集、规则不在里面 */
     val ruleSets: Map<String, Map<String, String>> = emptyMap(),
+    val hasLogin: Boolean = false,
 )
 
 /** Cookie，脚本里是 `cookie` */
@@ -527,6 +555,8 @@ class JavaBridge(
     private val chinese: ChineseConverter = ChineseConverter.NONE,
     /** [androidId] 给的设备号，见 [ScriptRuntime.androidId] */
     private val deviceId: () -> String = { "" },
+    private val loginInteraction: SourceLoginInteraction? = null,
+    private val loginRetry: (() -> StrResponse)? = null,
 ) {
 
     /** getString / getElement 落在哪份内容上；[setContent] 换掉它 */
@@ -584,21 +614,7 @@ class JavaBridge(
         ) ?: StrResponse.empty()
     }
 
-    // ---- 交互（我们没有 UI 回调，作空实现）----
-    // 缺一个方法，Rhino 就是 ReferenceError，整个书源直接判死。Legado 有的这些入口
-    // 宁可给空壳：脚本照常往下走，最坏是拿不到人机验证后的页面，而不是整源不可用。
-
-    fun startBrowser(url: String, title: String?): String = ""
-
-    fun startBrowserAwait(url: String, title: String?): String = ""
-
     fun getVerificationCode(url: String): String = ""
-
-    // 阅读里是拉起浏览器 / 别的 App 打开链接（目录的章节地址、简介里的「打开网页」都有这么写的）；后台抓取没有界面可拉
-
-    fun openUrl(url: String) = Unit
-
-    fun openUrl(url: String, mimeType: String?) = Unit
 
     // 阅读的 get / post / head 走 Jsoup、**不跟随重定向**：书仓网、来看文学 POST 搜索后读 `.header("Location")`
     // 拿结果页地址。从前跟着跳了过去，拿到的是结果页本身，Location 是空的，搜索地址拼成「站点/null」。
@@ -650,7 +666,13 @@ class JavaBridge(
     private fun on(content: Any?): JsRuleQuery? =
         if (content == null) this.content else (this.content ?: query)?.withContent(content, null)
 
-    fun getElement(rule: String): JsElement? = content?.getElement(rule)
+    /**
+     * 同阅读：Jsoup 内容上的 `getElement` 返回的是**全部**匹配（AnalyzeRule.getElement 走的就是 getElements），不是第一个。
+     * 来源照这个写：`d = java.getElement(".list > div"); for (i = 0; i < d.length; i++) d.select(…)`。
+     * 从前只给第一个元素，`d.length` 是 undefined，循环一次都不跑 —— 凡人小说的目录、正文全空。
+     * 单个元素上常用的 `text()` / `attr()` / `select()` 在整组上照样能用（同 jsoup 的 Elements）。
+     */
+    fun getElement(rule: String): JsElements = getElements(rule)
 
     /** 同阅读给的是 Elements：`size()` / `get(i)` / `text()`，下标和 length 也认（见 BridgeWrapFactory） */
     fun getElements(rule: String): JsElements = content?.getElements(rule) ?: JsElements(emptyList())
@@ -814,17 +836,45 @@ class JavaBridge(
     fun androidId(): String = deviceId()
 
     /**
-     * 阅读给的是系统 WebView 的 UA；我们抓取、渲染一律用 [SourceHttpClient.DEFAULT_UA]（站点按 UA 给不同的页面，
-     * 规则是照同一份写的），这里也给它。header 脚本里 `"User-Agent": java.getWebViewUA()` 的来源（晋江、太极小说）靠它
+     * 阅读给的是系统 WebView 的 UA（手机的），不是它抓取默认发的桌面 UA；我们给同样是手机 Chrome 的
+     * [SourceHttpClient.DEFAULT_UA]。header 脚本里 `"User-Agent": java.getWebViewUA()` 的来源（晋江、太极小说）靠它，
+     * 要的就是手机那一套页面 —— 别改成来源的默认 UA
      */
     fun getWebViewUA(): String = SourceHttpClient.DEFAULT_UA
 
     /** 书源用它打调试日志；返回原值方便串在表达式里 */
     fun log(msg: Any?): Any? = msg
 
-    fun toast(msg: Any?): Any? = msg
+    fun toast(msg: Any?): Any? {
+        msg?.toString()?.takeIf { it.isNotBlank() }?.let { loginInteraction?.message(it.take(500)) }
+        return msg
+    }
 
-    fun longToast(msg: Any?): Any? = msg
+    fun longToast(msg: Any?): Any? = toast(msg)
+
+    fun upLoginData(values: Map<*, *>) {
+        loginInteraction?.updateFields(values.entries.associate { it.key.toString() to it.value.toString() })
+    }
+
+    fun startBrowser(url: String, title: String?): String {
+        startBrowserAwait(url, title)
+        return ""
+    }
+
+    fun openUrl(url: String) = startBrowser(url, null)
+
+    fun openUrl(url: String, mimeType: String?) = openUrl(url)
+
+    fun startBrowserAwait(url: String, title: String?): Any {
+        val interaction = loginInteraction ?: return ""
+        return runBlocking(EngineJsHttp.currentJob() ?: EmptyCoroutineContext) {
+            interaction.openBrowser(url, title.orEmpty())
+        } ?: ""
+    }
+
+    fun getStrResponse(): StrResponse = loginRetry?.invoke() ?: StrResponse.empty()
+
+    fun getStrResponse(url: String, headers: String?): StrResponse = connect(url, headers)
 
     fun cacheGet(key: String): String? = cache.get(key)
 

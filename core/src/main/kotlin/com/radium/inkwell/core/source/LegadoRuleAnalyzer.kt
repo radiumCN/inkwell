@@ -334,8 +334,13 @@ object LegadoRuleAnalyzer {
 
     // ---------- 判定与切分 ----------
 
+    /**
+     * `/` 开头的不算：那是 XPath（`/a/p[1]/text()||/a/p[2]/text()`），Jsoup 选择器没有以 `/` 开头的写法。
+     * 整串交给 LegadoSelector 的话 `||` 就切不开了；照常切开以后每段到了求值器里再按 XPath 走（见 RuleEvaluator.implicitXPath）
+     */
     private fun isPureJsoup(s: String): Boolean =
         !s.contains("{{") &&
+            !s.startsWith("/") &&
             !s.contains("<js>", ignoreCase = true) &&
             !s.contains("@js:", ignoreCase = true) &&
             !s.contains("$.") &&

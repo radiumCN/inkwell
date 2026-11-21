@@ -4,6 +4,7 @@ import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SourceHttpClient
+import com.radium.inkwell.core.source.userAgent
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -110,6 +111,8 @@ class SiteAnalyzerTest {
         assertEquals(base, rule.bookSourceUrl)
         assertNull(book.tocLink)
         assertNull(rule.searchUrl)
+        // 向导是照手机 UA 下的页面认的规则，做出来的来源写明发手机 UA（不写就被当成阅读的来源发桌面 UA）
+        assertEquals(SourceHttpClient.DEFAULT_UA, rule.headers.userAgent())
 
         val eng = engine()
         val detail = eng.getDetail(rule, book.bookUrl)

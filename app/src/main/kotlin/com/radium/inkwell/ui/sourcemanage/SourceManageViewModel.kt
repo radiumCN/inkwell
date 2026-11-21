@@ -465,7 +465,7 @@ class SourceManageViewModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            messages.emit("无法读取书源：${e.message?.take(120) ?: "格式无效"}")
+            messages.emit("无法读取来源：${e.message?.take(120) ?: "格式无效"}")
         }
     }
 

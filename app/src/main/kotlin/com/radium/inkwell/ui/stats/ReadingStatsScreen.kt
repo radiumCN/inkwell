@@ -37,7 +37,7 @@ import com.radium.inkwell.ui.components.EmptyState
 import com.radium.inkwell.ui.components.LoadingState
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroup
-import com.radium.inkwell.ui.components.SettingGroupPosition
+import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
 import com.radium.inkwell.ui.components.settingsCardColor
@@ -283,13 +283,6 @@ private fun ReadingHeatmap(daily: Map<Long, Long>, today: LocalDate, modifier: M
             }
         }
     }
-}
-
-private fun groupPosition(index: Int, size: Int): SettingGroupPosition = when {
-    size == 1 -> SettingGroupPosition.Alone
-    index == 0 -> SettingGroupPosition.First
-    index == size - 1 -> SettingGroupPosition.Last
-    else -> SettingGroupPosition.Middle
 }
 
 /** 格子的目标边长：窄屏铺十几周、平板铺半年多，都差不多是这个大小 */

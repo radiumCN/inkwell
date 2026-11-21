@@ -1,5 +1,7 @@
 package com.radium.inkwell.core.source
 
+import com.radium.inkwell.core.util.toHex
+import java.security.MessageDigest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.nullable
@@ -52,12 +54,13 @@ data class BookSourceRule(
     val searchUrl: String? = null,
     @Serializable(with = LenientJsonText::class) val exploreUrl: String? = null,
     /**
-     * 阅读的登录脚本。我们不做登录，但不少来源把公用函数写在这里、规则开头 `eval(String(source.loginUrl))` 加载 ——
+     * 阅读的登录网址或脚本。不少来源也把公用函数写在这里、规则开头 `eval(String(source.loginUrl))` 加载 ——
      * 脚本里的 `source.loginUrl` 读的就是它（见 [scriptFacts]）。这个字段之前导入的来源没存它：重新导入一次才有
      */
     val loginUrl: String? = null,
-    /** 阅读的登录界面（一排控件的 JSON）。不画它，只给脚本读：聚合源拿 `typeof source.loginUi` 认 App，见 SourceBridge.loginUi */
+    /** 阅读的登录界面，可以是控件 JSON，也可以是生成控件列表的脚本 */
     @Serializable(with = LenientJsonText::class) val loginUi: String? = null,
+    val loginCheckJs: String? = null,
     // 规则集读得宽：对象、JSON 字符串都认，别的写法（`[]`、乱填的值）当没有，同阅读的导入 —— 见 [LenientRuleSet]
     @Serializable(with = LenientSearchRuleSet::class) val ruleSearch: SearchRuleSet? = null,
     @Serializable(with = LenientSearchRuleSet::class) val ruleExplore: SearchRuleSet? = null,
@@ -84,6 +87,26 @@ data class BookSourceRule(
 
     val group: String get() = bookSourceGroup
 
+    val hasLogin: Boolean get() = !loginUrl.isNullOrBlank() ||
+        loginUi?.filterNot(Char::isWhitespace)?.let { it.isNotEmpty() && it != "[]" } == true
+
+    /**
+     * 登录校验脚本也能写会话。按完整规则隔离会话，登录入口仍单独由 [hasLogin] 决定。
+     *
+     * 摘要算的是**重新编码**的规则：以后新认的字段（解码不再丢掉）会让同一个来源的摘要变掉，已经登录的会话就找不着了，
+     * 升级完人被悄悄登出。所以新认的字段算摘要前清掉 —— 0.6.1 起认的 `checkKeyWord`（从前导入时丢了）就是这样。
+     * 以后再给规则加字段，照这里一并清掉
+     */
+    val loginSessionId: String? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        if (!hasLogin && loginCheckJs.isNullOrBlank()) null else MessageDigest.getInstance("SHA-256")
+            .digest(withoutLaterFields().toJson().toByteArray(Charsets.UTF_8)).toHex()
+    }
+
+    private fun withoutLaterFields(): BookSourceRule = copy(
+        ruleSearch = ruleSearch?.copy(checkKeyWord = null),
+        ruleExplore = ruleExplore?.copy(checkKeyWord = null),
+    )
+
     /** Legado 无源级编码字段；编码来自 searchUrl 的 `,{charset}` 选项或响应头 */
     val charset: String? get() = null
 
@@ -94,6 +117,23 @@ data class BookSourceRule(
 
     /** [header] 写成脚本时的脚本本体（去掉 `@js:` / `<js>` 包装）；JSON 写法、没写为 null */
     val headerScript: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { headerScriptOf(header) }
+
+    /**
+     * 来源自己没写 User-Agent 时发哪个：从阅读导入的发阅读的默认 UA（[SourceHttpClient.LEGADO_UA]，桌面 Chrome），
+     * 「新建来源」向导做的发我们的手机 UA（[SourceHttpClient.DEFAULT_UA]）—— 各自的规则是照着哪一套页面写的，就发哪个。
+     *
+     * 向导做的来源现在把手机 UA 写进了 [header]（SourceDraftBuilder.build），走不到这里；
+     * 这里认的是之前做好、请求头里没写 UA 的那些，靠向导留下的备注认（[NATIVE_DRAFT_COMMENTS]）。
+     */
+    val defaultUserAgent: String
+        get() = if (isNativeDraft) SourceHttpClient.DEFAULT_UA else SourceHttpClient.LEGADO_UA
+
+    /**
+     * 「新建来源」向导做的（不是从阅读导入的），靠向导留下的备注认（[NATIVE_DRAFT_COMMENTS]）。
+     * 向导写出的规则是照我们自己的约定拼好的：发手机 UA（[defaultUserAgent]）、POST 表单体已经编码好（BookSourceEngine.doFetch）
+     */
+    val isNativeDraft: Boolean
+        get() = NATIVE_DRAFT_COMMENTS.any { bookSourceComment.startsWith(it) }
 
     val rateLimit: RateLimitRule? by lazy(LazyThreadSafetyMode.PUBLICATION) { parseConcurrentRate(concurrentRate) }
 
@@ -115,6 +155,7 @@ data class BookSourceRule(
             type = bookSourceType,
             loginUrl = loginUrl,
             loginUi = loginUi,
+            hasLogin = hasLogin,
             header = header,
             jsLib = jsLib,
             searchUrl = searchUrl,
@@ -151,6 +192,12 @@ data class SearchRuleSet(
     val bookUrl: String? = null,
     /** 可选扩展：规则明确提取的作品更新时间。 */
     val updateTime: String? = null,
+    /**
+     * 校验来源时搜的词（阅读的 `ruleSearch.checkKeyWord`）。来源作者挑一个这个站一定搜得到的词：
+     * 有的站只收某一类书（「催眠」「玩偶姐姐」），有的接口按分类名搜（我是盐神的「回答」），拿通用的「我的」去搜
+     * 必然「搜索无结果」，被判失效。从前导入时这个字段直接丢了
+     */
+    val checkKeyWord: String? = null,
 )
 
 /** 详情页规则（Legado ruleBookInfo）；[init] 在其余字段之前求值（常见 `@put`） */
@@ -277,16 +324,59 @@ data class ExploreItem(val name: String, val url: String)
 
 private val headerJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
+/** 「新建来源」向导写进 bookSourceComment 的开头（SourceDraftBuilder.build），见 [BookSourceRule.defaultUserAgent] */
+internal const val NATIVE_DRAFT_COMMENT = "由「新建来源」根据 "
+
+/** 认向导做的来源用：后一个是功能改名前（0.5.x）的写法，那时做的来源备注里还是它 */
+internal val NATIVE_DRAFT_COMMENTS = listOf(NATIVE_DRAFT_COMMENT, "由「新建书源」根据 ")
+
+/** 请求头里写的 User-Agent（键不分大小写）；没写为 null */
+internal fun Map<String, String>.userAgent(): String? =
+    entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+
 internal fun parseHeaderJson(raw: String?): Map<String, String> {
     val t = raw?.trim().orEmpty()
     if (t.isEmpty() || t.startsWith("@js", ignoreCase = true) || t.contains("<js>", ignoreCase = true)) {
         return emptyMap()
     }
-    return runCatching {
-        headerJson.parseToJsonElement(t).jsonObject.entries.associate { (k, v) ->
-            k to ((v as? JsonPrimitive)?.content ?: v.toString())
+    return runCatching { headerObject(t) }
+        .recoverCatching { headerObject(singleQuotedToJson(t)) }
+        .getOrDefault(emptyMap())
+}
+
+private fun headerObject(json: String): Map<String, String> =
+    headerJson.parseToJsonElement(json).jsonObject.entries.associate { (k, v) ->
+        k to ((v as? JsonPrimitive)?.content ?: v.toString())
+    }
+
+/**
+ * 单引号写的 JSON（`{'User-Agent': '…'}`）→ 双引号的。阅读先严格解析、不行再交给 GSON 的宽松模式，宽松模式认单引号；
+ * kotlinx 的 isLenient 不认，从前整条请求头解析失败、一个头都没发 —— 语料里十来个来源这么写（起点中文、69书吧、
+ * 猫眼看书的 client-device……），独步小说要手机 UA 才给搜索结果，拿到的是默认 UA。
+ * 只改引号：单引号串里的 `"` 转义、`\'` 还原成 `'`；双引号串原样抄过去（里面的单引号不动）
+ */
+private fun singleQuotedToJson(s: String): String {
+    val out = StringBuilder(s.length + 8)
+    var quote: Char? = null
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        when {
+            quote == null && (c == '\'' || c == '"') -> { quote = c; out.append('"') }
+            quote == null -> out.append(c)
+            c == '\\' && i + 1 < s.length -> {
+                val next = s[i + 1]
+                // 单引号串里的 \' 在 JSON 里不是合法转义，还原成字面的 '
+                if (quote == '\'' && next == '\'') out.append('\'') else out.append(c).append(next)
+                i++
+            }
+            c == quote -> { quote = null; out.append('"') }
+            c == '"' -> out.append("\\\"") // 只会出现在单引号串里
+            else -> out.append(c)
         }
-    }.getOrDefault(emptyMap())
+        i++
+    }
+    return out.toString()
 }
 
 /**

@@ -78,6 +78,21 @@ class AppIconManifestTest {
     }
 
     @Test
+    fun `状态栏使用每种图形自己的通知尺寸单色资源`() {
+        assertEquals(IconShape.entries.size, IconShape.entries.map { it.notificationIcon }.toSet().size)
+        IconShape.entries.forEach { shape ->
+            val file = File("src/main/res/drawable/ic_stat_inkwell_${shape.key}.xml")
+            val vector = DocumentBuilderFactory.newInstance()
+                .apply { isNamespaceAware = true }
+                .newDocumentBuilder()
+                .parse(file)
+                .documentElement
+            assertEquals("24dp", vector.attr("width"))
+            assertEquals("24dp", vector.attr("height"))
+        }
+    }
+
+    @Test
     fun `图形和纸色的每种组合都有，且只有一个`() {
         IconShape.entries.forEach { shape ->
             IconPaper.entries.forEach { paper ->

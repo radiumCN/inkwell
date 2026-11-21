@@ -70,6 +70,8 @@ class ReaderPrefs(
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
+        val SHOW_HEADER = booleanPreferencesKey("show_header")
+        val SHOW_FOOTER = booleanPreferencesKey("show_footer")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
         val SCROLL_CLICK_TO_FLIP = booleanPreferencesKey("scroll_click_to_flip")
@@ -149,6 +151,8 @@ class ReaderPrefs(
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
             keepScreenOn = p[Keys.KEEP_SCREEN_ON] ?: true,
             showBattery = p[Keys.SHOW_BATTERY] ?: true,
+            showHeader = p[Keys.SHOW_HEADER] ?: true,
+            showFooter = p[Keys.SHOW_FOOTER] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
             scrollClickToFlip = p[Keys.SCROLL_CLICK_TO_FLIP] ?: false,
@@ -170,6 +174,8 @@ class ReaderPrefs(
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.SHOW_BATTERY] = settings.showBattery
+            p[Keys.SHOW_HEADER] = settings.showHeader
+            p[Keys.SHOW_FOOTER] = settings.showFooter
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
             p[Keys.SCROLL_CLICK_TO_FLIP] = settings.scrollClickToFlip
@@ -278,6 +284,8 @@ class ReaderPrefs(
                 "brightness" to (s.brightnessOverride ?: -1f).toString(),
                 "keep_screen_on" to s.keepScreenOn.toString(),
                 "show_battery" to s.showBattery.toString(),
+                "show_header" to s.showHeader.toString(),
+                "show_footer" to s.showFooter.toString(),
                 "volume_key_flip" to s.volumeKeyFlip.toString(),
                 "flip_haptic" to s.flipHaptic.toString(),
                 "scroll_click_to_flip" to s.scrollClickToFlip.toString(),
@@ -350,7 +358,7 @@ internal object ReaderBackupImport {
             keys.FIRST_LINE_INDENT, keys.LETTER_SPACING, keys.BRIGHTNESS).forEach { key ->
             v[key.name]?.toFloatOrNull()?.takeIf { it.isFinite() }?.let { p[key] = it }
         }
-        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.VOLUME_KEY_FLIP,
+        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_FOOTER, keys.VOLUME_KEY_FLIP,
             keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
             keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES, keys.LOCAL_SHOW_IMAGES).forEach { key ->
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }

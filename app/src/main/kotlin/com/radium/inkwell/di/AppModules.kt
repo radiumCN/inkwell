@@ -18,6 +18,7 @@ import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.ReplaceRuleRepository
 import com.radium.inkwell.data.repo.WebDavRepository
+import com.radium.inkwell.data.source.SourceLoginSessions
 import com.radium.inkwell.ui.bookshelf.BookshelfViewModel
 import com.radium.inkwell.ui.reader.ReaderViewModel
 import com.radium.inkwell.ui.search.SearchViewModel
@@ -66,8 +67,14 @@ val appModule = module {
     single { ChapterContentCache(java.io.File(androidContext().filesDir, "cache")) }
 
     // 抓取日志接到 logcat：成功 debug、失败/重试 warn。开发者模式的运行日志录的就是 logcat
+    single { SourceLoginSessions(androidContext()) }
     single {
+        val sessions = get<SourceLoginSessions>()
         SourceHttpClient(
+            webCookies = sessions::webCookies,
+            updateWebCookies = sessions::updateWebCookies,
+            clearWebCookies = sessions::clearWebCookies,
+            sessionStore = sessions,
             logger = { warn, msg, e ->
                 if (warn) android.util.Log.w("SourceHttp", msg, e) else android.util.Log.d("SourceHttp", msg)
             },
@@ -83,7 +90,7 @@ val appModule = module {
     }
     // JS 渲染回退：静态 HTML 解析不出内容时用 WebView 执行页面 JS 再试（详情/目录/正文三级）
     single<com.radium.inkwell.core.source.PageRenderer> {
-        com.radium.inkwell.data.source.WebViewPageRenderer(androidContext())
+        com.radium.inkwell.data.source.WebViewPageRenderer(androidContext(), sessions = get())
     }
     single {
         val replaceRules = get<ReplaceRuleRepository>()
@@ -92,6 +99,7 @@ val appModule = module {
             scriptRuntime = get(),
             renderer = get(),
             globalPurify = { source, bookTitle -> replaceRules.purifyFor(source, bookTitle) },
+            sessionStore = get<SourceLoginSessions>(),
         )
     }
     single { com.radium.inkwell.core.source.rss.RssEngine(http = get(), scriptRuntime = get(), renderer = get()) }
@@ -142,6 +150,7 @@ val appModule = module {
     single { AutoSourceSwitcher(get(), get()) }
     single { com.radium.inkwell.util.LocalNetworkAccess(androidContext()) }
     single { WebDavRepository(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { com.radium.inkwell.data.repo.LocalBookBackupRepository(get(), get(), get()) }
     single { com.radium.inkwell.data.net.OfficialWebDavClient(get()) }
     single { com.radium.inkwell.data.repo.OfficialWebDavRepository(get(), get()) }
 
@@ -160,9 +169,9 @@ val appModule = module {
     // 整本缓存同理：离开详情页照常跑
     single { com.radium.inkwell.data.repo.OfflineDownloader(get(), get(), get(), get(), get()) }
     viewModel { SourceManageViewModel(androidContext(), get(), get(), get()) }
-    viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get()) }
+    viewModel { (sourceId: String) -> SourceDetailViewModel(sourceId, get(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.sourcewizard.SourceWizardViewModel(get(), get(), get(), get()) }
-    viewModel { WebDavViewModel(get(), get(), get(), get()) }
+    viewModel { WebDavViewModel(get(), get(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.feedback.FeedbackViewModel(androidContext(), get(), get(), get()) }
     viewModel { com.radium.inkwell.ui.settings.DeveloperViewModel(get(), get()) }
     viewModel { com.radium.inkwell.ui.stats.ReadingStatsViewModel(get(), get()) }

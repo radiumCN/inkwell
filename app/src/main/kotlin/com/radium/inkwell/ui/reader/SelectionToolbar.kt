@@ -14,6 +14,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.radium.inkwell.reader.render.SelectionEnd
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.IconLabelButton
@@ -42,7 +47,10 @@ import com.radium.inkwell.ui.components.smallGlassHighlight
  * 给了 [pageBackdrop] 时和阅读菜单一样是毛玻璃（[readerGlass]）：浮层色只叠八成，底下的正文隐约透出来，
  * 再描一圈边缘高光（浅色纸用亮模式那档、深色纸用暗模式那档）。
  *
- * 位置由调用方给（落在页脚那行正上方，同自动换源的提示胶囊）。
+ * 位置由调用方根据手柄位置决定，避免挡住可拖动的边界。
+ *
+ * 选区跨了段（[canPurify] = false）就只剩「复制」：净化规则逐段匹配，带换行的原文删不掉也换不了，
+ * 留着两个按钮点了只会建出一条永远不生效的规则。
  *
  * @param replacePreview 原文 → 本章的命中数与预览，见 [ReplaceTextDialog]
  * @param onReplace (原文, 换成)；换成为空就是删掉
@@ -50,7 +58,9 @@ import com.radium.inkwell.ui.components.smallGlassHighlight
 @Composable
 internal fun SelectionToolbar(
     selectedText: String,
+    canPurify: Boolean,
     onCopy: () -> Unit,
+    onStepBoundary: (SelectionEnd, Boolean) -> Boolean,
     onPurify: () -> Unit,
     onReplace: (find: String, replacement: String) -> Unit,
     replacePreview: (String) -> ReplacePreview?,
@@ -71,15 +81,32 @@ internal fun SelectionToolbar(
         // 位置由调用方垫好；默认的 12/8dp 外边距再叠一层，药丸就离页脚太远
         outSidePadding = PaddingValues(0.dp),
         shadowElevation = 0.dp,
+        showDivider = pageBackdrop == null,
     ) {
         Row(
             Modifier.padding(horizontal = Dimens.gapXS),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconLabelButton(MiuixIcons.Copy, "复制", onCopy)
+            IconLabelButton(
+                MiuixIcons.Copy,
+                "复制",
+                onCopy,
+                // 保持在现有按钮焦点上，读屏可浏览选区并从操作菜单调整两端。
+                modifier = Modifier.semantics {
+                    stateDescription = "已选择：$selectedText"
+                    customActions = listOf(
+                        CustomAccessibilityAction("起点向前移动一个字符") { onStepBoundary(SelectionEnd.START, false) },
+                        CustomAccessibilityAction("起点向后移动一个字符") { onStepBoundary(SelectionEnd.START, true) },
+                        CustomAccessibilityAction("终点向前移动一个字符") { onStepBoundary(SelectionEnd.END, false) },
+                        CustomAccessibilityAction("终点向后移动一个字符") { onStepBoundary(SelectionEnd.END, true) },
+                    )
+                },
+            )
             // 最常用的动作：把这句话从本书里删掉
-            IconLabelButton(MiuixIcons.Clear, "删除", onPurify)
-            IconLabelButton(MiuixIcons.Replace, "替换", { replacing = true })
+            if (canPurify) {
+                IconLabelButton(MiuixIcons.Clear, "删除", onPurify)
+                IconLabelButton(MiuixIcons.Replace, "替换", { replacing = true })
+            }
         }
     }
 

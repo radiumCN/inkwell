@@ -21,4 +21,13 @@ interface PageRenderer {
         headers: Map<String, String> = emptyMap(),
         userAgent: String? = null,
     ): FetchedPage?
+
+    /** 只有声明过网页登录的来源才会找到自己的 WebView 会话。 */
+    suspend fun renderForSource(
+        sessionId: String?,
+        url: String,
+        headers: Map<String, String>,
+        userAgent: String?,
+        credentialHeaders: Map<String, String>,
+    ): FetchedPage? = if (credentialHeaders.isEmpty()) render(url, headers, userAgent) else null
 }

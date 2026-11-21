@@ -502,7 +502,7 @@ private fun SourceImportDialog(
     var selection by remember(preview) { mutableStateOf("original") }
     var newGroup by remember(preview) { mutableStateOf("") }
     val groupOptions = remember(groups) {
-        listOf(PickerOption("original", "沿用书源自带分组")) +
+        listOf(PickerOption("original", "沿用来源自带分组")) +
             groups.map { PickerOption("group:$it", it) } +
             listOf(PickerOption("none", "不分组"), PickerOption("new", "新建分组…"))
     }
@@ -510,9 +510,9 @@ private fun SourceImportDialog(
         preview.skipped.groupingBy { it.substringAfterLast(": ", it) }.eachCount()
     }
     AppAlertDialog(
-        title = "确认导入书源",
+        title = "确认导入来源",
         onDismissRequest = onDismiss,
-        confirmText = if (preview.count > 0) "导入 ${preview.count} 个书源" else "知道了",
+        confirmText = if (preview.count > 0) "导入 ${preview.count} 个来源" else "知道了",
         dismissText = "取消".takeIf { preview.count > 0 },
         confirmEnabled = selection != "new" || newGroup.isNotBlank(),
         confirmLoading = saving,
@@ -529,7 +529,7 @@ private fun SourceImportDialog(
             Text("新增 ${preview.added}　更新 ${preview.updated}　跳过 ${preview.skipped.size}")
             if (preview.added > 0) {
                 SpinnerSettingRow(
-                    title = "新增书源分组",
+                    title = "新增来源分组",
                     options = groupOptions,
                     selectedId = selection,
                     onSelect = { selection = it.id },
@@ -544,7 +544,7 @@ private fun SourceImportDialog(
                 }
             }
             if (preview.updated > 0) {
-                Text("同地址的书源会更新规则，沿用本机分组。", style = MiuixTheme.textStyles.footnote1)
+                Text("同地址的来源会更新规则，沿用本机分组。", style = MiuixTheme.textStyles.footnote1)
             }
             for ((reason, count) in reasons) {
                 Text("$count 条 · $reason", style = MiuixTheme.textStyles.footnote1)

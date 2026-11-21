@@ -112,8 +112,13 @@ fun PageFlipContainer(
     /** 点击分区：哪一格翻上一页、下一页、开菜单。见 [TapZones] */
     tapZones: TapZones = TapZones.DEFAULT,
     modifier: Modifier = Modifier,
-    /** 长按选中的文字；只在静止态（没在翻页）才可能非空 */
+    /** 长按选中的文字；只在静止态（没在翻页）才可能非空。非空时不接程序化翻页 */
     selection: TextSelection? = null,
+    /**
+     * 只画不拦的高亮（朗读到的那一段）。和 [selection] 分开：从前朗读高亮也从 selection 传进来，
+     * 被当成「正在选字」，菜单上滑动翻页、音量键这些程序化翻页全被拦下
+     */
+    highlight: TextSelection? = null,
     /**
      * 点在当前页的一张图上（含没取到的那条提示）。返回 true = 这一下处理掉了（点提示条重试），不再翻页 / 开菜单；
      * 点在真图上照旧按点击分区走，由调用方返回 false。
@@ -138,6 +143,7 @@ fun PageFlipContainer(
     // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
     var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
+    var lastCommittedDirection by remember { mutableStateOf<FlipDirection?>(null) }
     var flipId by remember { mutableStateOf(0) }
     var settling by remember { mutableStateOf(false) }
     var size by remember { mutableStateOf(IntSize.Zero) }
@@ -184,6 +190,7 @@ fun PageFlipContainer(
 
     fun commitFlip(dir: FlipDirection, reason: String, settleMs: Long? = null) {
         trace(ReaderTrace.Action.COMMIT, dir, reason, settleMs)
+        if (effectiveAnim == FlipAnimation.CURL) lastCommittedDirection = dir
         onCommitLatest(dir)
     }
 
@@ -556,20 +563,24 @@ fun PageFlipContainer(
                 }
             },
     ) {
+        val painted = selection ?: highlight
         when (effectiveAnim) {
             // 滚动模式根本不该走到这里 —— 它是另一条渲染路径，由 ReaderScreen 分流。
             // 万一走到了（比如设置迁移遗漏），静态画当前页，总好过崩溃或白屏。
             FlipAnimation.NONE, FlipAnimation.SCROLL ->
-                PageCanvas(shownCurrent, layout, theme, selection = selection)
+                PageCanvas(shownCurrent, layout, theme, selection = painted)
             FlipAnimation.SLIDE -> SlideLayers(
-                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.COVER -> CoverLayers(
-                selection, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
+                painted, shownCurrent, shownPrev, shownNext, layout, theme, direction, offset, size.width.toFloat(),
             )
             FlipAnimation.CURL -> CurlLayer(
-                selection = selection,
+                selection = painted,
                 current = shownCurrent, prev = shownPrev, next = shownNext,
+                // heldPages 只有两页。预渲染跟随真实邻页，避免短暂的空槽淘汰仍可复用的位图。
+                request = CurlRequest(current, prev, next, layout, theme, density),
+                preferPrevious = lastCommittedDirection == FlipDirection.BACKWARD,
                 layout = layout, theme = theme, direction = direction,
                 offset = offset,
                 touchX = touchX,
@@ -662,6 +673,8 @@ private fun CurlLayer(
     current: RenderablePage?,
     prev: RenderablePage?,
     next: RenderablePage?,
+    request: CurlRequest,
+    preferPrevious: Boolean,
     layout: LayoutSpec,
     theme: ReaderTheme,
     direction: FlipDirection?,
@@ -692,31 +705,41 @@ private fun CurlLayer(
     //
     // 正在烤的那一轮仍然 NonCancellable：渲染本身没有挂起点，取消也停不下来，取消只会让 withContext
     // 把结果扔掉 —— 新渲出来的位图就没人 recycle 了。烤完总能拿到结果，要么交出去、要么回收。
-    val request = CurlRequest(current, prev, next, layout, theme, density)
     val latestRequest = rememberUpdatedState(request)
+    val latestPreferPrevious = rememberUpdatedState(preferPrevious)
     LaunchedEffect(Unit) {
+        suspend fun renderAndPublish(req: CurlRequest, previousOnly: Boolean = false) {
+            val old = bitmaps
+            val produced = withContext(Dispatchers.Default + NonCancellable) {
+                renderCurlBitmaps(old, req, previousOnly)
+            }
+            if (produced === old) return
+            if (!isActive) {
+                // 没交出去：只回收相对 old 新渲的那几张，共用槽不能动
+                produced.recycleFresh(old)
+                return
+            }
+            bitmaps = produced
+            // 回收宽限期不阻塞下一轮位图渲染。之后的请求只会复用 produced 里仍持有的槽。
+            if (old != null) launch(start = CoroutineStart.UNDISPATCHED) {
+                withContext(NonCancellable) {
+                    delay(32)
+                    old.recycleUnused(produced)
+                }
+            }
+        }
         snapshotFlow { latestRequest.value }
             .distinctUntilChanged { a, b -> a.sameContent(b) }
             .conflate()
             .collect { req ->
-                val old = bitmaps
-                val produced = withContext(Dispatchers.Default + NonCancellable) {
-                    renderCurlBitmaps(old, req)
+                val reusable = bitmaps?.takeIf { it.matchesStyle(req) }
+                fun missing(page: RenderablePage?) = page != null && reusable?.bitmapFor(page.curlKey()) == null
+                // 后翻卷起的是上一页。多张待生成时，先交付上一页，让下一刀能直接用。
+                if (latestPreferPrevious.value && missing(req.prev) && (missing(req.current) || missing(req.next))) {
+                    renderAndPublish(req, previousOnly = true)
+                    if (!isActive) return@collect
                 }
-                if (produced === old) return@collect
-                if (!isActive) {
-                    // 没交出去：只回收相对 old 新渲的那几张，共用槽不能动
-                    produced.recycleFresh(old)
-                    return@collect
-                }
-                bitmaps = produced
-                // 回收宽限期不阻塞下一轮位图渲染。之后的请求只会复用 produced 里仍持有的槽。
-                if (old != null) launch(start = CoroutineStart.UNDISPATCHED) {
-                    withContext(NonCancellable) {
-                        delay(32)
-                        old.recycleUnused(produced)
-                    }
-                }
+                renderAndPublish(req)
             }
     }
     if (size.width <= 1 || size.height <= 1) {
@@ -841,7 +864,7 @@ private class CurlRequest(
  * 版式、纸张、密度变了则一张都用不上 —— 字的位置、颜色、像素全不一样。
  * 什么都没变时原样返回 [old]，调用方据此跳过提交。
  */
-private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest): CurlBitmaps {
+private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest, previousOnly: Boolean): CurlBitmaps {
     val reusable = old?.takeIf { it.matchesStyle(req) }
     if (reusable != null &&
         req.current.matches(reusable.currentKey) &&
@@ -850,18 +873,22 @@ private fun renderCurlBitmaps(old: CurlBitmaps?, req: CurlRequest): CurlBitmaps 
     ) {
         return reusable
     }
-    fun obtain(page: RenderablePage?): android.graphics.Bitmap? {
+    fun obtain(page: RenderablePage?, renderIfMissing: Boolean): android.graphics.Bitmap? {
         if (page == null) return null
         reusable?.bitmapFor(page.curlKey())?.let { return it }
+        if (!renderIfMissing) return null
         return renderPageAndroidBitmap(page, req.layout, req.theme, req.density)
     }
+    val current = obtain(req.current, renderIfMissing = !previousOnly)
+    val prev = obtain(req.prev, renderIfMissing = true)
+    val next = obtain(req.next, renderIfMissing = !previousOnly)
     return CurlBitmaps(
-        current = obtain(req.current),
-        prev = obtain(req.prev),
-        next = obtain(req.next),
-        currentKey = req.current?.curlKey(),
-        prevKey = req.prev?.curlKey(),
-        nextKey = req.next?.curlKey(),
+        current = current,
+        prev = prev,
+        next = next,
+        currentKey = req.current?.curlKey().takeIf { current != null },
+        prevKey = req.prev?.curlKey().takeIf { prev != null },
+        nextKey = req.next?.curlKey().takeIf { next != null },
         layout = req.layout,
         theme = req.theme,
         density = req.density,

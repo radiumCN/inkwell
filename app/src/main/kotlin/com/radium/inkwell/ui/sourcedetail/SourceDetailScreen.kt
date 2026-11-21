@@ -55,6 +55,11 @@ fun SourceDetailScreen(
     val snackbar = remember { SnackbarHostState() }
 
     CollectMessages(viewModel.messages, snackbar)
+    val loginBrowser = state.loginBrowser
+    if (loginBrowser != null) {
+        SourceLoginBrowser(loginBrowser, snackbar, viewModel::closeLoginBrowser, viewModel::finishLoginBrowser)
+        return
+    }
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
@@ -99,6 +104,25 @@ fun SourceDetailScreen(
                 .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
         ) {
+            if (state.hasLogin) {
+                SectionHeader("来源登录")
+                SettingGroup {
+                    SettingBlock {
+                        val form = state.loginForm
+                        if (form == null) {
+                            SecondaryButton(
+                                text = "打开登录",
+                                onClick = viewModel::openLogin,
+                                enabled = !state.loginBusy,
+                                loading = state.loginBusy,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            SourceLoginFields(form, state.loginBusy, viewModel::updateLoginField, viewModel::submitLogin)
+                        }
+                    }
+                }
+            }
             // 控件装进卡里（设置类页面的骨架）：输入框的底是卡上的那一档，直接铺在灰底上几乎看不出框
             SectionHeader("全链路测试")
             SettingGroup {

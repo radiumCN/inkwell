@@ -151,10 +151,17 @@ class WebDavPrefs(
         }
     }
 
-    suspend fun saveOfficialTokens(accessToken: String, refreshToken: String) {
+    suspend fun saveOfficialTokens(
+        username: String,
+        accessToken: String,
+        refreshToken: String,
+        email: String? = null,
+    ) {
         context.webDavDataStore.edit { p ->
+            check(p[Keys.PROVIDER] == "official" && p[Keys.USERNAME] == username) { "官方账号已切换" }
             p[Keys.OFFICIAL_ACCESS] = if (accessToken.isEmpty()) "" else cipher.encrypt(accessToken)
             p[Keys.OFFICIAL_REFRESH] = if (refreshToken.isEmpty()) "" else cipher.encrypt(refreshToken)
+            if (!email.isNullOrBlank()) p[Keys.OFFICIAL_EMAIL] = email.trim()
         }
     }
 

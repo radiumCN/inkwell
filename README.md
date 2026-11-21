@@ -9,7 +9,7 @@
 ![license](https://img.shields.io/badge/License-MIT-blue)
 [![release](https://img.shields.io/github/v/release/radiumCN/inkwell?display_name=tag)](https://github.com/radiumCN/inkwell/releases)
 
-Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号、没有推送。排版引擎全自绘、进度以「章节 + 章内偏移」为真身，改字号也不丢位置；书架、进度与用户配置可通过 WebDAV 单文件同步，书籍文件不上云。另有[网页版](https://book.skylark.run)，使用书架与阅读需先登录注册，与 App 填同一套 WebDAV 即可同步。**默认不内置任何第三方内容或访问规则**；规则如需使用，均由用户自行导入并对其合法性负责（见下方免责声明）。
+Inkwell Android 用 Jetpack Compose 从零写成，没有广告、无需账号即可本地阅读、没有推送。排版引擎全自绘、进度以「章节 + 章内偏移」为真身，改字号也不丢位置；书架、进度与用户配置可通过 WebDAV 单文件同步，本地书原文件可手动备份。另有[网页版](https://book.skylark.run)，使用书架与阅读需先登录注册，与 App 填同一套 WebDAV 即可同步。**默认不内置任何第三方内容或访问规则**；规则如需使用，均由用户自行导入并对其合法性负责（见下方免责声明）。
 
 ## ✨ 功能特性
 
@@ -40,6 +40,7 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、没有账号�
 
 **同步与维护**
 - WebDAV 单文件（`inkwell/backup.json.gz`）增量同步，字段级 Last-Write-Wins 合并（进度按 `readAt`、元数据按 `updatedAt`）；凭据经系统密钥库加密存放。
+- Android 可将选中的本地书原文件手动备份至 `inkwell/books/`。换机后先同步书架，再恢复原文件即可接着读。官方同步页显示账号已用空间和总配额。
 - [网页版](https://book.skylark.run)（需登录注册）：书架、来源与阅读；与 App 共用同一套 WebDAV，读写同一份备份文件。
 - 设置页直接显示上次同步时间；自动同步失败时写明原因。
 - 同步上传使用远端版本校验，遇到其他设备同时修改会重新合并；远端备份损坏或版本不受支持时保留原文件。服务器需正确支持强 ETag 与条件写入；未提供强 ETag 时仍可拉取更新，暂停覆盖上传。

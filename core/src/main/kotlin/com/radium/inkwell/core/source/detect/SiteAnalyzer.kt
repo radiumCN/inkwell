@@ -5,6 +5,7 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.BookSourceTypes
 import com.radium.inkwell.core.source.ContentRuleSet
 import com.radium.inkwell.core.source.FetchedPage
+import com.radium.inkwell.core.source.NATIVE_DRAFT_COMMENT
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.FetchTrace
 import com.radium.inkwell.core.source.RuleTrace
@@ -137,6 +138,7 @@ class SiteAnalyzer(
         withContext(Dispatchers.IO) {
             val probe = BookSourceRule(
                 bookSourceUrl = SourceDraftBuilder.siteOrigin(bookUrl),
+                header = SourceDraftBuilder.NATIVE_HEADER,
                 searchUrl = searchUrl,
                 ruleSearch = SearchRuleSet(),
             )
@@ -434,7 +436,8 @@ object SourceDraftBuilder {
             bookSourceName = name,
             bookSourceGroup = group,
             bookSourceType = BookSourceTypes.TEXT,
-            bookSourceComment = "由「新建来源」根据 ${book.bookUrl} 自动识别生成",
+            bookSourceComment = "${NATIVE_DRAFT_COMMENT}${book.bookUrl} 自动识别生成",
+            header = NATIVE_HEADER,
             searchUrl = search?.searchUrl,
             ruleSearch = search?.rules,
             ruleBookInfo = bookInfo,
@@ -450,6 +453,16 @@ object SourceDraftBuilder {
             ),
         )
     }
+
+    /**
+     * 向导做的来源写明发我们的手机 UA（[SourceHttpClient.DEFAULT_UA]）：向导的网页、识别时抓的页都是这个 UA 下的样子，
+     * 规则照它认出来的。不写的话会被当成阅读的来源发桌面 UA（BookSourceRule.defaultUserAgent），站点给另一套页面，
+     * 刚认出来的规则当场对不上。写进请求头而不是只靠备注认：导出给阅读用，阅读也照这个 UA 发
+     */
+    internal val NATIVE_HEADER: String =
+        kotlinx.serialization.json.buildJsonObject {
+            put("User-Agent", kotlinx.serialization.json.JsonPrimitive(SourceHttpClient.DEFAULT_UA))
+        }.toString()
 
     /** `https://www.example.com/book/1/` → `https://www.example.com`（书源地址 = 站点根） */
     fun siteOrigin(url: String): String {

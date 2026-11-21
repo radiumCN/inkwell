@@ -180,4 +180,15 @@ object Dimens {
     val sliderLabelWidth = 120.dp
     /** 阅读页右边缘调亮度时浮出的那根竖条（见 QuickAdjustOverlay）：手指滑过半屏多，竖条有个能读的长度就够 */
     val brightnessHudHeight = 160.dp
+    /**
+     * 阅读页选字的两个手柄（SelectionHandles）：从字底伸下来的那截竖线，和末端圆点的直径。
+     * 能拖的范围不看圆点多大，以圆点为心、半个 [touchTarget] 为半径
+     */
+    val selectionHandleStem = 8.dp
+    val selectionHandleKnob = 12.dp
+    /**
+     * 选字操作条要让出的高度（ReaderScreen）：手柄离页眉或页脚不到这么远，操作条就换到另一头，别盖住手柄。
+     * 是操作条（图标 + 字两行的药丸）的高度再加一截余量
+     */
+    val selectionToolbarClearance = 96.dp
 }

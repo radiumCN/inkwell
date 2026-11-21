@@ -9,6 +9,14 @@ import org.mozilla.javascript.NativeObject
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 
+internal const val LOGIN_SCOPE_BINDING = "_inkwellLoginScope"
+
+/**
+ * 读到才算的绑定：脚本第一次读这个变量时才调 [compute]，之后读同一个值；脚本给它赋值就换成赋的值。
+ * 给算起来要花工夫、多数脚本又不读的变量用（`src`：列表里每一项都要序列化一遍，见 RuleEvaluator.runJs）
+ */
+class LazyBinding(val compute: () -> Any?)
+
 /** JS 规则执行器抽象；不注入时含 js: 规则的求值会明确报不支持 */
 interface ScriptRuntime {
     /**
@@ -29,6 +37,12 @@ interface ScriptRuntime {
     fun evalForList(script: String, bindings: Map<String, Any?>, jsLib: String? = null): ScriptValue =
         ScriptValue.Text(eval(script, bindings, jsLib))
 
+    /** 登录检查可以原样返回响应，也可以返回重新请求后的响应。 */
+    fun evalForResponse(script: String, bindings: Map<String, Any?>, jsLib: String?): StrResponse? {
+        eval(script, bindings, jsLib)
+        return null
+    }
+
     /** 脚本里 `java.t2s` / `java.s2t` 用的繁简转换；平台没给就原样返回 */
     val chineseConverter: ChineseConverter get() = ChineseConverter.NONE
 
@@ -44,7 +58,7 @@ interface ScriptRuntime {
  * （Java 的 Map / List），来源照它写 `result.book_id`、`result.toArray()`；也有来源照字符串写 `JSON.parse(result)`、
  * `result.match(…)`。两种都得认，见 RhinoScriptRuntime.jsonValue
  */
-class ScriptJson(val text: String)
+class ScriptJson(val text: String, val asObject: Boolean = false)
 
 /** [ScriptRuntime.evalForList] 的结果：元素，或同 [ScriptRuntime.eval] 的文本 */
 sealed interface ScriptValue {
@@ -154,15 +168,20 @@ class RhinoScriptRuntime(
      * 库本身跑不起来（语法错、阅读的远程库写法 `{"名字":"地址"}`）记成 null：当没有库，别让这个源的每条规则都陪着失败，
      * 也别每次重跑一遍。
      */
-    private val libScopesByThread = ThreadLocal<LinkedHashMap<String, Scriptable?>>()
+    private data class LibScopeKey(val script: String, val sessionId: String?)
 
-    private fun libScope(cx: Context, proto: org.mozilla.javascript.ScriptableObject, lib: String): Scriptable? {
+    private val libScopesByThread = ThreadLocal<LinkedHashMap<LibScopeKey, Scriptable?>>()
+
+    private fun libScope(
+        cx: Context, proto: org.mozilla.javascript.ScriptableObject, lib: String, sessionId: String?,
+    ): Scriptable? {
+        val key = LibScopeKey(lib, sessionId)
         val cache = libScopesByThread.get()
-            ?: object : LinkedHashMap<String, Scriptable?>(8, 0.75f, true) {
-                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Scriptable?>?): Boolean =
+            ?: object : LinkedHashMap<LibScopeKey, Scriptable?>(8, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<LibScopeKey, Scriptable?>?): Boolean =
                     size > LIB_SCOPES_PER_THREAD
             }.also { libScopesByThread.set(it) }
-        if (cache.containsKey(lib)) return cache[lib]
+        if (cache.containsKey(key)) return cache[key]
         val scope: Scriptable? = try {
             cx.newObject(proto).also {
                 it.prototype = proto
@@ -179,7 +198,7 @@ class RhinoScriptRuntime(
         } catch (_: Exception) {
             null
         }
-        cache[lib] = scope
+        cache[key] = scope
         return scope
     }
 
@@ -187,9 +206,18 @@ class RhinoScriptRuntime(
         (run(script, bindings, jsLib, keepNodes = false) as ScriptValue.Text).text
 
     override fun evalForList(script: String, bindings: Map<String, Any?>, jsLib: String?): ScriptValue =
-        run(script, bindings, jsLib, keepNodes = true)
+        run(script, bindings, jsLib, keepNodes = true) as ScriptValue
 
-    private fun run(script: String, bindings: Map<String, Any?>, jsLib: String?, keepNodes: Boolean): ScriptValue {
+    override fun evalForResponse(script: String, bindings: Map<String, Any?>, jsLib: String?): StrResponse? =
+        run(script, bindings, jsLib, keepNodes = false, keepResponse = true) as? StrResponse
+
+    private fun run(
+        script: String,
+        bindings: Map<String, Any?>,
+        jsLib: String?,
+        keepNodes: Boolean,
+        keepResponse: Boolean = false,
+    ): Any {
         // 嵌套求值（脚本里 java.getString("@js:…") 又回到这里）进的是同一个 Context：只在最外层清零
         // 指令计数。每进一层都清零的话，`while(true){ java.getString("@js:1") }` 永远撞不到上限
         val outermost = Context.getCurrentContext() == null
@@ -208,9 +236,29 @@ class RhinoScriptRuntime(
                 it.parentScope = null
             }
             bindings.forEach { (name, value) ->
-                holder.put(name, holder, if (value is ScriptJson) jsonValue(cx, holder, value.text) else Context.javaToJS(value, holder))
+                when {
+                    name == LOGIN_SCOPE_BINDING -> Unit
+                    value is LazyBinding -> {
+                        var cached: Any? = null
+                        var ready = false
+                        (holder as ScriptableObject).defineProperty(
+                            name,
+                            {
+                                if (!ready) {
+                                    cached = Context.javaToJS(value.compute(), holder)
+                                    ready = true
+                                }
+                                cached
+                            },
+                            { assigned -> cached = assigned; ready = true },
+                            ScriptableObject.EMPTY,
+                        )
+                    }
+                    else -> holder.put(name, holder, if (value is ScriptJson) jsonValue(cx, holder, value) else Context.javaToJS(value, holder))
+                }
             }
-            val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it) }
+            val loginScope = bindings[LOGIN_SCOPE_BINDING] as? String
+            val lib = jsLib?.takeIf { it.isNotBlank() }?.let { libScope(cx, proto, it, loginScope) }
             // 阅读来源直接拿 JDK 做加解密（JavaImporter / Packages.javax.crypto…）：装上替身，见 JdkCompat。
             // 装在这一次的 holder 上，不进每线程共用的原型 —— 顶层 importPackage 导进来的名字不能串到别的来源。
             // 只看脚本自己：库用到替身的，库作用域加载时已经装过（[libScope]），脚本往上找先找到它。
@@ -232,6 +280,10 @@ class RhinoScriptRuntime(
                     ?: compiledScripts.put(script, cx.compileString(script, "rule.js", 1, null))
                 val result = compiled.exec(cx, scope)
                 if (keepNodes) elementsOf(result)?.let { return ScriptValue.Nodes(it) }
+                if (keepResponse) {
+                    val response = (result as? org.mozilla.javascript.Wrapper)?.unwrap() as? StrResponse
+                    if (response != null) return response
+                }
                 return ScriptValue.Text(
                     when {
                         result == null || result === Context.getUndefinedValue() -> null
@@ -256,12 +308,14 @@ class RhinoScriptRuntime(
      * `result.match(…)`、`result == '[]'` 照旧是字符串的样子。JSON 数组另挂 `toArray()` / `size()` / `get(i)`（阅读那边是 Java 的 List）。
      * 和字符串自己的成员同名的字段不挂（`length`、`replace`…），免得把字符串方法盖掉。解不开的原样给字符串
      */
-    private fun jsonValue(cx: Context, scope: Scriptable, text: String): Any {
+    private fun jsonValue(cx: Context, scope: Scriptable, value: ScriptJson): Any {
+        val text = value.text
         val parsed = runCatching {
             val json = ScriptableObject.getProperty(scope, "JSON") as Scriptable
             ScriptableObject.callMethod(cx, json, "parse", arrayOf<Any>(text))
         }.getOrNull()
         if (parsed !is NativeObject && parsed !is NativeArray) return text
+        if (value.asObject) return parsed
         val str = cx.newObject(scope, "String", arrayOf<Any>(text))
         if (parsed is NativeArray) {
             str.put("toArray", str, ScriptFunction { parsed })
