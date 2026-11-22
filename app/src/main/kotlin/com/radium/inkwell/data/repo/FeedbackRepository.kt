@@ -1,12 +1,15 @@
 package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.data.net.InkwellServer
+import com.radium.inkwell.data.prefs.FeedbackReceipt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -14,6 +17,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.MultipartBody
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * 提交结果。**每个分支对应服务端一个明确的状态码**，而不是笼统的成功/失败 ——
@@ -51,6 +55,14 @@ sealed interface FeedbackResult {
     data class NetworkError(val message: String?) : FeedbackResult
 }
 
+enum class FeedbackIssueStatus(val label: String) {
+    OPEN("未关闭"),
+    COMPLETED("已完成"),
+    NOT_PLANNED("不计划处理"),
+    DUPLICATE("重复反馈"),
+    CLOSED("已关闭"),
+}
+
 /**
  * 意见反馈：POST 到中转服务器，服务端据此在公开仓库建一个 GitHub issue。
  *
@@ -62,6 +74,41 @@ class FeedbackRepository(
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+    suspend fun issueStatus(receipt: FeedbackReceipt): FeedbackIssueStatus? = withContext(Dispatchers.IO) {
+        val issue = receipt.url.toHttpUrlOrNull() ?: return@withContext null
+        val parts = issue.pathSegments
+        if (!issue.isHttps || issue.host != "github.com" || issue.port != 443 ||
+            parts.size != 4 || parts[2] != "issues" || parts[3].toIntOrNull() != receipt.issue || receipt.issue <= 0
+        ) return@withContext null
+        val api = HttpUrl.Builder().scheme("https").host("api.github.com")
+            .addPathSegment("repos").addPathSegment(parts[0]).addPathSegment(parts[1])
+            .addPathSegment("issues").addPathSegment(receipt.issue.toString()).build()
+        val request = Request.Builder().url(api).header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28").build()
+        val call = http.newCall(request)
+        call.timeout().timeout(10, TimeUnit.SECONDS)
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val info = json.decodeFromString<IssueResponse>(response.body.string())
+                when (info.state) {
+                    "open" -> FeedbackIssueStatus.OPEN
+                    "closed" -> when (info.reason) {
+                        "completed" -> FeedbackIssueStatus.COMPLETED
+                        "not_planned" -> FeedbackIssueStatus.NOT_PLANNED
+                        "duplicate" -> FeedbackIssueStatus.DUPLICATE
+                        else -> FeedbackIssueStatus.CLOSED
+                    }
+                    else -> null
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * @param contact 可选。⚠️ issue 建在**公开仓库**，填了就是公开可见的 ——
@@ -140,6 +187,9 @@ class FeedbackRepository(
 
     @Serializable
     private data class ErrorResponse(val code: String = "")
+
+    @Serializable
+    private data class IssueResponse(val state: String, @SerialName("state_reason") val reason: String? = null)
 
     @Serializable
     private data class Response(val status: String = "", val issue: Int = 0, val url: String = "")

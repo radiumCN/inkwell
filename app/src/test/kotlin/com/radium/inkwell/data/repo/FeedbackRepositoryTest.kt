@@ -1,5 +1,6 @@
 package com.radium.inkwell.data.repo
 
+import com.radium.inkwell.data.prefs.FeedbackReceipt
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -34,6 +35,27 @@ class FeedbackRepositoryTest {
 
     @AfterTest
     fun tearDown() = server.shutdown()
+
+    @Test
+    fun `反馈进度读取公开 Issue 的关闭原因`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            assertEquals("api.github.com", request.url.host)
+            assertNull(request.header("Authorization"))
+            chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath)).build())
+        }.build()
+        server.enqueue(MockResponse().setBody("""{"state":"closed","state_reason":"not_planned"}"""))
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试")
+        assertEquals(FeedbackIssueStatus.NOT_PLANNED, FeedbackRepository(client).issueStatus(receipt))
+        assertEquals("/repos/radiumCN/inkwell/issues/123", server.takeRequest().path)
+    }
+
+    @Test
+    fun `反馈进度忽略非 GitHub 地址和编号不匹配的收据`() = runBlocking {
+        assertNull(repo.issueStatus(FeedbackReceipt(123, "https://example.com/owner/project/issues/123", "测试")))
+        assertNull(repo.issueStatus(FeedbackReceipt(123, "https://github.com/owner/project/issues/456", "测试")))
+        assertEquals(0, server.requestCount)
+    }
 
     @Test
     fun `201 返回 issue 号与地址`() = runBlocking {

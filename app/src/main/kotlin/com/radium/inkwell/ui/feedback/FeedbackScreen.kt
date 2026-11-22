@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -18,9 +19,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.state.ToggleableState
 import com.radium.inkwell.ui.components.ContentListItem
@@ -30,9 +33,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radium.inkwell.data.prefs.FeedbackReceipt
 import com.radium.inkwell.data.repo.FeedbackRepository
 import com.radium.inkwell.ui.components.AppAlertDialog
+import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTopBar
 import com.radium.inkwell.ui.components.rememberAppTopBarScroll
@@ -48,7 +54,9 @@ import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.cardMargin
+import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
@@ -64,18 +72,20 @@ fun FeedbackScreen(
     viewModel: FeedbackViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val receipts by viewModel.receipts.collectAsStateWithLifecycle(initialValue = emptyList())
+    val progress by viewModel.progress.collectAsStateWithLifecycle()
+    var historyOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-    // 「查看进展」跳去 issue 页：先把地址亮出来问一句（见 rememberExternalLinkOpener）
     val links = rememberExternalLinkOpener { viewModel.messages.emit(NO_BROWSER_MESSAGE) }
 
     CollectMessages(viewModel.messages, snackbar)
 
     // 写了一半就走：系统返回、顶栏返回都先问一句。反馈常常是一大段复现步骤，
     // 手一滑划回去就全没了，而这页不存草稿。没写东西、或已经提交成功时照常直接退。
-    val hasDraft = state.successUrl == null &&
+    val hasDraft = state.submitted == null &&
         (state.content.isNotBlank() || state.contact.isNotBlank())
     var confirmLeave by remember { mutableStateOf(false) }
-    BackHandler(enabled = hasDraft) { confirmLeave = true }
+    BackHandler(enabled = hasDraft && !historyOpen) { confirmLeave = true }
     val leave: () -> Unit = {
         if (hasDraft) confirmLeave = true else onBack()
     }
@@ -88,11 +98,13 @@ fun FeedbackScreen(
         topBar = { AppTopBar("意见反馈", topBarScroll, onBack = leave, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        val url = state.successUrl
-        if (url != null) {
+        val submitted = state.submitted
+        if (submitted != null) {
             SubmittedState(
-                url = url,
-                onView = { links.open(url) },
+                onView = {
+                    viewModel.viewProgress(submitted)
+                    historyOpen = true
+                },
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize().padding(padding).padding(Dimens.screenPadding),
             )
@@ -117,6 +129,9 @@ fun FeedbackScreen(
                     bottom = Dimens.gapXL + padding.calculateBottomPadding(),
                 ),
         ) {
+            SettingGroup {
+                SettingRow(title = "反馈记录", position = groupPosition(0, 1), onClick = { historyOpen = true })
+            }
             SectionHeader("问题描述")
             SettingGroup {
                 SettingBlock {
@@ -210,6 +225,20 @@ fun FeedbackScreen(
         }
     }
 
+    if (historyOpen) {
+        FeedbackHistorySheet(
+            receipts = receipts,
+            progress = progress,
+            onSelect = viewModel::viewProgress,
+            onShowList = viewModel::closeProgress,
+            onDismiss = {
+                historyOpen = false
+                viewModel.closeProgress()
+            },
+            onOpenIssue = { links.open(it) },
+        )
+    }
+
     if (confirmLeave) {
         AppAlertDialog(
             onDismissRequest = { confirmLeave = false },
@@ -226,12 +255,10 @@ fun FeedbackScreen(
 }
 
 /**
- * 成功态。给出 issue 地址而不是只弹一句「提交成功」—— 用户能自己看进展、补充信息，
- * 反馈才不像扔进黑洞。
+ * 提交成功后可直接打开处理进展。
  */
 @Composable
 private fun SubmittedState(
-    url: String,
     onView: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -249,12 +276,64 @@ private fun SubmittedState(
         )
         Text("反馈已提交", style = MiuixTheme.textStyles.headline2, fontWeight = FontWeight.Medium)
         Text(
-            "感谢反馈。你可以在下面的页面里跟进处理进展，也可以补充信息。",
+            "你可以在反馈记录中跟进处理进展，也可以到 GitHub 补充信息。",
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,
         )
         PrimaryButton(text = "查看进展", onClick = onView, modifier = Modifier.fillMaxWidth())
         SecondaryButton(text = "完成", onClick = onBack, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun FeedbackHistorySheet(
+    receipts: List<FeedbackReceipt>,
+    progress: FeedbackProgress?,
+    onSelect: (FeedbackReceipt) -> Unit,
+    onShowList: () -> Unit,
+    onDismiss: () -> Unit,
+    onOpenIssue: (String) -> Unit,
+) {
+    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.55f
+    AppBottomSheet(onDismissRequest = onDismiss, title = if (progress == null) "反馈记录" else "处理进展") {
+        Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+            when {
+                progress != null -> {
+                    val receipt = progress.receipt
+                    SectionHeader(receipt.title)
+                    SettingGroup {
+                        val status = when {
+                            progress.loading -> "正在查询"
+                            progress.status != null -> progress.status.label
+                            else -> "暂时无法读取"
+                        }
+                        SettingRow(title = "公开状态", value = status, position = groupPosition(0, 4))
+                        SettingRow(
+                            title = "刷新进展",
+                            position = groupPosition(1, 4),
+                            onClick = if (progress.loading) null else ({ onSelect(receipt) }),
+                        )
+                        SettingRow(
+                            title = "在 GitHub 查看讨论",
+                            position = groupPosition(2, 4),
+                            onClick = { dismiss { onOpenIssue(receipt.url) } },
+                        )
+                        SettingRow(title = "返回反馈记录", position = groupPosition(3, 4), onClick = onShowList)
+                    }
+                }
+                receipts.isEmpty() -> SettingFootnote("暂无本机反馈记录。新的反馈提交成功后会显示在这里。")
+                else -> SettingGroup {
+                    receipts.forEachIndexed { index, receipt ->
+                        SettingRow(
+                            title = receipt.title,
+                            subtitle = "#${receipt.issue}",
+                            position = groupPosition(index, receipts.size),
+                            onClick = { onSelect(receipt) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
