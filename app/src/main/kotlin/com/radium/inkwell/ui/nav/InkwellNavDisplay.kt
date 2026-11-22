@@ -175,14 +175,6 @@ fun InkwellNavDisplay(
     fun gestureInProgress() =
         gestures?.transitionState?.value is NavigationEventTransitionState.InProgress
 
-    val feedbackPageMeta = NavDisplay.transitionSpec {
-        pageSlide.mode = if (gestureInProgress()) PageSlideMode.Predictive else PageSlideMode.LinearPush
-        PageSlideTransform
-    } + NavDisplay.popTransitionSpec {
-        pageSlide.mode = PageSlideMode.LinearPop
-        PageSlideTransform
-    }
-
     val readerMeta = remember(animate, nav) {
         val shrinkBack = {
             pageSlide.mode = PageSlideMode.None
@@ -494,7 +486,7 @@ fun InkwellNavDisplay(
                     viewModel = vm,
                 )
             }
-            entry<FeedbackHistoryRoute>(metadata = feedbackPageMeta) {
+            entry<FeedbackHistoryRoute> {
                 val prefs = koinInject<AppPrefs>()
                 val receipts by prefs.feedbackReceipts.collectAsStateWithLifecycle(initialValue = emptyList())
                 FeedbackHistoryScreen(
@@ -503,7 +495,7 @@ fun InkwellNavDisplay(
                     onBack = { nav.back() },
                 )
             }
-            entry<FeedbackDiscussionRoute>(metadata = feedbackPageMeta) { route ->
+            entry<FeedbackDiscussionRoute> { route ->
                 val prefs = koinInject<AppPrefs>()
                 val receiptFlow = remember(prefs, route) { prefs.feedbackReceipt(route.issue, route.url) }
                 val savedReceipt by receiptFlow.collectAsStateWithLifecycle(initialValue = null)

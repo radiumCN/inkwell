@@ -44,7 +44,7 @@ class FeedbackRepositoryTest {
         val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试")
         val discussion = requireNotNull(repo.discussion(receipt))
         assertEquals(FeedbackIssueStatus.NOT_PLANNED, discussion.status)
-        assertEquals("maintainer", discussion.comments.single().user?.login)
+        assertEquals("开发者回复", discussion.comments.single().message)
         assertEquals(5000000000L, discussion.comments.single().id)
         val request = server.takeRequest()
         assertEquals("/api/v1/feedback/123?repo=radiumCN%2Finkwell", request.path)
@@ -64,10 +64,14 @@ class FeedbackRepositoryTest {
 
     @Test
     fun `应用回复只把凭证发送给反馈中转服务`() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"id":42,"body":"已验证"}"""))
+        server.enqueue(MockResponse().setResponseCode(201).setBody(
+            """{"id":42,"body":"**反馈提交者（来自 Inkwell）**\n\n已验证","user":{"login":"relay"}}""",
+        ))
         val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "private-token")
         assertNull(repo.reply(receipt.copy(replyToken = null), "已验证"))
-        assertEquals(42L, repo.reply(receipt, "已验证")?.id)
+        val reply = requireNotNull(repo.reply(receipt, "已验证"))
+        assertEquals(42L, reply.id)
+        assertEquals("已验证", reply.message)
         val request = server.takeRequest()
         assertEquals("POST", request.method)
         assertEquals("/api/v1/feedback/123/comments", request.path)

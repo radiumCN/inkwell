@@ -135,9 +135,10 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?, drawLiveUnder: (() -> Unit)?) {
         canvas.save()
         canvas.clipPath(pathFront)
-        canvas.clipPath(pathUnder)
-        // 没有底页就露纸色（已铺）；投影照画，否则卷起来像纸片平移
+        // 底页铺满整个卷起区，背面随后覆盖。贝塞尔曲线与阴影的多边形在页缘
+        // 可能不完全重合，底页也裁到阴影多边形时，慢拖会露出一块空白。
         if (under != null) canvas.drawBitmap(under, 0f, 0f, null) else drawLiveUnder?.invoke()
+        canvas.clipPath(pathUnder)
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val w = (touchToCornerDis / 4f)
@@ -308,22 +309,15 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         bezierStart2.x = cornerX
         bezierStart2.y = bezierControl2.y - (cornerY - bezierControl2.y) / 2f
 
-        cross(touch, bezierControl1, bezierStart1, bezierStart2, bezierEnd1)
-        cross(touch, bezierControl2, bezierStart1, bezierStart2, bezierEnd2)
+        // 这两个交点恰好在触点和各自控制点的中间。直接取中点，避免
+        // 钉住触点 Y 后折线接近竖直时，斜率求交把卷曲边缘算歪。
+        bezierEnd1.set((touch.x + bezierControl1.x) / 2f, (touch.y + bezierControl1.y) / 2f)
+        bezierEnd2.set((touch.x + bezierControl2.x) / 2f, (touch.y + bezierControl2.y) / 2f)
 
         bezierVertex1.x = (bezierStart1.x + 2 * bezierControl1.x + bezierEnd1.x) / 4f
         bezierVertex1.y = (2 * bezierControl1.y + bezierStart1.y + bezierEnd1.y) / 4f
         bezierVertex2.x = (bezierStart2.x + 2 * bezierControl2.x + bezierEnd2.x) / 4f
         bezierVertex2.y = (2 * bezierControl2.y + bezierStart2.y + bezierEnd2.y) / 4f
-    }
-
-    private fun cross(p1: PointF, p2: PointF, p3: PointF, p4: PointF, out: PointF) {
-        val a1 = (p2.y - p1.y) / (p2.x - p1.x + 1e-6f)
-        val b1 = (p2.x * p1.y - p1.x * p2.y) / (p2.x - p1.x + 1e-6f)
-        val a2 = (p4.y - p3.y) / (p4.x - p3.x + 1e-6f)
-        val b2 = (p4.x * p3.y - p3.x * p4.y) / (p4.x - p3.x + 1e-6f)
-        out.x = (b2 - b1) / (a1 - a2 + 1e-6f)
-        out.y = a1 * out.x + b1
     }
 
     private fun buildPaths() {

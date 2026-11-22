@@ -140,8 +140,6 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
                 SettingGroup {
                     SettingBlock {
                         Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                            val author = comment.user?.login?.takeIf { it.isNotBlank() } ?: "GitHub 用户"
-                            Text(if (comment.appReply) "$author · 应用回复" else author, style = MiuixTheme.textStyles.headline2)
                             if (comment.createdAt.isNotBlank()) {
                                 Text(
                                     comment.createdAt.replace('T', ' ').removeSuffix("Z") + " UTC",

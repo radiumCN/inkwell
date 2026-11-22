@@ -748,6 +748,24 @@ private fun CurlLayer(
     }
     val frontPage = if (direction == FlipDirection.FORWARD) current else prev
     val underPage = if (direction == FlipDirection.FORWARD) next else current
+    // 连翻可在上一页提交的同一帧启动，但 ViewModel 的相邻页还未跟上。
+    // 本次先显示整页，避免卷开空白页，也避免相邻页到齐后从动画中途突然出现。
+    val missingPageReason = when {
+        frontPage == null -> "front_page_unavailable"
+        underPage == null -> "under_page_unavailable"
+        else -> null
+    }
+    val pendingPage = remember(flipId) { missingPageReason } ?: missingPageReason
+    if (pendingPage != null) {
+        LaunchedEffect(flipId, pendingPage) {
+            onTrace(
+                ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId,
+                    ReaderTrace.Render.CURL_PENDING_PAGE, pendingPage),
+            )
+        }
+        PageCanvas(current, layout, theme, selection = selection)
+        return
+    }
     // 连翻后可直接找上一轮相同内容的图，不必等后台把位图挪到新的槽位。
     val matching = bitmaps?.takeIf { it.matchesStyle(request) }
     val frontBitmap = frontPage?.let { matching?.bitmapFor(it.curlKey()) }
@@ -760,18 +778,15 @@ private fun CurlLayer(
     val render = when {
         liveFront != null -> ReaderTrace.Render.CURL_LIVE_FRONT
         front == null -> ReaderTrace.Render.SLIDE
-        under != null -> ReaderTrace.Render.CURL_BITMAPS
-        underPage != null -> ReaderTrace.Render.CURL_LIVE_UNDER
-        else -> ReaderTrace.Render.CURL_PAPER_UNDER
+        under == null -> ReaderTrace.Render.CURL_LIVE_UNDER
+        else -> ReaderTrace.Render.CURL_BITMAPS
     }
     val reason = when (render) {
         ReaderTrace.Render.SLIDE, ReaderTrace.Render.CURL_LIVE_FRONT -> when {
-            frontPage == null -> "front_page_unavailable"
             startedWithFront -> "front_bitmap_invalidated"
             else -> "front_bitmap_not_ready_at_start"
         }
         ReaderTrace.Render.CURL_LIVE_UNDER -> "under_bitmap_not_ready"
-        ReaderTrace.Render.CURL_PAPER_UNDER -> "under_page_unavailable"
         else -> null
     }
     LaunchedEffect(flipId, render, reason) {

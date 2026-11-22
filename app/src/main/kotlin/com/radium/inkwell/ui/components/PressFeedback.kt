@@ -13,7 +13,7 @@ import top.yukonga.miuix.kmp.utils.pressable
  * 接法照 Miuix 自己的 `Card(pressFeedbackType = …)`：反馈挂在**外层**（整块面一起动，角标、描边也跟着），
  * 点击挂在里面，两边**共用同一个** [interactionSource] —— 反馈只听这个源里的 Press / Release，
  * 点击、长按、读屏语义照旧由里面的 clickable / selectable 处理（pressable 不吃事件，也不加读屏动作）。
- * 里面那层的 indication 照旧给 `LocalIndication.current`，压暗和下沉一起出现。
+ * 需要叠加压暗时，点击层可用 `LocalIndication.current`。书架网格只用下沉反馈。
  * delay = null：按下立刻沉，不等「是不是要滚动」那一小段，与 Miuix 卡片一致。
  *
  * 只给「一整块可点的面」用：书架上的书、继续阅读卡、色板。贴在卡片里的设置行、列表行按 HyperOS 是按下变灰、

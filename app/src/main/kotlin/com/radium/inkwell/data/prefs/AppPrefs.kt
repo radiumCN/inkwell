@@ -24,17 +24,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.IOException
+
+private const val FEEDBACK_RECEIPT_LIMIT = 30
 
 private val Context.appDataStore by preferencesDataStore(
     name = "app_prefs",
@@ -47,6 +52,7 @@ class AppPrefs(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val feedbackReplyCipher = KeystoreSecretCipher("inkwell_feedback_reply_v1")
+    private val temporaryFeedbackReceipts = MutableStateFlow(emptyList<FeedbackReceipt>())
 
     internal object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
@@ -364,24 +370,39 @@ class AppPrefs(private val context: Context) {
             if (error is IOException) emit(emptyList()) else throw error
         }
 
-    val feedbackReceipts = storedFeedbackReceipts.map { receipts -> receipts.map { it.copy(replyToken = null) } }
+    val feedbackReceipts = storedFeedbackReceipts.combine(temporaryFeedbackReceipts) { stored, temporary ->
+        (temporary + stored).distinctBy { it.url }.take(FEEDBACK_RECEIPT_LIMIT).map { it.copy(replyToken = null) }
+    }
 
     fun feedbackReceipt(issue: Int, url: String): Flow<FeedbackReceipt?> = storedFeedbackReceipts
         .map { receipts -> receipts.firstOrNull { it.issue == issue && it.url == url } }
         .distinctUntilChanged()
-        .map { receipt -> receipt?.copy(replyToken = receipt.replyToken?.let(feedbackReplyCipher::decrypt)) }
+        .combine(temporaryFeedbackReceipts) { stored, temporary ->
+            temporary.firstOrNull { it.issue == issue && it.url == url }
+                ?: stored?.copy(replyToken = stored.replyToken?.let(feedbackReplyCipher::decrypt))
+        }
         .flowOn(Dispatchers.IO)
 
     suspend fun addFeedbackReceipt(receipt: FeedbackReceipt): Boolean = withContext(Dispatchers.IO) {
         val encryptedToken = receipt.replyToken?.let { runCatching { feedbackReplyCipher.encrypt(it) }.getOrNull() }
         val stored = receipt.copy(replyToken = encryptedToken)
-        context.appDataStore.edit { p ->
-            val previous = decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
-            p[Keys.FEEDBACK_RECEIPTS] = Json.encodeToString(
-                (listOf(stored) + previous.filterNot { it.url == stored.url }).take(30),
-            )
+        var saved = false
+        try {
+            context.appDataStore.edit { p ->
+                val previous = decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
+                p[Keys.FEEDBACK_RECEIPTS] = Json.encodeToString(
+                    (listOf(stored) + previous.filterNot { it.url == stored.url }).take(FEEDBACK_RECEIPT_LIMIT),
+                )
+            }
+            saved = receipt.replyToken == null || encryptedToken != null
+            saved
+        } finally {
+            // 保存失败时，已提交的记录仍可在本次应用进程中打开和回复。
+            temporaryFeedbackReceipts.update { receipts ->
+                val others = receipts.filterNot { it.url == receipt.url }
+                if (saved) others else (listOf(receipt) + others).take(FEEDBACK_RECEIPT_LIMIT)
+            }
         }
-        receipt.replyToken == null || encryptedToken != null
     }
 
     /**

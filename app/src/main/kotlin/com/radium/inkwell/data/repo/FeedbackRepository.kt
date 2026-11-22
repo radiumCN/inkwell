@@ -67,12 +67,7 @@ data class FeedbackComment(
     val id: Long,
     val body: String = "",
     @SerialName("created_at") val createdAt: String = "",
-    val user: Author? = null,
 ) {
-    @Serializable
-    data class Author(val login: String)
-
-    val appReply: Boolean get() = body.startsWith(APP_REPLY_PREFIX)
     val message: String get() = body.removePrefix(APP_REPLY_PREFIX)
 }
 
