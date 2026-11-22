@@ -55,6 +55,105 @@ class SourceLoginTest {
     }
 
     @Test
+    fun `登录按钮能读取本次表单且只执行自己的动作`() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            server.enqueue(MockResponse().setBody("""{"token":"fixture"}"""))
+            server.enqueue(MockResponse().setBody("""{"token":"fixture"}"""))
+            val source = fixture(base).copy(loginUrl = """
+                function login() {
+                  var email = result.get('邮箱');
+                  if (email !== result['邮箱'] || email !== source.getLoginInfoMap().get('邮箱')) throw 'form';
+                  if (result.get('不存在') != null || Object.keys(result).length !== 2) throw 'form shape';
+                  var response = JSON.parse(java.ajax(baseUrl + '/login,' +
+                    JSON.stringify({method:'POST', body:JSON.stringify(result)})));
+                  source.putLoginHeader(response.token);
+                }
+                function logout() { source.removeLoginHeader(); }
+            """.trimIndent())
+            val sessions = Sessions()
+            val engine = engine(http(sessions), sessions)
+            val id = checkNotNull(source.loginSessionId)
+            val values = mapOf("邮箱" to "fixture@example.com", "密码" to "fixture")
+
+            engine.submitLogin(source, values, action = "login(true)")
+            assertEquals(values, Json.decodeFromString<Map<String, String>>(server.takeRequest().body.readUtf8()))
+            assertEquals("fixture", sessions.read(id, SourceSessionKey.HEADERS))
+            assertNull(sessions.read(id, SourceSessionKey.INFO))
+
+            engine.submitLogin(source, values, action = "logout()")
+            assertNull(sessions.read(id, SourceSessionKey.HEADERS))
+            assertEquals(1, server.requestCount)
+
+            engine.submitLogin(source, values)
+            assertEquals(2, server.requestCount)
+            assertEquals(values, loginValues(sessions.read(id, SourceSessionKey.INFO)))
+        }
+    }
+
+    @Test
+    fun `浏览器脚本支持页面结果与同会话重新请求，取消后不请求`() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val source = fixture(base).copy(loginUrl = """
+                function login(refetch) {
+                  var result = java.startBrowserAwait(baseUrl + '/signin', '登录', refetch);
+                  if (!result) return;
+                  if (String(cookie.getCookie(baseUrl)) !== 'session=fixture') throw 'missing cookie';
+                  source.setVariable(result.body());
+                }
+            """.trimIndent())
+            val id = checkNotNull(source.loginSessionId)
+            val sessions = Sessions()
+            var completed = false
+            val engine = engine(http(sessions, webCookies = { session, url ->
+                "session=fixture".takeIf { completed && session == id && url.port == server.port }
+            }), sessions)
+            val browser = object : SourceLoginInteraction {
+                override fun message(text: String) = Unit
+                override fun updateFields(values: Map<String, String>) = Unit
+                override suspend fun openBrowser(url: String, title: String): StrResponse? {
+                    assertEquals("$base/signin", url)
+                    assertEquals("登录", title)
+                    return if (completed) StrResponse("DOM", 200, "$base/done") else null
+                }
+            }
+
+            engine.submitLogin(source, emptyMap(), action = "login(true)", interaction = browser)
+            assertNull(sessions.read(id, SourceSessionKey.VARIABLE))
+            assertEquals(0, server.requestCount)
+            completed = true
+            engine.submitLogin(source, emptyMap(), action = "login(false)", interaction = browser)
+            assertEquals("DOM", sessions.read(id, SourceSessionKey.VARIABLE))
+            assertEquals(0, server.requestCount)
+
+            server.enqueue(MockResponse().setBody("network"))
+            engine.submitLogin(source, emptyMap(), action = "login(true)", interaction = browser)
+            assertEquals("network", sessions.read(id, SourceSessionKey.VARIABLE))
+            val request = server.takeRequest()
+            assertEquals("/done", request.path)
+            assertEquals("session=fixture", request.getHeader("Cookie"))
+        }
+    }
+
+    @Test
+    fun `登录错误提供阶段且不包含脚本异常原文`() = runBlocking {
+        MockWebServer().use { server ->
+            val source = fixture(server.url("/").toString().trimEnd('/')).copy(
+                loginUrl = "function login() { throw 'fixture-secret'; }",
+            )
+            val engine = engine(http())
+            val script = assertFailsWith<SourceLoginException> { engine.submitLogin(source, emptyMap()) }
+            assertEquals(SourceLoginDiagnostic.SCRIPT_FAILED, script.diagnostic)
+            assertFalse(script.message.orEmpty().contains("fixture-secret"))
+
+            server.enqueue(MockResponse().setResponseCode(401))
+            val request = assertFailsWith<SourceLoginException> { engine.search(source, "样例") }
+            assertEquals(SourceLoginDiagnostic.AUTH_REQUIRED, request.diagnostic)
+        }
+    }
+
+    @Test
     fun `登录表单保存会话并在响应要求登录时续期重试`(): Unit = runBlocking {
         MockWebServer().use { server ->
             val base = server.url("/").toString().trimEnd('/')

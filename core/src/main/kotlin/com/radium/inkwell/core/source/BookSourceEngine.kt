@@ -20,7 +20,7 @@ import org.jsoup.Jsoup
 import java.util.concurrent.ConcurrentHashMap
 
 /** 书源业务错误（规则未配置/规则不匹配等） */
-class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 // ---- 结果模型 ----
 
@@ -901,7 +901,7 @@ class BookSourceEngine(
         val rawPage = try {
             fetch()
         } catch (e: SourceHttpClient.HttpStatusException) {
-            if (e.code == 401 && source.hasLogin) throw SourceException("请在来源详情中登录后重试")
+            if (e.code == 401 && source.hasLogin) throw SourceLoginException(SourceLoginDiagnostic.AUTH_REQUIRED)
             throw e
         }
         // 服务端的限流结果直接交给搜索调度，避免校验脚本立即重试。
@@ -912,14 +912,14 @@ class BookSourceEngine(
             // 校验脚本并发跑，不排队：它多半只看一眼响应。要重新登录（source.login()）时才串行，锁在 runLogin 里
             val checked = try {
                 evaluator.checkLogin(source, context, response, headerScriptOf(checkRule) ?: checkRule) {
-                    jsHttp.blockingUnderParent {
+                    retriedResponse ?: jsHttp.blockingUnderParent {
                         val page = fetch()
                         retriedPage = page
                         asResponse(page).also { retriedResponse = it }
                     } ?: StrResponse.empty()
                 }
             } catch (_: SourceException) {
-                throw SourceException("登录校验未通过，请在来源详情中登录后重试")
+                throw SourceLoginException(SourceLoginDiagnostic.VERIFICATION_FAILED)
             }
             when {
                 checked == null || checked === response -> rawPage
@@ -928,7 +928,7 @@ class BookSourceEngine(
             }
         }
         if (checkRule != null && page.statusCode !in 200..299) {
-            if (page.statusCode == 401 && source.hasLogin) throw SourceException("请在来源详情中登录后重试")
+            if (page.statusCode == 401) throw SourceLoginException(SourceLoginDiagnostic.AUTH_REQUIRED)
             val retryAfter = page.headers.entries.firstOrNull { it.key.equals("Retry-After", true) }?.value?.firstOrNull()
             throw SourceHttpClient.HttpStatusException(page.statusCode, page.finalUrl, retryAfter)
         }
