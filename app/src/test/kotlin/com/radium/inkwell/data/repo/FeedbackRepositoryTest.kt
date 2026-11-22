@@ -37,41 +37,29 @@ class FeedbackRepositoryTest {
     fun tearDown() = server.shutdown()
 
     @Test
-    fun `反馈进度读取公开 Issue 的关闭原因`() = runBlocking {
-        val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val request = chain.request()
-            assertEquals("api.github.com", request.url.host)
-            assertNull(request.header("Authorization"))
-            chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath)).build())
-        }.build()
-        server.enqueue(MockResponse().setBody("""{"state":"closed","state_reason":"not_planned"}"""))
+    fun `反馈进度和讨论经中转读取 旧收据也无需回复凭证`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"state":"closed","state_reason":"not_planned","comments":[{"id":5000000000,"body":"开发者回复","user":{"login":"maintainer"}}],"next_cursor":"cursor+page="}""",
+        ))
         val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试")
-        assertEquals(FeedbackIssueStatus.NOT_PLANNED, FeedbackRepository(client).issueStatus(receipt))
-        assertEquals("/repos/radiumCN/inkwell/issues/123", server.takeRequest().path)
+        val discussion = requireNotNull(repo.discussion(receipt))
+        assertEquals(FeedbackIssueStatus.NOT_PLANNED, discussion.status)
+        assertEquals("maintainer", discussion.comments.single().user?.login)
+        assertEquals(5000000000L, discussion.comments.single().id)
+        val request = server.takeRequest()
+        assertEquals("/api/v1/feedback/123?repo=radiumCN%2Finkwell", request.path)
+        assertNull(request.getHeader("Authorization"))
+
+        server.enqueue(MockResponse().setBody("""{"state":"closed","comments":[]}"""))
+        assertNull(requireNotNull(repo.discussion(receipt, discussion.nextCursor)).nextCursor)
+        assertEquals("/api/v1/feedback/123?repo=radiumCN%2Finkwell&after=cursor%2Bpage%3D", server.takeRequest().path)
     }
 
     @Test
     fun `反馈进度忽略非 GitHub 地址和编号不匹配的收据`() = runBlocking {
-        assertNull(repo.issueStatus(FeedbackReceipt(123, "https://example.com/owner/project/issues/123", "测试")))
-        assertNull(repo.issueStatus(FeedbackReceipt(123, "https://github.com/owner/project/issues/456", "测试")))
+        assertNull(repo.discussion(FeedbackReceipt(123, "https://example.com/owner/project/issues/123", "测试")))
+        assertNull(repo.discussion(FeedbackReceipt(123, "https://github.com/owner/project/issues/456", "测试")))
         assertEquals(0, server.requestCount)
-    }
-
-    @Test
-    fun `读取公开讨论并保留下一页状态`() = runBlocking {
-        val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val request = chain.request()
-            assertEquals("api.github.com", request.url.host)
-            assertNull(request.header("Authorization"))
-            chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath + "?" + request.url.encodedQuery)).build())
-        }.build()
-        server.enqueue(MockResponse().setHeader("Link", "<https://api.github.com/next>; rel=\"next\"")
-            .setBody("""[{"id":42,"body":"开发者回复","user":{"login":"maintainer"}}]"""))
-        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "secret")
-        val page = requireNotNull(FeedbackRepository(client).comments(receipt, 2))
-        assertTrue(page.hasMore)
-        assertEquals("maintainer", page.comments.single().user?.login)
-        assertEquals("/repos/radiumCN/inkwell/issues/123/comments?page=2&per_page=30", server.takeRequest().path)
     }
 
     @Test

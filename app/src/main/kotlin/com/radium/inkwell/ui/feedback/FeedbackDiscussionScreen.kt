@@ -42,8 +42,6 @@ import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.rememberExternalLinkOpener
 import com.radium.inkwell.ui.components.settingsPageColor
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Text
@@ -81,7 +79,7 @@ internal fun FeedbackHistoryScreen(
 internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRepository, onBack: () -> Unit) {
     var status by remember(receipt.url) { mutableStateOf<String?>(null) }
     var comments by remember(receipt.url) { mutableStateOf(emptyList<FeedbackComment>()) }
-    var nextPage by remember(receipt.url) { mutableStateOf<Int?>(null) }
+    var nextCursor by remember(receipt.url) { mutableStateOf<String?>(null) }
     var loading by remember(receipt.url) { mutableStateOf(true) }
     var loadFailed by remember(receipt.url) { mutableStateOf(false) }
     var sending by remember(receipt.url) { mutableStateOf(false) }
@@ -92,27 +90,24 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
     val links = rememberExternalLinkOpener { messages.emit(NO_BROWSER_MESSAGE) }
     CollectMessages(messages, snackbar)
 
-    suspend fun load(page: Int) {
+    suspend fun load(cursor: String? = null) {
         loading = true
         loadFailed = false
         try {
-            coroutineScope {
-                val issue = if (page == 1) async { repo.issueStatus(receipt) } else null
-                val result = repo.comments(receipt, page)
-                if (issue != null) status = issue.await()?.label
-                if (result == null) {
-                    loadFailed = true
-                } else {
-                    comments = (if (page == 1) result.comments else comments + result.comments).distinctBy { it.id }
-                    nextPage = if (result.hasMore) page + 1 else null
-                }
+            val result = repo.discussion(receipt, cursor)
+            if (result == null) {
+                loadFailed = true
+            } else {
+                status = result.status?.label
+                comments = (if (cursor == null) result.comments else comments + result.comments).distinctBy { it.id }
+                nextCursor = result.nextCursor
             }
         } finally {
             loading = false
         }
     }
 
-    LaunchedEffect(receipt.url) { load(1) }
+    LaunchedEffect(receipt.url) { load() }
 
     FeedbackPage("处理进展", onBack, snackbar) { padding ->
         LazyColumn(
@@ -131,7 +126,7 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
                     SettingRow(
                         title = "刷新进展",
                         position = groupPosition(1, 3),
-                        onClick = if (loading || sending) null else ({ scope.launch { load(1) } }),
+                        onClick = if (loading || sending) null else ({ scope.launch { load() } }),
                     )
                     SettingRow(
                         title = "在 GitHub 查看讨论",
@@ -145,7 +140,7 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
                 SettingGroup {
                     SettingBlock {
                         Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                            val author = comment.user?.login ?: "GitHub 用户"
+                            val author = comment.user?.login?.takeIf { it.isNotBlank() } ?: "GitHub 用户"
                             Text(if (comment.appReply) "$author · 应用回复" else author, style = MiuixTheme.textStyles.headline2)
                             if (comment.createdAt.isNotBlank()) {
                                 Text(
@@ -170,12 +165,12 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
                     )
                 }
             }
-            nextPage?.let { page ->
+            nextCursor?.let { cursor ->
                 item {
                     SecondaryButton(
                         text = "加载更多",
                         enabled = !loading && !sending,
-                        onClick = { scope.launch { load(page) } },
+                        onClick = { scope.launch { load(cursor) } },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding),
                     )
                 }

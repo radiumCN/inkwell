@@ -8,7 +8,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -79,7 +78,11 @@ data class FeedbackComment(
 
 private const val APP_REPLY_PREFIX = "**反馈提交者（来自 Inkwell）**\n\n"
 
-data class FeedbackCommentsPage(val comments: List<FeedbackComment>, val hasMore: Boolean)
+data class FeedbackDiscussion(
+    val status: FeedbackIssueStatus?,
+    val comments: List<FeedbackComment>,
+    val nextCursor: String?,
+)
 
 /**
  * 意见反馈：POST 到中转服务器，服务端据此在公开仓库建一个 GitHub issue。
@@ -95,51 +98,38 @@ class FeedbackRepository(
 
     private val replyHttp = http.newBuilder().retryOnConnectionFailure(false).followRedirects(false).build()
 
-    suspend fun issueStatus(receipt: FeedbackReceipt): FeedbackIssueStatus? = withContext(Dispatchers.IO) {
-        val api = issueApi(receipt) ?: return@withContext null
-        val request = publicIssueRequest(api)
-        val call = http.newCall(request)
-        call.timeout().timeout(10, TimeUnit.SECONDS)
-        try {
-            call.execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val info = json.decodeFromString<IssueResponse>(response.body.string())
-                when (info.state) {
-                    "open" -> FeedbackIssueStatus.OPEN
-                    "closed" -> when (info.reason) {
-                        "completed" -> FeedbackIssueStatus.COMPLETED
-                        "not_planned" -> FeedbackIssueStatus.NOT_PLANNED
-                        "duplicate" -> FeedbackIssueStatus.DUPLICATE
-                        else -> FeedbackIssueStatus.CLOSED
+    suspend fun discussion(receipt: FeedbackReceipt, cursor: String? = null): FeedbackDiscussion? =
+        withContext(Dispatchers.IO) {
+            val repo = feedbackRepo(receipt) ?: return@withContext null
+            val url = baseUrl.toHttpUrlOrNull()?.newBuilder()
+                ?.addPathSegments("api/v1/feedback")?.addPathSegment(receipt.issue.toString())
+                ?.addQueryParameter("repo", repo)
+                ?.apply { if (!cursor.isNullOrEmpty()) addQueryParameter("after", cursor) }
+                ?.build() ?: return@withContext null
+            try {
+                val call = http.newCall(Request.Builder().url(url).build())
+                call.timeout().timeout(15, TimeUnit.SECONDS)
+                call.execute().use { response ->
+                    if (!response.isSuccessful) return@withContext null
+                    val info = json.decodeFromString<DiscussionResponse>(response.body.string())
+                    val status = when (info.state) {
+                        "open" -> FeedbackIssueStatus.OPEN
+                        "closed" -> when (info.reason) {
+                            "completed" -> FeedbackIssueStatus.COMPLETED
+                            "not_planned" -> FeedbackIssueStatus.NOT_PLANNED
+                            "duplicate" -> FeedbackIssueStatus.DUPLICATE
+                            else -> FeedbackIssueStatus.CLOSED
+                        }
+                        else -> null
                     }
-                    else -> null
+                    FeedbackDiscussion(status, info.comments, info.nextCursor?.takeIf { it.isNotBlank() })
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            null
         }
-    }
-
-    suspend fun comments(receipt: FeedbackReceipt, page: Int): FeedbackCommentsPage? = withContext(Dispatchers.IO) {
-        val url = issueApi(receipt)?.newBuilder()?.addPathSegment("comments")
-            ?.addQueryParameter("page", page.toString())?.addQueryParameter("per_page", "30")?.build()
-            ?: return@withContext null
-        try {
-            val call = http.newCall(publicIssueRequest(url))
-            call.timeout().timeout(10, TimeUnit.SECONDS)
-            call.execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val comments = json.decodeFromString<List<FeedbackComment>>(response.body.string())
-                FeedbackCommentsPage(comments, response.header("Link")?.contains("rel=\"next\"") == true)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            null
-        }
-    }
 
     suspend fun reply(receipt: FeedbackReceipt, body: String): FeedbackComment? = withContext(Dispatchers.IO) {
         val token = receipt.replyToken ?: return@withContext null
@@ -161,19 +151,14 @@ class FeedbackRepository(
         }
     }
 
-    private fun issueApi(receipt: FeedbackReceipt): HttpUrl? {
+    private fun feedbackRepo(receipt: FeedbackReceipt): String? {
         val issue = receipt.url.toHttpUrlOrNull() ?: return null
         val parts = issue.pathSegments
         if (!issue.isHttps || issue.host != "github.com" || issue.port != 443 ||
             parts.size != 4 || parts[2] != "issues" || parts[3].toIntOrNull() != receipt.issue || receipt.issue <= 0
         ) return null
-        return HttpUrl.Builder().scheme("https").host("api.github.com")
-            .addPathSegment("repos").addPathSegment(parts[0]).addPathSegment(parts[1])
-            .addPathSegment("issues").addPathSegment(receipt.issue.toString()).build()
+        return "${parts[0]}/${parts[1]}"
     }
-
-    private fun publicIssueRequest(url: HttpUrl): Request = Request.Builder().url(url)
-        .header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28").build()
 
     /**
      * @param contact 可选。⚠️ issue 建在**公开仓库**，填了就是公开可见的 ——
@@ -260,7 +245,12 @@ class FeedbackRepository(
     private data class ErrorResponse(val code: String = "")
 
     @Serializable
-    private data class IssueResponse(val state: String, @SerialName("state_reason") val reason: String? = null)
+    private data class DiscussionResponse(
+        val state: String,
+        @SerialName("state_reason") val reason: String? = null,
+        val comments: List<FeedbackComment>,
+        @SerialName("next_cursor") val nextCursor: String? = null,
+    )
 
     @Serializable
     private data class Response(
