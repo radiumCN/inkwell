@@ -804,6 +804,7 @@ private fun CurlLayer(
                     paperColor = theme.background.toInt(),
                     drawLiveUnder = drawLiveUnder,
                     drawLiveFront = drawLiveFront,
+                    back = frontBitmap,
                 )
             }
         }

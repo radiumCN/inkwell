@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,8 +45,11 @@ import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.SwitchRow
 import com.radium.inkwell.ui.components.settingsPageColor
+import com.radium.inkwell.util.AppIcon
 import com.radium.inkwell.util.AppIconManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import com.radium.inkwell.ui.components.AppScaffold
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
@@ -69,8 +73,12 @@ fun AppearanceSettingsScreen(
     val duplicateHint = appPrefs.duplicateHintEnabledState.collectAsStateWithLifecycle().value ?: true
     val bookshelfLayout = appPrefs.bookshelfLayoutState.collectAsStateWithLifecycle().value ?: BookshelfLayout.GRID
     val bookshelfColumns = appPrefs.bookshelfColumnsState.collectAsStateWithLifecycle().value ?: ShelfColumns.DEFAULT
-    var appIcon by remember { mutableStateOf(AppIconManager.current(context)) }
+    var appIcon by remember(context) { mutableStateOf<AppIcon?>(null) }
     var showIconPicker by remember { mutableStateOf(false) }
+    LaunchedEffect(context) {
+        // 查桌面 alias 要逐个访问 PackageManager，让页面首帧先画出来。
+        appIcon = withContext(Dispatchers.IO) { AppIconManager.current(context) }
+    }
 
     val pageColor = settingsPageColor()
     val topBarScroll = rememberAppTopBarScroll()
@@ -100,8 +108,8 @@ fun AppearanceSettingsScreen(
                 )
                 SettingRow(
                     title = "应用图标",
-                    value = appIcon.label,
-                    onClick = { showIconPicker = true },
+                    value = appIcon?.label,
+                    onClick = if (appIcon != null) ({ showIconPicker = true }) else null,
                     position = SettingGroupPosition.Middle,
                 )
                 SwitchRow(
@@ -172,12 +180,13 @@ fun AppearanceSettingsScreen(
         }
     }
 
-    if (showIconPicker) {
+    val selectedIcon = appIcon
+    if (showIconPicker && selectedIcon != null) {
         AppIconSheet(
-            selected = appIcon,
+            selected = selectedIcon,
             onSelect = { picked ->
                 showIconPicker = false
-                if (picked != appIcon) {
+                if (picked != selectedIcon) {
                     AppIconManager.apply(context, picked)
                     appIcon = picked
                     messages.emit("已换成「${picked.label}」，桌面图标稍后刷新")

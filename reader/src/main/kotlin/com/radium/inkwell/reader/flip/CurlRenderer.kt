@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -49,6 +50,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val pathTmp = Path()    // 前页折痕投影用的临时四边形
 
     private val backMatrix = Matrix()
+    private val backClipBounds = Rect()
     private val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 1f)
     private var paperColor = 0xFFF5EFDC.toInt()
     // 纸背：铺纸色 + 极淡镜像（墨从另一面透出），比 legado 的满强度镜像更干净、跟主题走
@@ -73,7 +75,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /**
      * @param cornerBottom 卷角固定在右下(true)/右上(false)，手势开始时锁定
      * @param front 卷起页的位图，用于前页可见区和背面淡墨。
-     * @param drawLiveFront 尚无卷起页位图时，直接绘制前页可见区；背面只画纸色与折缝阴影。
+     * @param drawLiveFront 尚无卷起页位图时，直接绘制前页可见区与背面镜像。
+     * @param back 翻页进行中补齐的位图可先用于背面，正面保持起手时的绘制方式。
      */
     fun draw(
         canvas: Canvas,
@@ -85,7 +88,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         paperColor: Int,
         drawLiveUnder: (() -> Unit)? = null,
         drawLiveFront: (() -> Unit)? = null,
+        back: Bitmap? = front,
     ) {
+        if (touchX >= width) {
+            // 后翻已到终点。直接画完整的上一页，避免几何钳制在右下角留下最后一片卷角。
+            canvas.drawColor(paperColor)
+            if (front != null) canvas.drawBitmap(front, 0f, 0f, null) else drawLiveFront?.invoke()
+            return
+        }
         this.paperColor = paperColor
         cornerX = width
         cornerY = if (cornerBottom) height else 0f
@@ -109,7 +119,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         drawCurrentPageArea(canvas, front, drawLiveFront)
         drawNextPageAreaAndShadow(canvas, under, drawLiveUnder)
         drawCurrentPageShadow(canvas)
-        drawCurrentBackArea(canvas, front)
+        drawCurrentBackArea(canvas, back, drawLiveFront)
     }
 
     /** 前页可见区（挖掉卷起区，画前页） */
@@ -210,7 +220,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 卷起页背面（铺纸色 + 淡墨镜像）+ 背面折缝阴影（legado 的 folderShadow，宽 = min 半距） */
-    private fun drawCurrentBackArea(canvas: Canvas, front: Bitmap?) {
+    private fun drawCurrentBackArea(canvas: Canvas, back: Bitmap?, drawLiveFront: (() -> Unit)?) {
         val i = (bezierStart1.x + bezierControl1.x) / 2f
         val f1 = abs(i - bezierControl1.x)
         val i1 = (bezierStart2.y + bezierControl2.y) / 2f
@@ -234,7 +244,17 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         backMatrix.preTranslate(-bezierControl1.x, -bezierControl1.y)
         backMatrix.postTranslate(bezierControl1.x, bezierControl1.y)
         canvas.drawColor(paperColor)
-        if (front != null) canvas.drawBitmap(front, backMatrix, backPaint)
+        if (back != null) {
+            canvas.drawBitmap(back, backMatrix, backPaint)
+        } else if (drawLiveFront != null && canvas.getClipBounds(backClipBounds)) {
+            canvas.saveLayerAlpha(
+                backClipBounds.left.toFloat(), backClipBounds.top.toFloat(),
+                backClipBounds.right.toFloat(), backClipBounds.bottom.toFloat(), BACK_INK_ALPHA,
+            )
+            canvas.concat(backMatrix)
+            drawLiveFront()
+            canvas.restore()
+        }
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val (drawable, left, right) = if (isRtOrLb) {

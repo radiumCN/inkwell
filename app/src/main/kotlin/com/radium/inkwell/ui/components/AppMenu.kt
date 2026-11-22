@@ -37,6 +37,7 @@ fun AppDropdownMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     items: List<AppMenuItem>,
+    onDismissFinished: () -> Unit = {},
 ) {
     if (items.isEmpty()) return
     // 不 remember：调用方每次重组都新建一份带新 lambda 的列表，拿它当 key 永远不命中，缓存只是摆设。
@@ -53,5 +54,6 @@ fun AppDropdownMenu(
             )
         },
         onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
     )
 }

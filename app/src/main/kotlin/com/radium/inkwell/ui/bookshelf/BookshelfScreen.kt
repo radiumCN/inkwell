@@ -449,11 +449,18 @@ fun BookshelfScreen(
      * 收起时只清自己那份：快速长按另一本书时，上一本的菜单收起不该把新目标也清掉。
      */
     val bookMenu: @Composable (BookEntity) -> Unit = { book ->
+        var openDetailAfterDismiss by remember(book.id) { mutableStateOf(false) }
         AppDropdownMenu(
             expanded = actionTarget?.id == book.id && book.stillVisible(),
             onDismissRequest = { if (actionTarget?.id == book.id) actionTarget = null },
+            onDismissFinished = {
+                if (openDetailAfterDismiss) {
+                    openDetailAfterDismiss = false
+                    if (actionTarget == null && book.stillVisible()) onOpenDetail(book.id)
+                }
+            },
             items = buildList {
-                add(AppMenuItem("书籍详情", onClick = { onOpenDetail(book.id) }))
+                add(AppMenuItem("书籍详情", onClick = { openDetailAfterDismiss = true }))
                 add(
                     AppMenuItem(
                         "设置分组",
