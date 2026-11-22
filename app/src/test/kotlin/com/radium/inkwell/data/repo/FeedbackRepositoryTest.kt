@@ -58,6 +58,36 @@ class FeedbackRepositoryTest {
     }
 
     @Test
+    fun `读取公开讨论并保留下一页状态`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            assertEquals("api.github.com", request.url.host)
+            assertNull(request.header("Authorization"))
+            chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath + "?" + request.url.encodedQuery)).build())
+        }.build()
+        server.enqueue(MockResponse().setHeader("Link", "<https://api.github.com/next>; rel=\"next\"")
+            .setBody("""[{"id":42,"body":"开发者回复","user":{"login":"maintainer"}}]"""))
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "secret")
+        val page = requireNotNull(FeedbackRepository(client).comments(receipt, 2))
+        assertTrue(page.hasMore)
+        assertEquals("maintainer", page.comments.single().user?.login)
+        assertEquals("/repos/radiumCN/inkwell/issues/123/comments?page=2&per_page=30", server.takeRequest().path)
+    }
+
+    @Test
+    fun `应用回复只把凭证发送给反馈中转服务`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"id":42,"body":"已验证"}"""))
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "private-token")
+        assertNull(repo.reply(receipt.copy(replyToken = null), "已验证"))
+        assertEquals(42L, repo.reply(receipt, "已验证")?.id)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/feedback/123/comments", request.path)
+        assertEquals("Bearer private-token", request.getHeader("Authorization"))
+        assertEquals("已验证", (Json.parseToJsonElement(request.body.readUtf8()) as JsonObject)["body"]?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun `201 返回 issue 号与地址`() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(201).setBody(

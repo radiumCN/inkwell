@@ -29,8 +29,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.IOException
 
@@ -44,6 +46,7 @@ private val Context.appDataStore by preferencesDataStore(
 class AppPrefs(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val feedbackReplyCipher = KeystoreSecretCipher("inkwell_feedback_reply_v1")
 
     internal object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
@@ -353,27 +356,40 @@ class AppPrefs(private val context: Context) {
         }
     }
 
+    private val storedFeedbackReceipts = context.appDataStore.data
+        .map { it[Keys.FEEDBACK_RECEIPTS] }
+        .distinctUntilChanged()
+        .map(::decodeFeedbackReceipts)
+        .catch { error ->
+            if (error is IOException) emit(emptyList()) else throw error
+        }
+
+    val feedbackReceipts = storedFeedbackReceipts.map { receipts -> receipts.map { it.copy(replyToken = null) } }
+
+    fun feedbackReceipt(issue: Int, url: String): Flow<FeedbackReceipt?> = storedFeedbackReceipts
+        .map { receipts -> receipts.firstOrNull { it.issue == issue && it.url == url } }
+        .distinctUntilChanged()
+        .map { receipt -> receipt?.copy(replyToken = receipt.replyToken?.let(feedbackReplyCipher::decrypt)) }
+        .flowOn(Dispatchers.IO)
+
+    suspend fun addFeedbackReceipt(receipt: FeedbackReceipt): Boolean = withContext(Dispatchers.IO) {
+        val encryptedToken = receipt.replyToken?.let { runCatching { feedbackReplyCipher.encrypt(it) }.getOrNull() }
+        val stored = receipt.copy(replyToken = encryptedToken)
+        context.appDataStore.edit { p ->
+            val previous = decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
+            p[Keys.FEEDBACK_RECEIPTS] = Json.encodeToString(
+                (listOf(stored) + previous.filterNot { it.url == stored.url }).take(30),
+            )
+        }
+        receipt.replyToken == null || encryptedToken != null
+    }
+
     /**
      * 是否记录搜索历史。默认开。
      *
      * 开关进备份、随设备同步；**历史本身不进备份**：搜过什么是这台设备上的事，
      * 同步过去等于把别人在另一台设备上搜的词摊在这台的搜索页上。
      */
-    val feedbackReceipts: Flow<List<FeedbackReceipt>> = context.appDataStore.data.map { p ->
-        decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
-    }.catch { error ->
-        if (error is IOException) emit(emptyList()) else throw error
-    }.distinctUntilChanged()
-
-    suspend fun addFeedbackReceipt(receipt: FeedbackReceipt) {
-        context.appDataStore.edit { p ->
-            val previous = decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
-            p[Keys.FEEDBACK_RECEIPTS] = Json.encodeToString(
-                (listOf(receipt) + previous.filterNot { it.url == receipt.url }).take(30),
-            )
-        }
-    }
-
     val searchHistoryEnabled: Flow<Boolean> = context.appDataStore.data.map { p ->
         p[Keys.SEARCH_HISTORY_ENABLED] ?: true
     }.distinctUntilChanged()

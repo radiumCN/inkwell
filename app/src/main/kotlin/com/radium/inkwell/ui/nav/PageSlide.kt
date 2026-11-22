@@ -46,8 +46,12 @@ internal enum class PageSlideMode {
     /** 前进：新页从右整屏滑入，旧页左让 1/4 */
     Push,
 
+    LinearPush,
+
     /** 返回（箭头 / 返回键）：当前页右滑出，底层页从左 1/4 回位 */
     Pop,
+
+    LinearPop,
 
     /** 侧滑返回：几何同 [Pop]，线性，按手势进度 seek */
     Predictive,
@@ -113,15 +117,15 @@ internal fun rememberPageSlideDecorator(state: PageSlideState): NavEntryDecorato
 
 /** 进场起点，单位是窗口宽度 */
 private fun preEnterOffset(mode: PageSlideMode): Float = when (mode) {
-    PageSlideMode.Push -> 1f
-    PageSlideMode.Pop, PageSlideMode.Predictive -> -0.25f
+    PageSlideMode.Push, PageSlideMode.LinearPush -> 1f
+    PageSlideMode.Pop, PageSlideMode.LinearPop, PageSlideMode.Predictive -> -0.25f
     PageSlideMode.None -> 0f
 }
 
 /** 退场终点，单位是窗口宽度 */
 private fun postExitOffset(mode: PageSlideMode): Float = when (mode) {
-    PageSlideMode.Push -> -0.25f
-    PageSlideMode.Pop, PageSlideMode.Predictive -> 1f
+    PageSlideMode.Push, PageSlideMode.LinearPush -> -0.25f
+    PageSlideMode.Pop, PageSlideMode.LinearPop, PageSlideMode.Predictive -> 1f
     PageSlideMode.None -> 0f
 }
 
@@ -139,7 +143,8 @@ private fun pageSlideSpec(
     width: Float,
 ): FiniteAnimationSpec<Float> = when {
     !animate || mode == PageSlideMode.None -> tween(0)
-    mode == PageSlideMode.Predictive -> tween(Motion.PREDICTIVE_BACK_MS, easing = LinearEasing)
+    mode == PageSlideMode.Predictive || mode == PageSlideMode.LinearPush || mode == PageSlideMode.LinearPop ->
+        tween(Motion.PREDICTIVE_BACK_MS, easing = LinearEasing)
     else -> spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = if (target == EnterExitState.Visible) {

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
  */
 sealed interface FeedbackResult {
     /** 201。[url] 是公开 issue 地址，可以给用户一个「查看进展」的出口 */
-    data class Success(val issue: Int, val url: String) : FeedbackResult
+    data class Success(val issue: Int, val url: String, val replyToken: String? = null) : FeedbackResult
 
     /** 400：content 为空或请求体非法 */
     data object InvalidContent : FeedbackResult
@@ -63,6 +63,24 @@ enum class FeedbackIssueStatus(val label: String) {
     CLOSED("已关闭"),
 }
 
+@Serializable
+data class FeedbackComment(
+    val id: Long,
+    val body: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    val user: Author? = null,
+) {
+    @Serializable
+    data class Author(val login: String)
+
+    val appReply: Boolean get() = body.startsWith(APP_REPLY_PREFIX)
+    val message: String get() = body.removePrefix(APP_REPLY_PREFIX)
+}
+
+private const val APP_REPLY_PREFIX = "**反馈提交者（来自 Inkwell）**\n\n"
+
+data class FeedbackCommentsPage(val comments: List<FeedbackComment>, val hasMore: Boolean)
+
 /**
  * 意见反馈：POST 到中转服务器，服务端据此在公开仓库建一个 GitHub issue。
  *
@@ -75,17 +93,11 @@ class FeedbackRepository(
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
+    private val replyHttp = http.newBuilder().retryOnConnectionFailure(false).followRedirects(false).build()
+
     suspend fun issueStatus(receipt: FeedbackReceipt): FeedbackIssueStatus? = withContext(Dispatchers.IO) {
-        val issue = receipt.url.toHttpUrlOrNull() ?: return@withContext null
-        val parts = issue.pathSegments
-        if (!issue.isHttps || issue.host != "github.com" || issue.port != 443 ||
-            parts.size != 4 || parts[2] != "issues" || parts[3].toIntOrNull() != receipt.issue || receipt.issue <= 0
-        ) return@withContext null
-        val api = HttpUrl.Builder().scheme("https").host("api.github.com")
-            .addPathSegment("repos").addPathSegment(parts[0]).addPathSegment(parts[1])
-            .addPathSegment("issues").addPathSegment(receipt.issue.toString()).build()
-        val request = Request.Builder().url(api).header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28").build()
+        val api = issueApi(receipt) ?: return@withContext null
+        val request = publicIssueRequest(api)
         val call = http.newCall(request)
         call.timeout().timeout(10, TimeUnit.SECONDS)
         try {
@@ -110,6 +122,59 @@ class FeedbackRepository(
         }
     }
 
+    suspend fun comments(receipt: FeedbackReceipt, page: Int): FeedbackCommentsPage? = withContext(Dispatchers.IO) {
+        val url = issueApi(receipt)?.newBuilder()?.addPathSegment("comments")
+            ?.addQueryParameter("page", page.toString())?.addQueryParameter("per_page", "30")?.build()
+            ?: return@withContext null
+        try {
+            val call = http.newCall(publicIssueRequest(url))
+            call.timeout().timeout(10, TimeUnit.SECONDS)
+            call.execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val comments = json.decodeFromString<List<FeedbackComment>>(response.body.string())
+                FeedbackCommentsPage(comments, response.header("Link")?.contains("rel=\"next\"") == true)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun reply(receipt: FeedbackReceipt, body: String): FeedbackComment? = withContext(Dispatchers.IO) {
+        val token = receipt.replyToken ?: return@withContext null
+        if (receipt.issue <= 0 || body.isBlank() || body.length > MAX_CONTENT_LENGTH) return@withContext null
+        val request = Request.Builder().url("$baseUrl/api/v1/feedback/${receipt.issue}/comments")
+            .header("Authorization", "Bearer $token")
+            .post(json.encodeToString(ReplyBody(body)).toRequestBody(JSON_MEDIA)).build()
+        try {
+            val call = replyHttp.newCall(request)
+            call.timeout().timeout(25, TimeUnit.SECONDS)
+            call.execute().use { response ->
+                if (response.code != 201) return@withContext null
+                json.decodeFromString<FeedbackComment>(response.body.string())
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun issueApi(receipt: FeedbackReceipt): HttpUrl? {
+        val issue = receipt.url.toHttpUrlOrNull() ?: return null
+        val parts = issue.pathSegments
+        if (!issue.isHttps || issue.host != "github.com" || issue.port != 443 ||
+            parts.size != 4 || parts[2] != "issues" || parts[3].toIntOrNull() != receipt.issue || receipt.issue <= 0
+        ) return null
+        return HttpUrl.Builder().scheme("https").host("api.github.com")
+            .addPathSegment("repos").addPathSegment(parts[0]).addPathSegment(parts[1])
+            .addPathSegment("issues").addPathSegment(receipt.issue.toString()).build()
+    }
+
+    private fun publicIssueRequest(url: HttpUrl): Request = Request.Builder().url(url)
+        .header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28").build()
+
     /**
      * @param contact 可选。⚠️ issue 建在**公开仓库**，填了就是公开可见的 ——
      *   调用方必须先把这件事明确告诉用户，再让他填。
@@ -123,6 +188,7 @@ class FeedbackRepository(
         channel: String? = null,
         requestId: String? = null,
         logs: File? = null,
+        replyNonce: String? = null,
     ): FeedbackResult = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
             Payload.serializer(),
@@ -134,6 +200,7 @@ class FeedbackRepository(
                 osVersion = osVersion,
                 channel = channel,
                 requestId = requestId,
+                replyNonce = replyNonce,
             ),
         )
         val requestBody = if (logs == null) body.toRequestBody(JSON_MEDIA) else {
@@ -151,7 +218,7 @@ class FeedbackRepository(
                 when (resp.code) {
                     201 -> {
                         val dto = json.decodeFromString<Response>(resp.body.string())
-                        FeedbackResult.Success(dto.issue, dto.url)
+                        FeedbackResult.Success(dto.issue, dto.url, dto.replyToken)
                     }
                     400 -> FeedbackResult.InvalidContent
                     413 -> if (logs != null) FeedbackResult.AttachmentTooLarge else FeedbackResult.TooLong
@@ -183,7 +250,11 @@ class FeedbackRepository(
         @SerialName("os_version") val osVersion: String? = null,
         val channel: String? = null,
         @SerialName("request_id") val requestId: String? = null,
+        @SerialName("reply_nonce") val replyNonce: String? = null,
     )
+
+    @Serializable
+    private data class ReplyBody(val body: String)
 
     @Serializable
     private data class ErrorResponse(val code: String = "")
@@ -192,7 +263,12 @@ class FeedbackRepository(
     private data class IssueResponse(val state: String, @SerialName("state_reason") val reason: String? = null)
 
     @Serializable
-    private data class Response(val status: String = "", val issue: Int = 0, val url: String = "")
+    private data class Response(
+        val status: String = "",
+        val issue: Int = 0,
+        val url: String = "",
+        @SerialName("reply_token") val replyToken: String? = null,
+    )
 
     companion object {
         /** 服务端上限；UI 层照这个数拦，别等 413 回来才告诉用户白写了 */

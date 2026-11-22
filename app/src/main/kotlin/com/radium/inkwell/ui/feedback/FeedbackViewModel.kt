@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.FeedbackReceipt
-import com.radium.inkwell.data.repo.FeedbackIssueStatus
 import com.radium.inkwell.data.repo.FeedbackRepository
 import com.radium.inkwell.data.repo.FeedbackResult
 import com.radium.inkwell.ui.components.MessageBus
@@ -16,7 +15,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import com.radium.inkwell.util.RunLogRecorder
@@ -38,12 +36,6 @@ data class FeedbackUiState(
     val canSubmit: Boolean get() = content.isNotBlank() && !overLimit && !submitting && !pending
 }
 
-data class FeedbackProgress(
-    val receipt: FeedbackReceipt,
-    val loading: Boolean = true,
-    val status: FeedbackIssueStatus? = null,
-)
-
 class FeedbackViewModel(
     // lint 会报 StaticFieldLeak，但注入进来的是 Koin 的 androidContext()，即 Application ——
     // 不持有 Activity，不会泄漏。RssSourceViewModel / SourceManageViewModel 也是同样的写法。
@@ -55,26 +47,8 @@ class FeedbackViewModel(
 
     private val _state = MutableStateFlow(FeedbackUiState())
     val state: StateFlow<FeedbackUiState> = _state.asStateFlow()
-    val receipts = appPrefs.feedbackReceipts
-    private val _progress = MutableStateFlow<FeedbackProgress?>(null)
-    val progress = _progress.asStateFlow()
-    private var progressJob: Job? = null
-
     val messages = MessageBus()
-
-    fun viewProgress(receipt: FeedbackReceipt) {
-        progressJob?.cancel()
-        _progress.value = FeedbackProgress(receipt)
-        progressJob = viewModelScope.launch {
-            val status = repo.issueStatus(receipt)
-            _progress.value = FeedbackProgress(receipt, loading = false, status = status)
-        }
-    }
-
-    fun closeProgress() {
-        progressJob?.cancel()
-        _progress.value = null
-    }
+    private val replyNonce = "${UUID.randomUUID()}${UUID.randomUUID()}".replace("-", "")
 
     private val device = "${Build.MANUFACTURER} ${Build.MODEL}"
     private val osVersion = "Android ${Build.VERSION.RELEASE}"
@@ -133,6 +107,7 @@ class FeedbackViewModel(
                     channel = appPrefs.updateChannel.first().name.lowercase(),
                     requestId = s.requestId,
                     logs = logs,
+                    replyNonce = replyNonce,
                 )
                 UsageLog.event("feedback.result", "outcome" to when (result) {
                     is FeedbackResult.Success -> "success"
@@ -144,15 +119,16 @@ class FeedbackViewModel(
                 when (result) {
                     is FeedbackResult.Success -> {
                         val title = s.content.trim().lineSequence().first().take(60)
-                        val receipt = FeedbackReceipt(result.issue, result.url, title)
-                        _state.value = _state.value.copy(submitted = receipt)
+                        val receipt = FeedbackReceipt(result.issue, result.url, title, result.replyToken)
                         try {
-                            withContext(NonCancellable) { appPrefs.addFeedbackReceipt(receipt) }
+                            val saved = withContext(NonCancellable) { appPrefs.addFeedbackReceipt(receipt) }
+                            if (!saved) messages.emit("反馈已提交，本机回复凭证保存失败")
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
                             messages.emit("反馈已提交，本机记录保存失败")
                         }
+                        _state.value = _state.value.copy(submitted = receipt)
                     }
                     FeedbackResult.InvalidContent -> messages.emit("请填写反馈内容")
                     // UI 层已按 MAX_CONTENT_LENGTH 拦过，走到这里说明拦漏了
