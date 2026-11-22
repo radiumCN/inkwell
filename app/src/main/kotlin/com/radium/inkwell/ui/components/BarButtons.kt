@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Constraints
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.material.edgeStroke
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -71,8 +72,8 @@ internal fun BarButtonGroup(
                 shape = shape,
                 blurRadius = TOOLBAR_BLUR_RADIUS,
                 colors = BlurDefaults.blurColors(),
-                highlight = smallGlassHighlight(dark),
             )
+            .edgeStroke(shape, smallGlassStroke(dark))
             .background(toolbarGlassVeil(scheme.surfaceContainer, dark))
     } else {
         Modifier

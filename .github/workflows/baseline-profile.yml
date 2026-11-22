@@ -42,14 +42,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # 与 ci.yml 同一段：app 按 37.1 编译（compileSdkMinor = 1），托管镜像通常只有 37.0，
-      # 缺了 checkAarMetadata 直接失败。10 月给 ci.yml 补上时漏了这里，生成一跑就挂在构建上。
-      - name: Install Android SDK platform 37.1
+      # 同 CI 与发布工作流，配置 Baseline Profile 的目标应用也需要 Android 37.2。
+      - name: Install Android SDK platform 37.2
         run: |
           SM="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" -path '*/cmdline-tools/*/bin/sdkmanager' | head -n 1)"
           test -n "$SM"
           yes | "$SM" --licenses >/dev/null || true
-          "$SM" --install "platforms;android-37.1"
+          "$SM" --install "platforms;android-37.2"
 
       - name: Generate Baseline Profile
         uses: reactivecircus/android-emulator-runner@v2

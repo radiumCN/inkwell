@@ -68,11 +68,11 @@ App 的 UI 库是 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（Hyper
 
 「跟随壁纸」是一个预设 id（`AppThemes.DYNAMIC`），日/夜两槽都能选；颜色由 Miuix `ThemeController`（Monet 模式、不给 keyColor）读系统调色板生成。解析统一走 `rememberResolvedScheme`（MainActivity 设窗体底色、`InkwellTheme` 铺整树共用这一个结果），别在别处直接调 `AppThemes.resolve` 而漏掉壁纸配色。
 
-代价记清楚：Miuix 是 **0.x 实验线**，作者明说 API 可能不打招呼就改。Compose 用**稳定 BOM**，和 Miuix 构建时对的那一版 Compose（0.9.4 → 1.12）保持一致（从前为 M3 Expressive 走 alpha BOM、跑在 1.13 beta 上，那是 Miuix 没测过的组合）。升 Miuix 或 BOM 前先读 release notes 的 breaking change 段，再对一下两边的 Compose 版本，别盲升。
+Miuix 是 **0.x 实验线**，升级前先读发行说明的破坏性变更，再核对 Compose 版本。当前 Miuix 0.9.5-beta03 基于 Compose 1.13 RC，Android 侧使用同一版本线的稳定 BOM。玻璃边缘高光由 `miuix-material` 的 `GlassEdgeStrokes` 与 `Modifier.edgeStroke` 提供。
 
 ### 圆角 → `AppShapes`（`ui/theme/AppTheme.kt`）
 
-Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16，对齐 Miuix 卡片)/`extraLarge`(28，对齐 Miuix 底部面板)，用 Dp 半径（`AppShapes.radiusMedium`）。
+Miuix 没有主题级 Shapes，组件按 Dp 收圆角。刻度：`extraSmall`(4)/`small`(8)/`medium`(12)/`large`(16，对齐 Miuix 卡片)/`extraLarge`(28)，用 Dp 半径（`AppShapes.radiusMedium`）。对话框、底部面板和下拉菜单的外轮廓统一用 `AppShapes.radiusPopup`（24dp），参考 Miuix 的 OS 4 玻璃菜单。
 
 **12dp 及以上的「面」一律 squircle**（HyperOS 的连续曲率圆角，`miuix-squircle`；Miuix 的卡片、按钮、面板、页签全是它）：卡片用 Miuix `Card`，其余的面用 `AppSurface`，修饰符级别用 `Modifier.squircleSurface` / `squircleClip`，描边 `squircleBorder`，分组卡里按角切的行用 `SquircleCorners`（后三样都在 `ui/components/AppSurface.kt`）。毛玻璃要圆角时，外面套 `squircleClip`、玻璃本身给 `RectangleShape`（见 `SelectionToolbar`）；玻璃带边缘高光的，shape 给同一条曲线的 `squircleShape(radius)`（同文件），否则高光是直角、四个角被裁掉；**别自己另写 Shape 给高光** —— miuix-blur 的高光只从 `CornerBasedShape` 读圆角半径，认不出的一律按短边一半画，卡片中间会多出一个胶囊形的椭圆（`squircleShape` 因此继承了它）。**别**再 `clip(AppShapes.large)` / Miuix `Surface(shape = …)` —— 那是普通圆弧，夹在 Miuix 组件中间弯法差一截，被指出过「圆角不统一」。Shape（`AppShapes.small` 等）只留给 4~8dp 的标签、封面、热力图格子：连续曲率在小半径上看不出来，而 squircle 每个都开一个离屏层，书架一屏几十本封面不值。挨在一起的控件同一档：分段槽、页签槽、卡里的按钮都是 48dp 高 + `radiusMedium`，槽里的浮块 `radiusSmall`。**不要**裸写 `RoundedCornerShape(12.dp)`。
 

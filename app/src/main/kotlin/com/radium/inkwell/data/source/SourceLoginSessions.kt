@@ -10,6 +10,7 @@ import com.radium.inkwell.core.source.SourceSessionStore
 import com.radium.inkwell.core.source.isPrivateNetworkLiteral
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.core.source.webLoginOrigins
+import com.radium.inkwell.core.source.webLoginUserAgents
 import com.radium.inkwell.data.prefs.KeystoreSecretCipher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -72,15 +73,20 @@ internal class SourceLoginSessions(context: Context) : SourceSessionStore {
     }
 
     /** start 与 current 已由登录页核对获准访问。两个站点分别授权，仍由 CookieManager 校验 Cookie 作用域。 */
-    fun rememberWebLogin(sessionId: String, start: HttpUrl, current: HttpUrl): Boolean {
+    fun rememberWebLogin(sessionId: String, start: HttpUrl, current: HttpUrl, userAgent: String): Boolean {
         val manager = profileCookies(sessionId) ?: return false
         val origins = setOf(start.sourceOrigin(), current.sourceOrigin())
         val hasCookie = (origins + current).any { !manager.getCookie(it.toString()).isNullOrBlank() }
         if (!hasCookie) return false
         manager.flush()
         synchronized(this) {
-            val approved = webLoginOrigins(sessionId) + origins.map(HttpUrl::toString)
-            write(sessionId, SourceSessionKey.WEB_ORIGINS, Json.encodeToString(approved))
+            val loggedInOrigins = origins.map(HttpUrl::toString)
+            val approved = webLoginOrigins(sessionId) + loggedInOrigins
+            val userAgents = webLoginUserAgents(sessionId) + loggedInOrigins.associateWith { userAgent }
+            writeAll(sessionId, mapOf(
+                SourceSessionKey.WEB_ORIGINS to Json.encodeToString(approved),
+                SourceSessionKey.WEB_USER_AGENTS to Json.encodeToString(userAgents),
+            ))
         }
         return true
     }
@@ -106,7 +112,11 @@ internal class SourceLoginSessions(context: Context) : SourceSessionStore {
         if (!updated) synchronized(this) {
             // WebView 拒收更新时先停用这个 origin 的桥接，原生 jar 已记录本次更新或删除。
             val remaining = webLoginOrigins(sessionId) - url.sourceOrigin().toString()
-            write(sessionId, SourceSessionKey.WEB_ORIGINS, remaining.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) })
+            val userAgents = webLoginUserAgents(sessionId).filterKeys { it in remaining }
+            writeAll(sessionId, mapOf(
+                SourceSessionKey.WEB_ORIGINS to remaining.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+                SourceSessionKey.WEB_USER_AGENTS to userAgents.takeIf { it.isNotEmpty() }?.let { Json.encodeToString(it) },
+            ))
         }
     }
 
@@ -114,7 +124,7 @@ internal class SourceLoginSessions(context: Context) : SourceSessionStore {
         if (!hasWebLogin(sessionId, url)) return
         // CookieManager 无法逐站清除所有路径上的 Cookie。这个 profile 只属于一份规则。
         val manager = profileCookies(sessionId)
-        synchronized(this) { write(sessionId, SourceSessionKey.WEB_ORIGINS, null) }
+        writeAll(sessionId, mapOf(SourceSessionKey.WEB_ORIGINS to null, SourceSessionKey.WEB_USER_AGENTS to null))
         if (manager == null) return
         runBlocking(Dispatchers.Main.immediate) {
             withTimeoutOrNull(5_000) {

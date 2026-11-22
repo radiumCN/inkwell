@@ -9,8 +9,10 @@ import com.radium.inkwell.core.source.allowsLoginReturn
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.core.source.SourceLoginForm
 import com.radium.inkwell.core.source.SourceLoginInteraction
+import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.js.StrResponse
 import com.radium.inkwell.core.source.webLoginUrl
+import com.radium.inkwell.core.source.webLoginUserAgent
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.source.SourceLoginSessions
@@ -56,6 +58,7 @@ data class SourceLoginBrowserPage(
     val url: String, val title: String, val requireCookies: Boolean, val profile: String, val returnOrigin: String?,
     /** 登录网页的 UA：和抓取这个来源发的同一个（BookSourceEngine.userAgentOf） */
     val userAgent: String,
+    val desktopMode: Boolean = false,
 )
 
 class SourceDetailViewModel internal constructor(
@@ -181,11 +184,15 @@ class SourceDetailViewModel internal constructor(
                 return@withContext null
             }
             val userAgent = engine.userAgentOf(source)
+            val desktopMode = userAgent != SourceHttpClient.LEGADO_UA &&
+                withContext(Dispatchers.IO) {
+                    sessions.webLoginUserAgent(sessionId, target) == SourceHttpClient.LEGADO_UA
+                }
             val result = CompletableDeferred<StrResponse?>()
             browserResult = result
             val returnOrigin = source.baseUrl.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
             val page = SourceLoginBrowserPage(
-                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent,
+                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent, desktopMode,
             )
             _state.update { it.copy(loginBrowser = page) }
             try {
@@ -200,7 +207,7 @@ class SourceDetailViewModel internal constructor(
         browserResult?.complete(null)
     }
 
-    fun finishLoginBrowser(url: String, html: String) {
+    fun finishLoginBrowser(url: String, html: String, userAgent: String, status: Int) {
         val page = _state.value.loginBrowser ?: return
         val result = browserResult ?: return
         val start = page.url.sourceLoginHttpUrl() ?: return
@@ -210,7 +217,7 @@ class SourceDetailViewModel internal constructor(
         viewModelScope.launch {
             val cookies = withContext(Dispatchers.IO) {
                 if (current == null) null else runCatching {
-                    if (sessions.rememberWebLogin(sessionId, start, current)) {
+                    if (sessions.rememberWebLogin(sessionId, start, current, userAgent)) {
                         sessions.webCookies(sessionId, current).orEmpty()
                     } else null
                 }.getOrNull()
@@ -222,7 +229,7 @@ class SourceDetailViewModel internal constructor(
             }
             if (cookies != null) rule?.let(engine::invalidateLoginPages)
             result.complete(StrResponse(bodyText = html.takeIf { current != null }.orEmpty(),
-                status = if (current == null) 0 else 200, finalUrl = current?.toString().orEmpty(),
+                status = if (current == null) 0 else status, finalUrl = current?.toString().orEmpty(),
                 cookieStr = cookies.orEmpty()))
         }
     }

@@ -49,12 +49,22 @@ interface SourceSessionStore {
     }
 }
 
-enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS }
+enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS, WEB_USER_AGENTS }
 
 fun SourceSessionStore?.webLoginOrigins(sessionId: String): Set<String> =
     this?.read(sessionId, SourceSessionKey.WEB_ORIGINS)?.let {
         runCatching { Json.decodeFromString<Set<String>>(it) }.getOrNull()
     }.orEmpty()
+
+fun SourceSessionStore?.webLoginUserAgents(sessionId: String): Map<String, String> =
+    this?.read(sessionId, SourceSessionKey.WEB_USER_AGENTS)?.let {
+        runCatching { Json.decodeFromString<Map<String, String>>(it) }.getOrNull()
+    }.orEmpty()
+
+fun SourceSessionStore?.webLoginUserAgent(sessionId: String, url: HttpUrl): String? {
+    val origin = url.sourceOrigin().toString()
+    return if (origin in webLoginOrigins(sessionId)) webLoginUserAgents(sessionId)[origin] else null
+}
 
 data class SourceLoginForm(
     val fields: List<SourceLoginField>,

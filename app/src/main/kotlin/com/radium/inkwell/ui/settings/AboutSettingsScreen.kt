@@ -352,8 +352,8 @@ private fun AboutHero(
     }
 }
 
-/** dp。字形很细，糊得越狠字里透出来的越是一整片颜色、而不是背景的轮廓（示例用的就是上限 150） */
-private const val LOGO_BLUR_RADIUS = 150f
+/** 用库允许的最大半径，把细字形透进来的背景化成整片颜色。 */
+private val LOGO_BLUR_RADIUS = BlurDefaults.MaxBlurRadius
 
 // Miuix 示例关于页 Logo 的混色（example/shared/src/commonMain/kotlin/AboutPage.kt，Apache-2.0）
 private val LogoBlendLight = listOf(

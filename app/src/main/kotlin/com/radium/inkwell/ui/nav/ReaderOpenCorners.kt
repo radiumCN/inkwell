@@ -32,7 +32,7 @@ import top.yukonga.miuix.kmp.squircle.squircleClip
  * 半径取**屏幕本身的圆角**（系统报的 [RoundedCorner]），不取固定令牌：满屏那一刻裁出来的角和屏幕的角重合，
  * 看不出变化；一开始缩，圆角跟着整页一起缩小 —— 和应用退回桌面时窗口的样子是一个意思。取固定值的话，
  * 屏幕圆角和它不一样大的机型，缩放刚起步那几帧角上会「突然换一种弯法」。屏幕没有圆角的机型退回
- * [AppShapes.radiusExtraLarge]（和底部面板一样），从 0 跟着转场渐变上去，免得第一帧凭空冒出圆角。
+ * [AppShapes.radiusExtraLarge]，从 0 跟着转场渐变上去，免得第一帧凭空冒出圆角。
  *
  * 半径挂在 AnimatedContent 给这一页的 transition 上，时长、曲线和缩放那条一致（[Motion.readerEnterSpec] /
  * [Motion.readerExitSpec]）：侧滑时 NavDisplay seek 的是同一个 transition，圆角照样跟手；也不会让退场

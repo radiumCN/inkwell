@@ -67,9 +67,16 @@ data class FeedbackComment(
     val id: Long,
     val body: String = "",
     @SerialName("created_at") val createdAt: String = "",
+    val user: FeedbackCommentUser? = null,
 ) {
     val message: String get() = body.removePrefix(APP_REPLY_PREFIX)
+    val authorLabel: String
+        get() = if (body.startsWith(APP_REPLY_PREFIX)) "反馈提交者"
+        else user?.login?.takeIf(String::isNotBlank) ?: "未知作者"
 }
+
+@Serializable
+data class FeedbackCommentUser(val login: String = "")
 
 private const val APP_REPLY_PREFIX = "**反馈提交者（来自 Inkwell）**\n\n"
 

@@ -180,6 +180,13 @@ class CoverGlassTest {
     }
 
     @Test
+    fun `对话框与底部面板的文字在玻璃底色上保留对比度`() {
+        assertVeil("弹层正文", POPUP_PANEL_ALPHA, POPUP_PANEL_ALPHA) { s, dark ->
+            minAlpha(s.background, listOf(s.onSurface, s.onSurfaceSecondary, s.onSurfaceVariantSummary), dark)
+        }
+    }
+
+    @Test
     fun `玻璃的 squircle 形状把圆角半径交给边缘高光`() {
         // miuix-blur 的边缘高光只从 CornerBasedShape 读圆角半径，认不出的 Shape 按短边的一半画 ——
         // 卡片中间多出一个胶囊形的椭圆（0.5.1-beta.1 的「继续阅读」卡）

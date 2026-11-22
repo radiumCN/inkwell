@@ -1,6 +1,6 @@
 [versions]
 # 应用版本唯一来源：versionCode 由它推导，Release tag 必须与之一致（vX.Y.Z）
-inkwell = "0.6.2-beta.6"
+inkwell = "0.6.2-beta.7"
 agp = "9.5.0"
 kotlin = "2.4.21"
 # KSP 自 2.3.0 起改用独立版本号（不再是「Kotlin版本-KSP版本」）。
@@ -10,15 +10,12 @@ ksp = "2.3.14"
 coroutines = "1.11.0"
 # 1.13.0 撤回 1.12.0 对序列化异常的包装行为，并改善 JsonElement.toString 性能。
 serialization = "1.13.0"
-# **稳定的 compose-bom**（Compose 1.12.x）。从前用 compose-bom-alpha（1.13 beta）是为了 M3 Expressive，
-# 那批 API 只活在 material3 alpha 通道；UI 换成 Miuix、material3 删掉之后这条理由没了。
-# 回稳定版的直接理由：Miuix 0.9.4 是对着 Compose 1.12 构建的，跑在 1.13 beta 上等于拿它没测过的二进制组合碰运气。
-# 升 BOM 前先读 release notes 的 breaking change，并对一下 Miuix 当前版本对着哪一版 Compose 构建，别盲升。
-composeBom = "2026.09.00"
+# Miuix 0.9.5-beta03 基于 Compose 1.13 RC。Android 侧统一用 1.13 稳定版。
+composeBom = "2026.11.01"
 # UI 组件库：Miuix（HyperOS 设计语言，Compose Multiplatform）。只依赖 foundation，不依赖 material3 组件。
 # 0.x 实验线，作者明说 API 可能不打招呼就改 —— 升级前先读 release notes 的 breaking change，
-# 跟 BOM 一样别盲升。它对着 Compose 1.12 构建，在我们的 alpha BOM（1.13 beta）上会被抬版本运行。
-miuix = "0.9.4"
+# 跟 BOM 一样按上游的 Compose 版本线走。
+miuix = "0.9.5-beta03"
 activityCompose = "1.13.0"
 webkit = "1.16.0"
 # Navigation 3（与 Nav2 navigation-compose 不兼容，整图迁移）
@@ -90,6 +87,7 @@ miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference", version.
 miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version.ref = "miuix" }
 # 顶栏、阅读器菜单的毛玻璃（LayerBackdrop + textureBlur）。要 API 33（RuntimeShader），我们 minSdk 35，不用降级分支
 miuix-blur = { module = "top.yukonga.miuix.kmp:miuix-blur", version.ref = "miuix" }
+miuix-material = { module = "top.yukonga.miuix.kmp:miuix-material", version.ref = "miuix" }
 compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }

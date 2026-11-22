@@ -4,6 +4,7 @@ import com.radium.inkwell.core.source.js.RhinoScriptRuntime
 import com.radium.inkwell.core.source.js.StrResponse
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Cookie
@@ -151,6 +152,41 @@ class SourceLoginTest {
     }
 
     @Test
+    fun `网页登录 UA 按来源和 origin 隔离且旧会话仍用默认 UA`() = runBlocking {
+        MockWebServer().use { login ->
+            MockWebServer().use { other ->
+                val target = login.url("/book")
+                val origin = target.sourceOrigin().toString()
+                val sessions = Sessions()
+                sessions.write("source", SourceSessionKey.WEB_ORIGINS, Json.encodeToString(setOf(origin)))
+                val http = http(sessions)
+                val headers = mapOf("User-Agent" to "Source/1")
+                login.enqueue(MockResponse())
+                http.fetch(target.toString(), headers = headers, sourceId = "source")
+                assertEquals("Source/1", login.takeRequest().getHeader("User-Agent"))
+
+                sessions.write("source", SourceSessionKey.WEB_USER_AGENTS, Json.encodeToString(mapOf(origin to "Browser/1")))
+                login.enqueue(MockResponse().setResponseCode(302).setHeader("Location", login.url("/continue")))
+                login.enqueue(MockResponse().setResponseCode(302).setHeader("Location", other.url("/book")))
+                other.enqueue(MockResponse())
+                http.fetch(target.toString(), headers = headers, sourceId = "source")
+                assertEquals("Browser/1", login.takeRequest().getHeader("User-Agent"))
+                assertEquals("Browser/1", login.takeRequest().getHeader("User-Agent"))
+                assertEquals("Source/1", other.takeRequest().getHeader("User-Agent"))
+
+                login.enqueue(MockResponse())
+                http.fetch(target.toString(), headers = headers, sourceId = "other-source")
+                assertEquals("Source/1", login.takeRequest().getHeader("User-Agent"))
+
+                sessions.write("source", SourceSessionKey.WEB_ORIGINS, null)
+                login.enqueue(MockResponse())
+                http.fetch(target.toString(), headers = headers, sourceId = "source")
+                assertEquals("Source/1", login.takeRequest().getHeader("User-Agent"))
+            }
+        }
+    }
+
+    @Test
     fun `第三方资源和跨站重定向不携带持久化登录头`() = runBlocking {
         MockWebServer().use { server ->
             MockWebServer().use { other ->
@@ -280,6 +316,33 @@ class SourceLoginTest {
     }
 
     @Test
+    fun `登录脚本可以用纯域名读写和清除来源会话 Cookie`() = runBlocking {
+        val host = "auth.example.org"
+        val origin = "https://$host/".toHttpUrl()
+        val source = fixture("https://source.example.org").copy(
+            loginUrl = """function login() {
+                source.putVariable(cookie.getKey("$host", "sessionid"));
+                cookie.setCookie("$host", "local=fixture");
+            }""",
+        )
+        val sessionId = checkNotNull(source.loginSessionId)
+        val sessions = Sessions()
+        var webSession: String? = "sessionid=web"
+        val http = SourceHttpClient(
+            sessionStore = sessions,
+            webCookies = { id, url -> webSession.takeIf { id == sessionId && url == origin } },
+            clearWebCookies = { id, url -> if (id == sessionId && url == origin) webSession = null },
+        )
+        engine(http, sessions).submitLogin(source, emptyMap())
+
+        assertEquals("web", sessions.read(sessionId, SourceSessionKey.VARIABLE))
+        assertEquals("sessionid=web; local=fixture", http.cookieOf(origin.toString(), sessionId))
+        assertEquals("", http.cookieOf(host, "other"))
+        http.removeCookie(host, sessionId)
+        assertEquals("", http.cookieOf(origin.toString(), sessionId))
+    }
+
+    @Test
     fun `原生请求和脚本更新或删除已授权的网页 Cookie`() = runBlocking {
         MockWebServer().use { server ->
             val url = server.url("/session")
@@ -359,6 +422,7 @@ class SourceLoginTest {
         // 主页 www、接口 api 是常见的分法：从前只认主页那一个源，api 上的请求拿不到 token，登录了也搜不到。
         // 走渲染器看每个请求拿到的凭据（不连网：SourceHttpClient 用自己的 DNS，测试里没法把几个域名指到本机）
         val sent = mutableMapOf<String, Map<String, String>>()
+        val userAgents = mutableMapOf<String, String?>()
         val renderer = object : PageRenderer {
             override suspend fun render(url: String, headers: Map<String, String>, userAgent: String?) =
                 error("需要带来源会话渲染")
@@ -370,7 +434,9 @@ class SourceLoginTest {
                 userAgent: String?,
                 credentialHeaders: Map<String, String>,
             ): FetchedPage {
-                sent[url.toHttpUrl().host] = credentialHeaders
+                val host = url.toHttpUrl().host
+                sent[host] = credentialHeaders
+                userAgents[host] = userAgent
                 return FetchedPage(url, 200, """{"items":[{"title":"样例","url":"/book"}]}""", "UTF-8")
             }
         }
@@ -381,11 +447,17 @@ class SourceLoginTest {
             loginUrl = """function login() { source.putLoginHeader('{"Authorization":"Bearer fixture"}'); }""",
             ruleToc = TocRuleSet(chapterList = "$.items", chapterName = "title", chapterUrl = "url"),
         )
+        val sessionId = checkNotNull(source.loginSessionId)
+        val origin = "https://api.a.com/"
+        sessions.write(sessionId, SourceSessionKey.WEB_ORIGINS, Json.encodeToString(setOf(origin)))
+        sessions.write(sessionId, SourceSessionKey.WEB_USER_AGENTS, Json.encodeToString(mapOf(origin to "Browser/1")))
         engine.submitLogin(source, emptyMap())
         assertEquals("样例", engine.search(source, "样例").items.single().title)
         engine.getToc(source, """https://cdn.other.com/toc,{"webView":true}""")
         assertEquals(mapOf("Authorization" to "Bearer fixture"), sent["api.a.com"])
         assertEquals(emptyMap(), sent["cdn.other.com"])
+        assertEquals("Browser/1", userAgents["api.a.com"])
+        assertEquals(source.defaultUserAgent, userAgents["cdn.other.com"])
     }
 
     @Test

@@ -140,13 +140,13 @@ internal fun FeedbackDiscussionScreen(receipt: FeedbackReceipt, repo: FeedbackRe
                 SettingGroup {
                     SettingBlock {
                         Column(verticalArrangement = Arrangement.spacedBy(Dimens.gapXS)) {
-                            if (comment.createdAt.isNotBlank()) {
-                                Text(
-                                    comment.createdAt.replace('T', ' ').removeSuffix("Z") + " UTC",
-                                    style = MiuixTheme.textStyles.footnote1,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
-                            }
+                            val time = comment.createdAt.takeIf(String::isNotBlank)
+                                ?.let { it.replace('T', ' ').removeSuffix("Z") + " UTC" }
+                            Text(
+                                listOfNotNull(comment.authorLabel, time).joinToString(" · "),
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
                             Text(comment.message, style = MiuixTheme.textStyles.body1)
                         }
                     }

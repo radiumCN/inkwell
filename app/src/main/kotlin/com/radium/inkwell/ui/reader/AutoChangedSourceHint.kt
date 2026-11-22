@@ -20,7 +20,7 @@ import com.radium.inkwell.ui.components.AppSurface
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.blockTouchesBelow
-import com.radium.inkwell.ui.components.smallGlassHighlight
+import com.radium.inkwell.ui.components.smallGlassStroke
 import com.radium.inkwell.ui.components.squircleShape
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Icon
@@ -65,7 +65,7 @@ internal fun AutoChangedSourceHint(
         // 56dp 高的胶囊，28dp 的半径就是两头全圆
         cornerRadius = AppShapes.radiusExtraLarge,
         modifier = modifier
-            .readerGlass(pageBackdrop, shape, overlayColor, smallGlassHighlight(dark = overlayColor.luminance() < 0.5f))
+            .readerGlass(pageBackdrop, shape, overlayColor, smallGlassStroke(dark = overlayColor.luminance() < 0.5f))
             // 点在字上别漏给纸面（翻页、唤出菜单）
             .blockTouchesBelow(),
         color = if (glass) Color.Transparent else overlayColor,

@@ -832,10 +832,15 @@ class BookSourceEngine(
 
     private suspend fun render(source: BookSourceRule, target: String, headers: RequestHeaders): FetchedPage? {
         val r = renderer ?: return null
-        val ua = headers.all.userAgent() ?: source.defaultUserAgent
-        val regular = headers.regular.withoutLegadoOnlyHeaders()
-        val credentials = headers.credentials.withoutLegadoOnlyHeaders()
         val sessionId = source.loginSessionId
+        val loginUa = if (sessionId != null) {
+            target.toHttpUrlOrNull()?.let { sessionStore.webLoginUserAgent(sessionId, it) }
+        } else null
+        val ua = loginUa ?: headers.all.userAgent() ?: source.defaultUserAgent
+        val regular = headers.regular.withoutLegadoOnlyHeaders()
+        val credentials = headers.credentials.withoutLegadoOnlyHeaders().let {
+            if (loginUa == null) it else it.filterKeys { name -> !name.equals("User-Agent", ignoreCase = true) }
+        }
         val rendered = if (sessionId != null || credentials.isNotEmpty()) {
             r.renderForSource(sessionId, target, regular, ua, credentials)
         } else {

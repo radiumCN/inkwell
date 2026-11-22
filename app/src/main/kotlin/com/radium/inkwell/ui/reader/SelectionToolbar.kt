@@ -28,7 +28,7 @@ import top.yukonga.miuix.kmp.icon.extended.Clear
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import androidx.compose.ui.graphics.luminance
-import com.radium.inkwell.ui.components.smallGlassHighlight
+import com.radium.inkwell.ui.components.smallGlassStroke
 
 /**
  * 选中文字后的操作条：底部居中的一颗玻璃药丸（Miuix [FloatingToolbar]），复制 · 删除 · 替换，图标在上字在下
@@ -70,13 +70,13 @@ internal fun SelectionToolbar(
 ) {
     val overlayColor = readerOverlayColor()
     val fill = if (pageBackdrop != null) Color.Transparent else overlayColor
-    val highlight = smallGlassHighlight(dark = overlayColor.luminance() < 0.5f)
+    val stroke = smallGlassStroke(dark = overlayColor.luminance() < 0.5f)
     var replacing by remember { mutableStateOf(false) }
 
     FloatingToolbar(
         // 药丸是 50dp 圆角，比自身高度一半还大，等于两头全圆：模糊区用同一个胶囊形
         // 按钮之间的空隙别漏到纸面：纸面那层「点空白取消选区」会把选区收掉
-        modifier = modifier.readerGlass(pageBackdrop, CircleShape, overlayColor, highlight).blockTouchesBelow(),
+        modifier = modifier.readerGlass(pageBackdrop, CircleShape, overlayColor, stroke).blockTouchesBelow(),
         color = fill,
         // 位置由调用方垫好；默认的 12/8dp 外边距再叠一层，药丸就离页脚太远
         outSidePadding = PaddingValues(0.dp),

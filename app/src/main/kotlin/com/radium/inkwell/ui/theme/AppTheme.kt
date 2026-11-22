@@ -41,8 +41,7 @@ object AppTheme {
  * Shape 只剩给**小半径**用：4~8dp 的标签、封面、热力图格子。连续曲率在这么小的半径上看不出来
  * （miuix-squircle 文档：差异在中到大半径时最明显），而 squircle 每个都要开一个离屏层 —— 书架一屏几十本封面，不值。
  *
- * 刻度与 M3 时代一致：4 / 8 / 12 / 16 / 28。16 对齐 Miuix 卡片（`CardDefaults.CornerRadius`），
- * 28 对齐 Miuix 底部面板（`BottomSheetDefaults.cornerRadius`）。
+ * 基础刻度为 4 / 8 / 12 / 16 / 28。窗口弹层的外轮廓走 [radiusPopup]。
  */
 object AppShapes {
     val radiusExtraSmall: Dp = 4.dp
@@ -50,6 +49,8 @@ object AppShapes {
     val radiusMedium: Dp = 12.dp
     val radiusLarge: Dp = 16.dp
     val radiusExtraLarge: Dp = 28.dp
+    /** 对话框、底部面板和下拉菜单的外轮廓，参考 Miuix 的 OS 4 玻璃菜单。 */
+    val radiusPopup: Dp = 24.dp
 
     val extraSmall: RoundedCornerShape = RoundedCornerShape(radiusExtraSmall)
     val small: RoundedCornerShape = RoundedCornerShape(radiusSmall)
