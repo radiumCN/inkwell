@@ -101,6 +101,7 @@ internal fun FeedbackDiscussionScreen(
     var uploadingLogs by remember(receipt.url) { mutableStateOf(false) }
     var logUploadId by rememberSaveable(receipt.url) { mutableStateOf<String?>(null) }
     val hasReplyToken = !receipt.replyToken.isNullOrBlank()
+    val discussionBusy = loading || sending || uploadingLogs
     val scope = rememberCoroutineScope()
     val messages = remember { MessageBus() }
     val snackbar = remember { SnackbarHostState() }
@@ -144,7 +145,7 @@ internal fun FeedbackDiscussionScreen(
                     SettingRow(
                         title = "刷新进展",
                         position = groupPosition(1, rowCount),
-                        onClick = if (loading || sending) null else ({ scope.launch { load() } }),
+                        onClick = if (discussionBusy) null else ({ scope.launch { load() } }),
                     )
                     SettingRow(
                         title = "在 GitHub 查看讨论",
@@ -156,7 +157,7 @@ internal fun FeedbackDiscussionScreen(
                             title = "追加应用日志",
                             value = if (uploadingLogs) "正在上传…" else null,
                             position = groupPosition(3, rowCount),
-                            onClick = if (uploadingLogs) null else ({ confirmLogUpload = true }),
+                            onClick = if (discussionBusy) null else ({ confirmLogUpload = true }),
                         )
                     }
                 }
@@ -193,7 +194,7 @@ internal fun FeedbackDiscussionScreen(
                 item {
                     SecondaryButton(
                         text = "加载更多",
-                        enabled = !loading && !sending,
+                        enabled = !discussionBusy,
                         onClick = { scope.launch { load(cursor) } },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = Dimens.screenPadding),
                     )
@@ -218,7 +219,7 @@ internal fun FeedbackDiscussionScreen(
                     SettingFootnote("回复会公开显示在 GitHub 讨论中。")
                     PrimaryButton(
                         text = "发送回复",
-                        enabled = !sending && !loading && draft.isNotBlank() &&
+                        enabled = !discussionBusy && draft.isNotBlank() &&
                             draft.length <= FeedbackRepository.MAX_CONTENT_LENGTH,
                         loading = sending,
                         onClick = {
@@ -264,7 +265,10 @@ internal fun FeedbackDiscussionScreen(
                             recorder.exportForFeedback().also { logs = it }
                         }
                         val result = repo.appendLogs(receipt, uploadId, archive)
-                        if (result == FeedbackLogUploadResult.SUCCESS) logUploadId = null
+                        if (result == FeedbackLogUploadResult.SUCCESS) {
+                            logUploadId = null
+                            load()
+                        }
                         messages.emit(when (result) {
                             FeedbackLogUploadResult.SUCCESS -> "应用日志已追加"
                             FeedbackLogUploadResult.FORBIDDEN -> "反馈凭证已失效，无法追加日志"
