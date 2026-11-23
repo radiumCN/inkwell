@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -51,11 +52,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 页眉章节名 + 页脚信息层。
  * 左下：章内页码；右下：全书进度百分比 · 时间 ·（可选）电池图标。
- * 页眉、页脚各有开关（ReaderSettings.showHeader / showFooter）：关掉的那一边不画，
- * 分页时那条带也让给了正文（buildLayoutSpec），这里画了就压在正文上。
+ * 页眉的位置跟随已经应用到正文的分页结果，系统栏临时出现时收起上移的页眉。
  */
 @Composable
-fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec) {
+fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec, showRaisedHeader: Boolean) {
     val density = LocalDensity.current
     val context = LocalContext.current
     val footerColor = remember(session.settings.theme.footerColor) {
@@ -63,7 +63,8 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
     }
     val footerStyle = pageInfoTextStyle()
     val footerNumStyle = remember(footerStyle) { footerStyle.copy(fontFeatureSettings = "tnum") }
-    val showHeader = session.settings.showHeader
+    val raisedHeader = spec.raisedHeader
+    val showHeader = if (raisedHeader == null) spec.headerHeightPx > 0f else showRaisedHeader
     val showFooter = session.settings.showFooter
     // 页脚关了，电量也就不看了：连 BATTERY_CHANGED 都不注册
     val showBattery = showFooter && session.settings.showBattery
@@ -111,18 +112,18 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
     }
 
     val marginH = with(density) { spec.marginLeftPx.toDp() }
-    // 页眉、页脚和正文共用分页计算后的边距。负的头部留白会带着页眉和正文一起上移。
-    val headerTop = with(density) { spec.marginTopPx.toDp() }
     val footerBottom = with(density) { spec.marginBottomPx.toDp() }
 
     Box(Modifier.fillMaxSize()) {
-        // 页眉：章节名，落在正文上方的页眉带里
         if (showHeader) {
+            val left = with(density) { (raisedHeader?.leftInsetPx ?: spec.marginLeftPx).toDp() }
+            val right = with(density) { (raisedHeader?.rightInsetPx ?: spec.marginRightPx).toDp() }
+            val top = with(density) { (raisedHeader?.topPx ?: spec.marginTopPx).toDp() }
             Text(
                 pageUi.chapterTitle,
                 Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = marginH, end = marginH, top = headerTop),
+                    .absolutePadding(left = left, right = right, top = top),
                 color = footerColor,
                 style = footerStyle,
                 maxLines = 1,

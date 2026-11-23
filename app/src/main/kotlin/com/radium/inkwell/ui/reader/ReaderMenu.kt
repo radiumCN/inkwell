@@ -1552,7 +1552,7 @@ private fun TypesetTab(
         }
         ReaderBlock {
             Text(
-                "头部留白为负数时，页眉或正文可能被摄像头挖孔遮挡。",
+                "关闭页眉和系统状态栏时，负的头部留白可能使摄像头挖孔遮住正文。",
                 style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -1571,7 +1571,7 @@ private fun TypesetTab(
         }
         SwitchRow(
             title = "两端对齐",
-            subtitle = "每行左右都贴齐边距。关掉后行尾参差，但字距不会被拉开",
+            subtitle = "正文按两侧边距对齐，段落末行自然留白",
             checked = settings.justify,
             onCheckedChange = { onUpdate(settings.copy(justify = it)) },
             position = SettingGroupPosition.Last,
@@ -1801,6 +1801,16 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
+    ReaderGroup {
+        SwitchRow(
+            title = "阅读时显示系统状态栏",
+            subtitle = "关闭时，章节页眉移至屏幕顶部",
+            checked = settings.showStatusBar,
+            onCheckedChange = { onUpdate(settings.copy(showStatusBar = it)) },
+            position = SettingGroupPosition.Alone,
+        )
+    }
+
     // 关掉的那一边，正文顺势占用那条带（见 buildLayoutSpec），按同一字符位置重排。
     // 页脚关了电量就无从谈起：那一行收起来而不是变灰，再打开页脚时连同原来的开关状态一起回来
     ReaderGroup("页眉页脚") {

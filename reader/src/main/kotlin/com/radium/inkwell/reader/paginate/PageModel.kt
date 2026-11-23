@@ -29,11 +29,15 @@ data class LayoutSpec(
     /** 1dp 合多少 px。图按「原图一像素 = 1dp」排（见 [fitImage]），和订阅文章同一条规则 */
     val density: Float = 1f,
     val bodyFontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
+    /** 页眉借用顶部系统栏空间时的位置。随分页结果一起提交，避免新旧布局错开。 */
+    val raisedHeader: RaisedReaderHeader? = null,
 ) {
     val contentWidthPx: Int get() = (viewportWidthPx - marginLeftPx - marginRightPx).toInt()
     val contentHeightPx: Float get() =
         viewportHeightPx - marginTopPx - marginBottomPx - headerHeightPx - footerHeightPx
 }
+
+data class RaisedReaderHeader(val topPx: Float, val leftInsetPx: Float, val rightInsetPx: Float)
 
 /** 轻量分页结果：纯数据，可缓存 */
 data class PageSpec(

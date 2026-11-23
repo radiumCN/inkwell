@@ -109,4 +109,15 @@ class BackupPreferencesTest {
         assertEquals(8f, p[keys.HEADER_TOP_SPACING])
         assertEquals(0f, p[keys.HEADER_TOP_OFFSET])
     }
+
+    @Test fun `reader status bar imports both values and keeps the local setting for older backups`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf()
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(100, mapOf("show_status_bar" to "true"))) { true })
+        assertEquals(true, p[keys.SHOW_STATUS_BAR])
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, emptyMap())) { true })
+        assertEquals(true, p[keys.SHOW_STATUS_BAR])
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf("show_status_bar" to "false"))) { true })
+        assertEquals(false, p[keys.SHOW_STATUS_BAR])
+    }
 }

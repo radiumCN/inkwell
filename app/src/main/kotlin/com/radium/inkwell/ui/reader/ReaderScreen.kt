@@ -12,7 +12,10 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.areStatusBarsVisible
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,7 +81,10 @@ import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
@@ -101,6 +107,7 @@ import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageSpec
+import com.radium.inkwell.reader.paginate.RaisedReaderHeader
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -127,6 +134,7 @@ private const val PAGE_GLASS_LINGER_MS = 600L
 private data class ScrollSelectionTarget(val page: PageSpec, val offsetY: Float)
 
 /** 弹层宿主与正文共用窗口，供阅读设置局部取样。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReaderScreen(
     bookId: String,
@@ -140,6 +148,8 @@ fun ReaderScreen(
     val speechState by speech.state.collectAsStateWithLifecycle()
     val readerContext = LocalContext.current
     var showSpeechSheet by rememberSaveable { mutableStateOf(false) }
+    val showOverlayBars = overlay.menuVisible || showSpeechSheet
+    val showRaisedHeader = !showOverlayBars && !WindowInsets.areStatusBarsVisible
     var miniPlayerHeight by remember { mutableStateOf(0.dp) }
     val speechInset = if (speechState.active && miniPlayerHeight > 0.dp) miniPlayerHeight + Dimens.gapS else 0.dp
     LaunchedEffect(speechState.active) {
@@ -188,14 +198,15 @@ fun ReaderScreen(
      *
      * 但挖孔在哪，**窗口本来就知道** —— 我们是从书架页导航进来的，insets 老早派发过；
      * 晚一帧的只是 Compose 在这棵新子树里的那次分发。所以首帧直接问 window 要
-     * （[rootDisplayCutout]，同步），之后以 Compose 的响应式值为准 —— 旋转、折叠、
+     * （同步），之后以 Compose 的响应式值为准 —— 旋转、折叠、
      * 分屏时它会自己更新，不必去猜什么时候该让缓存失效。
      *
      * 两者一致时（绝大多数情况）视口从头到尾没变过，压根不会有第二次排版。
      */
     val view = LocalView.current
     val windowSize = LocalWindowInfo.current.containerSize
-    val seed = remember(view, windowSize) { rootDisplayCutout(view) }
+    val rootInsets = remember(view, windowSize) { ViewCompat.getRootWindowInsets(view) }
+    val seed = rootInsets?.getInsets(WindowInsetsCompat.Type.displayCutout())
 
     val live = WindowInsets.displayCutout
     val layoutDirection = LocalLayoutDirection.current
@@ -205,7 +216,22 @@ fun ReaderScreen(
     val t = live.getTop(density)
     val r = live.getRight(density, layoutDirection)
     val b = live.getBottom(density)
-    val cutout = if (l == 0 && t == 0 && r == 0 && b == 0) seed else IntInsets(l, t, r, b)
+    val cutout = if (l == 0 && t == 0 && r == 0 && b == 0 && seed != null) {
+        IntInsets(seed.left, seed.top, seed.right, seed.bottom)
+    } else {
+        IntInsets(l, t, r, b)
+    }
+    // 菜单临时显示系统栏时，正文仍按用户设置排版。这里读可见时的高度，避免来回重排。
+    val statusBarTop = WindowInsets.statusBarsIgnoringVisibility.getTop(density).takeIf { it > 0 }
+        ?: rootInsets?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+    val statusArea = remember(view, windowSize, cutout, statusBarTop) {
+        val displayCutout = ViewCompat.getRootWindowInsets(view)?.displayCutout
+        ReaderStatusArea(
+            statusBarTop,
+            displayCutout?.boundingRects.orEmpty().map { IntRect(it.left, it.top, it.right, it.bottom) },
+            displayCutout?.waterfallInsets?.top ?: 0,
+        )
+    }
 
     // 视口 = **整个窗口**（边到边）。挖孔不再从视口里扣掉，而是折进正文边距（见下）——
     // 这样正文页与卷页都铺满全屏，顶部不再留一条状态栏/挖孔高度的空带（卷页时会露出来）。
@@ -213,9 +239,12 @@ fun ReaderScreen(
 
     // 页眉页脚小字的行高：分页给那两条带的预留按它兜底（见 pageInfoTextStyle）
     val infoLineHeight = pageInfoTextStyle().lineHeight
-    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight, speechInset) {
+    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight, speechInset, statusArea, layoutDirection) {
         if (viewport.width <= 0 || viewport.height <= 0) null
-        else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() })
+        else buildLayoutSpec(
+            viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() },
+            statusArea, layoutDirection,
+        )
     }
     // 快速调字号时让旧页面按旧尺寸显示，等重排完成再一起换正文和排版参数。
     val layout = pageUi.layout ?: spec
@@ -369,10 +398,10 @@ fun ReaderScreen(
     val activity = LocalActivity.current
     BrightnessEffect((activity as? MainActivity)?.readerBrightness, session.settings.brightnessOverride)
     KeepScreenOnEffect(activity, session.settings.keepScreenOn)
-    // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复；露出来时图标明暗跟纸走、退出阅读页还给 App 主题
-    ImmersiveEffect(
+    ReaderSystemBarsEffect(
         activity,
-        immersive = !overlay.menuVisible && !showSpeechSheet,
+        showOverlayBars = showOverlayBars,
+        showStatusBar = session.settings.showStatusBar,
         lightPaper = !session.settings.theme.isDark,
         lightApp = MiuixTheme.colorScheme.surface.luminance() > 0.5f,
     )
@@ -618,7 +647,7 @@ fun ReaderScreen(
                                 viewingImage = box.resourceId
                             },
                         )
-                        PageInfoBar(pageUi, session, layout)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -714,7 +743,7 @@ fun ReaderScreen(
                             highlight = speechSelection,
                             onImageTap = onImageTap,
                         )
-                        PageInfoBar(pageUi, session, layout)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -1008,52 +1037,48 @@ fun ReaderScreen(
 /** 挖孔的四边留白，单位 px。只是个不带 Android 类型的小载体，方便比较相等。 */
 internal data class IntInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
-/**
- * 同步读窗口当前的挖孔 inset。
- *
- * Compose 的 `WindowInsets.displayCutout` 是**响应式**的，代价是新子树的首帧读不到值。
- * 而 window 上挂着的 rootWindowInsets 是**已经在那儿**的 —— Activity 早就布局过了。
- * 首帧要一个正确的值，只能问它。
- *
- * view 还没 attach 时拿不到（返回 null），退回全 0：那就是从前的行为（首帧按全屏排、
- * 第二帧纠正），不会更糟。
- */
-private fun rootDisplayCutout(view: android.view.View): IntInsets {
-    val insets = ViewCompat.getRootWindowInsets(view)
-        ?.getInsets(WindowInsetsCompat.Type.displayCutout())
-        ?: return IntInsets(0, 0, 0, 0)
-    return IntInsets(insets.left, insets.top, insets.right, insets.bottom)
-}
+internal data class ReaderStatusArea(
+    val heightPx: Int,
+    val cutoutBounds: List<IntRect> = emptyList(),
+    val waterfallTopPx: Int = 0,
+)
 
 internal fun buildLayoutSpec(
     viewport: IntSize,
     settings: ReaderSettings,
-    density: androidx.compose.ui.unit.Density,
+    density: Density,
     cutout: IntInsets,
     infoLineHeight: TextUnit,
     speechInsetPx: Float,
+    statusArea: ReaderStatusArea = ReaderStatusArea(0),
+    layoutDirection: LayoutDirection = LayoutDirection.Ltr,
 ): LayoutSpec = with(density) {
     val fontSizePx = settings.fontSizeSp.sp.toPx()
-    // 页眉页脚小字一行的高度（随系统字号缩放）。不是 sp（主题里被改成 em/未指定）就只按下面的 dp 兜底
-    val infoLinePx = if (infoLineHeight.isSp) infoLineHeight.toPx() else 0f
+    val infoLinePx = if (infoLineHeight.isSp) infoLineHeight.toPx() else 18.dp.toPx()
+    val leftMargin = settings.marginHorizontalDp.dp.toPx() + cutout.left
+    val rightMargin = settings.marginHorizontalDp.dp.toPx() + cutout.right
+    val raisedHeader = if (settings.showHeader && !settings.showStatusBar) {
+        raisedReaderHeader(
+            viewport.width, leftMargin, rightMargin, cutout.top, statusArea, layoutDirection,
+            infoLinePx,
+        )
+    } else null
+    val preferredTop = (settings.headerTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f)
+    val marginTop = when {
+        raisedHeader != null -> maxOf(preferredTop, cutout.top.toFloat(), raisedHeader.topPx + infoLinePx + Dimens.gapS.toPx())
+        settings.showStatusBar || settings.showHeader -> maxOf(preferredTop, cutout.top.toFloat(), statusArea.heightPx.toFloat())
+        else -> preferredTop
+    }
     // 挖孔折进边距：视口铺满全屏，靠加大这一侧的留白把页眉/正文推开摄像头，而不是把整页缩进去。
     LayoutSpec(
         viewportWidthPx = viewport.width,
         viewportHeightPx = viewport.height,
-        marginLeftPx = settings.marginHorizontalDp.dp.toPx() + cutout.left,
-        marginRightPx = settings.marginHorizontalDp.dp.toPx() + cutout.right,
-        // 负留白只用于抵消顶部挖孔预留。页眉与正文都以屏幕顶边为最小起点。
-        marginTopPx = (settings.headerTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f),
+        marginLeftPx = leftMargin,
+        marginRightPx = rightMargin,
+        marginTopPx = marginTop,
         marginBottomPx = settings.marginVerticalDp.coerceAtLeast(0f).dp.toPx() + cutout.bottom + speechInsetPx,
-        // 正文首行落在 marginTop + headerHeight，而页眉章节名画在 marginTop —— 两者的间距就是
-        // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
-        // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。
-        //
-        // 页眉页脚的字走排版令牌（footnote1，见 pageInfoTextStyle），会跟着系统字号放大：放大到行高
-        // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 18sp，两条带仍是 26/18dp，排版不变。
-        //
-        // 页眉 / 页脚关掉了，那条带就给 0：正文顶到头部留白 / 下边距为止，多排出一行左右（同阅读）。
-        headerHeightPx = if (settings.showHeader) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
+        // 页眉上移后已经由 marginTop 让开，正文无需再留一条页眉带。
+        headerHeightPx = if (settings.showHeader && raisedHeader == null) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
         footerHeightPx = if (settings.showFooter) maxOf(18.dp.toPx(), infoLinePx) else 0f,
         fontSizePx = fontSizePx,
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
@@ -1067,7 +1092,41 @@ internal fun buildLayoutSpec(
         bodyFontWeight = settings.bodyFontWeight,
         showImages = settings.showImages,
         density = density.density,
+        raisedHeader = raisedHeader,
     )
+}
+
+private fun Density.raisedReaderHeader(
+    viewportWidthPx: Int,
+    leftMarginPx: Float,
+    rightMarginPx: Float,
+    cutoutTopPx: Int,
+    statusArea: ReaderStatusArea,
+    layoutDirection: LayoutDirection,
+    lineHeightPx: Float,
+): RaisedReaderHeader? {
+    if (statusArea.heightPx <= 0) return null
+    val availableHeight = maxOf(statusArea.heightPx, cutoutTopPx) - statusArea.waterfallTopPx
+    if (availableHeight < lineHeightPx) return null
+    // 已知顶部有挖孔却拿不到它的横向位置时，退回安全区下方。
+    if (cutoutTopPx > statusArea.waterfallTopPx && statusArea.cutoutBounds.none { it.top < cutoutTopPx && it.bottom > 0 }) {
+        return null
+    }
+    val top = statusArea.waterfallTopPx + (availableHeight - lineHeightPx) / 2f
+    val right = viewportWidthPx - rightMarginPx
+    val clearancePx = Dimens.gapS.toPx()
+    val obstacles = statusArea.cutoutBounds.filter {
+        it.top < top + lineHeightPx && it.bottom > top &&
+            it.left - clearancePx < right && it.right + clearancePx > leftMarginPx
+    }
+    val leftEdge = if (layoutDirection == LayoutDirection.Rtl) {
+        obstacles.maxOfOrNull { it.right + clearancePx } ?: leftMarginPx
+    } else leftMarginPx
+    val rightEdge = if (layoutDirection == LayoutDirection.Ltr) {
+        obstacles.minOfOrNull { it.left - clearancePx } ?: right
+    } else right
+    if (rightEdge - leftEdge < maxOf((Dimens.touchTarget * 2).toPx(), lineHeightPx * 4)) return null
+    return RaisedReaderHeader(top, leftEdge, viewportWidthPx - rightEdge)
 }
 
 @Composable
@@ -1081,38 +1140,42 @@ private fun BrightnessEffect(windowBrightness: ReaderWindowBrightness?, brightne
     SideEffect { windowBrightness.update(reader, brightness) }
 }
 
-/**
- * 沉浸：读的时候藏起系统栏，呼出菜单时放出来。
- *
- * 放出来的系统栏压在阅读菜单的顶栏 / 底栏上，图标明暗得跟**纸**走（[lightPaper]），不能沿用 MainActivity 按 App 主题设的那一套：
- * App 是深色、纸是象牙时，状态栏的时间和信号是白字压在浅色顶栏上，几乎看不见（反过来也一样）。
- * 退出阅读页时还给 App 主题（[lightApp]）—— MainActivity 那边是 SideEffect，根组合不重组就不会再设一遍。
- */
 @Composable
-private fun ImmersiveEffect(activity: Activity?, immersive: Boolean, lightPaper: Boolean, lightApp: Boolean) {
-    DisposableEffect(activity, immersive, lightPaper, lightApp) {
-        val window = activity?.window
-        if (window != null) {
-            val controller = WindowInsetsControllerCompat(window, window.decorView)
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.isAppearanceLightStatusBars = lightPaper
-            controller.isAppearanceLightNavigationBars = lightPaper
-            if (immersive) {
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            } else {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
+private fun ReaderSystemBarsEffect(
+    activity: Activity?,
+    showOverlayBars: Boolean,
+    showStatusBar: Boolean,
+    lightPaper: Boolean,
+    lightApp: Boolean,
+) {
+    val window = activity?.window ?: return
+    val controller = remember(window) { WindowInsetsControllerCompat(window, window.decorView) }
+    val latestLightApp by rememberUpdatedState(lightApp)
+    val systemBars = WindowInsetsCompat.Type.systemBars()
+    val statusBar = WindowInsetsCompat.Type.statusBars()
+    // 开合面板只切换可见性。退出阅读时才归还系统栏和 App 主题的图标颜色。
+    DisposableEffect(controller) {
+        val previousBehavior = controller.systemBarsBehavior
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         onDispose {
-            // 退出阅读页恢复系统栏，图标明暗还给 App 主题（换纸 / 开合菜单时这里也会先跑一遍，紧接着被新的一轮设回来）
-            activity?.window?.let {
-                WindowInsetsControllerCompat(it, it.decorView).apply {
-                    show(WindowInsetsCompat.Type.systemBars())
-                    isAppearanceLightStatusBars = lightApp
-                    isAppearanceLightNavigationBars = lightApp
-                }
+            controller.systemBarsBehavior = previousBehavior
+            controller.show(systemBars)
+            controller.isAppearanceLightStatusBars = latestLightApp
+            controller.isAppearanceLightNavigationBars = latestLightApp
+        }
+    }
+    SideEffect {
+        if (controller.isAppearanceLightStatusBars != lightPaper) controller.isAppearanceLightStatusBars = lightPaper
+        if (controller.isAppearanceLightNavigationBars != lightPaper) controller.isAppearanceLightNavigationBars = lightPaper
+    }
+    LaunchedEffect(controller, showOverlayBars, showStatusBar) {
+        when {
+            showOverlayBars -> controller.show(systemBars)
+            showStatusBar -> {
+                controller.hide(systemBars and statusBar.inv())
+                controller.show(statusBar)
             }
+            else -> controller.hide(systemBars)
         }
     }
 }

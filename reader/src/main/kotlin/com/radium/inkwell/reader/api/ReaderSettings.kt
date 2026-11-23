@@ -7,7 +7,7 @@ data class ReaderSettings(
     val titleScale: Float = 1.4f,
     /** 章节标题上方的留白（dp）。让标题跟正文之间/跟页顶之间松紧可调 */
     val titleTopSpacingDp: Float = 24f,
-    /** 顶部安全区之外的额外留白（dp）。负值缩小顶部挖孔预留，页眉与正文一起上移。 */
+    /** 顶部挖孔区之外的排版留白（dp）。页眉或系统状态栏显示时，保留对应的安全空间。 */
     val headerTopSpacingDp: Float = 24f,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
@@ -29,10 +29,11 @@ data class ReaderSettings(
      */
     val showBattery: Boolean = true,
     /**
-     * 正文上方画不画章节名（页眉）。关掉后页眉那条带让给正文（buildLayoutSpec 里带高给 0），约多排一行；
-     * 正文顶端仍由「头部留白」和顶部挖孔安全区决定。默认开。
+     * 是否显示章节名页眉。默认开。顶部系统状态栏隐藏时，页眉优先使用屏幕顶部可用区域。
      */
     val showHeader: Boolean = true,
+    /** 正文阅读时是否常驻顶部系统状态栏。 */
+    val showStatusBar: Boolean = false,
     /**
      * 正文下方画不画「页码 · 进度 · 时间 · 电量」（页脚）。关掉后页脚那条带让给正文，「下边距」照旧；
      * [showBattery] 这时不起作用（设置里那一行也收起来）。默认开。

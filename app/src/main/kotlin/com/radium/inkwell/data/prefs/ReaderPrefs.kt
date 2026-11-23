@@ -72,6 +72,7 @@ class ReaderPrefs(
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
         val SHOW_HEADER = booleanPreferencesKey("show_header")
+        val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val SHOW_FOOTER = booleanPreferencesKey("show_footer")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
@@ -154,6 +155,7 @@ class ReaderPrefs(
             keepScreenOn = p[Keys.KEEP_SCREEN_ON] ?: true,
             showBattery = p[Keys.SHOW_BATTERY] ?: true,
             showHeader = p[Keys.SHOW_HEADER] ?: true,
+            showStatusBar = p[Keys.SHOW_STATUS_BAR] ?: false,
             showFooter = p[Keys.SHOW_FOOTER] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
@@ -177,6 +179,7 @@ class ReaderPrefs(
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.SHOW_BATTERY] = settings.showBattery
             p[Keys.SHOW_HEADER] = settings.showHeader
+            p[Keys.SHOW_STATUS_BAR] = settings.showStatusBar
             p[Keys.SHOW_FOOTER] = settings.showFooter
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
@@ -288,6 +291,7 @@ class ReaderPrefs(
                 "keep_screen_on" to s.keepScreenOn.toString(),
                 "show_battery" to s.showBattery.toString(),
                 "show_header" to s.showHeader.toString(),
+                Keys.SHOW_STATUS_BAR.name to s.showStatusBar.toString(),
                 "show_footer" to s.showFooter.toString(),
                 "volume_key_flip" to s.volumeKeyFlip.toString(),
                 "flip_haptic" to s.flipHaptic.toString(),
@@ -372,8 +376,8 @@ internal object ReaderBackupImport {
             val headerOffset = v[keys.HEADER_TOP_OFFSET.name]?.toFloatOrNull()?.takeIf { it.isFinite() && it < 0f }
             writeHeaderTopSpacing(p, if (headerSpacing == 0f) headerOffset ?: 0f else headerSpacing)
         }
-        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_FOOTER, keys.VOLUME_KEY_FLIP,
-            keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
+        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_STATUS_BAR,
+            keys.SHOW_FOOTER, keys.VOLUME_KEY_FLIP, keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
             keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES, keys.LOCAL_SHOW_IMAGES).forEach { key ->
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }
         }

@@ -1,37 +1,87 @@
 package com.radium.inkwell.ui.reader
 
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import com.radium.inkwell.reader.api.ReaderSettings
+import com.radium.inkwell.reader.paginate.RaisedReaderHeader
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * 页眉 / 页脚开关：关掉的那一边，分页时那条带给 0，正文顺势占用；边距（头部留白里折着挖孔、下边距）不跟着收。
- * 这一步只在 buildLayoutSpec 里，画的那一层（PageInfoBar）只管不画 —— 两边对不上的话，
- * 要么字被藏了却空着一条带，要么带子让出去了字还压在正文上。
- */
 class ReaderLayoutSpecTest {
 
     private val density = Density(density = 3f, fontScale = 1f)
     private val cutout = IntInsets(0, 90, 0, 0)
+    private val statusArea = ReaderStatusArea(90, listOf(IntRect(516, 12, 564, 72)))
 
-    private fun spec(settings: ReaderSettings, insets: IntInsets = cutout, speechInsetPx: Float = 0f) =
-        buildLayoutSpec(IntSize(1080, 2400), settings, density, insets, 18.sp, speechInsetPx)
+    private fun spec(
+        settings: ReaderSettings,
+        insets: IntInsets = cutout,
+        speechInsetPx: Float = 0f,
+        status: ReaderStatusArea = statusArea,
+        layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+    ) = buildLayoutSpec(IntSize(1080, 2400), settings, density, insets, 18.sp, speechInsetPx, status, layoutDirection)
 
     @Test
-    fun `默认页眉页脚都在，两条带是 26 和 18 dp`() {
-        val s = spec(ReaderSettings())
+    fun `状态栏开启时页眉和页脚各自预留排版高度`() {
+        val s = spec(ReaderSettings(showStatusBar = true))
+        assertNull(s.raisedHeader)
         assertEquals(26f * 3, s.headerHeightPx)
         assertEquals(18f * 3, s.footerHeightPx)
     }
 
     @Test
+    fun `隐藏状态栏时页眉用挖孔左侧且正文收回原页眉带`() {
+        val raised = spec(ReaderSettings())
+        val regular = spec(ReaderSettings(showStatusBar = true))
+        assertEquals(RaisedReaderHeader(18f, 72f, 588f), raised.raisedHeader)
+        assertEquals(0f, raised.headerHeightPx)
+        assertEquals(regular.marginTopPx, raised.marginTopPx)
+        assertEquals(regular.contentHeightPx + regular.headerHeightPx, raised.contentHeightPx)
+
+        val rtl = spec(ReaderSettings(), layoutDirection = LayoutDirection.Rtl)
+        assertEquals(RaisedReaderHeader(18f, 588f, 72f), rtl.raisedHeader)
+    }
+
+    @Test
+    fun `挖孔前空间不足或缺少坐标时用安全区下方的常规页眉`() {
+        val settings = ReaderSettings(headerTopSpacingDp = -48f)
+        for (status in listOf(ReaderStatusArea(90, listOf(IntRect(132, 12, 182, 72))), ReaderStatusArea(90))) {
+            val s = spec(settings, status = status)
+            assertNull(s.raisedHeader)
+            assertEquals(90f, s.marginTopPx)
+            assertEquals(78f, s.headerHeightPx)
+        }
+    }
+
+    @Test
+    fun `顶部放不下放大的页眉时整行留在安全区下方`() {
+        val settings = ReaderSettings(headerTopSpacingDp = -48f)
+        val s = buildLayoutSpec(IntSize(1080, 2400), settings, density, cutout, 36.sp, 0f, statusArea)
+        assertNull(s.raisedHeader)
+        assertEquals(90f, s.marginTopPx)
+        assertEquals(132f, s.headerHeightPx)
+    }
+
+    @Test
+    fun `常显状态栏时负留白无法让正文进入系统栏`() {
+        val s = spec(
+            ReaderSettings(showStatusBar = true, showHeader = false, headerTopSpacingDp = -48f),
+            status = ReaderStatusArea(120),
+        )
+        assertEquals(120f, s.marginTopPx)
+        assertEquals(0f, s.headerHeightPx)
+        assertNull(s.raisedHeader)
+    }
+
+    @Test
     fun `关掉页眉，页眉那条带整个让给正文，头部留白和挖孔照旧`() {
-        val shown = spec(ReaderSettings())
-        val hidden = spec(ReaderSettings(showHeader = false))
+        val shown = spec(ReaderSettings(showStatusBar = true))
+        val hidden = spec(ReaderSettings(showStatusBar = true, showHeader = false))
         assertEquals(0f, hidden.headerHeightPx)
         assertEquals(shown.marginTopPx, hidden.marginTopPx)
         assertEquals(shown.footerHeightPx, hidden.footerHeightPx)
@@ -55,8 +105,8 @@ class ReaderLayoutSpecTest {
     }
 
     @Test
-    fun `头部留白为负时抵消挖孔预留但不越过屏幕顶边`() {
-        val settings = ReaderSettings(headerTopSpacingDp = -12f)
+    fun `页眉和状态栏均关闭时负留白抵消挖孔预留但不越过屏幕顶边`() {
+        val settings = ReaderSettings(showHeader = false, headerTopSpacingDp = -12f)
         val zero = spec(settings.copy(headerTopSpacingDp = 0f))
         val reduced = spec(settings)
         assertEquals(90f, zero.marginTopPx)
