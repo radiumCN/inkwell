@@ -3,6 +3,8 @@ package com.radium.inkwell.ui.feedback
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -68,13 +70,18 @@ fun FeedbackScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val pickAttachments = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+        viewModel::addAttachments,
+    )
+    val canEditAttachments = !state.submitting && !state.pending && !state.readingAttachments
 
     CollectMessages(viewModel.messages, snackbar)
 
     // 写了一半就走：系统返回、顶栏返回都先问一句。反馈常常是一大段复现步骤，
     // 手一滑划回去就全没了，而这页不存草稿。没写东西、或已经提交成功时照常直接退。
     val hasDraft = state.submitted == null &&
-        (state.content.isNotBlank() || state.contact.isNotBlank())
+        (state.content.isNotBlank() || state.contact.isNotBlank() || state.attachments.isNotEmpty())
     var confirmLeave by remember { mutableStateOf(false) }
     BackHandler(enabled = hasDraft) { confirmLeave = true }
     val leave: () -> Unit = {
@@ -172,6 +179,30 @@ fun FeedbackScreen(
                 },
             )
 
+            SectionHeader("附件")
+            SettingGroup {
+                val rowCount = state.attachments.size + 1
+                SettingRow(
+                    title = if (state.readingAttachments) "正在读取附件" else "添加截图、视频或文件",
+                    value = "${state.attachments.size} / $MAX_FEEDBACK_FILES",
+                    position = groupPosition(0, rowCount),
+                    onClick = if (canEditAttachments && state.attachments.size < MAX_FEEDBACK_FILES) {
+                        { pickAttachments.launch(arrayOf("*/*")) }
+                    } else null,
+                )
+                state.attachments.forEachIndexed { index, attachment ->
+                    SettingRow(
+                        title = attachment.name,
+                        subtitle = if (canEditAttachments) "点按移除" else null,
+                        position = groupPosition(index + 1, rowCount),
+                        onClick = if (canEditAttachments) {
+                            { viewModel.removeAttachment(attachment.uri) }
+                        } else null,
+                    )
+                }
+            }
+            SettingFootnote("最多 $MAX_FEEDBACK_FILES 个文件，合计 $MAX_FEEDBACK_FILE_MIB MiB。附件仅供开发者排查，私下保存 30 天。")
+
             SectionHeader("问题定位")
             SettingGroup {
                 ContentListItem(
@@ -195,7 +226,12 @@ fun FeedbackScreen(
             }
 
             PrimaryButton(
-                text = if (state.collectingLogs) "正在收集日志" else if (state.submitting) "正在提交" else "提交",
+                text = when {
+                    state.packingAttachments -> "正在准备附件"
+                    state.collectingLogs -> "正在收集日志"
+                    state.submitting -> "正在提交"
+                    else -> "提交"
+                },
                 onClick = viewModel::submit,
                 enabled = state.canSubmit,
                 loading = state.submitting,

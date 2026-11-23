@@ -742,12 +742,23 @@ class ReaderViewModel(
     }
 
     fun traceInteraction(event: com.radium.inkwell.reader.flip.ReaderTrace) {
-        val diagnostics = listOfNotNull(
-            event.flipId?.let { "flip_id" to it },
-            event.render?.let { "render" to it.name },
-            event.reason?.let { "reason" to it },
-            event.settleMs?.let { "settle_ms" to it },
-        )
+        val diagnostics = buildList {
+            event.flipId?.let { add("flip_id" to it) }
+            event.render?.let { add("render" to it.name) }
+            event.reason?.let { add("reason" to it) }
+            event.settleMs?.let { add("settle_ms" to it) }
+            event.swipe?.let {
+                add("swipe_start_px" to "${it.start.x},${it.start.y}")
+                add("swipe_end_px" to "${it.end.x},${it.end.y}")
+                add("viewport_px" to "${it.viewport.width}x${it.viewport.height}")
+                add("swipe_duration_ms" to it.durationMs)
+                add("swipe_velocity_x_px_s" to it.velocityX)
+            }
+            event.curlGrip?.let {
+                add("curl_corner" to if (it.cornerBottom) "right_bottom" else "right_top")
+                add("curl_pin_y" to it.pinTouchY)
+            }
+        }
         trace("input", "action" to event.action.name, "direction" to event.direction?.name,
             "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter,
             "animation" to _state.value.settings.flipAnimation.name, *diagnostics.toTypedArray())

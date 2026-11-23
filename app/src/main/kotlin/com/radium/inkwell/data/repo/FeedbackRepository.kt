@@ -28,6 +28,7 @@ sealed interface FeedbackResult {
 
     /** 400：content 为空或请求体非法 */
     data object InvalidContent : FeedbackResult
+    data object InvalidAttachment : FeedbackResult
 
     /** 413：超过 [MAX_CONTENT_LENGTH] 字。UI 层本该拦住，走到这里说明拦漏了 */
     data object TooLong : FeedbackResult
@@ -99,6 +100,11 @@ class FeedbackRepository(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
     private val replyHttp = http.newBuilder().retryOnConnectionFailure(false).followRedirects(false).build()
+    private val attachmentHttp = replyHttp.newBuilder()
+        .callTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .build()
 
     suspend fun discussion(receipt: FeedbackReceipt, cursor: String? = null): FeedbackDiscussion? =
         withContext(Dispatchers.IO) {
@@ -176,6 +182,7 @@ class FeedbackRepository(
         requestId: String? = null,
         logs: File? = null,
         replyNonce: String? = null,
+        attachments: File? = null,
     ): FeedbackResult = withContext(Dispatchers.IO) {
         val body = json.encodeToString(
             Payload.serializer(),
@@ -190,25 +197,28 @@ class FeedbackRepository(
                 replyNonce = replyNonce,
             ),
         )
-        val requestBody = if (logs == null) body.toRequestBody(JSON_MEDIA) else {
-            MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("payload", body)
-                .addFormDataPart("logs", "logs.zip", logs.asRequestBody("application/zip".toMediaType()))
-                .build()
+        val requestBody = if (logs == null && attachments == null) body.toRequestBody(JSON_MEDIA) else {
+            val multipart = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("payload", body)
+            logs?.let { multipart.addFormDataPart("logs", "logs.zip", it.asRequestBody(ZIP_MEDIA)) }
+            attachments?.let {
+                multipart.addFormDataPart("attachments", "attachments.zip", it.asRequestBody(ZIP_MEDIA))
+            }
+            multipart.build()
         }
         val req = Request.Builder()
             .url("$baseUrl/api/v1/feedback")
             .post(requestBody)
             .build()
         try {
-            http.newCall(req).execute().use { resp ->
+            val client = if (attachments == null) http else attachmentHttp
+            client.newCall(req).execute().use { resp ->
                 when (resp.code) {
                     201 -> {
                         val dto = json.decodeFromString<Response>(resp.body.string())
                         FeedbackResult.Success(dto.issue, dto.url, dto.replyToken)
                     }
-                    400 -> FeedbackResult.InvalidContent
-                    413 -> if (logs != null) FeedbackResult.AttachmentTooLarge else FeedbackResult.TooLong
+                    400 -> if (attachments == null) FeedbackResult.InvalidContent else FeedbackResult.InvalidAttachment
+                    413 -> if (logs != null || attachments != null) FeedbackResult.AttachmentTooLarge else FeedbackResult.TooLong
                     409 -> FeedbackResult.Pending
                     429 -> FeedbackResult.RateLimited(
                         resp.header("Retry-After")?.trim()?.toLongOrNull(),
@@ -267,5 +277,6 @@ class FeedbackRepository(
         const val MAX_CONTENT_LENGTH = 4000
 
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        private val ZIP_MEDIA = "application/zip".toMediaType()
     }
 }

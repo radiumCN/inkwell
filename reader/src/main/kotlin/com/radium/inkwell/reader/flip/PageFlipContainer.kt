@@ -37,6 +37,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -378,6 +379,12 @@ fun PageFlipContainer(
                     var dragDir: FlipDirection? = null
                     var followedFlipId: Int? = null
                     fun isFollowing() = followedFlipId == flipId && direction != null && !settling
+                    fun traceSwipe(dir: FlipDirection, velocityX: Float, elapsed: Long) {
+                        val swipe = ReaderTrace.Swipe(
+                            down.position.round(), last.position.round(), size, elapsed, velocityX.toInt(),
+                        )
+                        traceLatest.value(ReaderTrace(ReaderTrace.Action.SWIPE_RELEASE, dir, followedFlipId, swipe = swipe))
+                    }
                     var cancelled = false
                     // 快甩时位移经常整段落在抬手那一帧。必须先判 slop 再看 pressed ——
                     // 先因 UP 跳出的话，offset 几乎是 0，松手当回弹，中间还会被当成开菜单。
@@ -492,12 +499,13 @@ fun PageFlipContainer(
                     if (dragDir == null) {
                         val dx = last.position.x - down.position.x
                         val dy = last.position.y - down.position.y
+                        val velocity = tracker.calculateVelocity().x
                         val action = classifyReleaseBeforeSlop(
-                            dx, dy, tracker.calculateVelocity().x, flipSlopPx, FLIP_COMMIT_VELOCITY_PX,
+                            dx, dy, velocity, flipSlopPx, FLIP_COMMIT_VELOCITY_PX,
                         )
                         when (action) {
                             is FlipReleaseBeforeSlop.Flick -> {
-                                trace(ReaderTrace.Action.SWIPE_RELEASE, action.direction, id = null)
+                                traceSwipe(action.direction, velocity, (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L))
                                 programmaticFlip(action.direction, "next_flick")
                             }
                             FlipReleaseBeforeSlop.Tap -> {
@@ -530,7 +538,9 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir
-                    trace(ReaderTrace.Action.SWIPE_RELEASE, dir, id = followedFlipId)
+                    val velocity = tracker.calculateVelocity().x
+                    val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
+                    traceSwipe(dir, velocity, elapsed)
                     if (followedFlipId != null && !isFollowing()) return@awaitEachGesture
                     val flippable = canFlipLatest(dir)
                     val width = size.width.toFloat()
@@ -545,8 +555,6 @@ fun PageFlipContainer(
                         commitFlip(dir, if (animationsEnabled) "animation_none" else "system_animations_disabled")
                         return@awaitEachGesture
                     }
-                    val velocity = tracker.calculateVelocity().x
-                    val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
                     val displacement = seedFlipOffset(last.position.x - down.position.x, dir, width)
                     val commit = shouldCommitHorizontalFlip(displacement, velocity, width, dir, elapsed)
                     if (isFollowing()) {
@@ -581,6 +589,7 @@ fun PageFlipContainer(
                 downX = downX,
                 touchY = touchY,
                 cornerBottom = cornerBottom,
+                pinTouchY = flatSwipe,
                 size = size, density = density,
                 flipId = flipId, onTrace = { traceLatest.value(it) },
             )
@@ -677,6 +686,7 @@ private fun CurlLayer(
     downX: Float,
     touchY: MutableFloatState,
     cornerBottom: Boolean,
+    pinTouchY: Boolean,
     size: IntSize,
     density: androidx.compose.ui.unit.Density,
     flipId: Int,
@@ -748,6 +758,7 @@ private fun CurlLayer(
     }
     val frontPage = if (direction == FlipDirection.FORWARD) current else prev
     val underPage = if (direction == FlipDirection.FORWARD) next else current
+    val grip = CurlGrip(cornerBottom, pinTouchY)
     // 连翻可在上一页提交的同一帧启动，但 ViewModel 的相邻页还未跟上。
     // 本次先显示整页，避免卷开空白页，也避免相邻页到齐后从动画中途突然出现。
     val missingPageReason = when {
@@ -760,7 +771,7 @@ private fun CurlLayer(
         LaunchedEffect(flipId, pendingPage) {
             onTrace(
                 ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId,
-                    ReaderTrace.Render.CURL_PENDING_PAGE, pendingPage),
+                    ReaderTrace.Render.CURL_PENDING_PAGE, pendingPage, curlGrip = grip),
             )
         }
         PageCanvas(current, layout, theme, selection = selection)
@@ -790,7 +801,7 @@ private fun CurlLayer(
         else -> null
     }
     LaunchedEffect(flipId, render, reason) {
-        onTrace(ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId, render, reason))
+        onTrace(ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId, render, reason, curlGrip = grip))
     }
     if (render == ReaderTrace.Render.SLIDE) {
         SlideLayers(

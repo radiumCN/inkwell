@@ -2,7 +2,7 @@
 
 反馈附件中的 `usage-events.jsonl` 是应用主动记录的最近操作，每行一个 JSON 事件。
 它独立于开发者选项中的系统日志录制；用户不必提前开启录制即可在反馈时附带最近操作。
-ZIP 仍走现有私有上传协议，服务端不需要变更。
+运行日志使用 multipart 的 `logs`，和用户选择的 `attachments` 分开上传。附件支持截图、录屏和其他文件，最多 4 个、合计 25 MiB，两者均在服务端私有保存 30 天。开发者可按公开 issue 的提交编号从服务器查找日志 ZIP 和用户附件 ZIP。
 
 ## 已记录范围
 
@@ -20,7 +20,7 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 | `reader.chapter.cache_upgrade` | 正文已显示后，旧纯文字缓存的后台补全结果 |
 | `reader.session.load.* / menu.toggle / sheet / settings.apply / source.* / auto_flip.*` | 进书、阅读面板、设置、换源与自动翻页状态 |
 | `reader.settings.paper_selected / paper_applied` | 接收到的纸张选择与实际生效的主题切换，只记录主题 ID |
-| `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项和反馈结果，不记录输入值 |
+| `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项、附件数量和反馈结果，不记录输入值或附件名称 |
 | `webdav.sync.result / webdav.book_files.result` | 同步和文件传输结果、耗时、失败类别，以及文件成功、隐藏跳过和失败数量 |
 
 搜索首个结果行布局时记录 `search.first_visible`，耗时从提交搜索开始，并单列书源准备耗时。
@@ -29,7 +29,9 @@ ZIP 仍走现有私有上传协议，服务端不需要变更。
 
 横向翻页的 `flip_id` 在当前翻页容器内递增，用于关联同一次翻页的渲染、收尾和提交。
 仿真模式的 `RENDER_SELECTED` 在选择或更换渲染方式时记录，`render` 区分双位图卷页、
-直接绘制底页、后翻时直接绘制尚无位图的卷曲页、底页尚不可用时露纸色，以及降级平移。
+直接绘制底页、后翻时直接绘制尚无位图的卷曲页、邻页尚不可用时保持静止，以及降级平移。
+`curl_corner` 和 `curl_pin_y` 记录卷角所在页边与触点 Y 是否固定。
+`SWIPE_RELEASE` 记录阅读区域尺寸、手势起止坐标、持续时间和松手横向速度。坐标以阅读区域左上角为原点，单位为像素，每次松手记录一次。
 `reason` 记录渲染切换或中断原因。
 `ANIMATION_START` 的 `settle_ms` 是计划时长，`INTERRUPTED`、`COMMIT` 和 `ROLLBACK` 中同一字段是
 从请求收尾到该事件的实际耗时。直接切页或取消手势时，提交原因也会记录。

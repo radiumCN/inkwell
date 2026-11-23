@@ -148,6 +148,28 @@ class FeedbackRepositoryTest {
     }
 
     @Test
+    fun `附件单独使用 multipart 无需附带日志`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"issue":1,"url":"u"}"""))
+        val files = File.createTempFile("feedback-attachments-test", ".zip")
+        try {
+            files.writeText("attachments-marker")
+            assertEquals(
+                FeedbackResult.Success(1, "u"),
+                repo.submit(content = "正文", requestId = "stable-submission-id", attachments = files),
+            )
+            val req = server.takeRequest()
+            assertTrue(req.getHeader("Content-Type")!!.startsWith("multipart/form-data;"))
+            val body = req.body.readUtf8()
+            assertTrue("name=\"payload\"" in body)
+            assertTrue("name=\"attachments\"; filename=\"attachments.zip\"" in body)
+            assertTrue("attachments-marker" in body)
+            assertTrue("name=\"logs\"" !in body)
+        } finally {
+            files.delete()
+        }
+    }
+
+    @Test
     fun `不附带日志保留 JSON 且发送提交编号`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(201).setBody("""{"issue":1,"url":"u"}"""))
         repo.submit(content = "正文", requestId = "stable-submission-id")

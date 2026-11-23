@@ -1,6 +1,7 @@
 package com.radium.inkwell.ui.feedback
 
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import com.radium.inkwell.util.RunLogRecorder
@@ -28,12 +30,15 @@ data class FeedbackUiState(
     val submitting: Boolean = false,
     val attachLogs: Boolean = false,
     val collectingLogs: Boolean = false,
+    val attachments: List<FeedbackAttachment> = emptyList(),
+    val readingAttachments: Boolean = false,
+    val packingAttachments: Boolean = false,
     val pending: Boolean = false,
     val requestId: String = UUID.randomUUID().toString(),
     val submitted: FeedbackReceipt? = null,
 ) {
     val overLimit: Boolean get() = content.length > FeedbackRepository.MAX_CONTENT_LENGTH
-    val canSubmit: Boolean get() = content.isNotBlank() && !overLimit && !submitting && !pending
+    val canSubmit: Boolean get() = content.isNotBlank() && !overLimit && !submitting && !pending && !readingAttachments
 }
 
 class FeedbackViewModel(
@@ -75,15 +80,76 @@ class FeedbackViewModel(
         _state.value = _state.value.copy(attachLogs = v, requestId = UUID.randomUUID().toString())
     }
 
+    fun addAttachments(uris: List<Uri>) {
+        val s = _state.value
+        if (uris.isEmpty() || s.submitting || s.pending || s.readingAttachments) return
+        val newUris = uris.distinct().filter { uri -> s.attachments.none { it.uri == uri } }
+        if (newUris.isEmpty()) return
+        if (s.attachments.size + newUris.size > MAX_FEEDBACK_FILES) {
+            messages.emit("最多添加 ${MAX_FEEDBACK_FILES} 个附件")
+            return
+        }
+        _state.value = s.copy(readingAttachments = true)
+        viewModelScope.launch {
+            try {
+                val files = withContext(Dispatchers.IO) { newUris.map { context.readFeedbackAttachment(it) } }
+                val total = (s.attachments + files).fold(0L) { sum, file ->
+                    sum + (file.sizeBytes ?: 0).coerceAtMost(MAX_FEEDBACK_FILE_BYTES + 1)
+                }
+                if (total > MAX_FEEDBACK_FILE_BYTES) {
+                    messages.emit("附件合计最多 ${MAX_FEEDBACK_FILE_MIB} MiB，可裁短录屏或减少文件")
+                    return@launch
+                }
+                _state.value = _state.value.copy(
+                    attachments = s.attachments + files,
+                    requestId = UUID.randomUUID().toString(),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                messages.emit("无法读取所选附件，请重新选择")
+            } finally {
+                _state.value = _state.value.copy(readingAttachments = false)
+            }
+        }
+    }
+
+    fun removeAttachment(uri: Uri) {
+        val s = _state.value
+        if (s.submitting || s.pending || s.readingAttachments || s.attachments.none { it.uri == uri }) return
+        _state.value = s.copy(
+            attachments = s.attachments.filterNot { it.uri == uri },
+            requestId = UUID.randomUUID().toString(),
+        )
+    }
+
     fun submit() {
         val s = _state.value
         // 双击会建出两个 issue，而且是在公开仓库里 —— 拦住
         if (!s.canSubmit) return
-        UsageLog.event("ui.click", "action" to "feedback.submit", "attach_logs" to s.attachLogs)
+        UsageLog.event("ui.click", "action" to "feedback.submit", "attach_logs" to s.attachLogs,
+            "attachment_count" to s.attachments.size)
         _state.value = s.copy(submitting = true)
         viewModelScope.launch {
             var logs: File? = null
+            var attachments: File? = null
             try {
+                if (s.attachments.isNotEmpty()) {
+                    _state.value = _state.value.copy(packingAttachments = true)
+                    try {
+                        withContext(Dispatchers.IO) { attachments = context.packFeedbackAttachments(s.attachments) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: FeedbackFilesTooLarge) {
+                        messages.emit("附件合计最多 ${MAX_FEEDBACK_FILE_MIB} MiB，可裁短录屏或减少文件")
+                        return@launch
+                    } catch (_: Exception) {
+                        messages.emit("无法读取附件，请移除后重新选择")
+                        return@launch
+                    } finally {
+                        _state.value = _state.value.copy(packingAttachments = false)
+                    }
+                }
                 if (s.attachLogs) {
                     _state.value = _state.value.copy(collectingLogs = true)
                     try {
@@ -108,6 +174,7 @@ class FeedbackViewModel(
                     requestId = s.requestId,
                     logs = logs,
                     replyNonce = replyNonce,
+                    attachments = attachments,
                 )
                 UsageLog.event("feedback.result", "outcome" to when (result) {
                     is FeedbackResult.Success -> "success"
@@ -131,10 +198,14 @@ class FeedbackViewModel(
                         _state.value = _state.value.copy(submitted = receipt)
                     }
                     FeedbackResult.InvalidContent -> messages.emit("请填写反馈内容")
+                    FeedbackResult.InvalidAttachment -> messages.emit("服务端无法接收附件，可移除后重新选择")
                     // UI 层已按 MAX_CONTENT_LENGTH 拦过，走到这里说明拦漏了
                     FeedbackResult.TooLong ->
                         messages.emit("内容超过 ${FeedbackRepository.MAX_CONTENT_LENGTH} 字，请精简后再试")
-                    FeedbackResult.AttachmentTooLarge -> messages.emit("日志附件过大，可取消勾选后提交反馈")
+                    FeedbackResult.AttachmentTooLarge -> messages.emit(
+                        if (s.attachments.isEmpty()) "日志附件过大，可取消勾选后提交反馈"
+                        else "上传内容超过限制，可减少附件或取消附带日志",
+                    )
                     FeedbackResult.Pending -> {
                         _state.value = _state.value.copy(pending = true)
                         messages.emit("提交结果待确认，请勿重复提交")
@@ -147,6 +218,7 @@ class FeedbackViewModel(
                 }
             } finally {
                 logs?.delete()
+                attachments?.delete()
                 _state.value = _state.value.copy(submitting = false, collectingLogs = false)
             }
         }
