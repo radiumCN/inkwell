@@ -91,4 +91,22 @@ class BackupPreferencesTest {
         assertEquals(false, p[keys.SHOW_FOOTER])
         assertEquals(false, p[keys.SHOW_BATTERY])
     }
+
+    @Test fun `backup restores a negative header offset without writing negative spacing to the legacy key`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf()
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(100, mapOf(
+            "header_top_spacing" to "0", "header_top_offset" to "-16", "margin_v" to "0",
+        ))) { true })
+        assertEquals(0f, p[keys.HEADER_TOP_SPACING])
+        assertEquals(-16f, p[keys.HEADER_TOP_OFFSET])
+        assertEquals(0f, p[keys.MARGIN_V])
+
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, mapOf("font_size_sp" to "20"))) { true })
+        assertEquals(-16f, p[keys.HEADER_TOP_OFFSET])
+
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf("header_top_spacing" to "8"))) { true })
+        assertEquals(8f, p[keys.HEADER_TOP_SPACING])
+        assertEquals(0f, p[keys.HEADER_TOP_OFFSET])
+    }
 }

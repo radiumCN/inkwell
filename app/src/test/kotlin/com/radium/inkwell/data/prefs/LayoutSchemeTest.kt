@@ -62,6 +62,17 @@ class LayoutSchemeTest {
     }
 
     @Test
+    fun `排版方案保存负的头部留白并为旧版保留零值`() {
+        val settings = tight.copy(headerTopSpacingDp = -16f, marginVerticalDp = 0f)
+        val scheme = LayoutScheme.capture("贴边", settings)
+        val decoded = LayoutSchemeCodec.decode(LayoutSchemeCodec.encode(listOf(scheme))).single()
+        assertEquals(0f, decoded.headerTopSpacingDp)
+        assertEquals(settings, decoded.applyTo(ReaderSettings()))
+        assertTrue(decoded.matches(settings))
+        assertFalse(decoded.matches(settings.copy(headerTopSpacingDp = 0f)))
+    }
+
+    @Test
     fun `同名覆盖原地替换，新名追加到末尾`() {
         val a = LayoutScheme.capture("甲", ReaderSettings())
         val b = LayoutScheme.capture("乙", ReaderSettings())

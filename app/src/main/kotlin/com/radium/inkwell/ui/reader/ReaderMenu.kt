@@ -1541,14 +1541,21 @@ private fun TypesetTab(
         LayoutNumberRow("字距", settings, onAdjust, ReaderSettings::letterSpacingEm, 0f..0.15f, 0.01f, "em", 2) {
             copy(letterSpacingEm = it)
         }
-        LayoutNumberRow("头部留白", settings, onAdjust, ReaderSettings::headerTopSpacingDp, 8f..48f, 1f, "dp") {
+        LayoutNumberRow("头部留白", settings, onAdjust, ReaderSettings::headerTopSpacingDp, -48f..48f, 1f, "dp") {
             copy(headerTopSpacingDp = it)
         }
-        LayoutNumberRow("下边距", settings, onAdjust, ReaderSettings::marginVerticalDp, 8f..48f, 1f, "dp") {
+        LayoutNumberRow("下边距", settings, onAdjust, ReaderSettings::marginVerticalDp, 0f..48f, 1f, "dp") {
             copy(marginVerticalDp = it)
         }
         LayoutNumberRow("左右边距", settings, onAdjust, ReaderSettings::marginHorizontalDp, 8f..48f, 1f, "dp") {
             copy(marginHorizontalDp = it)
+        }
+        ReaderBlock {
+            Text(
+                "头部留白为负数时，页眉或正文可能被摄像头挖孔遮挡。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
         }
     }
 

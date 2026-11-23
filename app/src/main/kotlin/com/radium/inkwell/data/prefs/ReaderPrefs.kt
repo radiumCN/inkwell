@@ -50,6 +50,7 @@ class ReaderPrefs(
         val TITLE_SCALE = floatPreferencesKey("title_scale")
         val TITLE_TOP_SPACING = floatPreferencesKey("title_top_spacing")
         val HEADER_TOP_SPACING = floatPreferencesKey("header_top_spacing")
+        val HEADER_TOP_OFFSET = floatPreferencesKey("header_top_offset")
         val LINE_SPACING = floatPreferencesKey("line_spacing")
         val PARA_SPACING = floatPreferencesKey("para_spacing")
         val MARGIN_H = floatPreferencesKey("margin_h")
@@ -129,11 +130,12 @@ class ReaderPrefs(
 
     private fun readSettings(p: Preferences, dark: Boolean): ReaderSettings {
         val customPaper = ReaderPaperPrefs.custom(p, dark)
+        val headerSpacing = p[Keys.HEADER_TOP_SPACING] ?: 24f
         return ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
             titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING] ?: 24f,
-            headerTopSpacingDp = p[Keys.HEADER_TOP_SPACING] ?: 24f,
+            headerTopSpacingDp = if (headerSpacing == 0f) p[Keys.HEADER_TOP_OFFSET] ?: 0f else headerSpacing,
             fontId = p[Keys.FONT_ID] ?: ReaderSettings.FONT_SYSTEM,
             bodyFontWeight = p[Keys.BODY_FONT_WEIGHT]?.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
                 ?: ReaderSettings.FONT_WEIGHT_NORMAL,
@@ -205,7 +207,7 @@ class ReaderPrefs(
         p[Keys.FONT_SIZE] = settings.fontSizeSp
         p[Keys.TITLE_SCALE] = settings.titleScale
         p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
-        p[Keys.HEADER_TOP_SPACING] = settings.headerTopSpacingDp
+        writeHeaderTopSpacing(p, settings.headerTopSpacingDp)
         p[Keys.FONT_ID] = settings.fontId
         p[Keys.BODY_FONT_WEIGHT] = settings.bodyFontWeight
         p[Keys.LINE_SPACING] = settings.lineSpacingMult
@@ -269,7 +271,8 @@ class ReaderPrefs(
                 "font_size_sp" to s.fontSizeSp.toString(),
                 "title_scale" to s.titleScale.toString(),
                 "title_top_spacing" to s.titleTopSpacingDp.toString(),
-                "header_top_spacing" to s.headerTopSpacingDp.toString(),
+                Keys.HEADER_TOP_SPACING.name to s.headerTopSpacingDp.coerceAtLeast(0f).toString(),
+                Keys.HEADER_TOP_OFFSET.name to s.headerTopSpacingDp.coerceAtMost(0f).toString(),
                 "font_id" to s.fontId,
                 Keys.BODY_FONT_WEIGHT.name to s.bodyFontWeight.toString(),
                 "line_spacing" to s.lineSpacingMult.toString(),
@@ -308,6 +311,12 @@ class ReaderPrefs(
         return applied
     }
 
+}
+
+/** 旧版直接把头部留白用于布局，因此旧键始终保存非负值。 */
+private fun writeHeaderTopSpacing(p: MutablePreferences, spacing: Float) {
+    p[ReaderPrefs.Keys.HEADER_TOP_SPACING] = spacing.coerceAtLeast(0f)
+    p[ReaderPrefs.Keys.HEADER_TOP_OFFSET] = spacing.coerceAtMost(0f)
 }
 
 /** 日夜分别记当前主题和自定义配色；旧单槽只迁移到日间。 */
@@ -353,10 +362,15 @@ internal object ReaderBackupImport {
     ): Boolean {
         if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return false
         val v = backup.values
-        listOf(keys.FONT_SIZE, keys.TITLE_SCALE, keys.TITLE_TOP_SPACING, keys.HEADER_TOP_SPACING,
+        listOf(keys.FONT_SIZE, keys.TITLE_SCALE, keys.TITLE_TOP_SPACING,
             keys.LINE_SPACING, keys.PARA_SPACING, keys.MARGIN_H, keys.MARGIN_V,
             keys.FIRST_LINE_INDENT, keys.LETTER_SPACING, keys.BRIGHTNESS).forEach { key ->
             v[key.name]?.toFloatOrNull()?.takeIf { it.isFinite() }?.let { p[key] = it }
+        }
+        val headerSpacing = v[keys.HEADER_TOP_SPACING.name]?.toFloatOrNull()?.takeIf { it.isFinite() }
+        if (headerSpacing != null) {
+            val headerOffset = v[keys.HEADER_TOP_OFFSET.name]?.toFloatOrNull()?.takeIf { it.isFinite() && it < 0f }
+            writeHeaderTopSpacing(p, if (headerSpacing == 0f) headerOffset ?: 0f else headerSpacing)
         }
         listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_FOOTER, keys.VOLUME_KEY_FLIP,
             keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,

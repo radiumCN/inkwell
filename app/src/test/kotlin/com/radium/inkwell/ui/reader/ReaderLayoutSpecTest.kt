@@ -18,8 +18,8 @@ class ReaderLayoutSpecTest {
     private val density = Density(density = 3f, fontScale = 1f)
     private val cutout = IntInsets(0, 90, 0, 0)
 
-    private fun spec(settings: ReaderSettings) =
-        buildLayoutSpec(IntSize(1080, 2400), settings, density, cutout, 18.sp, speechInsetPx = 0f)
+    private fun spec(settings: ReaderSettings, insets: IntInsets = cutout, speechInsetPx: Float = 0f) =
+        buildLayoutSpec(IntSize(1080, 2400), settings, density, insets, 18.sp, speechInsetPx)
 
     @Test
     fun `默认页眉页脚都在，两条带是 26 和 18 dp`() {
@@ -52,5 +52,26 @@ class ReaderLayoutSpecTest {
     fun `只关电量不动排版`() {
         assertEquals(spec(ReaderSettings()), spec(ReaderSettings(showBattery = false)))
         assertTrue(spec(ReaderSettings(showHeader = false, showFooter = false)).contentHeightPx > spec(ReaderSettings()).contentHeightPx)
+    }
+
+    @Test
+    fun `头部留白为负时抵消挖孔预留但不越过屏幕顶边`() {
+        val settings = ReaderSettings(headerTopSpacingDp = -12f)
+        val zero = spec(settings.copy(headerTopSpacingDp = 0f))
+        val reduced = spec(settings)
+        assertEquals(90f, zero.marginTopPx)
+        assertEquals(54f, reduced.marginTopPx)
+        assertEquals(zero.contentHeightPx + 36f, reduced.contentHeightPx)
+        assertEquals(0f, spec(settings.copy(headerTopSpacingDp = -48f)).marginTopPx)
+        assertEquals(0f, spec(settings, IntInsets(0, 0, 0, 0)).marginTopPx)
+    }
+
+    @Test
+    fun `下边距为零时仍给底部挖孔和朗读控件留位置`() {
+        val settings = ReaderSettings(marginVerticalDp = 0f, showFooter = false)
+        assertEquals(0f, spec(settings).marginBottomPx)
+        val withInsets = spec(settings, IntInsets(0, 90, 0, 42), speechInsetPx = 60f)
+        assertEquals(102f, withInsets.marginBottomPx)
+        assertEquals(0f, withInsets.footerHeightPx)
     }
 }

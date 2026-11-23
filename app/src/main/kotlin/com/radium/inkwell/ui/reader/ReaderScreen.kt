@@ -1042,10 +1042,9 @@ internal fun buildLayoutSpec(
         viewportHeightPx = viewport.height,
         marginLeftPx = settings.marginHorizontalDp.dp.toPx() + cutout.left,
         marginRightPx = settings.marginHorizontalDp.dp.toPx() + cutout.right,
-        // 上边距 = 头部留白：它就是正文顶端的位置（页眉小标题落在这条带里）。缩小它，
-        // 正文顶跟着上移、多出显示空间。下边距用 marginVerticalDp。
-        marginTopPx = settings.headerTopSpacingDp.dp.toPx() + cutout.top,
-        marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom + speechInsetPx,
+        // 负留白只用于抵消顶部挖孔预留。页眉与正文都以屏幕顶边为最小起点。
+        marginTopPx = (settings.headerTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f),
+        marginBottomPx = settings.marginVerticalDp.coerceAtLeast(0f).dp.toPx() + cutout.bottom + speechInsetPx,
         // 正文首行落在 marginTop + headerHeight，而页眉章节名画在 marginTop —— 两者的间距就是
         // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
         // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。
@@ -1054,7 +1053,6 @@ internal fun buildLayoutSpec(
         // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 18sp，两条带仍是 26/18dp，排版不变。
         //
         // 页眉 / 页脚关掉了，那条带就给 0：正文顶到头部留白 / 下边距为止，多排出一行左右（同阅读）。
-        // 边距不跟着收 —— 头部留白里折着挖孔，收了正文就钻到摄像头底下
         headerHeightPx = if (settings.showHeader) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
         footerHeightPx = if (settings.showFooter) maxOf(18.dp.toPx(), infoLinePx) else 0f,
         fontSizePx = fontSizePx,
