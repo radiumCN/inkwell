@@ -82,6 +82,37 @@ class FeedbackRepositoryTest {
     }
 
     @Test
+    fun `追加日志使用回复凭证并上传原始 ZIP 请求体`() = runBlocking {
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "private-token")
+        val uploadId = "11111111-2222-3333-4444-555555555555"
+        val logs = File.createTempFile("feedback-log-upload", ".zip")
+        try {
+            logs.writeText("private-logs")
+            for (code in listOf(201, 204)) {
+                server.enqueue(MockResponse().setResponseCode(code))
+                assertEquals(FeedbackLogUploadResult.SUCCESS, repo.appendLogs(receipt, uploadId, logs))
+                val request = server.takeRequest()
+                assertEquals("PUT", request.method)
+                assertEquals("/api/v1/feedback/123/logs/$uploadId", request.path)
+                assertEquals("Bearer private-token", request.getHeader("Authorization"))
+                assertEquals("application/zip", request.getHeader("Content-Type"))
+                assertEquals("private-logs", request.body.readUtf8())
+            }
+        } finally {
+            logs.delete()
+        }
+    }
+
+    @Test
+    fun `追加日志需要匹配的反馈收据`() = runBlocking {
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "private-token")
+        val logs = File("unused.zip")
+        assertEquals(FeedbackLogUploadResult.FORBIDDEN, repo.appendLogs(receipt.copy(replyToken = null), "id", logs))
+        assertEquals(FeedbackLogUploadResult.FORBIDDEN, repo.appendLogs(receipt.copy(issue = 456), "id", logs))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun `201 返回 issue 号与地址`() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(201).setBody(

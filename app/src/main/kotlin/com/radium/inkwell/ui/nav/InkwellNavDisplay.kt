@@ -500,7 +500,12 @@ fun InkwellNavDisplay(
                 val receiptFlow = remember(prefs, route) { prefs.feedbackReceipt(route.issue, route.url) }
                 val savedReceipt by receiptFlow.collectAsStateWithLifecycle(initialValue = null)
                 val receipt = savedReceipt ?: FeedbackReceipt(route.issue, route.url, route.title)
-                FeedbackDiscussionScreen(receipt, koinInject<FeedbackRepository>(), onBack = { nav.back() })
+                FeedbackDiscussionScreen(
+                    receipt = receipt,
+                    repo = koinInject<FeedbackRepository>(),
+                    recorder = koinInject(),
+                    onBack = { nav.back() },
+                )
             }
             entry<DisclaimerRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),
