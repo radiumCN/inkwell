@@ -28,6 +28,7 @@ import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.FloatingToolbarDefaults
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.material.edgeStroke
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -163,8 +164,8 @@ fun FloatingGlassBar(
                 blurRadius = TOOLBAR_BLUR_RADIUS,
                 // 不混色：透不透看的是糊多狠，发灰的那层正出在 Colored Thick 里（见上面 KDoc）。字的对比度只靠下面那层薄底
                 colors = BlurDefaults.blurColors(),
-                highlight = smallGlassHighlight(dark),
             )
+            .edgeStroke(shape, smallGlassStroke(dark))
             .background(toolbarGlassVeil(scheme.surfaceContainer, dark))
     } else {
         Modifier

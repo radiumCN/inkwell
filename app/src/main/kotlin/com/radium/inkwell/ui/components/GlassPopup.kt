@@ -14,7 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -28,6 +28,9 @@ import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
+import top.yukonga.miuix.kmp.squircle.addSquircleRect
+import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
+import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -39,9 +42,8 @@ import top.yukonga.miuix.kmp.window.WindowListPopup
  * Miuix 的弹出列表（`WindowListPopup`）是一块实心的卡片色，压在一层压暗上。这里换成 HyperOS 的玻璃：
  * - **背后整页糊掉**：弹层是 Miuix 开的一个全屏 Dialog 窗口，在它里面调 [DialogWindowBlur] —— 系统合成器把后面的应用窗口
  *   糊掉（同对话框、底部面板背后那层），Miuix 自己的压暗照旧叠在上面。
- * - **卡片半透明**：卡片底（Miuix 在 `ListPopupContent` 里写死读 `surfaceContainer`）只在这一小块换成
- *   [POPUP_GLASS_ALPHA_LIGHT] / [POPUP_GLASS_ALPHA_DARK] 的卡片色，各行的底（`DropdownColors.containerColor`，默认也是实心卡片色）
- *   换成透明 —— 透出来的是底下那片已经糊开的页面，一层雾，而不是贴上去的一块白。
+ * - **卡片半透明**：外轮廓与对话框、面板共用 [AppShapes.radiusPopup]，底色透出已经模糊的页面。
+ *   Miuix 自带的卡片底和各行底色设为透明，实际背景由统一圆角的曲面绘制。
  * - **一道上亮下淡的细边**（[GlassRim]）：模仿顶栏玻璃圆、底部胶囊那种边缘高光的「顶光」，深色下尤其靠它分出卡片的轮廓。
  *
  * 字读不读得清按**最坏的页面**算（同 CoverGlassTest 里的玻璃卡）：浅色主题卡片下面一片纯黑、深色主题一片纯白。
@@ -81,7 +83,8 @@ internal fun GlassDropdownPopup(
     )
     val haptic = LocalHapticFeedback.current
     val currentItems by rememberUpdatedState(items)
-    PopupCardColor(if (glass) container.copy(alpha = popupGlassAlpha(dark)) else container) {
+    val cardColor = if (glass) container.copy(alpha = popupGlassAlpha(dark)) else container
+    TransparentPopupBackground {
         WindowListPopup(
             show = show,
             alignment = PopupPositionProvider.Align.End,
@@ -91,7 +94,7 @@ internal fun GlassDropdownPopup(
             // 这里已经在弹层自己的 Dialog 窗口里：只有在这儿拿得到那个窗口
             if (glass) DialogWindowBlur(visible = show)
             val dismiss = LocalDismissState.current
-            Box {
+            Box(Modifier.squircleSurface(cardColor, AppShapes.radiusPopup)) {
                 ListPopupColumn {
                     items.forEachIndexed { index, item ->
                         DropdownImpl(
@@ -116,11 +119,11 @@ internal fun GlassDropdownPopup(
 }
 
 /**
- * 玻璃卡片的边：一道白色细线，上亮下淡 —— 顶栏玻璃圆、底部胶囊的边缘高光是从上面打的光（miuix-blur 的 BloomStroke），
- * 这里用竖向渐变学它的样子，和它们放在一起是一套。形状同 Miuix 弹出卡片（[AppShapes.radiusLarge] 的 squircle）。
+ * 玻璃卡片的边：一道白色细线，上亮下淡，呼应顶栏玻璃圆和底部胶囊的边缘高光。
+ * 这里用竖向渐变画顶光。描边和卡片都沿 [AppShapes.radiusPopup] 的连续圆角绘制。
  * 画在卡片的内容里（在 Miuix 展开动画的裁切以内），展开时跟着卡片一起长出来。线一半落在裁切外面，粗档画出来是一道细线。
  *
- * **别换成 miuix-blur 的边缘高光**（0.5.2-beta.5 / beta.6 两回）：它按 Plus 混合往上加，前提是底下不透明 ——
+ * **这里用 SrcOver 混合**。Plus 边缘高光要求底下不透明 ——
  * 主窗口里的玻璃底下是页面，没事；弹层是自己的透明窗口，卡片只有 [POPUP_GLASS_ALPHA_LIGHT] 那么厚，
  * Plus 把高光那一圈的**透明度**也加满了，透出窗口底下的黑：beta.5 借 `drawBackdrop` 画成一圈纯黑，
  * beta.6 直接画着色器，那一圈成了「卡片叠在黑底上」的灰，中间剩一块直角的亮矩形（真机截图量过：亮块 242 = 卡片叠在页面上，灰圈 217 = 卡片叠在纯黑上）。
@@ -130,34 +133,44 @@ internal fun GlassDropdownPopup(
 private fun GlassRim(dark: Boolean, modifier: Modifier) {
     val top = Color.White.copy(alpha = if (dark) POPUP_RIM_TOP_ALPHA_DARK else POPUP_RIM_TOP_ALPHA_LIGHT)
     val bottom = Color.White.copy(alpha = if (dark) POPUP_RIM_BOTTOM_ALPHA_DARK else POPUP_RIM_BOTTOM_ALPHA_LIGHT)
-    val shape = remember { squircleShape(AppShapes.radiusLarge) }
+    val squircleEnabled = isSquircleEnabled()
     Box(
         modifier.drawWithCache {
-            val outline = shape.createOutline(size, layoutDirection, this)
+            val outline = Path().apply {
+                addSquircleRect(
+                    width = size.width,
+                    height = size.height,
+                    cornerRadius = AppShapes.radiusPopup.toPx(),
+                    squircleEnabled = squircleEnabled,
+                )
+            }
             val stroke = Stroke(width = Dimens.strokeThick.toPx())
             val brush = Brush.verticalGradient(listOf(top, bottom))
-            onDrawBehind { drawOutline(outline, brush, style = stroke) }
+            onDrawBehind { drawPath(outline, brush, style = stroke) }
         },
     )
 }
 
 /**
- * 只把弹出卡片的底换掉：Miuix 的 `ListPopupContent` 写死读 `MiuixTheme.colorScheme.surfaceContainer`，没有参数。
- * 这一层只包住弹层（卡片里的各行用的是显式传进去的 DropdownColors，不读这个槽）。
+ * Miuix 的 `ListPopupContent` 从 `surfaceContainer` 画固定 16dp 的底。
+ * 底色交给内容层绘制，窗口依然沿用 Miuix 的定位和展开动画。
  * colors 版的 MiuixTheme 不提供 LocalContentColor（见 ReaderThemeScope），照外层的补上
  */
 @Composable
-private fun PopupCardColor(color: Color, content: @Composable () -> Unit) {
+private fun TransparentPopupBackground(content: @Composable () -> Unit) {
     val base = MiuixTheme.colorScheme
-    if (color == base.surfaceContainer) {
-        content()
-        return
-    }
     val contentColor = LocalContentColor.current
-    MiuixTheme(colors = base.copy(surfaceContainer = color), textStyles = MiuixTheme.textStyles) {
+    MiuixTheme(colors = base.copy(surfaceContainer = Color.Transparent), textStyles = MiuixTheme.textStyles) {
         CompositionLocalProvider(LocalContentColor provides contentColor, content = content)
     }
 }
+
+/** 大面积的弹层使用较厚的底色。系统关闭跨窗口模糊时，直接使用主题底色。 */
+@Composable
+internal fun popupPanelColor(color: Color): Color =
+    if (rememberCrossWindowBlurEnabled() && color.alpha == 1f) color.copy(alpha = POPUP_PANEL_ALPHA) else color
+
+internal const val POPUP_PANEL_ALPHA = 0.94f
 
 /**
  * 系统此刻开没开跨窗口模糊（Android 12+ 才有；省电模式、开发者选项会随时关掉它），关了 / 开了实时跟上。

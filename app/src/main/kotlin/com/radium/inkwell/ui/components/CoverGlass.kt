@@ -22,13 +22,14 @@ import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.ProgressiveBlur
-import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
-import top.yukonga.miuix.kmp.blur.highlight.rememberTiltLight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.material.EdgeStroke
+import top.yukonga.miuix.kmp.material.GlassEdgeStrokes
+import top.yukonga.miuix.kmp.material.edgeStroke
+import top.yukonga.miuix.kmp.material.rememberTiltLightState
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.LocalContentColor
@@ -89,6 +90,8 @@ fun CoverGlassCard(
     }
     val colors = BlurDefaults.blurColors(blendColors = if (dark) ColoredThickDark else ColoredThickLight)
     val shape = remember { squircleShape(AppShapes.radiusLarge) }
+    val stroke = smallGlassStroke(dark)
+    val tiltedStroke = if (tiltHighlight && animationsEnabled()) rememberTiltStroke(stroke) else null
     // 一上来就有书（书架）时初值即终值，不淡；从 pending 等到书的才淡进来
     val reveal by animateFloatAsState(
         targetValue = if (coverTitle != null) 1f else 0f,
@@ -118,8 +121,8 @@ fun CoverGlassCard(
                     shape = shape,
                     blurRadius = CARD_BLUR_RADIUS,
                     colors = colors,
-                    highlight = if (tiltHighlight && animationsEnabled()) rememberTiltHighlight(dark) else smallGlassHighlight(dark),
                 )
+                .then(if (tiltedStroke != null) Modifier.edgeStroke(shape, tiltedStroke) else Modifier.edgeStroke(shape, stroke))
                 // 薄底画在玻璃「里面」（玻璃节点的内容）：边缘高光画在内容之上，不会被这层底盖暗
                 .background(coverGlassVeil(card, dark)),
         )
@@ -179,8 +182,8 @@ fun CoverMosaicGlassCard(
                     shape = shape,
                     blurRadius = CARD_BLUR_RADIUS,
                     colors = colors,
-                    highlight = smallGlassHighlight(dark),
                 )
+                .edgeStroke(shape, smallGlassStroke(dark))
                 .background(card.copy(alpha = if (dark) MOSAIC_VEIL_DARK else MOSAIC_VEIL_LIGHT)),
         )
         CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
@@ -231,33 +234,22 @@ fun CoverHeaderBackground(title: String, coverModel: Any?, modifier: Modifier = 
 }
 
 /**
- * 示例 App 的 Small Container 那档玻璃边缘高光：卡片、浮起来的药丸、提示胶囊这类小面都用这一档。
+ * Miuix OS 4 玻璃的 Small 档边缘光：卡片、浮起来的药丸、提示胶囊这类小面都用这一档。
  * [dark] 是**玻璃本身**深不深（深色主题、或浅色主题里的深色胶囊），不是 App 在不在深色模式
  */
-internal fun smallGlassHighlight(dark: Boolean): Highlight =
-    if (dark) Highlight.GlassStrokeSmallDark else Highlight.GlassStrokeSmallLight
+internal fun smallGlassStroke(dark: Boolean): EdgeStroke =
+    if (dark) GlassEdgeStrokes.SmallDark else GlassEdgeStrokes.SmallLight
 
 /**
- * 同一档高光，两路光的位置跟着手机倾斜挪（Miuix 文档「传感器驱动的视差」的写法与灵敏度）。
- * 预设的 style 不是 BloomStroke（库将来换了实现）时原样返回，不动。
+ * 绘制时读取倾斜引起的光位变化，传感器更新只重画玻璃边缘。
  */
 @Composable
-private fun rememberTiltHighlight(dark: Boolean): Highlight {
-    val base = smallGlassHighlight(dark)
-    val style = base.style as? BloomStroke ?: return base
-    val primary = rememberTiltLight(
-        basePosition = style.primaryLight.position,
-        color = style.primaryLight.color,
-        intensity = style.primaryLight.intensity,
-        sensitivity = 0.15f,
-    )
-    val secondary = rememberTiltLight(
-        basePosition = style.secondaryLight.position,
-        color = style.secondaryLight.color,
-        intensity = style.secondaryLight.intensity,
-        sensitivity = 0.12f,
-    )
-    return base.copy(style = style.copy(primaryLight = primary, secondaryLight = secondary))
+private fun rememberTiltStroke(base: EdgeStroke): () -> EdgeStroke {
+    val primary = rememberTiltLightState(base.primary, sensitivity = 0.15f)
+    val secondary = rememberTiltLightState(base.secondary, sensitivity = 0.12f)
+    return remember(base, primary, secondary) {
+        { base.copy(primary = primary.value, secondary = secondary.value) }
+    }
 }
 
 /** 封面玻璃卡上那层卡片色（为什么要有它见 [CoverGlassCard]） */
@@ -268,7 +260,7 @@ internal fun coverGlassVeil(card: Color, dark: Boolean): Color =
 internal fun coverHeaderVeil(page: Color, dark: Boolean): Color =
     page.copy(alpha = if (dark) HEADER_VEIL_DARK else HEADER_VEIL_LIGHT)
 
-/** dp（miuix-blur 按 dp 收半径，上限 150）。卡片小、字压在上面，糊得狠；示例「Texture Blur」默认就是 100 */
+/** dp（miuix-blur 按 dp 收半径，上限 100）。把封面化成大块颜色。 */
 private const val CARD_BLUR_RADIUS = 100f
 
 /**

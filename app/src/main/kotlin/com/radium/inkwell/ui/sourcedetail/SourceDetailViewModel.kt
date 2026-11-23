@@ -8,9 +8,12 @@ import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.allowsLoginReturn
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.core.source.SourceLoginForm
+import com.radium.inkwell.core.source.SourceLoginException
 import com.radium.inkwell.core.source.SourceLoginInteraction
+import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.js.StrResponse
 import com.radium.inkwell.core.source.webLoginUrl
+import com.radium.inkwell.core.source.webLoginUserAgent
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.source.SourceLoginSessions
@@ -20,6 +23,7 @@ import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +53,7 @@ data class SourceDetailUiState(
     val hasLogin: Boolean = false,
     val loginForm: SourceLoginForm? = null,
     val loginBusy: Boolean = false,
+    val loginDiagnostic: String? = null,
     val loginBrowser: SourceLoginBrowserPage? = null,
 )
 
@@ -56,6 +61,7 @@ data class SourceLoginBrowserPage(
     val url: String, val title: String, val requireCookies: Boolean, val profile: String, val returnOrigin: String?,
     /** 登录网页的 UA：和抓取这个来源发的同一个（BookSourceEngine.userAgentOf） */
     val userAgent: String,
+    val desktopMode: Boolean = false,
 )
 
 class SourceDetailViewModel internal constructor(
@@ -73,6 +79,7 @@ class SourceDetailViewModel internal constructor(
     val messages = MessageBus()
     private var rule: BookSourceRule? = null
     private var browserResult: CompletableDeferred<StrResponse?>? = null
+    private var browserCompletion: Job? = null
 
     init {
         viewModelScope.launch {
@@ -124,6 +131,7 @@ class SourceDetailViewModel internal constructor(
     fun submitLogin(action: String? = null) = launchLogin { source ->
         val submitted = _state.value.loginForm?.values.orEmpty()
         var showedMessage = false
+        var lastHttpStatus: Int? = null
         val interaction = object : SourceLoginInteraction {
             override fun message(text: String) {
                 showedMessage = true
@@ -136,8 +144,18 @@ class SourceDetailViewModel internal constructor(
 
             override suspend fun openBrowser(url: String, title: String): StrResponse? =
                 this@SourceDetailViewModel.openBrowser(url, title, requireCookies = false)
+
+            override fun onHttpStatus(status: Int) {
+                lastHttpStatus = status
+            }
         }
-        engine.submitLogin(source, submitted, action, interaction)
+        try {
+            engine.submitLogin(source, submitted, action, interaction)
+        } finally {
+            lastHttpStatus?.takeIf { it == 401 || it == 403 }?.let { status ->
+                recordLoginDiagnostic("站点拒绝了登录请求（HTTP $status）")
+            }
+        }
         val form = engine.getLoginForm(source)
         _state.update { state ->
             val edits = state.loginForm?.values.orEmpty().filter { (key, value) -> submitted[key] != value }
@@ -146,25 +164,40 @@ class SourceDetailViewModel internal constructor(
             }
             state.copy(loginForm = form.copy(values = values))
         }
-        if (action == null && !showedMessage) messages.emit("登录请求已完成，可以重新校验来源")
+        if (action == null && !showedMessage && _state.value.loginDiagnostic == null) {
+            messages.emit("登录请求已完成，可以重新校验来源")
+        }
     }
 
     private fun launchLogin(block: suspend (BookSourceRule) -> Unit) {
         val source = rule ?: return
         if (_state.value.loginBusy) return
-        _state.update { it.copy(loginBusy = true) }
+        _state.update { it.copy(loginBusy = true, loginDiagnostic = null) }
         viewModelScope.launch {
             try {
                 block(source)
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // 来源脚本的异常可能含表单内容或请求凭据，不展示或记录原文。
-                messages.emit("来源登录操作失败")
+                val message = _state.value.loginDiagnostic
+                    ?: (e as? SourceLoginException)?.diagnostic?.message
+                    ?: "来源登录操作失败，请检查来源规则"
+                recordLoginDiagnostic(message)
+                messages.emit(message)
             } finally {
                 _state.update { it.copy(loginBusy = false) }
             }
         }
+    }
+
+    private fun recordLoginDiagnostic(message: String) {
+        _state.update { it.copy(loginDiagnostic = message) }
+    }
+
+    private fun showBrowserDiagnostic(message: String) {
+        recordLoginDiagnostic(message)
+        messages.emit(message)
     }
 
     private suspend fun openBrowser(url: String, title: String, requireCookies: Boolean): StrResponse? =
@@ -173,56 +206,74 @@ class SourceDetailViewModel internal constructor(
             val sessionId = source.loginSessionId ?: return@withContext null
             val target = url.sourceLoginHttpUrl()
             if (target == null) {
-                messages.emit("该登录地址无法打开，请检查来源的 HTTPS 地址")
+                showBrowserDiagnostic("该登录地址无法打开，请检查来源的 HTTPS 地址")
                 return@withContext null
             }
             if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
-                messages.emit("请更新 Android 系统 WebView 后再打开登录网页")
+                showBrowserDiagnostic("请更新 Android 系统 WebView 后再打开登录网页")
                 return@withContext null
             }
             val userAgent = engine.userAgentOf(source)
+            val desktopMode = userAgent != SourceHttpClient.LEGADO_UA &&
+                withContext(Dispatchers.IO) {
+                    sessions.webLoginUserAgent(sessionId, target) == SourceHttpClient.LEGADO_UA
+                }
             val result = CompletableDeferred<StrResponse?>()
             browserResult = result
             val returnOrigin = source.baseUrl.sourceLoginHttpUrl()?.sourceOrigin()?.toString()
             val page = SourceLoginBrowserPage(
-                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent,
+                target.toString(), title, requireCookies, loginProfileName(sessionId), returnOrigin, userAgent, desktopMode,
             )
             _state.update { it.copy(loginBrowser = page) }
             try {
                 result.await()
             } finally {
+                browserCompletion?.cancel()
+                browserCompletion = null
                 browserResult = null
                 _state.update { it.copy(loginBrowser = null) }
             }
         }
 
     fun closeLoginBrowser() {
-        browserResult?.complete(null)
+        val result = browserResult ?: return
+        browserCompletion?.cancel()
+        if (result.complete(null)) recordLoginDiagnostic("已取消网页登录")
     }
 
-    fun finishLoginBrowser(url: String, html: String) {
+    fun finishLoginBrowser(url: String, html: String, userAgent: String, status: Int) {
         val page = _state.value.loginBrowser ?: return
         val result = browserResult ?: return
+        if (result.isCompleted || browserCompletion?.isActive == true) return
         val start = page.url.sourceLoginHttpUrl() ?: return
         val source = rule ?: return
         val sessionId = source.loginSessionId ?: return
         val current = url.sourceLoginHttpUrl()?.takeIf { source.allowsLoginReturn(start, it) }
-        viewModelScope.launch {
+        if (current == null) {
+            showBrowserDiagnostic("请完成网页登录并返回书源站点后再确认")
+            return
+        }
+        browserCompletion = viewModelScope.launch {
             val cookies = withContext(Dispatchers.IO) {
-                if (current == null) null else runCatching {
-                    if (sessions.rememberWebLogin(sessionId, start, current)) {
+                runCatching {
+                    if (sessions.rememberWebLogin(sessionId, start, current, userAgent)) {
                         sessions.webCookies(sessionId, current).orEmpty()
                     } else null
                 }.getOrNull()
             }
-            if (result !== browserResult) return@launch
+            if (result !== browserResult || result.isCompleted) return@launch
+            val diagnostic = when {
+                status == 401 || status == 403 -> "登录网页拒绝了请求（HTTP $status）"
+                cookies == null -> "网页没有可同步的 Cookie，请确认是否已完成登录"
+                else -> null
+            }
             if (page.requireCookies && cookies == null) {
-                messages.emit("未找到登录会话，请在来源网页完成登录后再试")
+                showBrowserDiagnostic(checkNotNull(diagnostic))
                 return@launch
             }
-            if (cookies != null) rule?.let(engine::invalidateLoginPages)
-            result.complete(StrResponse(bodyText = html.takeIf { current != null }.orEmpty(),
-                status = if (current == null) 0 else 200, finalUrl = current?.toString().orEmpty(),
+            _state.update { it.copy(loginDiagnostic = diagnostic) }
+            if (cookies != null) engine.invalidateLoginPages(source)
+            result.complete(StrResponse(bodyText = html, status = status, finalUrl = current.toString(),
                 cookieStr = cookies.orEmpty()))
         }
     }
@@ -285,6 +336,7 @@ class SourceDetailViewModel internal constructor(
                     // 离开页面掐掉了冒烟，不是书源坏了 —— 别往报告里写一条「失败」
                     throw e
                 } catch (e: Exception) {
+                    if (e is SourceLoginException) recordLoginDiagnostic(e.diagnostic.message)
                     step("✘ 失败: ${e.message}")
                 }
             }

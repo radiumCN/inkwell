@@ -6,9 +6,11 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
@@ -49,6 +51,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     private val pathTmp = Path()    // 前页折痕投影用的临时四边形
 
     private val backMatrix = Matrix()
+    private val backClipBounds = Rect()
     private val matrixArray = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 1f)
     private var paperColor = 0xFFF5EFDC.toInt()
     // 纸背：铺纸色 + 极淡镜像（墨从另一面透出），比 legado 的满强度镜像更干净、跟主题走
@@ -73,7 +76,8 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     /**
      * @param cornerBottom 卷角固定在右下(true)/右上(false)，手势开始时锁定
      * @param front 卷起页的位图，用于前页可见区和背面淡墨。
-     * @param drawLiveFront 尚无卷起页位图时，直接绘制前页可见区；背面只画纸色与折缝阴影。
+     * @param drawLiveFront 尚无卷起页位图时，直接绘制前页可见区与背面镜像。
+     * @param back 翻页进行中补齐的位图可先用于背面，正面保持起手时的绘制方式。
      */
     fun draw(
         canvas: Canvas,
@@ -85,7 +89,14 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         paperColor: Int,
         drawLiveUnder: (() -> Unit)? = null,
         drawLiveFront: (() -> Unit)? = null,
+        back: Bitmap? = front,
     ) {
+        if (touchX >= width) {
+            // 后翻已到终点。直接画完整的上一页，避免几何钳制在右下角留下最后一片卷角。
+            canvas.drawColor(paperColor)
+            if (front != null) canvas.drawBitmap(front, 0f, 0f, null) else drawLiveFront?.invoke()
+            return
+        }
         this.paperColor = paperColor
         cornerX = width
         cornerY = if (cornerBottom) height else 0f
@@ -99,6 +110,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         degrees = Math.toDegrees(
             atan2((bezierControl1.x - cornerX).toDouble(), (bezierControl2.y - cornerY).toDouble())
         ).toFloat()
+        val shadowBottom = curlShadowBottom(width, height, bezierStart1.x, bezierStart1.y, degrees, maxLength)
 
         // 先铺满纸色。折页路径盖不住的缝、以及 clip 漏出来的像素，
         // 否则会透出底层或未清的缓冲，整屏发褐发紫。
@@ -107,9 +119,9 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         // 拖动帧也画三片阴影：关掉会变成「纸片平移」，不像在卷。跟手靠触点只在
         // drawBehind 里读，不靠少画阴影。
         drawCurrentPageArea(canvas, front, drawLiveFront)
-        drawNextPageAreaAndShadow(canvas, under, drawLiveUnder)
+        drawNextPageAreaAndShadow(canvas, under, drawLiveUnder, shadowBottom)
         drawCurrentPageShadow(canvas)
-        drawCurrentBackArea(canvas, front)
+        drawCurrentBackArea(canvas, back, drawLiveFront, shadowBottom)
     }
 
     /** 前页可见区（挖掉卷起区，画前页） */
@@ -122,12 +134,18 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 下页露出区 + 翻起页投在下页上的阴影（legado 的 backShadow，宽 = 触角距/4） */
-    private fun drawNextPageAreaAndShadow(canvas: Canvas, under: Bitmap?, drawLiveUnder: (() -> Unit)?) {
+    private fun drawNextPageAreaAndShadow(
+        canvas: Canvas,
+        under: Bitmap?,
+        drawLiveUnder: (() -> Unit)?,
+        shadowBottom: Int,
+    ) {
         canvas.save()
         canvas.clipPath(pathFront)
-        canvas.clipPath(pathUnder)
-        // 没有底页就露纸色（已铺）；投影照画，否则卷起来像纸片平移
+        // 底页铺满整个卷起区，背面随后覆盖。贝塞尔曲线与阴影的多边形在页缘
+        // 可能不完全重合，底页也裁到阴影多边形时，慢拖会露出一块空白。
         if (under != null) canvas.drawBitmap(under, 0f, 0f, null) else drawLiveUnder?.invoke()
+        canvas.clipPath(pathUnder)
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val w = (touchToCornerDis / 4f)
@@ -136,7 +154,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         } else {
             Triple(backShadowRL, (bezierStart1.x - w).toInt(), bezierStart1.x.toInt())
         }
-        drawable.setBounds(left, bezierStart1.y.toInt(), right, (bezierStart1.y + maxLength).toInt())
+        drawable.setBounds(left, bezierStart1.y.toInt(), right, shadowBottom)
         drawable.draw(canvas)
         canvas.restore()
     }
@@ -210,7 +228,12 @@ class CurlRenderer(private val width: Float, private val height: Float) {
     }
 
     /** 卷起页背面（铺纸色 + 淡墨镜像）+ 背面折缝阴影（legado 的 folderShadow，宽 = min 半距） */
-    private fun drawCurrentBackArea(canvas: Canvas, front: Bitmap?) {
+    private fun drawCurrentBackArea(
+        canvas: Canvas,
+        back: Bitmap?,
+        drawLiveFront: (() -> Unit)?,
+        shadowBottom: Int,
+    ) {
         val i = (bezierStart1.x + bezierControl1.x) / 2f
         val f1 = abs(i - bezierControl1.x)
         val i1 = (bezierStart2.y + bezierControl2.y) / 2f
@@ -234,7 +257,17 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         backMatrix.preTranslate(-bezierControl1.x, -bezierControl1.y)
         backMatrix.postTranslate(bezierControl1.x, bezierControl1.y)
         canvas.drawColor(paperColor)
-        if (front != null) canvas.drawBitmap(front, backMatrix, backPaint)
+        if (back != null) {
+            canvas.drawBitmap(back, backMatrix, backPaint)
+        } else if (drawLiveFront != null && canvas.getClipBounds(backClipBounds)) {
+            canvas.saveLayerAlpha(
+                backClipBounds.left.toFloat(), backClipBounds.top.toFloat(),
+                backClipBounds.right.toFloat(), backClipBounds.bottom.toFloat(), BACK_INK_ALPHA,
+            )
+            canvas.concat(backMatrix)
+            drawLiveFront()
+            canvas.restore()
+        }
 
         canvas.rotate(degrees, bezierStart1.x, bezierStart1.y)
         val (drawable, left, right) = if (isRtOrLb) {
@@ -242,7 +275,7 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         } else {
             Triple(folderShadowRL, (bezierStart1.x - f3 - 1).toInt(), (bezierStart1.x + 1).toInt())
         }
-        drawable.setBounds(left, bezierStart1.y.toInt(), right, (bezierStart1.y + maxLength).toInt())
+        drawable.setBounds(left, bezierStart1.y.toInt(), right, shadowBottom)
         drawable.draw(canvas)
         canvas.restore()
     }
@@ -288,22 +321,15 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         bezierStart2.x = cornerX
         bezierStart2.y = bezierControl2.y - (cornerY - bezierControl2.y) / 2f
 
-        cross(touch, bezierControl1, bezierStart1, bezierStart2, bezierEnd1)
-        cross(touch, bezierControl2, bezierStart1, bezierStart2, bezierEnd2)
+        // 这两个交点恰好在触点和各自控制点的中间。直接取中点，避免
+        // 钉住触点 Y 后折线接近竖直时，斜率求交把卷曲边缘算歪。
+        bezierEnd1.set((touch.x + bezierControl1.x) / 2f, (touch.y + bezierControl1.y) / 2f)
+        bezierEnd2.set((touch.x + bezierControl2.x) / 2f, (touch.y + bezierControl2.y) / 2f)
 
         bezierVertex1.x = (bezierStart1.x + 2 * bezierControl1.x + bezierEnd1.x) / 4f
         bezierVertex1.y = (2 * bezierControl1.y + bezierStart1.y + bezierEnd1.y) / 4f
         bezierVertex2.x = (bezierStart2.x + 2 * bezierControl2.x + bezierEnd2.x) / 4f
         bezierVertex2.y = (2 * bezierControl2.y + bezierStart2.y + bezierEnd2.y) / 4f
-    }
-
-    private fun cross(p1: PointF, p2: PointF, p3: PointF, p4: PointF, out: PointF) {
-        val a1 = (p2.y - p1.y) / (p2.x - p1.x + 1e-6f)
-        val b1 = (p2.x * p1.y - p1.x * p2.y) / (p2.x - p1.x + 1e-6f)
-        val a2 = (p4.y - p3.y) / (p4.x - p3.x + 1e-6f)
-        val b2 = (p4.x * p3.y - p3.x * p4.y) / (p4.x - p3.x + 1e-6f)
-        out.x = (b2 - b1) / (a1 - a2 + 1e-6f)
-        out.y = a1 * out.x + b1
     }
 
     private fun buildPaths() {
@@ -340,4 +366,22 @@ class CurlRenderer(private val width: Float, private val height: Float) {
         /** 纸背透出的墨的浓度（legado 用满强度，我们保留主题选的浅色纸 + 淡墨，背面更干净） */
         const val BACK_INK_ALPHA = 13 // ~5%
     }
+}
+
+internal fun curlShadowBottom(
+    width: Float,
+    height: Float,
+    pivotX: Float,
+    pivotY: Float,
+    degrees: Float,
+    pageDiagonal: Float,
+): Int {
+    val radians = Math.toRadians(degrees.toDouble())
+    val xProjection = -sin(radians)
+    val yProjection = cos(radians)
+    // 斜卷收尾时支点可能移出视口。逆旋转后，沿阴影长轴的最大投影取自视口四角之一。
+    val farX = if (xProjection >= 0) width else 0f
+    val farY = if (yProjection >= 0) height else 0f
+    val farthestY = pivotY + (farX - pivotX) * xProjection + (farY - pivotY) * yProjection
+    return maxOf((pivotY + pageDiagonal).toInt(), ceil(farthestY).toInt())
 }

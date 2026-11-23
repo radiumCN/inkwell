@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextAlign
+import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -107,6 +108,8 @@ fun AppAlertDialog(
             show = show,
             modifier = modifier,
             title = title,
+            cornerRadius = AppShapes.radiusPopup,
+            backgroundColor = popupPanelColor(MiuixTheme.colorScheme.background),
             // 加载中、或调用方禁了取消（加入书架落库中）时，不让点外面 / 返回键把它关掉 ——
             // 否则保存到一半弹窗没了，结果提示落在别的页面上。取消键灰着，外面那条路也得一起关
             onDismissRequest = { if (!confirmLoading && dismissEnabled) show = false },

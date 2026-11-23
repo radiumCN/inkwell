@@ -49,12 +49,30 @@ interface SourceSessionStore {
     }
 }
 
-enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS }
+enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS, WEB_USER_AGENTS }
+
+enum class SourceLoginDiagnostic(val message: String) {
+    SCRIPT_FAILED("登录脚本执行失败，请检查规则或脚本接口兼容性"),
+    VERIFICATION_FAILED("登录校验脚本执行失败，请检查来源规则"),
+    AUTH_REQUIRED("站点要求登录，已有会话可能已失效"),
+}
+
+class SourceLoginException(val diagnostic: SourceLoginDiagnostic) : SourceException(diagnostic.message)
 
 fun SourceSessionStore?.webLoginOrigins(sessionId: String): Set<String> =
     this?.read(sessionId, SourceSessionKey.WEB_ORIGINS)?.let {
         runCatching { Json.decodeFromString<Set<String>>(it) }.getOrNull()
     }.orEmpty()
+
+fun SourceSessionStore?.webLoginUserAgents(sessionId: String): Map<String, String> =
+    this?.read(sessionId, SourceSessionKey.WEB_USER_AGENTS)?.let {
+        runCatching { Json.decodeFromString<Map<String, String>>(it) }.getOrNull()
+    }.orEmpty()
+
+fun SourceSessionStore?.webLoginUserAgent(sessionId: String, url: HttpUrl): String? {
+    val origin = url.sourceOrigin().toString()
+    return if (origin in webLoginOrigins(sessionId)) webLoginUserAgents(sessionId)[origin] else null
+}
 
 data class SourceLoginForm(
     val fields: List<SourceLoginField>,
@@ -95,6 +113,7 @@ interface SourceLoginInteraction {
     fun message(text: String)
     fun updateFields(values: Map<String, String>)
     suspend fun openBrowser(url: String, title: String): StrResponse?
+    fun onHttpStatus(status: Int) {}
 }
 
 internal fun parseSourceLoginFields(text: String): List<SourceLoginField> {

@@ -3,6 +3,8 @@ package com.radium.inkwell.ui.feedback
 import com.radium.inkwell.ui.components.horizontalOnly
 import com.radium.inkwell.ui.components.pageScroll
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radium.inkwell.data.prefs.FeedbackReceipt
 import com.radium.inkwell.data.repo.FeedbackRepository
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppSnackbarHost
@@ -41,15 +44,15 @@ import com.radium.inkwell.ui.components.CollectMessages
 import com.radium.inkwell.ui.components.CompactTextArea
 import com.radium.inkwell.ui.components.CompactTextField
 import com.radium.inkwell.ui.components.Dimens
-import com.radium.inkwell.ui.components.NO_BROWSER_MESSAGE
 import com.radium.inkwell.ui.components.PrimaryButton
 import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingBlock
 import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SettingGroup
+import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.cardMargin
-import com.radium.inkwell.ui.components.rememberExternalLinkOpener
+import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.settingsPageColor
 import top.yukonga.miuix.kmp.basic.Icon
 import com.radium.inkwell.ui.components.AppScaffold
@@ -61,19 +64,24 @@ import top.yukonga.miuix.kmp.icon.extended.Ok
 @Composable
 fun FeedbackScreen(
     onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenDiscussion: (FeedbackReceipt) -> Unit,
     viewModel: FeedbackViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    // 「查看进展」跳去 issue 页：先把地址亮出来问一句（见 rememberExternalLinkOpener）
-    val links = rememberExternalLinkOpener { viewModel.messages.emit(NO_BROWSER_MESSAGE) }
+    val pickAttachments = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+        viewModel::addAttachments,
+    )
+    val canEditAttachments = !state.submitting && !state.pending && !state.readingAttachments
 
     CollectMessages(viewModel.messages, snackbar)
 
     // 写了一半就走：系统返回、顶栏返回都先问一句。反馈常常是一大段复现步骤，
     // 手一滑划回去就全没了，而这页不存草稿。没写东西、或已经提交成功时照常直接退。
-    val hasDraft = state.successUrl == null &&
-        (state.content.isNotBlank() || state.contact.isNotBlank())
+    val hasDraft = state.submitted == null &&
+        (state.content.isNotBlank() || state.contact.isNotBlank() || state.attachments.isNotEmpty())
     var confirmLeave by remember { mutableStateOf(false) }
     BackHandler(enabled = hasDraft) { confirmLeave = true }
     val leave: () -> Unit = {
@@ -88,11 +96,10 @@ fun FeedbackScreen(
         topBar = { AppTopBar("意见反馈", topBarScroll, onBack = leave, containerColor = pageColor) },
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
-        val url = state.successUrl
-        if (url != null) {
+        val submitted = state.submitted
+        if (submitted != null) {
             SubmittedState(
-                url = url,
-                onView = { links.open(url) },
+                onView = { onOpenDiscussion(submitted) },
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize().padding(padding).padding(Dimens.screenPadding),
             )
@@ -117,6 +124,9 @@ fun FeedbackScreen(
                     bottom = Dimens.gapXL + padding.calculateBottomPadding(),
                 ),
         ) {
+            SettingGroup {
+                SettingRow(title = "反馈记录", position = groupPosition(0, 1), onClick = onOpenHistory)
+            }
             SectionHeader("问题描述")
             SettingGroup {
                 SettingBlock {
@@ -169,6 +179,30 @@ fun FeedbackScreen(
                 },
             )
 
+            SectionHeader("附件")
+            SettingGroup {
+                val rowCount = state.attachments.size + 1
+                SettingRow(
+                    title = if (state.readingAttachments) "正在读取附件" else "添加截图、视频或文件",
+                    value = "${state.attachments.size} / $MAX_FEEDBACK_FILES",
+                    position = groupPosition(0, rowCount),
+                    onClick = if (canEditAttachments && state.attachments.size < MAX_FEEDBACK_FILES) {
+                        { pickAttachments.launch(arrayOf("*/*")) }
+                    } else null,
+                )
+                state.attachments.forEachIndexed { index, attachment ->
+                    SettingRow(
+                        title = attachment.name,
+                        subtitle = if (canEditAttachments) "点按移除" else null,
+                        position = groupPosition(index + 1, rowCount),
+                        onClick = if (canEditAttachments) {
+                            { viewModel.removeAttachment(attachment.uri) }
+                        } else null,
+                    )
+                }
+            }
+            SettingFootnote("最多 $MAX_FEEDBACK_FILES 个文件，合计 $MAX_FEEDBACK_FILE_MIB MiB。附件仅供开发者排查，私下保存 30 天。")
+
             SectionHeader("问题定位")
             SettingGroup {
                 ContentListItem(
@@ -192,7 +226,12 @@ fun FeedbackScreen(
             }
 
             PrimaryButton(
-                text = if (state.collectingLogs) "正在收集日志" else if (state.submitting) "正在提交" else "提交",
+                text = when {
+                    state.packingAttachments -> "正在准备附件"
+                    state.collectingLogs -> "正在收集日志"
+                    state.submitting -> "正在提交"
+                    else -> "提交"
+                },
                 onClick = viewModel::submit,
                 enabled = state.canSubmit,
                 loading = state.submitting,
@@ -226,12 +265,10 @@ fun FeedbackScreen(
 }
 
 /**
- * 成功态。给出 issue 地址而不是只弹一句「提交成功」—— 用户能自己看进展、补充信息，
- * 反馈才不像扔进黑洞。
+ * 提交成功后可直接打开处理进展。
  */
 @Composable
 private fun SubmittedState(
-    url: String,
     onView: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -249,7 +286,7 @@ private fun SubmittedState(
         )
         Text("反馈已提交", style = MiuixTheme.textStyles.headline2, fontWeight = FontWeight.Medium)
         Text(
-            "感谢反馈。你可以在下面的页面里跟进处理进展，也可以补充信息。",
+            "你可以在反馈记录中跟进处理进展，也可以在详情中补充信息。",
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center,

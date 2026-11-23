@@ -238,10 +238,13 @@ class RunLogRecorder(private val context: Context) {
         val pkg = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0)
         }.getOrNull()
+        val display = context.resources.displayMetrics
         return buildString {
             appendLine("应用版本: ${pkg?.versionName} (${pkg?.longVersionCode})")
             appendLine("设备: ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("系统: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            appendLine("系统构建: ${Build.DISPLAY}")
+            appendLine("显示区域: ${display.widthPixels}x${display.heightPixels} px (${display.densityDpi} dpi)")
             appendLine("导出时间: ${stamp()}")
             appendLine("正在录制: $isRecording")
         }

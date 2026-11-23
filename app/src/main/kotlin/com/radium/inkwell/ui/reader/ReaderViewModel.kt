@@ -169,6 +169,7 @@ data class ReaderUiState(
     val inShelf: Boolean = true,
     val refreshingChapter: Boolean = false,
     val chapterRefreshFailed: Boolean = false,
+    val pageLayout: LayoutSpec? = null,
 )
 
 /**
@@ -188,6 +189,7 @@ data class ReaderPageUi(
     val loading: Boolean = true,
     val error: String? = null,
     val atBookEnd: Boolean = false,
+    val layout: LayoutSpec? = null,
 )
 
 data class ReaderSessionUi(
@@ -226,7 +228,7 @@ data class ReaderOverlayUi(
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
     chapterTitle, chapterIndex, pageInChapter, pageCount,
-    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd,
+    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout,
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
@@ -742,12 +744,23 @@ class ReaderViewModel(
     }
 
     fun traceInteraction(event: com.radium.inkwell.reader.flip.ReaderTrace) {
-        val diagnostics = listOfNotNull(
-            event.flipId?.let { "flip_id" to it },
-            event.render?.let { "render" to it.name },
-            event.reason?.let { "reason" to it },
-            event.settleMs?.let { "settle_ms" to it },
-        )
+        val diagnostics = buildList {
+            event.flipId?.let { add("flip_id" to it) }
+            event.render?.let { add("render" to it.name) }
+            event.reason?.let { add("reason" to it) }
+            event.settleMs?.let { add("settle_ms" to it) }
+            event.swipe?.let {
+                add("swipe_start_px" to "${it.start.x},${it.start.y}")
+                add("swipe_end_px" to "${it.end.x},${it.end.y}")
+                add("viewport_px" to "${it.viewport.width}x${it.viewport.height}")
+                add("swipe_duration_ms" to it.durationMs)
+                add("swipe_velocity_x_px_s" to it.velocityX)
+            }
+            event.curlGrip?.let {
+                add("curl_corner" to if (it.cornerBottom) "right_bottom" else "right_top")
+                add("curl_pin_y" to it.pinTouchY)
+            }
+        }
         trace("input", "action" to event.action.name, "direction" to event.direction?.name,
             "chapter" to _state.value.chapterIndex, "page" to _state.value.pageInChapter,
             "animation" to _state.value.settings.flipAnimation.name, *diagnostics.toTypedArray())
@@ -1293,14 +1306,14 @@ class ReaderViewModel(
     }
 
     /**
-     * 当前章各段的正文，下标同排版元素（= `TextSelection.elementIndex`）；章标题、图片、空段是空串。
+     * 指定章各段的正文，下标同排版元素（= `TextSelection.elementIndex`）；章标题、图片、空段是空串。
      * 选字「替换」弹窗拿它数「本章 N 处」、截预览（[replacePreview]）。
      *
      * 读的是分页缓存里的测量结果 —— 就是屏幕上那一份字（已按现有规则净化过），不另读章节文件。
      * 章标题（第 0 个元素）不算：净化只跑正文里的段落和小标题，标题里命中了也换不到。还没排好时是空表。
      */
-    fun currentChapterParagraphs(): List<String> {
-        val result = paginated[_state.value.chapterIndex] ?: return emptyList()
+    fun chapterParagraphs(chapterIndex: Int): List<String> {
+        val result = paginated[chapterIndex] ?: return emptyList()
         val measured = result.measured
         val last = measured.keys.maxOrNull() ?: return emptyList()
         // 没取到的图那一行提示（「图片没加载出来 · 点按重试」）也量在表里，它不是正文，别让净化拿它去匹配
@@ -2005,6 +2018,7 @@ class ReaderViewModel(
      * 用户看到的正是「返回再进来，退回上一页」。
      */
     private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
+        val layout = spec ?: return
         val result = paginated[chapterIndex] ?: return
         if (pageIndex !in result.chapter.pages.indices) return
         val oldPage = _state.value
@@ -2041,6 +2055,7 @@ class ReaderViewModel(
             pageInChapter = pageIndex,
             pageCount = result.chapter.pages.size,
             page = page,
+            pageLayout = layout,
             prevPage = prev,
             nextPage = next,
             hasPrev = pageIndex > 0 || chapterIndex > 0,
@@ -2191,7 +2206,7 @@ class ReaderViewModel(
                                         // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
                                         // 排版完成后的那次 showPage 之前，先出的仍是这一屏
                                         viewModelScope.launch(Dispatchers.Main) {
-                                            if (caller?.isActive == false || gen != tocGeneration) return@launch
+                                            if (caller?.isActive == false || stale()) return@launch
                                             showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
                                         }
                                     }

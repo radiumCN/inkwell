@@ -916,7 +916,7 @@ class RuleEvaluator(
         // 同一个来源的登录一个一个来：会话过期时几路抓取的校验脚本同时 source.login()，别同时写会话。
         // 只锁登录本身：校验脚本、网页登录（等人操作）都不在锁里，免得这个来源的抓取全排在后面
         val changes = mutableMapOf<SourceSessionKey, String?>()
-        evalLoginScript(source, ctx, action ?: "login.call(this)", values, interaction, changes, submit = action == null)
+        evalLoginScript(source, ctx, action ?: "login.call(this)", values, interaction, changes)
         com.radium.inkwell.core.source.js.EngineJsHttp.currentJob()?.ensureActive()
         if (action == null && values.isNotEmpty() && SourceSessionKey.INFO !in changes) {
             changes[SourceSessionKey.INFO] = Json.encodeToString(values)
@@ -945,12 +945,11 @@ class RuleEvaluator(
         values: Map<String, String>,
         interaction: SourceLoginInteraction? = null,
         changes: MutableMap<SourceSessionKey, String?>? = null,
-        submit: Boolean = false,
     ): String? {
         val formJson = Json.encodeToString(values)
         return runScript(
-            ctx, ScriptJson(formJson, asObject = true), strict = true, interaction = interaction,
-            submittedInfo = formJson.takeIf { submit && values.isNotEmpty() },
+            ctx, ScriptJson(formJson, asLoginForm = true), strict = true, interaction = interaction,
+            submittedInfo = formJson.takeIf { values.isNotEmpty() },
             pendingLogin = changes,
         ) { runtime, bindings ->
             runtime.eval(listOfNotNull(source.loginScript, action).joinToString("\n"), bindings, ctx.js.jsLib)
@@ -1064,7 +1063,7 @@ class RuleEvaluator(
         } catch (e: Exception) {
             // 取消不是「脚本报错」：吞掉的话，被取消的那次调用还会带着空结果把剩下的条目一个个求值完
             if (e is kotlinx.coroutines.CancellationException) throw e
-            if (strict) throw SourceException("来源登录脚本执行失败")
+            if (strict) throw SourceLoginException(SourceLoginDiagnostic.SCRIPT_FAILED)
             null
         }
     }

@@ -24,12 +24,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import java.io.IOException
+
+private const val FEEDBACK_RECEIPT_LIMIT = 30
 
 private val Context.appDataStore by preferencesDataStore(
     name = "app_prefs",
@@ -41,6 +51,8 @@ private val Context.appDataStore by preferencesDataStore(
 class AppPrefs(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val feedbackReplyCipher = KeystoreSecretCipher("inkwell_feedback_reply_v1")
+    private val temporaryFeedbackReceipts = MutableStateFlow(emptyList<FeedbackReceipt>())
 
     internal object Keys {
         val UPDATE_CHANNEL = stringPreferencesKey("update_channel")
@@ -70,6 +82,7 @@ class AppPrefs(private val context: Context) {
         val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
         /** 搜索历史，新的在前，换行分隔（关键词入库前已把换行压成空格，见 [pushSearchHistory]） */
         val SEARCH_HISTORY = stringPreferencesKey("search_history")
+        val FEEDBACK_RECEIPTS = stringPreferencesKey("feedback_receipts")
         /** 发现页选择器「最近」用过的书源 id，新的在前，换行分隔（id 是单行的网址，不会自带换行） */
         val RECENT_EXPLORE_SOURCES = stringPreferencesKey("recent_explore_sources")
         /**
@@ -349,6 +362,49 @@ class AppPrefs(private val context: Context) {
         }
     }
 
+    private val storedFeedbackReceipts = context.appDataStore.data
+        .map { it[Keys.FEEDBACK_RECEIPTS] }
+        .distinctUntilChanged()
+        .map(::decodeFeedbackReceipts)
+        .catch { error ->
+            if (error is IOException) emit(emptyList()) else throw error
+        }
+
+    val feedbackReceipts = storedFeedbackReceipts.combine(temporaryFeedbackReceipts) { stored, temporary ->
+        (temporary + stored).distinctBy { it.url }.take(FEEDBACK_RECEIPT_LIMIT).map { it.copy(replyToken = null) }
+    }
+
+    fun feedbackReceipt(issue: Int, url: String): Flow<FeedbackReceipt?> = storedFeedbackReceipts
+        .map { receipts -> receipts.firstOrNull { it.issue == issue && it.url == url } }
+        .distinctUntilChanged()
+        .combine(temporaryFeedbackReceipts) { stored, temporary ->
+            temporary.firstOrNull { it.issue == issue && it.url == url }
+                ?: stored?.copy(replyToken = stored.replyToken?.let(feedbackReplyCipher::decrypt))
+        }
+        .flowOn(Dispatchers.IO)
+
+    suspend fun addFeedbackReceipt(receipt: FeedbackReceipt): Boolean = withContext(Dispatchers.IO) {
+        val encryptedToken = receipt.replyToken?.let { runCatching { feedbackReplyCipher.encrypt(it) }.getOrNull() }
+        val stored = receipt.copy(replyToken = encryptedToken)
+        var saved = false
+        try {
+            context.appDataStore.edit { p ->
+                val previous = decodeFeedbackReceipts(p[Keys.FEEDBACK_RECEIPTS])
+                p[Keys.FEEDBACK_RECEIPTS] = Json.encodeToString(
+                    (listOf(stored) + previous.filterNot { it.url == stored.url }).take(FEEDBACK_RECEIPT_LIMIT),
+                )
+            }
+            saved = receipt.replyToken == null || encryptedToken != null
+            saved
+        } finally {
+            // 保存失败时，已提交的记录仍可在本次应用进程中打开和回复。
+            temporaryFeedbackReceipts.update { receipts ->
+                val others = receipts.filterNot { it.url == receipt.url }
+                if (saved) others else (listOf(receipt) + others).take(FEEDBACK_RECEIPT_LIMIT)
+            }
+        }
+    }
+
     /**
      * 是否记录搜索历史。默认开。
      *
@@ -622,6 +678,10 @@ class AppPrefs(private val context: Context) {
         val CACHE_AUTO_PRUNE_DAYS_OPTIONS = setOf(0, 7, 14, 30)
     }
 }
+
+private fun decodeFeedbackReceipts(raw: String?): List<FeedbackReceipt> = raw?.let {
+    runCatching { Json.decodeFromString<List<FeedbackReceipt>>(it) }.getOrNull()
+}.orEmpty()
 
 private fun decodeSearchHistory(raw: String?): List<String> =
     raw?.split('\n')?.filter { it.isNotBlank() }.orEmpty()

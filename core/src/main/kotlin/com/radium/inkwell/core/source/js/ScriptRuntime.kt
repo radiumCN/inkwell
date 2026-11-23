@@ -58,7 +58,7 @@ interface ScriptRuntime {
  * （Java 的 Map / List），来源照它写 `result.book_id`、`result.toArray()`；也有来源照字符串写 `JSON.parse(result)`、
  * `result.match(…)`。两种都得认，见 RhinoScriptRuntime.jsonValue
  */
-class ScriptJson(val text: String, val asObject: Boolean = false)
+class ScriptJson(val text: String, val asLoginForm: Boolean = false)
 
 /** [ScriptRuntime.evalForList] 的结果：元素，或同 [ScriptRuntime.eval] 的文本 */
 sealed interface ScriptValue {
@@ -315,7 +315,16 @@ class RhinoScriptRuntime(
             ScriptableObject.callMethod(cx, json, "parse", arrayOf<Any>(text))
         }.getOrNull()
         if (parsed !is NativeObject && parsed !is NativeArray) return text
-        if (value.asObject) return parsed
+        if (value.asLoginForm) {
+            if (parsed is NativeObject && !parsed.has("get", parsed)) {
+                parsed.defineProperty("get", ScriptFunction { args ->
+                    args.firstOrNull()?.let { key ->
+                        parsed.get(Context.toString(key), parsed).takeUnless { it == Scriptable.NOT_FOUND }
+                    }
+                }, ScriptableObject.DONTENUM)
+            }
+            return parsed
+        }
         val str = cx.newObject(scope, "String", arrayOf<Any>(text))
         if (parsed is NativeArray) {
             str.put("toArray", str, ScriptFunction { parsed })

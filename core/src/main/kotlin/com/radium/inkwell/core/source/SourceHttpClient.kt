@@ -126,12 +126,20 @@ class SourceHttpClient(
                 }.build()
             }
             val web = scope?.sessionId?.let { webCookies(it, request.url) }
+            val loginUa = scope?.sessionId?.let { sessionStore.webLoginUserAgent(it, request.url) }
+                ?.takeIf { it.isNotBlank() && isValidHeaderValue(it) }
             // 网页 Cookie 每跳按实际地址重新取，跟随重定向时由目标站的 origin 决定。
-            val cookies = if (web.isNullOrBlank()) null else mergeWebCookies(request.header("Cookie").orEmpty(), web)
-            chain.proceed(
-                if (cookies == null || !isValidHeaderValue(cookies)) request
-                else request.newBuilder().header("Cookie", cookies).build(),
-            )
+            val cookies = web?.takeIf(String::isNotBlank)
+                ?.let { mergeWebCookies(request.header("Cookie").orEmpty(), it) }
+                ?.takeIf(::isValidHeaderValue)
+            if (cookies != null || loginUa != null) {
+                request = request.newBuilder().apply {
+                    if (cookies != null) header("Cookie", cookies)
+                    // UA 也是网页会话的一部分。每跳独立匹配 origin，跨站后仍用来源原有的 UA。
+                    if (loginUa != null) header("User-Agent", loginUa)
+                }.build()
+            }
+            chain.proceed(request)
         }
         // 超时必须显式配：OkHttp 默认 connect/read/write 各 10 秒，且**没有 callTimeout**。
         // 没有总闸的话，一个每 9 秒吐一个字节的站能把这次调用无限期挂住 —— 而书源脚本那条路
@@ -178,12 +186,16 @@ class SourceHttpClient(
         }
 
     /** 书源脚本要读写 cookie（登录态、防盗链 token 都靠它） */
-    fun cookieOf(url: String, sourceId: String? = null): String = url.toHttpUrlOrNull()
+    fun cookieOf(url: String, sourceId: String? = null): String = cookieUrl(url)
         ?.let { target ->
             val local = nativeCookies(sourceId, target)
             val web = sourceId?.let { webCookies(it, target) }
             if (web.isNullOrBlank()) local else mergeWebCookies(local, web)
         }.orEmpty()
+
+    /** 阅读脚本的 Cookie 接口也接受纯域名，例如网页登录后传入站点域名取会话。 */
+    private fun cookieUrl(value: String): HttpUrl? = value.toHttpUrlOrNull()
+        ?: runCatching { HttpUrl.Builder().scheme("https").host(value).build() }.getOrNull()
 
     private fun nativeCookies(sessionId: String?, target: HttpUrl): String =
         clientSession(sessionId).jar.loadForRequest(target).joinToString("; ") { "${it.name}=${it.value}" }
@@ -198,7 +210,7 @@ class SourceHttpClient(
     private data class SourceRequest(val sessionId: String?, val origin: HttpUrl, val credentialHeaders: Set<String>)
 
     fun setCookie(url: String, cookie: String, sourceId: String? = null) {
-        val u = url.toHttpUrlOrNull() ?: return
+        val u = cookieUrl(url) ?: return
         // 脚本写的同阅读的 CookieStore.setCookie，存下来、重启后还在：登录脚本常这样存登录态。没写过期时间的在 OkHttp 里
         // 是会话 Cookie、不落盘（见 clientSession），补一个远期的。服务端下发的会话 Cookie 不动，同阅读只留在这一次运行里
         val cookies = cookie.split(';').mapNotNull { Cookie.parse(u, it.trim()) }
@@ -207,7 +219,7 @@ class SourceHttpClient(
     }
 
     fun removeCookie(url: String, sourceId: String? = null) {
-        val target = url.toHttpUrlOrNull() ?: return
+        val target = cookieUrl(url) ?: return
         clientSession(sourceId).jar.clear(target)
         if (sourceId != null) clearWebCookies(sourceId, target)
     }

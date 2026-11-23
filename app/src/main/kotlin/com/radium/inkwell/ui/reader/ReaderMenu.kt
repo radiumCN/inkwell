@@ -1,9 +1,12 @@
 package com.radium.inkwell.ui.reader
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import com.radium.inkwell.ui.components.blockTouchesBelow
 import com.radium.inkwell.ui.components.sheetBottomInset
 import com.radium.inkwell.util.UsageLog
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -25,7 +28,6 @@ import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
-import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,11 +57,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.FlingBehavior
@@ -87,6 +92,8 @@ import com.radium.inkwell.ui.components.topBarExit
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
@@ -96,10 +103,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.ChapterListItem
 import com.radium.inkwell.ui.components.CardViewport
+import com.radium.inkwell.ui.components.CardLayer
 import com.radium.inkwell.ui.components.ChipRow
+import com.radium.inkwell.ui.components.LocalCardLayer
 import com.radium.inkwell.ui.components.IconLabelButton
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupedCardItem
@@ -142,10 +152,12 @@ import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import com.radium.inkwell.ui.components.pageScroll
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.LocalContentColor
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.radium.inkwell.ui.components.sinkOnPress
@@ -194,7 +206,13 @@ fun ReaderMenu(
 ) {
     var showToc by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
     var showMore by remember { mutableStateOf(false) }
+    val settingsShown by animateFloatAsState(
+        if (dragging == null) 1f else 0f,
+        AppTheme.motionScheme.defaultEffectsSpec(),
+        label = "readerSettingsShown",
+    )
 
     // 菜单现在常驻组合（为了能播退场动画），所以关菜单时得把面板一起收掉 ——
     // 否则下次呼出菜单，上回没关的目录会自己冒出来
@@ -202,6 +220,7 @@ fun ReaderMenu(
         if (!visible) {
             showToc = false
             showSettings = false
+            dragging = null
             showMore = false
         }
     }
@@ -255,7 +274,7 @@ fun ReaderMenu(
                         onFlip = onSwipePage,
                     ),
             )
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().graphicsLayer { alpha = settingsShown }) {
                 // 顶栏从上滑入，底部从下滑入 —— 用 animateEnterExit 而不是再套一层
                 // AnimatedVisibility：套进来的那层 visible 恒为 true，根本不会播。
                 Surface(
@@ -434,43 +453,54 @@ fun ReaderMenu(
         // 拖着字号 / 亮度时面板让开 —— 底色和拖动条淡掉，只剩手上那一条（见 TypographyPanel）。
         // 二级页的标题行（‹ 和页名）不用面板自己的那一行：它得跟着页面一起滑进来（见 SheetPages）
         var page by remember { mutableStateOf(SettingsPage.Main) }
-        var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
-        val effects = AppTheme.motionScheme.defaultEffectsSpec<Color>()
         val overlayColor = readerOverlayColor()
         val handleColor = BottomSheetDefaults.dragHandleColor()
-        val sheetColor by animateColorAsState(
-            if (dragging != null) overlayColor.copy(alpha = 0f) else overlayColor,
-            effects,
-            label = "settingsSheet",
-        )
-        val sheetHandle by animateColorAsState(
-            if (dragging != null) handleColor.copy(alpha = 0f) else handleColor,
-            effects,
-            label = "settingsHandle",
-        )
-        AppBottomSheet(
-            onDismissRequest = { showSettings = false },
-            backgroundColor = sheetColor,
-            padNavigationBar = false,
+        val textStyles = MiuixTheme.textStyles
+        var sheetOpen by remember { mutableStateOf(true) }
+        val sheetColor = overlayColor.copy(alpha = overlayColor.alpha * settingsShown)
+        OverlayBottomSheet(
+            show = sheetOpen,
+            onDismissRequest = { sheetOpen = false },
+            onDismissFinished = {
+                showSettings = false
+                dragging = null
+            },
+            cornerRadius = AppShapes.radiusPopup,
+            insideMargin = DpSize.Zero,
             enableWindowDim = false,
-            dragHandleColor = sheetHandle,
+            renderInRootScaffold = false,
+            dragHandleColor = handleColor.copy(alpha = handleColor.alpha * settingsShown),
+            surface = {
+                if (isOverscroll) Modifier.background(sheetColor)
+                else Modifier.readerSettingsSurface(pageBackdrop, sheetColor, cornerRadius)
+            },
         ) {
-            TypographyPanel(
-                page = page,
-                onOpen = { page = it },
-                dragging = dragging,
-                onDragging = { dragging = it },
-                settings = session.settings,
-                isNetBook = session.isNetBook,
-                onUpdate = onUpdateSettings,
-                onPreview = onPreviewSettings,
-                onCommit = onCommitSettings,
-                onSelectPaper = onSelectPaper,
-                onCommitCustomPaper = onCommitCustomPaper,
-                textSelectionEnabled = session.textSelectionEnabled,
-                onTextSelectionChange = onSetTextSelection,
-                typography = typography,
-            )
+            // Overlay 的内容在 Scaffold 的宿主里组合，显式带上阅读主题的颜色。
+            MiuixTheme(colors = scheme, textStyles = textStyles) {
+                CompositionLocalProvider(
+                    LocalContentColor provides scheme.onSurface,
+                    LocalCardLayer provides CardLayer(scheme.surfaceContainer, Dimens.gapXL),
+                ) {
+                    TypographyPanel(
+                        page = page,
+                        onOpen = { page = it },
+                        dragging = dragging,
+                        onDragging = { dragging = it },
+                        shown = settingsShown,
+                        pageBackdrop = pageBackdrop,
+                        settings = session.settings,
+                        isNetBook = session.isNetBook,
+                        onUpdate = onUpdateSettings,
+                        onPreview = onPreviewSettings,
+                        onCommit = onCommitSettings,
+                        onSelectPaper = onSelectPaper,
+                        onCommitCustomPaper = onCommitCustomPaper,
+                        textSelectionEnabled = session.textSelectionEnabled,
+                        onTextSelectionChange = onSetTextSelection,
+                        typography = typography,
+                    )
+                }
+            }
         }
     }
 
@@ -952,6 +982,8 @@ private fun TypographyPanel(
     onOpen: (SettingsPage) -> Unit,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
+    shown: Float,
+    pageBackdrop: LayerBackdrop?,
     settings: ReaderSettings,
     isNetBook: Boolean,
     onUpdate: (ReaderSettings) -> Unit,
@@ -1008,6 +1040,8 @@ private fun TypographyPanel(
                         typography = typography,
                         dragging = dragging,
                         onDragging = onDragging,
+                        shown = shown,
+                        pageBackdrop = pageBackdrop,
                         onOpen = onOpen,
                     )
                     SettingsPage.Typeset -> {
@@ -1161,40 +1195,32 @@ private fun MainPage(
     typography: TypographyActions,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
+    shown: Float,
+    pageBackdrop: LayerBackdrop?,
     onOpen: (SettingsPage) -> Unit,
 ) {
-    // 1 = 面板照常；0 = 让开，只剩手上那条滑轨
-    val shown by animateFloatAsState(
-        if (dragging == null) 1f else 0f,
-        AppTheme.motionScheme.defaultEffectsSpec(),
-        label = "settingsShown",
-    )
     // 松手后 dragging 立刻变回 null，面板却还在淡回来：留住刚才拖的是哪一条，淡回来的这段它别跟着闪没
     var active by remember { mutableStateOf<SettingsSlider?>(null) }
     if (dragging != null && active != dragging) active = dragging
     val card = readerCardColor()
-    // 卡片淡掉了，拖着的那一行自己铺一块卡片底（与卡片的淡出此消彼长，看着是这一行从卡里浮出来）；别的行跟着淡掉
-    val floatingRow = Modifier.squircleBackground(card.copy(alpha = card.alpha * (1f - shown)), AppShapes.radiusLarge)
-    val fadingRow = Modifier.alpha(shown)
-    fun rowModifier(kind: SettingsSlider): Modifier = if (active == kind) floatingRow else fadingRow
-
     ReaderGroup(color = card.copy(alpha = card.alpha * shown)) {
-        BrightnessRow(
-            settings = settings,
-            onUpdate = onUpdate,
-            onPreview = onPreview,
-            onCommit = onCommit,
-            onDragging = { onDragging(if (it) SettingsSlider.Brightness else null) },
-            modifier = rowModifier(SettingsSlider.Brightness),
-        )
-        FontSizeRow(
-            settings = settings,
-            onAdjust = typography.onAdjust,
-            onPreview = onPreview,
-            onCommit = onCommit,
-            onDragging = { onDragging(if (it) SettingsSlider.FontSize else null) },
-            modifier = rowModifier(SettingsSlider.FontSize),
-        )
+        ReaderSettingsSlider(pageBackdrop, card, shown, active == SettingsSlider.Brightness) {
+            BrightnessRow(
+                settings = settings,
+                onPreview = onPreview,
+                onCommit = onCommit,
+                onDragging = { onDragging(if (it) SettingsSlider.Brightness else null) },
+            )
+        }
+        ReaderSettingsSlider(pageBackdrop, card, shown, active == SettingsSlider.FontSize) {
+            FontSizeRow(
+                settings = settings,
+                onAdjust = typography.onAdjust,
+                onPreview = onPreview,
+                onCommit = onCommit,
+                onDragging = { onDragging(if (it) SettingsSlider.FontSize else null) },
+            )
+        }
         Box(Modifier.alpha(shown)) {
             SegmentRow("行距", LINE_SPACING_OPTIONS, settings.lineSpacingMult, 0.001f) {
                 typography.onAdjust { copy(lineSpacingMult = it) }
@@ -1242,19 +1268,29 @@ private fun MainPage(
 @Composable
 private fun BrightnessRow(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onDragging: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val following = settings.brightnessOverride == null
-    val systemLevel = remember { systemBrightnessLevel(context) ?: HALF_BRIGHTNESS }
+    var systemLevel by remember(context) { mutableFloatStateOf(systemBrightnessLevel(context) ?: HALF_BRIGHTNESS) }
+    DisposableEffect(context, following) {
+        if (!following) return@DisposableEffect onDispose { }
+        systemBrightnessLevel(context)?.let { systemLevel = it }
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                systemBrightnessLevel(context)?.let { systemLevel = it }
+            }
+        }
+        val resolver = context.contentResolver
+        resolver.registerContentObserver(Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS), false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
     var manual by remember { mutableFloatStateOf(settings.brightnessOverride ?: systemLevel) }
     val scheme = MiuixTheme.colorScheme
     Row(
-        modifier
+        Modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
         verticalAlignment = Alignment.CenterVertically,
@@ -1262,7 +1298,7 @@ private fun BrightnessRow(
     ) {
         Icon(Icons.Outlined.BrightnessLow, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
         AppSlider(
-            value = settings.brightnessOverride ?: manual,
+            value = settings.brightnessOverride ?: systemLevel,
             onValueChange = { v ->
                 manual = v.coerceIn(MIN_BRIGHTNESS, 1f)
                 onPreview(settings.copy(brightnessOverride = manual))
@@ -1278,7 +1314,11 @@ private fun BrightnessRow(
         Icon(Icons.Outlined.BrightnessHigh, contentDescription = null, modifier = Modifier.size(Dimens.iconMd))
         AppFilterChip(
             selected = following,
-            onClick = { onUpdate(settings.copy(brightnessOverride = if (following) manual else null)) },
+            onClick = {
+                // 先解除窗口亮度覆盖，再保存，和拖动亮度走同一条预览路径。
+                onPreview(settings.copy(brightnessOverride = if (following) manual else null))
+                onCommit()
+            },
             label = "系统",
             solidSelection = true,
         )
@@ -1300,14 +1340,24 @@ private fun FontSizeRow(
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onDragging: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val size = settings.fontSizeSp
     val min = ReaderSettings.FONT_SIZE_MIN
     val max = ReaderSettings.FONT_SIZE_MAX
     val step = ReaderSettings.FONT_SIZE_STEP
+    var pendingSize by remember { mutableStateOf<Float?>(null) }
+    val size = pendingSize ?: settings.fontSizeSp
+    val previewSize by rememberUpdatedState<(Float) -> Unit> { sp ->
+        onPreview(settings.copy(fontSizeSp = sp))
+    }
+    LaunchedEffect(Unit) {
+        // 滑杆立即跟手。分页合并快速经过的档位，松手时再同步提交最后一档。
+        snapshotFlow { pendingSize }.filterNotNull().collect { sp ->
+            previewSize(sp)
+            delay(FONT_PREVIEW_INTERVAL_MS)
+        }
+    }
     Row(
-        modifier
+        Modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.listHorizontal, vertical = Dimens.gapXS),
         verticalAlignment = Alignment.CenterVertically,
@@ -1325,10 +1375,13 @@ private fun FontSizeRow(
             valueRange = min..max,
             steps = ((max - min) / step).toInt() - 1,
             onValueChange = { v ->
-                val sp = (v / step).roundToInt() * step
-                if (sp != settings.fontSizeSp) onPreview(settings.copy(fontSizeSp = sp))
+                pendingSize = (v / step).roundToInt() * step
             },
-            onValueChangeFinished = onCommit,
+            onValueChangeFinished = {
+                pendingSize?.let(previewSize)
+                onCommit()
+                pendingSize = null
+            },
             label = "字号",
             hapticEffect = SliderDefaults.SliderHapticEffect.Step,
             modifier = Modifier
@@ -1342,15 +1395,16 @@ private fun FontSizeRow(
             enabled = size < max,
             onClick = { onAdjust { copy(fontSizeSp = (fontSizeSp + step).coerceAtMost(max)) } },
         )
-        Text(
-            size.toString().removeSuffix(".0"),
-            style = MiuixTheme.textStyles.body1,
-            fontWeight = FontWeight.Medium,
-            // 数字已经由滑轨念过（读屏念滑轨的当前值），这里不再念一遍
-            modifier = Modifier.clearAndSetSemantics { },
-        )
+        val numberStyle = MiuixTheme.textStyles.body1.copy(fontFeatureSettings = "tnum")
+        // 数字栏预留两位整数和一位小数，跨整数档时轨道宽度也保持稳定。
+        Box(Modifier.clearAndSetSemantics { }, contentAlignment = Alignment.CenterEnd) {
+            Text("00.0", modifier = Modifier.alpha(0f), style = numberStyle, fontWeight = FontWeight.Medium)
+            Text(size.toString().removeSuffix(".0"), style = numberStyle, fontWeight = FontWeight.Medium)
+        }
     }
 }
+
+private const val FONT_PREVIEW_INTERVAL_MS = 48L
 
 /** 排版微调按钮：带读屏标签，并保留完整触控区域。 */
 @Composable

@@ -611,7 +611,7 @@ class JavaBridge(
             body = opt?.body ?: body,
             headers = headers + opt?.headers.orEmpty(),
             followRedirects = followRedirects,
-        ) ?: StrResponse.empty()
+        )?.also { loginInteraction?.onHttpStatus(it.status) } ?: StrResponse.empty()
     }
 
     fun getVerificationCode(url: String): String = ""
@@ -865,11 +865,17 @@ class JavaBridge(
 
     fun openUrl(url: String, mimeType: String?) = openUrl(url)
 
-    fun startBrowserAwait(url: String, title: String?): Any {
-        val interaction = loginInteraction ?: return ""
-        return runBlocking(EngineJsHttp.currentJob() ?: EmptyCoroutineContext) {
+    fun startBrowserAwait(url: String, title: String?): StrResponse? = startBrowserAwait(url, title, false)
+
+    fun startBrowserAwait(url: String, title: String?, refetchAfterSuccess: Boolean): StrResponse? {
+        val interaction = loginInteraction ?: return null
+        val result = runBlocking(EngineJsHttp.currentJob() ?: EmptyCoroutineContext) {
             interaction.openBrowser(url, title.orEmpty())
-        } ?: ""
+        } ?: return null
+        if (refetchAfterSuccess && result.finalUrl.isNotBlank()) {
+            return http?.fetch(result.finalUrl)?.also { interaction.onHttpStatus(it.status) } ?: StrResponse.empty()
+        }
+        return result
     }
 
     fun getStrResponse(): StrResponse = loginRetry?.invoke() ?: StrResponse.empty()

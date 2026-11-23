@@ -29,6 +29,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.material.edgeStroke
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -108,8 +109,7 @@ fun AppSnackbar(
             shape = shape,
             blurRadius = SNACKBAR_GLASS_BLUR_RADIUS,
             colors = colors,
-            highlight = smallGlassHighlight(dark = container.luminance() < 0.5f),
-        )
+        ).edgeStroke(shape, smallGlassStroke(dark = container.luminance() < 0.5f))
     } else {
         Modifier
     }

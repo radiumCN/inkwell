@@ -1,5 +1,6 @@
 package com.radium.inkwell.data.repo
 
+import com.radium.inkwell.data.prefs.FeedbackReceipt
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -34,6 +35,51 @@ class FeedbackRepositoryTest {
 
     @AfterTest
     fun tearDown() = server.shutdown()
+
+    @Test
+    fun `反馈进度和讨论经中转读取 旧收据也无需回复凭证`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"state":"closed","state_reason":"not_planned","comments":[{"id":5000000000,"body":"开发者回复","user":{"login":"maintainer"}}],"next_cursor":"cursor+page="}""",
+        ))
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试")
+        val discussion = requireNotNull(repo.discussion(receipt))
+        assertEquals(FeedbackIssueStatus.NOT_PLANNED, discussion.status)
+        assertEquals("开发者回复", discussion.comments.single().message)
+        assertEquals("maintainer", discussion.comments.single().authorLabel)
+        assertEquals(5000000000L, discussion.comments.single().id)
+        val request = server.takeRequest()
+        assertEquals("/api/v1/feedback/123?repo=radiumCN%2Finkwell", request.path)
+        assertNull(request.getHeader("Authorization"))
+
+        server.enqueue(MockResponse().setBody("""{"state":"closed","comments":[]}"""))
+        assertNull(requireNotNull(repo.discussion(receipt, discussion.nextCursor)).nextCursor)
+        assertEquals("/api/v1/feedback/123?repo=radiumCN%2Finkwell&after=cursor%2Bpage%3D", server.takeRequest().path)
+    }
+
+    @Test
+    fun `反馈进度忽略非 GitHub 地址和编号不匹配的收据`() = runBlocking {
+        assertNull(repo.discussion(FeedbackReceipt(123, "https://example.com/owner/project/issues/123", "测试")))
+        assertNull(repo.discussion(FeedbackReceipt(123, "https://github.com/owner/project/issues/456", "测试")))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `应用回复只把凭证发送给反馈中转服务`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody(
+            """{"id":42,"body":"**反馈提交者（来自 Inkwell）**\n\n已验证","user":{"login":"relay"}}""",
+        ))
+        val receipt = FeedbackReceipt(123, "https://github.com/radiumCN/inkwell/issues/123", "测试", "private-token")
+        assertNull(repo.reply(receipt.copy(replyToken = null), "已验证"))
+        val reply = requireNotNull(repo.reply(receipt, "已验证"))
+        assertEquals(42L, reply.id)
+        assertEquals("已验证", reply.message)
+        assertEquals("反馈提交者", reply.authorLabel)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/feedback/123/comments", request.path)
+        assertEquals("Bearer private-token", request.getHeader("Authorization"))
+        assertEquals("已验证", (Json.parseToJsonElement(request.body.readUtf8()) as JsonObject)["body"]?.jsonPrimitive?.content)
+    }
 
     @Test
     fun `201 返回 issue 号与地址`() = runBlocking {
@@ -98,6 +144,28 @@ class FeedbackRepositoryTest {
             assertTrue("test-archive-marker" in body)
         } finally {
             logs.delete()
+        }
+    }
+
+    @Test
+    fun `附件单独使用 multipart 无需附带日志`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(201).setBody("""{"issue":1,"url":"u"}"""))
+        val files = File.createTempFile("feedback-attachments-test", ".zip")
+        try {
+            files.writeText("attachments-marker")
+            assertEquals(
+                FeedbackResult.Success(1, "u"),
+                repo.submit(content = "正文", requestId = "stable-submission-id", attachments = files),
+            )
+            val req = server.takeRequest()
+            assertTrue(req.getHeader("Content-Type")!!.startsWith("multipart/form-data;"))
+            val body = req.body.readUtf8()
+            assertTrue("name=\"payload\"" in body)
+            assertTrue("name=\"attachments\"; filename=\"attachments.zip\"" in body)
+            assertTrue("attachments-marker" in body)
+            assertTrue("name=\"logs\"" !in body)
+        } finally {
+            files.delete()
         }
     }
 

@@ -37,6 +37,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import com.radium.inkwell.reader.api.FlipAnimation
@@ -140,7 +141,7 @@ fun PageFlipContainer(
     val touchY = remember { mutableFloatStateOf(0f) }
     var downX by remember { mutableFloatStateOf(0f) }
     var cornerBottom by remember { mutableStateOf(true) }
-    // 中间横划（揪整页）vs 从角起手（揪角）。前者把触点 Y 钉在页边卷出竖直圆柱
+    // 钉 Y（揪整页，卷出竖直圆柱：中间横划、所有后翻）vs 前翻从上下三分之一起手（揪角）。见 curlGrip
     var flatSwipe by remember { mutableStateOf(false) }
     var direction by remember { mutableStateOf<FlipDirection?>(null) }
     var lastCommittedDirection by remember { mutableStateOf<FlipDirection?>(null) }
@@ -378,6 +379,12 @@ fun PageFlipContainer(
                     var dragDir: FlipDirection? = null
                     var followedFlipId: Int? = null
                     fun isFollowing() = followedFlipId == flipId && direction != null && !settling
+                    fun traceSwipe(dir: FlipDirection, velocityX: Float, elapsed: Long) {
+                        val swipe = ReaderTrace.Swipe(
+                            down.position.round(), last.position.round(), size, elapsed, velocityX.toInt(),
+                        )
+                        traceLatest.value(ReaderTrace(ReaderTrace.Action.SWIPE_RELEASE, dir, followedFlipId, swipe = swipe))
+                    }
                     var cancelled = false
                     // 快甩时位移经常整段落在抬手那一帧。必须先判 slop 再看 pressed ——
                     // 先因 UP 跳出的话，offset 几乎是 0，松手当回弹，中间还会被当成开菜单。
@@ -420,17 +427,11 @@ fun PageFlipContainer(
                                 // NONE 分支提前 return、永不复位 direction，此后点击与拖拽翻页全被挡死。
                                 if (flippable && effectiveAnim != FlipAnimation.NONE) {
                                     val h = size.height.toFloat()
-                                    // 卷角在手势开始时锁定，拖拽中不再改变（避免翻页中途跳变）。
-                                    // 后翻一律用底角：从上半屏往回翻若按触点选顶角，会卷出很别扭的对角。
-                                    cornerBottom = dir == FlipDirection.BACKWARD || down.position.y > h / 2f
-                                    // 从屏幕**中间那一带**起手 = 想翻整页，不是揪角。这时把触点 Y 钉到卷角所在的
-                                    // 页边（不跟手指的 Y），折痕于是接近竖直、页面绕竖轴卷过去 —— 真书翻页的样子。
-                                    // 只有从上/下三分之一起手才让 Y 跟手，卷出斜的揪角效果。
-                                    //
-                                    // 从前一律跟手，中间横划就卷出一条贯穿全页的大斜折（"天差地别"那张图）。
-                                    // 当年试过钉边但崩了，根因是退化处理会把控制点塌回卷角 —— 那个已在
-                                    // CurlRenderer 用 ÷0.1 修好，这里才敢钉。
-                                    flatSwipe = down.position.y > h / 3f && down.position.y < h * 2 / 3f
+                                    // 卷角与触点 Y 在手势开始时锁定：后翻一律右下角、一律钉 Y；
+                                    // 前翻中间那一带钉 Y、上下三分之一揪角。两条互相牵连，规则与来由见 curlGrip
+                                    val grip = curlGrip(dir, down.position.y, h)
+                                    cornerBottom = grip.cornerBottom
+                                    flatSwipe = grip.pinTouchY
                                     touchY.floatValue = if (flatSwipe) {
                                         if (cornerBottom) h else 0f
                                     } else {
@@ -451,7 +452,7 @@ fun PageFlipContainer(
                                 val width = size.width.toFloat()
                                 val dir = dragDir
                                 // 拖拽路径直写状态，不经协程（每事件 launch 会造成输入延迟与分配抖动）。
-                                // 中间横划时 Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
+                                // 钉 Y 时（中间横划、所有后翻）Y 保持钉在页边，不跟手指上下漂 —— 否则折痕会随手抖来抖去
                                 touchY.floatValue = if (flatSwipe) {
                                     if (cornerBottom) size.height.toFloat() else 0f
                                 } else {
@@ -498,12 +499,13 @@ fun PageFlipContainer(
                     if (dragDir == null) {
                         val dx = last.position.x - down.position.x
                         val dy = last.position.y - down.position.y
+                        val velocity = tracker.calculateVelocity().x
                         val action = classifyReleaseBeforeSlop(
-                            dx, dy, tracker.calculateVelocity().x, flipSlopPx, FLIP_COMMIT_VELOCITY_PX,
+                            dx, dy, velocity, flipSlopPx, FLIP_COMMIT_VELOCITY_PX,
                         )
                         when (action) {
                             is FlipReleaseBeforeSlop.Flick -> {
-                                trace(ReaderTrace.Action.SWIPE_RELEASE, action.direction, id = null)
+                                traceSwipe(action.direction, velocity, (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L))
                                 programmaticFlip(action.direction, "next_flick")
                             }
                             FlipReleaseBeforeSlop.Tap -> {
@@ -536,7 +538,9 @@ fun PageFlipContainer(
                         return@awaitEachGesture
                     }
                     val dir = dragDir
-                    trace(ReaderTrace.Action.SWIPE_RELEASE, dir, id = followedFlipId)
+                    val velocity = tracker.calculateVelocity().x
+                    val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
+                    traceSwipe(dir, velocity, elapsed)
                     if (followedFlipId != null && !isFollowing()) return@awaitEachGesture
                     val flippable = canFlipLatest(dir)
                     val width = size.width.toFloat()
@@ -551,8 +555,6 @@ fun PageFlipContainer(
                         commitFlip(dir, if (animationsEnabled) "animation_none" else "system_animations_disabled")
                         return@awaitEachGesture
                     }
-                    val velocity = tracker.calculateVelocity().x
-                    val elapsed = (last.uptimeMillis - down.uptimeMillis).coerceAtLeast(0L)
                     val displacement = seedFlipOffset(last.position.x - down.position.x, dir, width)
                     val commit = shouldCommitHorizontalFlip(displacement, velocity, width, dir, elapsed)
                     if (isFollowing()) {
@@ -587,6 +589,7 @@ fun PageFlipContainer(
                 downX = downX,
                 touchY = touchY,
                 cornerBottom = cornerBottom,
+                pinTouchY = flatSwipe,
                 size = size, density = density,
                 flipId = flipId, onTrace = { traceLatest.value(it) },
             )
@@ -683,6 +686,7 @@ private fun CurlLayer(
     downX: Float,
     touchY: MutableFloatState,
     cornerBottom: Boolean,
+    pinTouchY: Boolean,
     size: IntSize,
     density: androidx.compose.ui.unit.Density,
     flipId: Int,
@@ -754,6 +758,25 @@ private fun CurlLayer(
     }
     val frontPage = if (direction == FlipDirection.FORWARD) current else prev
     val underPage = if (direction == FlipDirection.FORWARD) next else current
+    val grip = CurlGrip(cornerBottom, pinTouchY)
+    // 连翻可在上一页提交的同一帧启动，但 ViewModel 的相邻页还未跟上。
+    // 本次先显示整页，避免卷开空白页，也避免相邻页到齐后从动画中途突然出现。
+    val missingPageReason = when {
+        frontPage == null -> "front_page_unavailable"
+        underPage == null -> "under_page_unavailable"
+        else -> null
+    }
+    val pendingPage = remember(flipId) { missingPageReason } ?: missingPageReason
+    if (pendingPage != null) {
+        LaunchedEffect(flipId, pendingPage) {
+            onTrace(
+                ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId,
+                    ReaderTrace.Render.CURL_PENDING_PAGE, pendingPage, curlGrip = grip),
+            )
+        }
+        PageCanvas(current, layout, theme, selection = selection)
+        return
+    }
     // 连翻后可直接找上一轮相同内容的图，不必等后台把位图挪到新的槽位。
     val matching = bitmaps?.takeIf { it.matchesStyle(request) }
     val frontBitmap = frontPage?.let { matching?.bitmapFor(it.curlKey()) }
@@ -766,22 +789,19 @@ private fun CurlLayer(
     val render = when {
         liveFront != null -> ReaderTrace.Render.CURL_LIVE_FRONT
         front == null -> ReaderTrace.Render.SLIDE
-        under != null -> ReaderTrace.Render.CURL_BITMAPS
-        underPage != null -> ReaderTrace.Render.CURL_LIVE_UNDER
-        else -> ReaderTrace.Render.CURL_PAPER_UNDER
+        under == null -> ReaderTrace.Render.CURL_LIVE_UNDER
+        else -> ReaderTrace.Render.CURL_BITMAPS
     }
     val reason = when (render) {
         ReaderTrace.Render.SLIDE, ReaderTrace.Render.CURL_LIVE_FRONT -> when {
-            frontPage == null -> "front_page_unavailable"
             startedWithFront -> "front_bitmap_invalidated"
             else -> "front_bitmap_not_ready_at_start"
         }
         ReaderTrace.Render.CURL_LIVE_UNDER -> "under_bitmap_not_ready"
-        ReaderTrace.Render.CURL_PAPER_UNDER -> "under_page_unavailable"
         else -> null
     }
     LaunchedEffect(flipId, render, reason) {
-        onTrace(ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId, render, reason))
+        onTrace(ReaderTrace(ReaderTrace.Action.RENDER_SELECTED, direction, flipId, render, reason, curlGrip = grip))
     }
     if (render == ReaderTrace.Render.SLIDE) {
         SlideLayers(
@@ -810,6 +830,7 @@ private fun CurlLayer(
                     paperColor = theme.background.toInt(),
                     drawLiveUnder = drawLiveUnder,
                     drawLiveFront = drawLiveFront,
+                    back = frontBitmap,
                 )
             }
         }

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -102,9 +103,10 @@ fun AppBottomSheet(
             show = show,
             modifier = modifier,
             title = title,
+            cornerRadius = AppShapes.radiusPopup,
             startAction = startAction?.let { action -> { scope.action() } },
             endAction = endAction?.let { action -> { scope.action() } },
-            backgroundColor = backgroundColor,
+            backgroundColor = if (enableWindowDim) popupPanelColor(backgroundColor) else backgroundColor,
             enableWindowDim = enableWindowDim,
             allowDismiss = allowDismiss,
             dragHandleColor = dragHandleColor,

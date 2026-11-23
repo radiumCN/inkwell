@@ -120,6 +120,13 @@ fun SourceDetailScreen(
                         } else {
                             SourceLoginFields(form, state.loginBusy, viewModel::updateLoginField, viewModel::submitLogin)
                         }
+                        state.loginDiagnostic?.let { diagnostic ->
+                            Text(
+                                diagnostic,
+                                style = MiuixTheme.textStyles.footnote1,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
                     }
                 }
             }

@@ -9,6 +9,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -59,17 +60,13 @@ object Motion {
      * 进阅读器专用：从被点那本书的位置放大展开（NavDisplay 里 scaleIn，原点定在书上）。
      *
      * 这条**刻意不走** [AppMotionScheme]：时长要和 [READER_SPLASH_DELAY_MS] 对齐（封面恰好在展开
-     * 收尾时才可能出现，不跟展开抢戏），而 spring 给不出确定时长。曲线用 M3「强调减速」：起步更快、
-     * 收尾更缓，落定那一下像被接住。200ms 比常规页转场更短 —— 进书首帧排版本就抢手
+     * 收尾时才可能出现，不跟展开抢戏），而 spring 给不出确定时长。用减速曲线平滑展开，
+     * 给起步阶段留出足够的位移。200ms 比常规页转场更短 —— 进书首帧排版本就抢手
      * （见 InkwellNavDisplay 的转场注释 / ReaderViewModel.PREFETCH_LEAD_IN_MS），转场只做点到为止的
      * 空间暗示。返回走配对的 [readerExitSpec]。
      */
     const val READER_ENTER_MS = 200
-    /** M3「强调减速」：起步快、收尾缓，落定像被接住。阅读器入场用 */
-    val EmphasizedDecelerate: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-    val ReaderEnterEasing: Easing = EmphasizedDecelerate
-
-    fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = ReaderEnterEasing)
+    fun <T> readerEnterSpec(): FiniteAnimationSpec<T> = tween(READER_ENTER_MS, easing = LinearOutSlowInEasing)
 
     /**
      * 阅读页退场。**必须比入场快**，曲线也要和入场配成一对。
@@ -78,8 +75,7 @@ object Motion {
      * 「退场比入场快、约取 65%」，也违反 M3 motion 的同一条；而且入场用 M3 强调减速、退场用
      * 通用加速，两条曲线根本不是一套。
      *
-     * 130ms ≈ 200 的 65%。曲线取 M3「强调加速」（emphasized accelerate）：慢起快走，
-     * 与入场的强调减速（快进慢停）正好互为镜像 —— 进来时被稳稳接住，离开时干脆抽走。
+     * 130ms ≈ 200 的 65%。退场曲线用 M3「强调加速」，缩回书位时由慢到快。
      */
     const val READER_EXIT_MS = 130
     val ReaderExitEasing: Easing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)

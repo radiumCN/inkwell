@@ -135,7 +135,6 @@ import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.icon.extended.SearchDevice
 import top.yukonga.miuix.kmp.icon.extended.Notes
-import androidx.compose.foundation.LocalIndication
 import com.radium.inkwell.ui.components.sinkOnPress
 /**
  * 把封面在窗口里的位置换算成整屏的比例坐标，作为进书放大动画的原点 ——
@@ -449,11 +448,18 @@ fun BookshelfScreen(
      * 收起时只清自己那份：快速长按另一本书时，上一本的菜单收起不该把新目标也清掉。
      */
     val bookMenu: @Composable (BookEntity) -> Unit = { book ->
+        var openDetailAfterDismiss by remember(book.id) { mutableStateOf(false) }
         AppDropdownMenu(
             expanded = actionTarget?.id == book.id && book.stillVisible(),
             onDismissRequest = { if (actionTarget?.id == book.id) actionTarget = null },
+            onDismissFinished = {
+                if (openDetailAfterDismiss) {
+                    openDetailAfterDismiss = false
+                    if (actionTarget == null && book.stillVisible()) onOpenDetail(book.id)
+                }
+            },
             items = buildList {
-                add(AppMenuItem("书籍详情", onClick = { onOpenDetail(book.id) }))
+                add(AppMenuItem("书籍详情", onClick = { openDetailAfterDismiss = true }))
                 add(
                     AppMenuItem(
                         "设置分组",
@@ -1188,12 +1194,7 @@ private fun BookCard(
     // 按下整本书（封面连书名）微微沉下去，HyperOS 桌面图标那种手感；见 sinkOnPress
     val press = remember { MutableInteractionSource() }
     Column(
-        // **不要在这里 clip**。从前是 `clip(shapes.medium)` 加在整个 Column 上，
-        // 而 Column 装的是「封面 + 标题」—— 标题正好贴着底边，左下角那道 12dp 的圆弧
-        // 就直接啃掉了书名第一个字的一角。
-        //
-        // 它当初是为了约束涟漪。但涟漪本来就该铺满可点区域（整张卡片），
-        // 方角涟漪在网格项上完全正常；封面自己的圆角由 BookCover 负责。
+        // 圆角由 BookCover 裁剪，整列裁剪会切到贴近底边的书名。
         modifier
             .sinkOnPress(press)
             .semantics(mergeDescendants = true) {
@@ -1206,7 +1207,7 @@ private fun BookCard(
             }
             .combinedClickable(
                 interactionSource = press,
-                indication = LocalIndication.current,
+                indication = null,
                 // 平时整张卡就是一个按钮（点开读、长按出菜单）；多选时角色由上面的 Checkbox 给
                 role = if (selectionMode) null else Role.Button,
                 onClick = { onClick(cover.boundsInWindow()) },

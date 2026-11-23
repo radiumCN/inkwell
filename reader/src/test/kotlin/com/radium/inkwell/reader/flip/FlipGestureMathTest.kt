@@ -167,4 +167,34 @@ class FlipGestureMathTest {
         )
         assertEquals(FlipReleaseBeforeSlop.Ignore, action)
     }
+
+    @Test
+    fun `后翻从左上起手：右下角且钉 Y，不卷斜角`() {
+        // 0.6.1 反馈的录屏：1220×2656 的屏，落在 y=811（上三分之一）往回划。
+        // 从前 Y 跟手，卷角被防撕裂钳制拽到右下、离手指一千多像素
+        assertEquals(CurlGrip(cornerBottom = true, pinTouchY = true), curlGrip(FlipDirection.BACKWARD, 811f, 2656f))
+        assertEquals(CurlGrip(cornerBottom = true, pinTouchY = true), curlGrip(FlipDirection.BACKWARD, 10f, 2656f))
+    }
+
+    @Test
+    fun `后翻无论从哪一带起手都钉 Y，和点击、快甩往回翻同一个竖直圆柱`() {
+        for (y in listOf(1300f, 2400f, 2650f)) {
+            assertEquals(CurlGrip(cornerBottom = true, pinTouchY = true), curlGrip(FlipDirection.BACKWARD, y, 2656f))
+        }
+    }
+
+    @Test
+    fun `前翻上下三分之一揪角、Y 跟手，卷角挑近的那个`() {
+        assertEquals(CurlGrip(cornerBottom = false, pinTouchY = false), curlGrip(FlipDirection.FORWARD, 300f, 2400f))
+        assertEquals(CurlGrip(cornerBottom = true, pinTouchY = false), curlGrip(FlipDirection.FORWARD, 2100f, 2400f))
+    }
+
+    @Test
+    fun `前翻中间那一带钉 Y，卷角按上下半屏挑`() {
+        assertEquals(CurlGrip(cornerBottom = false, pinTouchY = true), curlGrip(FlipDirection.FORWARD, 1000f, 2400f))
+        assertEquals(CurlGrip(cornerBottom = true, pinTouchY = true), curlGrip(FlipDirection.FORWARD, 1400f, 2400f))
+        // 分界线本身归上下三分之一（开区间），和从前的写法一致
+        assertEquals(false, curlGrip(FlipDirection.FORWARD, 800f, 2400f).pinTouchY)
+        assertEquals(false, curlGrip(FlipDirection.FORWARD, 1600f, 2400f).pinTouchY)
+    }
 }

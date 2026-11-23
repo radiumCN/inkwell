@@ -143,6 +143,12 @@ data object WebDavSettingsRoute : NavKey
 data object FeedbackRoute : NavKey
 
 @Serializable
+data object FeedbackHistoryRoute : NavKey
+
+@Serializable
+data class FeedbackDiscussionRoute(val issue: Int, val url: String, val title: String) : NavKey
+
+@Serializable
 data object DisclaimerRoute : NavKey
 
 @Serializable
@@ -173,6 +179,8 @@ internal fun NavKey?.diagnosticName(): String = when (this) {
     is ThemeSettingsRoute -> "theme_settings"
     is WebDavSettingsRoute -> "webdav"
     is FeedbackRoute -> "feedback"
+    is FeedbackHistoryRoute -> "feedback_history"
+    is FeedbackDiscussionRoute -> "feedback_discussion"
     is DisclaimerRoute -> "disclaimer"
     is DeveloperSettingsRoute -> "developer_settings"
     null -> "none"
