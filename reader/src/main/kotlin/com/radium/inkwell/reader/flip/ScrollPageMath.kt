@@ -79,6 +79,38 @@ fun scrollContentTop(layout: LayoutSpec): Float =
 fun scrollContentBottom(layout: LayoutSpec): Float =
     layout.viewportHeightPx - layout.marginBottomPx - layout.footerHeightPx
 
+internal data class ScrollPagePlacement(
+    val page: RenderablePage,
+    val offsetY: Float,
+    val height: Float,
+)
+
+internal fun scrollPagePlacements(
+    current: RenderablePage?,
+    prev: RenderablePage?,
+    next: RenderablePage?,
+): List<ScrollPagePlacement> {
+    if (current == null) return emptyList()
+    val currentHeight = scrollPageHeight(current).coerceAtLeast(1f)
+    val prevHeight = scrollPageHeight(prev)
+    return buildList {
+        add(ScrollPagePlacement(current, 0f, currentHeight))
+        if (next != null) add(ScrollPagePlacement(next, currentHeight, scrollPageHeight(next)))
+        if (prev != null) add(ScrollPagePlacement(prev, -prevHeight, prevHeight))
+    }
+}
+
+internal fun List<ScrollPagePlacement>.pageAt(
+    y: Float,
+    layout: LayoutSpec,
+    scrollOffset: Float,
+): ScrollPagePlacement? {
+    val contentTop = scrollContentTop(layout)
+    if (y < contentTop || y >= scrollContentBottom(layout)) return null
+    val relativeY = y - contentTop - scrollOffset
+    return firstOrNull { relativeY >= it.offsetY && relativeY < it.offsetY + it.height }
+}
+
 /** 本页正文实际高度（最后一项底 + 页尾段距），不是视口高 —— 按视口叠会在页底留一道空白 */
 fun pageContentHeight(page: RenderablePage?): Float = scrollPageHeight(page)
 

@@ -1293,14 +1293,14 @@ class ReaderViewModel(
     }
 
     /**
-     * 当前章各段的正文，下标同排版元素（= `TextSelection.elementIndex`）；章标题、图片、空段是空串。
+     * 指定章各段的正文，下标同排版元素（= `TextSelection.elementIndex`）；章标题、图片、空段是空串。
      * 选字「替换」弹窗拿它数「本章 N 处」、截预览（[replacePreview]）。
      *
      * 读的是分页缓存里的测量结果 —— 就是屏幕上那一份字（已按现有规则净化过），不另读章节文件。
      * 章标题（第 0 个元素）不算：净化只跑正文里的段落和小标题，标题里命中了也换不到。还没排好时是空表。
      */
-    fun currentChapterParagraphs(): List<String> {
-        val result = paginated[_state.value.chapterIndex] ?: return emptyList()
+    fun chapterParagraphs(chapterIndex: Int): List<String> {
+        val result = paginated[chapterIndex] ?: return emptyList()
         val measured = result.measured
         val last = measured.keys.maxOrNull() ?: return emptyList()
         // 没取到的图那一行提示（「图片没加载出来 · 点按重试」）也量在表里，它不是正文，别让净化拿它去匹配

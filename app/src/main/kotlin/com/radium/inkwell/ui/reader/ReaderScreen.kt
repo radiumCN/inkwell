@@ -67,6 +67,7 @@ import com.radium.inkwell.ui.components.scrimEnter
 import com.radium.inkwell.ui.components.scrimExit
 import com.radium.inkwell.reader.api.FlipAnimation
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -93,9 +94,12 @@ import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.flip.FlipController
 import com.radium.inkwell.reader.flip.PageFlipContainer
 import com.radium.inkwell.reader.flip.ScrollPageReader
+import com.radium.inkwell.reader.flip.scrollContentBottom
+import com.radium.inkwell.reader.flip.scrollContentTop
 import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -117,6 +121,8 @@ private const val READER_TOAST_MS = 1_800L
  * 退场走 fast* 档的 spring，几百毫秒内就落定，这里留足余量。
  */
 private const val PAGE_GLASS_LINGER_MS = 600L
+
+private data class ScrollSelectionTarget(val page: PageSpec, val offsetY: Float)
 
 @Composable
 fun ReaderScreen(
@@ -247,16 +253,43 @@ fun ReaderScreen(
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
     var anchor by remember { mutableStateOf<TextSelection?>(null) }
-    LaunchedEffect(pageUi.page?.spec, spec, session.textSelectionEnabled, overlay.menuVisible) {
+    var scrollSelectionTarget by remember { mutableStateOf<ScrollSelectionTarget?>(null) }
+    fun clearSelection() {
         selection = null
         anchor = null
+        scrollSelectionTarget = null
     }
-    val selectionHandles = remember(pageUi.page, spec, selection) {
-        val page = pageUi.page
+    LaunchedEffect(
+        pageUi.page?.spec, spec, session.settings.flipAnimation, session.textSelectionEnabled, overlay.menuVisible,
+    ) {
+        clearSelection()
+    }
+    val scrollTarget = scrollSelectionTarget
+    val scrollPageSpec = scrollTarget?.page
+    val currentPage = pageUi.page
+    val previousPage = pageUi.prevPage
+    val nextPage = pageUi.nextPage
+    val selectionPage = if (scrollPageSpec == null) currentPage else when (scrollPageSpec) {
+        currentPage?.spec -> currentPage
+        previousPage?.spec -> previousPage
+        nextPage?.spec -> nextPage
+        else -> null
+    }
+    LaunchedEffect(scrollPageSpec, selectionPage?.spec) {
+        if (scrollPageSpec != null && selectionPage == null) clearSelection()
+    }
+    val selectionHandles = remember(selectionPage, spec, selection, scrollTarget?.offsetY) {
         val selected = selection
-        if (page == null || spec == null || selected == null) emptyMap()
+        if (selectionPage == null || spec == null || selected == null) emptyMap()
         else SelectionEnd.entries.mapNotNull { edge ->
-            page.selectionHandlePosition(selected, edge, spec)?.let { edge to it }
+            val position = selectionPage.selectionHandlePosition(selected, edge, spec) ?: return@mapNotNull null
+            if (scrollTarget == null) return@mapNotNull edge to position
+            val shifted = position.anchor + Offset(0f, scrollTarget.offsetY)
+            val lineCenterY = position.lineCenterY + scrollTarget.offsetY
+            val lineTop = lineCenterY - (shifted.y - lineCenterY)
+            val contentBottom = scrollContentBottom(spec)
+            if (shifted.y <= scrollContentTop(spec) || lineTop >= contentBottom) return@mapNotNull null
+            edge to position.copy(anchor = Offset(shifted.x, minOf(shifted.y, contentBottom)), lineCenterY = lineCenterY)
         }.toMap()
     }
     val selectionHandlesLatest = rememberUpdatedState(selectionHandles)
@@ -319,7 +352,7 @@ fun ReaderScreen(
             (!session.inShelf && !addShelfPrompt),
     ) {
         when {
-            selection != null -> { selection = null; anchor = null }
+            selection != null -> clearSelection()
             overlay.sourceCandidates != null -> viewModel.dismissSourcePanel()
             overlay.menuVisible -> viewModel.toggleMenu()
             else -> addShelfPrompt = true
@@ -535,10 +568,31 @@ fun ReaderScreen(
                 }
                 // 滚动：与仿真同一套分页。越过页高就 flip，标题跟当前页走。
                 session.settings.flipAnimation == FlipAnimation.SCROLL -> {
-                    Box(Modifier.fillMaxSize()) {
+                    val layoutLatest = rememberUpdatedState(layout)
+                    val selectionPageLatest = rememberUpdatedState(selectionPage)
+                    Box(
+                        Modifier.fillMaxSize().dragSelectionHandles(selectionHandlesLatest) { edge, position ->
+                            val selected = selection ?: return@dragSelectionHandles
+                            val target = scrollSelectionTarget ?: return@dragSelectionHandles
+                            val page = selectionPageLatest.value ?: return@dragSelectionHandles
+                            val activeLayout = layoutLatest.value
+                            val y = position.y.coerceIn(scrollContentTop(activeLayout), scrollContentBottom(activeLayout))
+                            selection = page.moveSelectionEnd(selected, edge, position.x, y - target.offsetY, activeLayout)
+                        },
+                    ) {
                         ScrollPageReader(
                             onTrace = viewModel::traceInteraction,
-                            selection = speechSelection,
+                            highlight = speechSelection,
+                            selectedPage = scrollPageSpec,
+                            textSelection = selection,
+                            onTextSelection = if (!session.textSelectionEnabled) null else { page, offsetY, selected ->
+                                if (selection == null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    scrollSelectionTarget = ScrollSelectionTarget(page, offsetY)
+                                }
+                                selection = selected
+                            },
+                            onClearSelection = ::clearSelection,
                             current = pageUi.page,
                             prev = pageUi.prevPage,
                             next = pageUi.nextPage,
@@ -560,6 +614,7 @@ fun ReaderScreen(
                             },
                         )
                         PageInfoBar(pageUi, session, layout)
+                        SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
 
@@ -621,7 +676,7 @@ fun ReaderScreen(
                             // 选中状态下点空白处取消。翻页手势此时已关掉，不会有人抢这个 tap
                             .pointerInput(selection != null) {
                                 if (selection == null) return@pointerInput
-                                detectTapGestures { selection = null; anchor = null }
+                                detectTapGestures { clearSelection() }
                             }
                     ) {
                         PageFlipContainer(
@@ -804,7 +859,7 @@ fun ReaderScreen(
                 canPurify = sel.isSingleParagraph,
                 onStepBoundary = step@{ edge, forward ->
                     val active = selection ?: return@step false
-                    val updated = pageUi.page?.stepSelectionEnd(active, edge, forward) ?: return@step false
+                    val updated = selectionPage?.stepSelectionEnd(active, edge, forward) ?: return@step false
                     if (updated == active) return@step false
                     selection = updated
                     true
@@ -812,22 +867,22 @@ fun ReaderScreen(
                 onCopy = {
                     scope.launch {
                         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("selection", sel.text)))
-                        selection = null
-                        anchor = null
+                        clearSelection()
                     }
                 },
                 onPurify = {
                     viewModel.purifySelection(sel.text)
-                    selection = null; anchor = null
+                    clearSelection()
                 },
                 onReplace = { find, to ->
                     viewModel.purifySelection(find, to)
-                    selection = null; anchor = null
+                    clearSelection()
                 },
                 // 原文每改一个字算一遍：本章各段从分页缓存现取（一串引用），数一遍是毫秒级。
                 // 锚点是选区所在，预览优先给用户选的那一处
                 replacePreview = { find ->
-                    replacePreview(viewModel.currentChapterParagraphs(), find, anchor = sel.elementIndex to sel.start)
+                    val chapterIndex = selectionPage?.spec?.chapterIndex ?: pageUi.chapterIndex
+                    replacePreview(viewModel.chapterParagraphs(chapterIndex), find, anchor = sel.elementIndex to sel.start)
                 },
                 modifier = toolbarPosition,
                 pageBackdrop = pageBackdrop,

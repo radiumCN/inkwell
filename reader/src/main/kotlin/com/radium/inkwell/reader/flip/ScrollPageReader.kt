@@ -1,9 +1,12 @@
 package com.radium.inkwell.reader.flip
 
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,10 +23,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -32,10 +35,13 @@ import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
+import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.reader.render.drawPageItems
+import com.radium.inkwell.reader.render.extendSelection
 import com.radium.inkwell.reader.render.imageAt
+import com.radium.inkwell.reader.render.selectWordAt
 
 /**
  * 滚动阅读：与仿真/覆盖同一套分页，用 [pageOffset] 在 prev/cur/next 三页上滑。
@@ -65,7 +71,12 @@ fun ScrollPageReader(
     /** 长按一张图（看大图）。null = 不接长按 */
     onImageLongPress: ((PageItem.ImageBox) -> Unit)? = null,
     onTrace: (ReaderTrace) -> Unit = {},
-    selection: TextSelection? = null,
+    highlight: TextSelection? = null,
+    selectedPage: PageSpec? = null,
+    textSelection: TextSelection? = null,
+    /** 回传选区所在的页、该页相对普通翻页坐标的纵向偏移、选区。 */
+    onTextSelection: ((PageSpec, Float, TextSelection) -> Unit)? = null,
+    onClearSelection: () -> Unit = {},
 ) {
     val traceLatest = rememberUpdatedState(onTrace)
     fun trace(action: ReaderTrace.Action, dir: FlipDirection? = null) {
@@ -94,6 +105,12 @@ fun ScrollPageReader(
     val onCenterTapLatest = rememberUpdatedState(onCenterTap)
     val onImageTapLatest = rememberUpdatedState(onImageTap)
     val onImageLongPressLatest = rememberUpdatedState(onImageLongPress)
+    val onTextSelectionLatest = rememberUpdatedState(onTextSelection)
+    val onClearSelectionLatest = rememberUpdatedState(onClearSelection)
+    val selectionActive = textSelection != null
+    val selectionActiveLatest = rememberUpdatedState(selectionActive)
+    val placements = remember(current, prev, next) { scrollPagePlacements(current, prev, next) }
+    val placementsLatest = rememberUpdatedState(placements)
 
     val leftover = remember { mutableFloatStateOf(0f) }
     var leftoverChain by remember { mutableIntStateOf(0) }
@@ -152,6 +169,7 @@ fun ScrollPageReader(
     }
 
     val scrollableState = rememberScrollableState { composeDelta ->
+        if (selectionActiveLatest.value) return@rememberScrollableState 0f
         // scrollable 默认 reverseDirection=false：正 delta = 手指下滑，与 pageOffset 同号。
         val drag = composeDelta
         // 翻页已经交出去、新页还没进组合：手里的 current / prev / next 和 offset 还是翻之前那一窗的，
@@ -219,23 +237,8 @@ fun ScrollPageReader(
         }
     }
 
-    /** 触点落在三页里哪张图上：三页叠着、跟着 [offset] 挪，和 [ScrollPageLayer] 画的位置算法一致 */
-    fun imageUnder(x: Float, y: Float): PageItem.ImageBox? {
-        val spec = layoutLatest.value
-        val top = scrollContentTop(spec)
-        if (y < top || y > scrollContentBottom(spec)) return null
-        val cur = currentLatest.value ?: return null
-        val curHeight = scrollPageHeight(cur).let { if (it <= 0f) 1f else it }
-        val shift = offset.floatValue
-        return cur.imageAt(x, y, spec, originY = top + shift)
-            ?: nextLatest.value?.imageAt(x, y, spec, originY = top + curHeight + shift)
-            ?: prevLatest.value?.let { p -> p.imageAt(x, y, spec, originY = top - scrollPageHeight(p) + shift) }
-    }
-
     val contentTop = scrollContentTop(layout)
     val contentBottom = scrollContentBottom(layout)
-    val curH = scrollPageHeight(current).let { if (it <= 0f) 1f else it }
-    val prevH = scrollPageHeight(prev).let { if (it <= 0f) 1f else it }
 
     Box(
         modifier
@@ -246,7 +249,7 @@ fun ScrollPageReader(
             .readerPageSemantics(
                 page = current,
                 canFlip = { dir ->
-                    gesturesEnabled && if (dir == FlipDirection.BACKWARD) hasPrev else hasNext
+                    gesturesEnabled && !selectionActive && if (dir == FlipDirection.BACKWARD) hasPrev else hasNext
                 },
                 onFlip = { trace(ReaderTrace.Action.ACCESSIBILITY, it); flipBy(it) },
                 onMenu = { onCenterTapLatest.value() },
@@ -254,20 +257,65 @@ fun ScrollPageReader(
             .scrollable(
                 state = scrollableState,
                 orientation = Orientation.Vertical,
-                enabled = gesturesEnabled,
+                enabled = gesturesEnabled && !selectionActive,
                 // 默认 false：正 delta = 手指下滑，和 pageOffset 同号。verticalScroll 会把这个翻掉，这里别学。
                 reverseDirection = false,
             )
-            .pointerInput(gesturesEnabled, size, clickToFlip, onImageLongPress != null) {
+            .pointerInput(gesturesEnabled, size, clickToFlip, onImageLongPress != null, onTextSelection != null) {
                 if (!gesturesEnabled) return@pointerInput
-                // 不接长按时别挂：挂上了，按久一点再松手就不算点按，开不了菜单
-                val longPress: ((Offset) -> Unit)? = if (onImageLongPressLatest.value == null) null else ({ pos: Offset ->
-                    val hit = imageUnder(pos.x, pos.y)
-                    if (hit != null && !hit.failed) onImageLongPressLatest.value?.invoke(hit)
-                })
-                detectTapGestures(onLongPress = longPress) { pos ->
-                    val image = onImageTapLatest.value?.let { imageUnder(pos.x, pos.y) }
-                    if (image != null && onImageTapLatest.value?.invoke(image) == true) return@detectTapGestures
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    // 超时前由 scrollable 抢走移动手势；长按命中文字后由选区独占后续拖动。
+                    val up = try {
+                        if (!selectionActiveLatest.value &&
+                            (onImageLongPressLatest.value != null || onTextSelectionLatest.value != null)
+                        ) {
+                            withTimeout(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
+                        } else {
+                            waitForUpOrCancellation()
+                        }
+                    } catch (_: PointerEventTimeoutCancellationException) {
+                        val pos = currentEvent.changes.firstOrNull { it.id == down.id && it.pressed }?.position
+                            ?: return@awaitEachGesture
+                        val spec = layoutLatest.value
+                        val scrollOffset = offset.floatValue
+                        val placement = placementsLatest.value.pageAt(pos.y, spec, scrollOffset)
+                            ?: return@awaitEachGesture
+                        val shift = placement.offsetY + scrollOffset
+                        val page = placement.page
+                        val image = page.imageAt(pos.x, pos.y, spec, originY = scrollContentTop(spec) + shift)
+                        val openImage = onImageLongPressLatest.value
+                        if (openImage != null && image != null && !image.failed) {
+                            openImage(image)
+                            drag(down.id) { it.consume() }
+                        } else {
+                            val select = onTextSelectionLatest.value ?: return@awaitEachGesture
+                            val anchor = page.selectWordAt(pos.x, pos.y - shift, spec)
+                                ?.takeUnless { it.isEmpty } ?: return@awaitEachGesture
+                            select(page.spec, shift, anchor)
+                            drag(down.id) { change ->
+                                change.consume()
+                                val y = change.position.y.coerceIn(scrollContentTop(spec), scrollContentBottom(spec))
+                                val extended = page.extendSelection(anchor, change.position.x, y - shift, spec)
+                                onTextSelectionLatest.value?.invoke(page.spec, shift, extended)
+                            }
+                        }
+                        return@awaitEachGesture
+                    } ?: return@awaitEachGesture
+                    up.consume()
+                    if (selectionActiveLatest.value) {
+                        onClearSelectionLatest.value()
+                        return@awaitEachGesture
+                    }
+                    val pos = up.position
+                    val spec = layoutLatest.value
+                    val scrollOffset = offset.floatValue
+                    val placement = placementsLatest.value.pageAt(pos.y, spec, scrollOffset)
+                    val image = placement?.let {
+                        it.page.imageAt(pos.x, pos.y, spec, originY = scrollContentTop(spec) + scrollOffset + it.offsetY)
+                    }
+                    if (image != null && onImageTapLatest.value?.invoke(image) == true) return@awaitEachGesture
                     tapAction(
                         pos.x, pos.y, size.width.toFloat(), size.height.toFloat(),
                         tapZonesLatest.value, enabled = clickToFlipLatest.value,
@@ -290,9 +338,17 @@ fun ScrollPageReader(
                         }
                     },
             ) {
-                ScrollPageLayer(current, layout, theme, baseY = contentTop, offset = offset, selection = selection)
-                ScrollPageLayer(next, layout, theme, baseY = contentTop + curH, offset = offset)
-                ScrollPageLayer(prev, layout, theme, baseY = contentTop - prevH, offset = offset)
+                for (placement in placements) {
+                    val page = placement.page
+                    ScrollPageLayer(
+                        page, layout, theme, baseY = contentTop + placement.offsetY, offset = offset,
+                        selection = when {
+                            page.spec == selectedPage -> textSelection
+                            !selectionActive && page.spec == current.spec -> highlight
+                            else -> null
+                        },
+                    )
+                }
             }
         }
     }
@@ -308,14 +364,13 @@ fun ScrollPageReader(
  */
 @Composable
 private fun ScrollPageLayer(
-    page: RenderablePage?,
+    page: RenderablePage,
     layout: LayoutSpec,
     theme: ReaderTheme,
     baseY: Float,
     offset: FloatState,
     selection: TextSelection? = null,
 ) {
-    if (page == null) return
     Spacer(
         Modifier
             .fillMaxSize()

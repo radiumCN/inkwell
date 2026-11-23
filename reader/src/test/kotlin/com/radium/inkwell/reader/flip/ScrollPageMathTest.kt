@@ -9,8 +9,10 @@ import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.paginate.Paginator
 import com.radium.inkwell.reader.render.RenderablePage
+import com.radium.inkwell.reader.render.selectWordAt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class ScrollPageMathTest {
@@ -256,5 +258,35 @@ class ScrollPageMathTest {
         assertEquals(126f, scrollContentTop(spec))
         assertEquals(1902f, scrollContentBottom(spec))
         assertEquals(spec.contentHeightPx, scrollContentBottom(spec) - scrollContentTop(spec))
+    }
+
+    @Test
+    fun `滚动后长按命中可见页面的词`() {
+        val layout = LayoutSpec(
+            viewportWidthPx = 300, viewportHeightPx = 100,
+            marginLeftPx = 0f, marginTopPx = 0f, marginRightPx = 0f, marginBottomPx = 0f,
+            headerHeightPx = 20f, footerHeightPx = 20f,
+            fontSizePx = 20f, lineHeightPx = 40f, paragraphSpacingPx = 0f,
+        )
+        val paginator = Paginator(FakeTextMeasureFacade())
+        fun page(chapterIndex: Int, word: String): RenderablePage {
+            val result = paginator.paginate(
+                chapterIndex, "", ChapterContent(listOf(ContentElement.Paragraph(word))), layout,
+            )
+            return RenderablePage(result.chapter.pages.single(), result.measured)
+        }
+        val placements = scrollPagePlacements(page(1, "current"), page(0, "previous"), page(2, "next"))
+        fun wordAt(y: Float, scrollOffset: Float): String {
+            val placement = assertNotNull(placements.pageAt(y, layout, scrollOffset))
+            return assertNotNull(
+                placement.page.selectWordAt(25f, y - (placement.offsetY + scrollOffset), layout),
+            ).text
+        }
+
+        assertEquals("previous", wordAt(y = 25f, scrollOffset = 20f))
+        assertEquals("current", wordAt(y = 49f, scrollOffset = 20f))
+        assertEquals("next", wordAt(y = 49f, scrollOffset = -20f))
+        assertNull(placements.pageAt(y = 19f, layout, scrollOffset = 20f))
+        assertNull(placements.pageAt(y = 80f, layout, scrollOffset = 20f))
     }
 }
