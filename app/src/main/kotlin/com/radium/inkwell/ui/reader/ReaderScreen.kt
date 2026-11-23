@@ -5,6 +5,7 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import android.app.Activity
 import android.content.ClipData
 import android.view.WindowManager
+import com.radium.inkwell.MainActivity
 import com.radium.inkwell.util.UsageLog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -106,6 +107,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.graphics.luminance
@@ -124,12 +126,13 @@ private const val PAGE_GLASS_LINGER_MS = 600L
 
 private data class ScrollSelectionTarget(val page: PageSpec, val offsetY: Float)
 
+/** 弹层宿主与正文共用窗口，供阅读设置局部取样。 */
 @Composable
 fun ReaderScreen(
     bookId: String,
     onExit: () -> Unit,
     viewModel: ReaderViewModel,
-) {
+) = Scaffold(Modifier.fillMaxSize(), containerColor = Color.Transparent) {
     val pageUi by viewModel.page.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
     val overlay by viewModel.overlay.collectAsStateWithLifecycle()
@@ -214,6 +217,8 @@ fun ReaderScreen(
         if (viewport.width <= 0 || viewport.height <= 0) null
         else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() })
     }
+    // 快速调字号时让旧页面按旧尺寸显示，等重排完成再一起换正文和排版参数。
+    val layout = pageUi.layout ?: spec
 
     // 导入的字体与预设走同一个注册表；应用级单例，FontFamily 缓存跨章、跨书都有效
     val fontRegistry = koinInject<ReaderFontStore>().registry
@@ -278,17 +283,17 @@ fun ReaderScreen(
     LaunchedEffect(scrollPageSpec, selectionPage?.spec) {
         if (scrollPageSpec != null && selectionPage == null) clearSelection()
     }
-    val selectionHandles = remember(selectionPage, spec, selection, scrollTarget?.offsetY) {
+    val selectionHandles = remember(selectionPage, layout, selection, scrollTarget?.offsetY) {
         val selected = selection
-        if (selectionPage == null || spec == null || selected == null) emptyMap()
+        if (selectionPage == null || layout == null || selected == null) emptyMap()
         else SelectionEnd.entries.mapNotNull { edge ->
-            val position = selectionPage.selectionHandlePosition(selected, edge, spec) ?: return@mapNotNull null
+            val position = selectionPage.selectionHandlePosition(selected, edge, layout) ?: return@mapNotNull null
             if (scrollTarget == null) return@mapNotNull edge to position
             val shifted = position.anchor + Offset(0f, scrollTarget.offsetY)
             val lineCenterY = position.lineCenterY + scrollTarget.offsetY
             val lineTop = lineCenterY - (shifted.y - lineCenterY)
-            val contentBottom = scrollContentBottom(spec)
-            if (shifted.y <= scrollContentTop(spec) || lineTop >= contentBottom) return@mapNotNull null
+            val contentBottom = scrollContentBottom(layout)
+            if (shifted.y <= scrollContentTop(layout) || lineTop >= contentBottom) return@mapNotNull null
             edge to position.copy(anchor = Offset(shifted.x, minOf(shifted.y, contentBottom)), lineCenterY = lineCenterY)
         }.toMap()
     }
@@ -348,8 +353,10 @@ fun ReaderScreen(
     // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
     // 试读未上架时再拦一层，弹出加入书架的确认。
     BackHandler(
-        overlay.menuVisible || selection != null || overlay.sourceCandidates != null ||
-            (!session.inShelf && !addShelfPrompt),
+        enabled = !overlay.readerSheetOpen && (
+            overlay.menuVisible || selection != null || overlay.sourceCandidates != null ||
+                (!session.inShelf && !addShelfPrompt)
+            ),
     ) {
         when {
             selection != null -> clearSelection()
@@ -360,7 +367,7 @@ fun ReaderScreen(
     }
 
     val activity = LocalActivity.current
-    BrightnessEffect(activity, session.settings.brightnessOverride)
+    BrightnessEffect((activity as? MainActivity)?.readerBrightness, session.settings.brightnessOverride)
     KeepScreenOnEffect(activity, session.settings.keepScreenOn)
     // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复；露出来时图标明暗跟纸走、退出阅读页还给 App 主题
     ImmersiveEffect(
@@ -398,8 +405,6 @@ fun ReaderScreen(
             // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
             // statusBarsPadding 让开状态栏，不受这里影响。
     ) {
-        val layout = spec
-
         /*
          * 进书 splash：正文还没就位时，在纸面上居中显示这本书的封面。
          *
@@ -928,7 +933,7 @@ fun ReaderScreen(
             }
         }
 
-        // 常驻组合，可见性交给 AnimatedVisibility —— 否则退场动画根本没机会播
+        // 常驻组合，可见性交给 AnimatedVisibility，保留退场动画。
         ReaderMenu(
             visible = overlay.menuVisible,
             session = session,
@@ -1067,31 +1072,15 @@ internal fun buildLayoutSpec(
     )
 }
 
-/**
- * 设值与复位分开：拖亮度条时 brightness 每帧都变。从前是 `DisposableEffect(activity, brightness)`，
- * 每变一次先在 onDispose 里复位成系统亮度、再设新值 —— 一帧两次 `window.attributes`，
- * 中间那一下还可能闪回系统亮度。复位只该在离开阅读页时做一次。
- */
 @Composable
-private fun BrightnessEffect(activity: Activity?, brightness: Float?) {
-    SideEffect {
-        val window = activity?.window ?: return@SideEffect
-        val target = brightness?.coerceIn(0.01f, 1f)
-            ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        val attrs = window.attributes
-        if (attrs.screenBrightness != target) {
-            attrs.screenBrightness = target
-            window.attributes = attrs
-        }
+private fun BrightnessEffect(windowBrightness: ReaderWindowBrightness?, brightness: Float?) {
+    if (windowBrightness == null) return
+    val reader = remember(windowBrightness) { Any() }
+    DisposableEffect(windowBrightness, reader) {
+        windowBrightness.attach(reader)
+        onDispose { windowBrightness.detach(reader) }
     }
-    DisposableEffect(activity) {
-        onDispose {
-            val w = activity?.window ?: return@onDispose
-            val attrs = w.attributes
-            attrs.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-            w.attributes = attrs
-        }
-    }
+    SideEffect { windowBrightness.update(reader, brightness) }
 }
 
 /**

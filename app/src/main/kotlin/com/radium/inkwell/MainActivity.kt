@@ -21,6 +21,7 @@ import androidx.core.os.BundleCompat
 import androidx.core.view.WindowCompat
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.ui.nav.InkwellNavDisplay
+import com.radium.inkwell.ui.reader.ReaderWindowBrightness
 import com.radium.inkwell.ui.theme.InkwellTheme
 import com.radium.inkwell.ui.theme.rememberResolvedScheme
 import com.radium.inkwell.ui.theme.ThemeConfig
@@ -36,6 +37,7 @@ import org.koin.android.ext.android.inject
  */
 class MainActivity : androidx.fragment.app.FragmentActivity() {
 
+    internal val readerBrightness by lazy { ReaderWindowBrightness(this) }
     private val keyEventBus: KeyEventBus by inject()
     private val appPrefs: AppPrefs by inject()
     private val updateNotifier: UpdateNotifier by inject()

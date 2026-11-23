@@ -169,6 +169,7 @@ data class ReaderUiState(
     val inShelf: Boolean = true,
     val refreshingChapter: Boolean = false,
     val chapterRefreshFailed: Boolean = false,
+    val pageLayout: LayoutSpec? = null,
 )
 
 /**
@@ -188,6 +189,7 @@ data class ReaderPageUi(
     val loading: Boolean = true,
     val error: String? = null,
     val atBookEnd: Boolean = false,
+    val layout: LayoutSpec? = null,
 )
 
 data class ReaderSessionUi(
@@ -226,7 +228,7 @@ data class ReaderOverlayUi(
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
     chapterTitle, chapterIndex, pageInChapter, pageCount,
-    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd,
+    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout,
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
@@ -2016,6 +2018,7 @@ class ReaderViewModel(
      * 用户看到的正是「返回再进来，退回上一页」。
      */
     private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
+        val layout = spec ?: return
         val result = paginated[chapterIndex] ?: return
         if (pageIndex !in result.chapter.pages.indices) return
         val oldPage = _state.value
@@ -2052,6 +2055,7 @@ class ReaderViewModel(
             pageInChapter = pageIndex,
             pageCount = result.chapter.pages.size,
             page = page,
+            pageLayout = layout,
             prevPage = prev,
             nextPage = next,
             hasPrev = pageIndex > 0 || chapterIndex > 0,
@@ -2202,7 +2206,7 @@ class ReaderViewModel(
                                         // 直接在这里调就是和主线程上的写入赛跑。投递回主线程 —— 它排在本次
                                         // 排版完成后的那次 showPage 之前，先出的仍是这一屏
                                         viewModelScope.launch(Dispatchers.Main) {
-                                            if (caller?.isActive == false || gen != tocGeneration) return@launch
+                                            if (caller?.isActive == false || stale()) return@launch
                                             showPage(chapterIndex, pageIdx, keepOffset = notifyAfterChar)
                                         }
                                     }
