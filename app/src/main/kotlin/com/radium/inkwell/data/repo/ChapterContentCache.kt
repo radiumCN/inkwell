@@ -123,16 +123,18 @@ class ChapterContentCache(private val root: File) {
 
     /** 这本书有没有任何正文缓存。全书架清理先问这一句，没有就不必去读它几千行的目录 */
     fun hasAny(bookId: String): Boolean =
-        bookDir(bookId).list()?.any { it != OFFLINE_PLAN_FILE && !it.endsWith(".part") } == true
+        bookDir(bookId).list()?.any { name ->
+            name != OFFLINE_PLAN_FILE && name != TEXT_PLAN_FILE && !name.endsWith(".part")
+        } == true
 
-    internal fun readOfflinePlan(bookId: String): String? = synchronized(epochLock) {
-        offlinePlanFile(bookId).takeIf { it.isFile }?.readText()
+    internal fun readOfflinePlan(bookId: String, textOnly: Boolean = false): String? = synchronized(epochLock) {
+        offlinePlanFile(bookId, textOnly).takeIf { it.isFile }?.readText()
     }
 
-    internal fun writeOfflinePlan(bookId: String, plan: String, epoch: Long): Boolean =
+    internal fun writeOfflinePlan(bookId: String, plan: String, epoch: Long, textOnly: Boolean = false): Boolean =
         synchronized(epochLock) {
             if (epoch(bookId) != epoch) return false
-            val target = offlinePlanFile(bookId)
+            val target = offlinePlanFile(bookId, textOnly)
             val dir = checkNotNull(target.parentFile)
             dir.mkdirs()
             val temporary = File.createTempFile("offline-", ".part", dir)
@@ -145,13 +147,14 @@ class ChapterContentCache(private val root: File) {
             true
         }
 
-    internal fun clearOfflinePlan(bookId: String, epoch: Long) {
+    internal fun clearOfflinePlan(bookId: String, epoch: Long, textOnly: Boolean = false) {
         synchronized(epochLock) {
-            if (epoch(bookId) == epoch) Files.deleteIfExists(offlinePlanFile(bookId).toPath())
+            if (epoch(bookId) == epoch) Files.deleteIfExists(offlinePlanFile(bookId, textOnly).toPath())
         }
     }
 
-    private fun offlinePlanFile(bookId: String) = File(bookDir(bookId), OFFLINE_PLAN_FILE)
+    private fun offlinePlanFile(bookId: String, textOnly: Boolean) =
+        File(bookDir(bookId), if (textOnly) TEXT_PLAN_FILE else OFFLINE_PLAN_FILE)
 
     /**
      * 整本目录逐章问 [has] 的批量版：目录只列一次，之后每章算个 MD5 查集合。语义与 [has] 相同（文件在不在）。
@@ -428,6 +431,7 @@ class ChapterContentCache(private val root: File) {
 
     private companion object {
         const val OFFLINE_PLAN_FILE = "offline-plan.json"
+        const val TEXT_PLAN_FILE = "text-search-plan.json"
         const val MAX_RECENT_UPGRADES = 256
         /** 同一本书两次清理之间至少隔多久，见 [claimPrune] */
         const val PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000L

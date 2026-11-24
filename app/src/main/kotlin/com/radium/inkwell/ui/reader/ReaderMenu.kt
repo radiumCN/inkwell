@@ -187,6 +187,7 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.VolumeUp
 
 @Composable
@@ -200,10 +201,7 @@ fun ReaderMenu(
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
     onGotoTocEntry: (TocItem) -> Unit,
-    textSearch: StateFlow<ReaderTextSearchState>,
-    onFindText: (String, Boolean) -> Unit,
-    onResetTextSearch: () -> Unit,
-    onOpenTextMatch: (ReaderTextMatch) -> Unit,
+    onShowTextSearch: () -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
     onPreviewSettings: (ReaderSettings) -> Unit,
@@ -224,7 +222,6 @@ fun ReaderMenu(
     pageBackdrop: LayerBackdrop? = null,
 ) {
     var showToc by remember { mutableStateOf(false) }
-    var showFind by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
     var showMore by remember { mutableStateOf(false) }
@@ -242,15 +239,13 @@ fun ReaderMenu(
     LaunchedEffect(visible) {
         if (!visible) {
             showToc = false
-            if (showFind) onResetTextSearch()
-            showFind = false
             showSettings = false
             dragging = null
             showMore = false
         }
     }
-    LaunchedEffect(showToc, showSettings, showFind) {
-        onReaderSheetOpen(showToc || showSettings || showFind)
+    LaunchedEffect(showToc, showSettings) {
+        onReaderSheetOpen(showToc || showSettings)
     }
 
     // 菜单这一层靠**色阶 + 毛玻璃**跟纸面分开，不靠阴影和蒙层：
@@ -358,6 +353,12 @@ fun ReaderMenu(
                                 )
                             }
                         }
+                        AppIconButton(
+                            onClick = onShowTextSearch,
+                            enabled = pageUi.page != null && !overlay.changingSource && !overlay.autoChanging,
+                        ) {
+                            Icon(MiuixIcons.Search, contentDescription = "查找正文")
+                        }
                         Box {
                             AppIconButton(onClick = { showMore = true }) {
                                 Icon(MiuixIcons.More, contentDescription = "更多阅读操作")
@@ -366,13 +367,6 @@ fun ReaderMenu(
                                 expanded = showMore,
                                 onDismissRequest = { showMore = false },
                                 items = buildList {
-                                    add(
-                                        AppMenuItem(
-                                            text = "查找正文",
-                                            enabled = pageUi.page != null,
-                                            onClick = { showFind = true },
-                                        ),
-                                    )
                                     add(
                                         AppMenuItem(
                                             text = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
@@ -444,16 +438,6 @@ fun ReaderMenu(
                 }
             }
         }
-    }
-
-    if (showFind) {
-        ReaderTextSearchSheet(
-            state = textSearch,
-            onFind = onFindText,
-            onReset = onResetTextSearch,
-            onDismiss = { showFind = false; onResetTextSearch() },
-            onOpenMatch = { showFind = false; onOpenTextMatch(it); onDismiss() },
-        )
     }
 
     if (showToc) {

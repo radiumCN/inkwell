@@ -33,12 +33,19 @@ class ChapterContentCacheTest {
     fun `offline plans survive a new cache instance and follow cache invalidation`() {
         val epoch = cache.epoch("b1")
         assertTrue(cache.writeOfflinePlan("b1", "original range", epoch))
+        assertTrue(cache.writeOfflinePlan("b1", "missing chapters", epoch, textOnly = true))
         val reopened = ChapterContentCache(root)
         assertEquals("original range", reopened.readOfflinePlan("b1"))
+        assertEquals("missing chapters", reopened.readOfflinePlan("b1", textOnly = true))
         assertFalse(reopened.hasAny("b1"))
+        cache.clearOfflinePlan("b1", epoch, textOnly = true)
+        assertNull(reopened.readOfflinePlan("b1", textOnly = true))
+        assertEquals("original range", reopened.readOfflinePlan("b1"))
+        assertTrue(cache.writeOfflinePlan("b1", "new range", epoch, textOnly = true))
         cache.clear("b1")
         assertFalse(cache.writeOfflinePlan("b1", "stale range", epoch))
         assertNull(reopened.readOfflinePlan("b1"))
+        assertNull(reopened.readOfflinePlan("b1", textOnly = true))
     }
 
     @Test

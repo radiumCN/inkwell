@@ -35,7 +35,7 @@ enum class OfflineRange(val label: String) {
 }
 
 /**
- * [done] 是正文和插图都已就绪的章节数，[imageFailures] 是 [failed] 中只有插图未就绪的章节数。
+ * [done] 是已缓存完成的章节数。普通任务包含插图，[textOnly] 任务只要求正文就绪。
  */
 data class OfflineDownload(
     val bookId: String,
@@ -46,6 +46,7 @@ data class OfflineDownload(
     val running: Boolean = true,
     val canResume: Boolean = false,
     val stoppedBecause: String? = null,
+    val textOnly: Boolean = false,
 )
 
 @Serializable
@@ -76,74 +77,117 @@ class OfflineDownloader(
 
     fun isRunning(bookId: String): Boolean = jobs.containsKey(bookId)
 
-    fun start(bookId: String, range: OfflineRange) = enqueue(bookId, range)
+    fun start(bookId: String, range: OfflineRange) {
+        enqueue(bookId, range)
+    }
 
-    fun resume(bookId: String) = enqueue(bookId, null)
+    fun resume(bookId: String) {
+        enqueue(bookId, null, textOnly = downloads.value[bookId]?.textOnly == true)
+    }
 
-    private fun enqueue(bookId: String, range: OfflineRange?) {
+    internal fun activeJob(bookId: String): Job? = jobs[bookId]
+
+    internal fun startText(bookId: String, urls: List<String>, epoch: Long): Job? =
+        enqueue(bookId, null, urls, epoch, textOnly = true)
+
+    internal fun resumeText(bookId: String, epoch: Long): Job? =
+        enqueue(bookId, null, expectedEpoch = epoch, textOnly = true)
+
+    private fun enqueue(
+        bookId: String,
+        range: OfflineRange?,
+        textUrls: List<String>? = null,
+        expectedEpoch: Long? = null,
+        textOnly: Boolean = false,
+    ): Job? {
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                download(bookId, range)
+                download(bookId, range, textUrls, expectedEpoch, textOnly)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                stopEarly(bookId, "无法继续离线缓存，请重试", canResume = readPlan(bookId) != null)
+                stopEarly(
+                    bookId, "无法继续离线缓存，请重试", canResume = readPlan(bookId, textOnly) != null,
+                    textOnly = textOnly,
+                )
             }
         }
         if (jobs.putIfAbsent(bookId, job) != null) {
             job.cancel()
-            return
+            return null
         }
         job.invokeOnCompletion { jobs.remove(bookId, job) }
         job.start()
+        return job
     }
 
     fun cancel(bookId: String) {
         jobs[bookId]?.cancel()
     }
 
-    suspend fun restore(bookId: String) = withContext(Dispatchers.IO) {
+    suspend fun restore(bookId: String, textOnly: Boolean = false) = withContext(Dispatchers.IO) {
         val epoch = cache.epoch(bookId)
-        val plan = readPlan(bookId)
+        val plan = readPlan(bookId, textOnly)
         _downloads.update { all ->
             if (isRunning(bookId) || epoch != cache.epoch(bookId)) return@update all
-            if (plan == null && all[bookId]?.canResume == true) return@update all - bookId
-            if (plan == null || all.containsKey(bookId)) return@update all
-            all + (bookId to OfflineDownload(bookId, plan.urls.size, running = false, canResume = true))
+            val current = all[bookId]
+            if (plan == null) {
+                return@update if (current?.canResume == true && current.textOnly == textOnly) all - bookId else all
+            }
+            if (current?.textOnly == textOnly) return@update all
+            all + (bookId to OfflineDownload(
+                bookId, plan.urls.size, running = false, canResume = true, textOnly = textOnly,
+            ))
         }
     }
 
-    private fun readPlan(bookId: String): OfflinePlan? = runCatching {
-        cache.readOfflinePlan(bookId)?.let { Json.decodeFromString<OfflinePlan>(it) }
+    private fun readPlan(bookId: String, textOnly: Boolean): OfflinePlan? = runCatching {
+        cache.readOfflinePlan(bookId, textOnly)?.let { Json.decodeFromString<OfflinePlan>(it) }
     }.getOrNull()
 
-    private suspend fun download(bookId: String, range: OfflineRange?) {
+    private suspend fun download(
+        bookId: String,
+        range: OfflineRange?,
+        textUrls: List<String>?,
+        expectedEpoch: Long?,
+        textOnly: Boolean,
+    ) {
         val epoch = cache.epoch(bookId)
+        if (expectedEpoch != null && epoch != expectedEpoch) {
+            return stopEarly(bookId, "来源换了或缓存被清空，已停止", textOnly = true)
+        }
         val book = bookRepo.getBook(bookId)
         if (book == null || book.deleted || book.type != BookType.NET) return
-        val saved = if (range == null) readPlan(bookId)
-            ?: return stopEarly(bookId, "原缓存任务已清除，请重新选择范围") else null
+        val saved = if (range == null && textUrls == null) {
+            readPlan(bookId, textOnly)
+                ?: return stopEarly(bookId, "原缓存任务已清除，请重新选择范围", textOnly = textOnly)
+        } else null
         if (saved != null && (saved.sourceId != book.sourceId || saved.bookUrl != book.bookUrl)) {
-            cache.clearOfflinePlan(bookId, epoch)
-            return stopEarly(bookId, "来源已变更，请重新选择缓存范围")
+            cache.clearOfflinePlan(bookId, epoch, textOnly)
+            return stopEarly(bookId, "来源已变更，请重新选择缓存范围", textOnly = textOnly)
         }
-        val sourceId = book.sourceId ?: return stopEarly(bookId, "来源不存在，先换源")
+        val sourceId = book.sourceId ?: return stopEarly(bookId, "来源不存在，先换源", textOnly = textOnly)
         val rule = sourceRepo.getRule(sourceId)
-            ?: return stopEarly(bookId, "来源不存在，先换源", canResume = saved != null)
+            ?: return stopEarly(bookId, "来源不存在，先换源", canResume = saved != null, textOnly = textOnly)
         val chapters = chapterDao.getByBook(bookId)
-        if (chapters.isEmpty()) return stopEarly(bookId, "目录还没加载，先刷新目录", canResume = saved != null)
+        if (chapters.isEmpty()) {
+            return stopEarly(bookId, "目录还没加载，先刷新目录", canResume = saved != null, textOnly = textOnly)
+        }
 
-        val plan = saved ?: OfflinePlan(sourceId, book.bookUrl, offlineTargetUrls(chapters, book.readChapterIndex, checkNotNull(range)))
-        if (plan.urls.isEmpty()) return stopEarly(bookId, "目录中没有可缓存的章节")
+        val plan = saved ?: OfflinePlan(
+            sourceId, book.bookUrl,
+            textUrls ?: offlineTargetUrls(chapters, book.readChapterIndex, checkNotNull(range)),
+        )
+        if (plan.urls.isEmpty()) return stopEarly(bookId, "目录中没有可缓存的章节", textOnly = textOnly)
         currentCoroutineContext().ensureActive()
-        if (saved == null && !cache.writeOfflinePlan(bookId, Json.encodeToString(plan), epoch)) {
-            return stopEarly(bookId, "来源换了或缓存被清空，已停止")
+        if (saved == null && !cache.writeOfflinePlan(bookId, Json.encodeToString(plan), epoch, textOnly)) {
+            return stopEarly(bookId, "来源换了或缓存被清空，已停止", textOnly = textOnly)
         }
         val byUrl = chapters.mapNotNull { chapter -> chapter.url?.let { it to chapter } }.toMap()
         val otherUrls = byUrl.keys
         val variables = SourceVariables.decode(book.variable)
 
-        var status = OfflineDownload(bookId, total = plan.urls.size)
+        var status = OfflineDownload(bookId, total = plan.urls.size, textOnly = textOnly)
         publish(status)
         var consecutiveBodyFailures = 0
         try {
@@ -158,7 +202,7 @@ class OfflineDownloader(
                     } else {
                         val cached = cache.readEntry(bookId, url)
                         bodyReady = cached != null
-                        val content = if (cached?.withImages == true) cached.content else {
+                        val content = if (cached != null && (textOnly || cached.withImages)) cached.content else {
                             val remote = engine.getContent(
                                 rule, url, otherUrls,
                                 chapterVariable = chapter.variable,
@@ -174,7 +218,7 @@ class OfflineDownloader(
                             fetched
                         }
                         bodyReady = true
-                        cache.cacheOfflineImages(bookId, content, epoch) { imageUrl ->
+                        textOnly || cache.cacheOfflineImages(bookId, content, epoch) { imageUrl ->
                             engine.getImage(rule, imageUrl)
                         }
                     }
@@ -198,7 +242,7 @@ class OfflineDownloader(
         } finally {
             withContext(NonCancellable) {
                 val invalidated = cache.epoch(bookId) != epoch
-                if (status.done == status.total) cache.clearOfflinePlan(bookId, epoch)
+                if (status.done == status.total) cache.clearOfflinePlan(bookId, epoch, textOnly)
                 publish(
                     status.copy(
                         running = false,
@@ -210,8 +254,8 @@ class OfflineDownloader(
         }
     }
 
-    private fun stopEarly(bookId: String, reason: String, canResume: Boolean = false) {
-        publish(OfflineDownload(bookId, total = 0, running = false, canResume = canResume, stoppedBecause = reason))
+    private fun stopEarly(bookId: String, reason: String, canResume: Boolean = false, textOnly: Boolean = false) {
+        publish(OfflineDownload(bookId, total = 0, running = false, canResume = canResume, stoppedBecause = reason, textOnly = textOnly))
     }
 
     private fun publish(d: OfflineDownload) {

@@ -456,7 +456,8 @@ private fun OfflineStatus(
             // 从前写在选范围的面板顶上；范围改成按钮上弹出的列表后放不下长说明，挪到正在缓存时 ——
             // 这时候用户才会想「能不能先走开」「重复的会不会再下一遍」
             Text(
-                "离开这一页也会接着缓存正文和插图。中断后可以继续原范围",
+                if (download.textOnly) "离开这一页也会接着缓存正文。中断后可以继续原范围"
+                else "离开这一页也会接着缓存正文和插图。中断后可以继续原范围",
                 style = MiuixTheme.textStyles.footnote1,
                 color = muted,
             )
@@ -464,8 +465,10 @@ private fun OfflineStatus(
         download != null -> Row(verticalAlignment = Alignment.CenterVertically) {
             val summary = when {
                 download.stoppedBecause != null -> download.stoppedBecause
+                download.failed > 0 && download.textOnly -> "${download.failed} 章正文未缓存"
                 download.failed > 0 -> "${download.failed} 章未缓存完整，其中 ${download.imageFailures} 章只缺插图"
                 download.canResume -> "可继续缓存原范围（${download.total} 章）"
+                download.textOnly -> "本次正文已缓存"
                 else -> "本次正文和插图已缓存"
             }
             Text(summary, Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1, color = muted)

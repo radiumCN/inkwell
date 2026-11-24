@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.media.AudioAttributes
@@ -46,6 +47,10 @@ internal class ReaderSpeechService : Service() {
     private lateinit var notifications: NotificationManager
     private lateinit var focus: AudioFocusRequest
     private val preferences by lazy { getSharedPreferences(CHANNEL, MODE_PRIVATE) }
+    val availableRates by lazy {
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) speechRates + experimentalSpeechRates
+        else speechRates
+    }
     private var owner: ReaderSpeech? = null
     private var notificationIcon = AppIcon.DEFAULT.shape.notificationIcon
     private var notificationArt: Bitmap? = null
@@ -124,7 +129,8 @@ internal class ReaderSpeechService : Service() {
                 notificationArt = AppIconManager.drawable(this, icon).toBitmap(ART_SIZE_PX, ART_SIZE_PX, Bitmap.Config.ARGB_8888)
                 publishedTitle = null
                 current.service = this
-                current.update(current.state.value.copy(rate = preferences.getFloat("rate", 1f)))
+                val savedRate = preferences.getFloat("rate", 1f)
+                current.update(current.state.value.copy(rate = savedRate.takeIf { it in availableRates } ?: 1f))
                 media.isActive = true
                 if (enterForeground()) initializeEngine()
             }
@@ -333,18 +339,17 @@ internal class ReaderSpeechService : Service() {
 
     fun setRate(rate: Float) {
         val state = owner?.state?.value ?: return
+        if (rate == state.rate || rate !in availableRates) return
         preferences.edit().putFloat("rate", rate).apply()
         publish(state.copy(rate = rate))
-        // 倍速只在一段的第一片设给引擎（见 speakNextChunk）：不重播的话，要等这一段（一片最长几千字）读完才变
-        if (state.status == SpeechStatus.PLAYING) restartChunk()
-    }
-
-    /** 用新倍速重播当前播报片段，不用等到整段结束；章节进度仍用原锚点 */
-    private fun restartChunk() {
-        val restart = chunkStart
-        stopUtterance()
-        nextChunk = restart
-        speakNextChunk()
+        val paragraph = state.paragraph
+        if (state.status == SpeechStatus.PLAYING && utterance != null && paragraph != null) {
+            // 没有字词回调时 spokenOffset 仍是片段开头。新播报用 QUEUE_FLUSH 换掉当前这一段。
+            val restart = paragraph.startWithin(paragraph.offset + spokenOffset)
+            stopUtterance(sendStop = false)
+            nextChunk = restart
+            speakNextChunk()
+        }
     }
 
     fun setTimer(minutes: Int?) {

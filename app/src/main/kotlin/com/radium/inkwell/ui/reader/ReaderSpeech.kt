@@ -10,6 +10,11 @@ import java.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+internal val speechRates = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+internal val experimentalSpeechRates = listOf(3f, 4f, 5f)
+
+internal fun Float.speechRateLabel(): String = "${toString().removeSuffix(".0")}×"
+
 internal data class SpeechParagraph(val offset: Int, val elementIndex: Int, val text: String) {
     fun startWithin(chapterOffset: Int): Int {
         val start = chapterOffset - offset

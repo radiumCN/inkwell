@@ -24,4 +24,15 @@ class ReaderTextSearchTest {
         assertEquals(3, match.selection.start)
         assertEquals("Ink", match.selection.text)
     }
+
+    @Test fun `excerpt highlights the selected occurrence when the same word appears earlier`() {
+        val content = ChapterContent(listOf(ContentElement.Paragraph("前".repeat(30) + "渡口与渡口")))
+        val matches = readerTextMatches(content, 0, "", "渡口", limit = 2)
+        val second = matches.last()
+
+        assertEquals(33, second.selection.start)
+        assertEquals(25, second.excerptMatchStart)
+        assertEquals("渡口", second.excerpt.substring(second.excerptMatchStart))
+        assertEquals("渡口与", second.excerpt.substring(second.excerptMatchStart - 3, second.excerptMatchStart))
+    }
 }

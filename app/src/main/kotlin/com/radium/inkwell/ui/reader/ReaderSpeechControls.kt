@@ -68,7 +68,6 @@ private const val MANAGE_VOICES = "系统语音设置"
 private const val MISSING_VOICE_HINT = "请切换语音引擎，或在系统语音设置中添加中文音色。"
 private const val NETWORK_VOICE_HINT = "联网音色可能将朗读文字发送给语音引擎的服务。"
 
-private val speechRates = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
 private val sleepTimers = listOf(null, 15, 30, 45, 60, 0)
 
 @Composable
@@ -210,9 +209,11 @@ internal fun ReaderSpeechSheet(
                                 enabled = state.engines.isNotEmpty(),
                                 position = SettingGroupPosition.First,
                             )
+                            val rates = speech.service?.availableRates ?: speechRates
                             SpinnerSettingRow(
                                 title = "播放倍速",
-                                options = speechRates.map { PickerOption(it.toString(), "${it}×") },
+                                options = rates.map { PickerOption(it.toString(), it.speechRateLabel()) },
+                                subtitle = if (rates.size > speechRates.size) "3× 及以上用于调试，实际语速由引擎决定" else null,
                                 selectedId = state.rate.toString(),
                                 onSelect = { speech.service?.setRate(it.id.toFloat()) },
                                 position = SettingGroupPosition.Middle,
@@ -365,7 +366,7 @@ private fun SpeechTransport(state: SpeechState, speech: ReaderSpeech) {
         }
         Text(
             if (chapter == null) state.description()
-            else "${state.description()} · 第 ${state.paragraphIndex + 1} / ${chapter.paragraphs.size} 段",
+            else "${state.description()} · 第 ${state.paragraphIndex + 1} / ${chapter.paragraphs.size} 段 · ${state.rate.speechRateLabel()}",
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = Dimens.gapXS, bottom = Dimens.gapS),

@@ -30,6 +30,7 @@ import com.radium.inkwell.data.repo.TEXT_ONLY_UPGRADE_INTERVAL_MS
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
+import com.radium.inkwell.data.repo.OfflineDownloader
 import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.TitleMatch
@@ -297,6 +298,7 @@ class ReaderViewModel(
     private val fontStore: ReaderFontStore,
     private val readingStats: ReadingStatsRepository,
     private val readHealth: SourceReadHealth,
+    private val offlineDownloader: OfflineDownloader,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -418,6 +420,20 @@ class ReaderViewModel(
         UsageLog.event("reader.$event", "book" to diagnosticBook, *fields)
     }
 
+    private val _textSearch = MutableStateFlow(ReaderTextSearchState())
+    val textSearch = _textSearch.asStateFlow()
+    private val _textMatch = MutableStateFlow<ReaderTextMatch?>(null)
+    val textMatch = _textMatch.asStateFlow()
+    private val _textSearchDestination = MutableStateFlow<ReaderTextSearchDestination?>(null)
+    internal val textSearchDestination = _textSearchDestination.asStateFlow()
+    internal val textSearchDownload = offlineDownloader.downloads.map { it[bookId] }.distinctUntilChanged()
+    private var textSearchJob: Job? = null
+    private var wholeBookSearchQuery: String? = null
+    private var missingTextUrls = emptyList<String>()
+    private var textSearchEpoch = 0L
+    private var textSearchRevision = 0
+    private var watchedTextDownload: Job? = null
+
     init {
         viewModelScope.launch {
             loadSession()
@@ -501,6 +517,7 @@ class ReaderViewModel(
         if (sameReadingToc(old, rows)) return
         val remap = TocRemap(old, rows)
         val s = _state.value
+        invalidateTextSearch()
         src.updateChapters(rows)
         // 只在末尾追加了新章（连载追更的常态）：手里记着的序号一个都没动，补上章数、刷新「下一章/书末」即可
         val held = buildSet {
@@ -565,6 +582,7 @@ class ReaderViewModel(
         trace("session.load.start")
         try {
             sessionReady = false
+            invalidateTextSearch()
             stopLegacyImageUpgrade()
             upgradedChapterUrl = null
             decodeJob?.cancel()
@@ -1286,6 +1304,7 @@ class ReaderViewModel(
                         }
                         throw e
                     }
+                    invalidateTextSearch()
                     if (position.chapterIndex == chapterIndex && pendingTarget == null) {
                         val latestOffset = position.charOffset
                         showPage(chapterIndex, result.chapter.pageIndexFor(latestOffset), keepOffset = latestOffset)
@@ -1319,94 +1338,194 @@ class ReaderViewModel(
             var first = true
             replaceRules.observeForBook(bookId).collect {
                 if (first) { first = false; return@collect } // 首帧是初始值，别白重排一次
+                invalidateTextSearch()
                 navigate(invalidate = true) { pendingTarget ?: position }
             }
         }
     }
 
-    // ---------- 长按选字 ----------
-
-    private val _textSearch = MutableStateFlow(ReaderTextSearchState())
-    val textSearch = _textSearch.asStateFlow()
-    private val _textMatch = MutableStateFlow<ReaderTextMatch?>(null)
-    val textMatch = _textMatch.asStateFlow()
-    private var textSearchJob: Job? = null
+    // ---------- 查找正文 ----------
 
     fun clearTextSearch() {
         textSearchJob?.cancel()
+        textSearchRevision++
+        wholeBookSearchQuery = null
+        missingTextUrls = emptyList()
         _textSearch.value = ReaderTextSearchState()
+        _textMatch.value = null
+        _textSearchDestination.value = null
+    }
+
+    private fun invalidateTextSearch() {
+        if (_textSearch.value.total == 0) return
+        clearTextSearch()
+        _textSearch.value = ReaderTextSearchState(invalidated = true)
     }
 
     fun findText(input: String, wholeBook: Boolean) {
         clearTextSearch()
         val query = input.trim()
-        val src = source ?: return
         if (query.isEmpty() || query.length > MAX_READER_TEXT_QUERY) return
-        val generation = tocGeneration
+        searchText(query, wholeBook)
+    }
+
+    private fun searchText(query: String, wholeBook: Boolean) {
+        if (!sessionReady || sourceChanging) return
+        val src = source ?: return
+        val epoch = contentCache.epoch(bookId)
+        textSearchEpoch = epoch
+        wholeBookSearchQuery = query.takeIf { wholeBook }
+        missingTextUrls = emptyList()
+        textSearchJob?.cancel()
         val indices = if (wholeBook) 0 until src.chapterCount else _state.value.chapterIndex.let { it..it }
+        val net = src as? NetReaderBookSource
         textSearchJob = viewModelScope.launch {
             val matches = ArrayList<ReaderTextMatch>()
+            val missing = ArrayList<String>()
             var scanned = 0
-            var unavailable = 0
-            fun snapshot(active: Boolean) = ReaderTextSearchState(indices.count(), scanned, unavailable, matches.toList(), active)
+            var failed = 0
+            var limited = false
+            fun snapshot(active: Boolean) = ReaderTextSearchState(
+                total = indices.count(), scanned = scanned, missing = missing.size, failed = failed,
+                matches = matches.toList(), active = active, limited = limited,
+            )
             _textSearch.value = snapshot(active = true)
             for (index in indices) {
                 ensureActive()
-                if (src !== source || generation != tocGeneration) break
                 val title = src.chapterTitle(index).orEmpty()
+                val url = net?.chapters?.getOrNull(index)?.url
                 val found = try {
-                    val raw = if (src is NetReaderBookSource) {
-                        val url = src.chapters.getOrNull(index)?.url
-                        if (url == null) null else withContext(Dispatchers.IO) { contentCache.read(bookId, url) }
+                    val raw = if (net != null) {
+                        url?.let { withContext(Dispatchers.IO) { contentCache.read(bookId, it) } }
                     } else {
                         src.loadChapter(index)
                     }
-                    raw?.let {
-                        val content = prepareChapter(loadPurified(it, index, reportTimeout = false), title)
+                    if (raw == null) {
+                        if (url == null) failed++ else missing.add(url)
+                        emptyList()
+                    } else {
                         withContext(Dispatchers.Default) {
-                            readerTextMatches(content, index, title, query, MAX_READER_TEXT_MATCHES - matches.size)
+                            val content = prepareChapter(loadPurified(raw, index, reportTimeout = false), title)
+                            readerTextMatches(content, index, title, query, MAX_READER_TEXT_MATCHES + 1 - matches.size)
                         }
                     }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
-                    null
+                    failed++
+                    emptyList()
                 }
-                if (src !== source || generation != tocGeneration) break
+                ensureActive()
+                if (net != null && epoch != contentCache.epoch(bookId)) {
+                    invalidateTextSearch()
+                    return@launch
+                }
                 scanned++
-                if (found == null) unavailable++ else matches.addAll(found)
-                if (matches.size >= MAX_READER_TEXT_MATCHES) break
-                if (found?.isNotEmpty() == true || scanned % 8 == 0) _textSearch.value = snapshot(active = true)
+                matches.addAll(found)
+                if (matches.size > MAX_READER_TEXT_MATCHES) {
+                    matches.removeAt(matches.lastIndex)
+                    limited = true
+                    break
+                }
+                if (found.isNotEmpty() || scanned % 8 == 0) _textSearch.value = snapshot(active = true)
             }
+            missingTextUrls = missing.distinct()
             _textSearch.value = snapshot(active = false)
+            _textSearchDestination.update { destination ->
+                destination?.let {
+                    val index = matches.indexOf(it.match)
+                    if (index < 0) null else it.copy(matchNumber = index + 1, totalMatches = matches.size)
+                }
+            }
+        }
+    }
+
+    internal suspend fun restoreTextSearchDownload() {
+        offlineDownloader.restore(bookId, textOnly = true)
+        val src = source as? NetReaderBookSource ?: return
+        val task = offlineDownloader.activeJob(bookId) ?: return
+        refreshSearchAfterDownload(task, src, contentCache.epoch(bookId))
+    }
+
+    internal fun stopTextSearchDownload() {
+        if (offlineDownloader.downloads.value[bookId]?.textOnly == true) offlineDownloader.cancel(bookId)
+    }
+
+    internal fun cacheTextSearchChapters(resume: Boolean) {
+        val src = source as? NetReaderBookSource ?: return
+        val result = _textSearch.value
+        if (sourceChanging || result.active || result.limited || missingTextUrls.isEmpty() ||
+            wholeBookSearchQuery == null
+        ) return
+        val epoch = textSearchEpoch
+        if (epoch != contentCache.epoch(bookId)) {
+            invalidateTextSearch()
+            return
+        }
+        val task = if (resume) offlineDownloader.resumeText(bookId, epoch)
+            else offlineDownloader.startText(bookId, missingTextUrls, epoch)
+        if (task == null) return
+        refreshSearchAfterDownload(task, src, epoch)
+    }
+
+    private fun refreshSearchAfterDownload(task: Job, src: NetReaderBookSource, epoch: Long) {
+        if (watchedTextDownload === task) return
+        watchedTextDownload = task
+        viewModelScope.launch {
+            task.join()
+            if (watchedTextDownload !== task) return@launch
+            watchedTextDownload = null
+            val query = wholeBookSearchQuery
+            if (query != null && source === src && !sourceChanging && contentCache.epoch(bookId) == epoch &&
+                offlineDownloader.downloads.value[bookId]?.let { it.done > 0 || it.imageFailures > 0 } == true
+            ) {
+                searchText(query, wholeBook = true)
+            }
         }
     }
 
     fun openTextMatch(match: ReaderTextMatch) {
-        clearTextSearch()
+        val matches = _textSearch.value.matches
+        val index = matches.indexOf(match)
+        if (sourceChanging || index < 0) return
+        val revision = textSearchRevision
+        val epoch = textSearchEpoch
         stopSpeech(returnToText = false)
+        stopAutoFlip()
         progressHeld = false
         _textMatch.value = null
+        _textSearchDestination.value = null
         navigate {
+            if (revision != textSearchRevision || sourceChanging) return@navigate position
             val result = ensurePaginated(match.position.chapterIndex, userFacing = true, notifyAfterChar = Int.MAX_VALUE)
+            if (revision != textSearchRevision || sourceChanging) return@navigate position
             val selection = match.selection
             val currentText = result?.measured?.get(selection.elementIndex)?.text
             val start = result?.elementOffsets?.getOrNull(selection.elementIndex)
-            if (start != null && currentText?.regionMatches(selection.start, selection.text, 0, selection.text.length) == true) {
+            if (result != null && start != null &&
+                (source !is NetReaderBookSource || epoch == contentCache.epoch(bookId)) &&
+                currentText?.regionMatches(selection.start, selection.text, 0, selection.text.length) == true
+            ) {
                 val destination = match.position.copy(charOffset = start + selection.start)
                 val highlight = match.copy(position = destination)
                 _textMatch.value = highlight
+                _textSearchDestination.value = ReaderTextSearchDestination(
+                    match, result.chapter.pageIndexFor(destination.charOffset), index + 1, matches.size,
+                )
                 viewModelScope.launch {
                     delay(5_000)
                     if (_textMatch.value === highlight) _textMatch.value = null
                 }
                 destination
             } else {
+                invalidateTextSearch()
                 messageBus.emit("正文已变化，请重新查找")
                 position
             }
         }
     }
+
+    // ---------- 长按选字 ----------
 
     fun setTextSelectionEnabled(on: Boolean) {
         viewModelScope.launch { appPrefs.setTextSelectionEnabled(on) }

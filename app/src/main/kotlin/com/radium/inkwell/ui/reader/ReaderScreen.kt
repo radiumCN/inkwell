@@ -63,7 +63,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.FloatingGlassBar
 import com.radium.inkwell.ui.components.LocalBarBackdrop
+import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import androidx.compose.runtime.snapshotFlow
@@ -153,7 +156,12 @@ fun ReaderScreen(
     val speechState by speech.state.collectAsStateWithLifecycle()
     val readerContext = LocalContext.current
     var showSpeechSheet by rememberSaveable { mutableStateOf(false) }
-    val showOverlayBars = overlay.menuVisible || showSpeechSheet
+    var showTextSearch by rememberSaveable { mutableStateOf(false) }
+    var menuSheetOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(menuSheetOpen, showTextSearch) {
+        viewModel.setReaderSheetOpen(menuSheetOpen || showTextSearch)
+    }
+    val showOverlayBars = overlay.menuVisible || showSpeechSheet || showTextSearch
     val showRaisedHeader = !WindowInsets.areStatusBarsVisible
     val motion = AppTheme.motionScheme
     val menuProgress = animateFloatAsState(
@@ -179,6 +187,10 @@ fun ReaderScreen(
     }
         ?.let { TextSelection(it.elementIndex, 0, it.text.length, it.text) }
     val textMatch by viewModel.textMatch.collectAsStateWithLifecycle()
+    val searchDestination by viewModel.textSearchDestination.collectAsStateWithLifecycle()
+    val onSearchResultPage = searchDestination?.let {
+        pageUi.chapterIndex == it.match.position.chapterIndex && pageUi.pageInChapter == it.pageIndex
+    } == true
     val readingHighlight = textMatch?.takeIf { it.position.chapterIndex == pageUi.chapterIndex }?.selection
         ?: speechSelection
     val density = LocalDensity.current
@@ -396,7 +408,7 @@ fun ReaderScreen(
     // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
     // 试读未上架时再拦一层，弹出加入书架的确认。
     BackHandler(
-        enabled = !overlay.readerSheetOpen && (
+        enabled = !overlay.readerSheetOpen && !showTextSearch && (
             overlay.menuVisible || selection != null || overlay.sourceCandidates != null ||
                 (!session.inShelf && !addShelfPrompt)
             ),
@@ -430,7 +442,8 @@ fun ReaderScreen(
     // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
     // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明。
     // 自动换源的提示胶囊也是这块玻璃：它只亮 8 秒（AUTO_CHANGED_HINT_MS），这几秒录着不值一提
-    val needsGlass = speechState.active || overlay.menuVisible || selection != null || overlay.autoChangedTo != null
+    val needsGlass = speechState.active || overlay.menuVisible || selection != null ||
+        overlay.autoChangedTo != null || onSearchResultPage
     var glassLingering by remember { mutableStateOf(false) }
     LaunchedEffect(needsGlass) {
         if (needsGlass) {
@@ -843,6 +856,45 @@ fun ReaderScreen(
 
         QuickAdjustOverlay(quickAdjust)
 
+        val showSearchReturn = onSearchResultPage && !pageUi.loading && !overlay.menuVisible &&
+            !showTextSearch && !overlay.readerSheetOpen && overlay.sourceCandidates == null &&
+            !overlay.changingSource && !overlay.autoChanging && overlay.autoChangedTo == null &&
+            selection == null && !speechState.active &&
+            viewingImage == null && !addShelfPrompt
+        val lastSearchPosition = remember { mutableStateOf("") }
+        searchDestination?.let {
+            lastSearchPosition.value = "第 ${it.matchNumber} / ${it.totalMatches} 处"
+        }
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = hintBottom)) {
+            CompositionLocalProvider(LocalBarBackdrop provides pageBackdrop) {
+                FloatingGlassBar(visible = showSearchReturn, onHeightChange = {}) { floor ->
+                    val scheme = MiuixTheme.colorScheme
+                    Text(
+                        lastSearchPosition.value,
+                        color = AppThemes.readableOn(scheme.onSurface, floor),
+                        style = MiuixTheme.textStyles.footnote1,
+                        modifier = Modifier.padding(start = Dimens.gapM, end = Dimens.gapS),
+                    )
+                    AppTextButton(
+                        "返回结果",
+                        onClick = { showTextSearch = true },
+                        contentColor = AppThemes.readableOn(scheme.primary, floor),
+                    )
+                }
+            }
+        }
+        ReaderTextSearchSheet(
+            visible = showTextSearch,
+            isNetBook = session.isNetBook,
+            viewModel = viewModel,
+            onDismiss = { showTextSearch = false },
+            onOpenMatch = {
+                showTextSearch = false
+                viewModel.dismissMenu()
+                viewModel.openTextMatch(it)
+            },
+        )
+
         if (showSpeechSheet && speechState.active) {
             ReaderSpeechSheet(
                 speech = speech,
@@ -987,10 +1039,10 @@ fun ReaderScreen(
             onExit = requestExit,
             onGotoChapter = viewModel::jumpFromReaderMenu,
             onGotoTocEntry = viewModel::jumpFromToc,
-            textSearch = viewModel.textSearch,
-            onFindText = viewModel::findText,
-            onResetTextSearch = viewModel::clearTextSearch,
-            onOpenTextMatch = viewModel::openTextMatch,
+            onShowTextSearch = {
+                viewModel.stopAutoFlip()
+                showTextSearch = true
+            },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },
@@ -1018,7 +1070,7 @@ fun ReaderScreen(
                     flipController.requestFlip(dir)
                 }
             },
-            onReaderSheetOpen = { viewModel.setReaderSheetOpen(it) },
+            onReaderSheetOpen = { menuSheetOpen = it },
             pageBackdrop = pageBackdrop,
         )
 
