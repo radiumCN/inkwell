@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
+import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.paginate.RaisedReaderHeader
 import kotlin.test.Test
@@ -118,8 +119,11 @@ class ReaderLayoutSpecTest {
     }
 
     @Test
-    fun `只关电量不动排版`() {
+    fun `切换电量样式或关闭电量不动排版`() {
         assertEquals(spec(ReaderSettings()), spec(ReaderSettings(showBattery = false)))
+        BatteryDisplayStyle.entries.forEach { style ->
+            assertEquals(spec(ReaderSettings()), spec(ReaderSettings(batteryDisplayStyle = style)))
+        }
         assertTrue(spec(ReaderSettings(showHeader = false, showFooter = false)).contentHeightPx > spec(ReaderSettings()).contentHeightPx)
     }
 

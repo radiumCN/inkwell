@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
@@ -106,6 +107,7 @@ class ReaderPrefs(
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
+        val BATTERY_DISPLAY_STYLE = stringPreferencesKey("battery_display_style")
         val SHOW_HEADER = booleanPreferencesKey("show_header")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val RAISE_HEADER = booleanPreferencesKey("raise_header")
@@ -192,6 +194,7 @@ class ReaderPrefs(
             brightnessOverride = p[Keys.BRIGHTNESS]?.takeIf { it >= 0f },
             keepScreenOn = p[Keys.KEEP_SCREEN_ON] ?: true,
             showBattery = p[Keys.SHOW_BATTERY] ?: true,
+            batteryDisplayStyle = decodeBatteryDisplayStyle(p[Keys.BATTERY_DISPLAY_STYLE]) ?: BatteryDisplayStyle.ICON,
             showHeader = p[Keys.SHOW_HEADER] ?: true,
             showStatusBar = p[Keys.SHOW_STATUS_BAR] ?: false,
             raiseHeader = p[Keys.RAISE_HEADER] ?: false,
@@ -218,6 +221,7 @@ class ReaderPrefs(
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.SHOW_BATTERY] = settings.showBattery
+            p[Keys.BATTERY_DISPLAY_STYLE] = settings.batteryDisplayStyle.name
             p[Keys.SHOW_HEADER] = settings.showHeader
             p[Keys.SHOW_STATUS_BAR] = settings.showStatusBar
             p[Keys.LIGHTWEIGHT_EFFECTS] = settings.lightweightEffects
@@ -378,7 +382,8 @@ class ReaderPrefs(
                 "flip" to s.flipAnimation.name,
                 "brightness" to (s.brightnessOverride ?: -1f).toString(),
                 "keep_screen_on" to s.keepScreenOn.toString(),
-                "show_battery" to s.showBattery.toString(),
+                Keys.SHOW_BATTERY.name to s.showBattery.toString(),
+                Keys.BATTERY_DISPLAY_STYLE.name to s.batteryDisplayStyle.name,
                 "show_header" to s.showHeader.toString(),
                 Keys.SHOW_STATUS_BAR.name to s.showStatusBar.toString(),
                 Keys.RAISE_HEADER.name to s.raiseHeader.toString(),
@@ -411,6 +416,9 @@ class ReaderPrefs(
     }
 
 }
+
+private fun decodeBatteryDisplayStyle(value: String?): BatteryDisplayStyle? =
+    BatteryDisplayStyle.entries.firstOrNull { it.name == value }
 
 /** 旧版直接把头部留白用于布局，因此旧键始终保存非负值。 */
 private fun writeHeaderTopSpacing(p: MutablePreferences, spacing: Float?) {
@@ -498,6 +506,7 @@ internal object ReaderBackupImport {
             keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES, keys.LOCAL_SHOW_IMAGES).forEach { key ->
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }
         }
+        decodeBatteryDisplayStyle(v[keys.BATTERY_DISPLAY_STYLE.name])?.let { p[keys.BATTERY_DISPLAY_STYLE] = it.name }
         v["font_id"]?.takeIf(fontAvailable)?.let { p[keys.FONT_ID] = it }
         v[keys.BODY_FONT_WEIGHT.name]?.toIntOrNull()?.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
             ?.let { p[keys.BODY_FONT_WEIGHT] = it }

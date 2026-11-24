@@ -2,6 +2,7 @@ package com.radium.inkwell.data.prefs
 
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import com.radium.inkwell.core.webdav.BackupSettings
+import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.api.ReaderTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -108,6 +109,21 @@ class BackupPreferencesTest {
         assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf("header_top_spacing" to "8"))) { true })
         assertEquals(8f, p[keys.HEADER_TOP_SPACING])
         assertEquals(0f, p[keys.HEADER_TOP_OFFSET])
+    }
+
+    @Test fun `battery display style restores independently of the old visibility switch`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf(keys.SHOW_BATTERY to false)
+        BatteryDisplayStyle.entries.forEachIndexed { index, style ->
+            assertTrue(ReaderBackupImport.apply(p, BackupSettings(index + 1L, mapOf("battery_display_style" to style.name))) { true })
+            assertEquals(style.name, p[keys.BATTERY_DISPLAY_STYLE])
+            assertEquals(false, p[keys.SHOW_BATTERY])
+        }
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(100, mapOf("show_battery" to "true"))) { true })
+        assertEquals(BatteryDisplayStyle.PERCENT_ONLY.name, p[keys.BATTERY_DISPLAY_STYLE])
+        assertEquals(true, p[keys.SHOW_BATTERY])
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, mapOf("battery_display_style" to "UNKNOWN"))) { true })
+        assertEquals(BatteryDisplayStyle.PERCENT_ONLY.name, p[keys.BATTERY_DISPLAY_STYLE])
     }
 
     @Test fun `reader status bar imports both values and keeps the local setting for older backups`() {

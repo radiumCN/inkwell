@@ -24,6 +24,7 @@ import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
@@ -50,6 +51,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -70,6 +72,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
@@ -126,6 +129,9 @@ import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroupPosition
 import com.radium.inkwell.ui.components.SettingRow
 import com.radium.inkwell.ui.components.PrimaryButton
+import com.radium.inkwell.ui.components.PickerOption
+import com.radium.inkwell.ui.components.SpinnerSettingRow
+import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.api.FlipAnimation
 import com.radium.inkwell.reader.api.FlipDirection
 import com.radium.inkwell.reader.api.ReaderSettings
@@ -1982,11 +1988,33 @@ private fun MoreTab(
         if (settings.showFooter) {
             SwitchRow(
                 title = "页脚显示电量",
-                subtitle = "页脚右侧的电池图标",
                 checked = settings.showBattery,
                 onCheckedChange = { onUpdate(settings.copy(showBattery = it)) },
                 position = SettingGroupPosition.Middle,
             )
+            if (settings.showBattery) {
+                SpinnerSettingRow(
+                    title = "电量样式",
+                    options = BatteryDisplayStyle.entries.map { PickerOption(it.name, it.label) },
+                    selectedId = settings.batteryDisplayStyle.name,
+                    onSelect = { onUpdate(settings.copy(batteryDisplayStyle = BatteryDisplayStyle.valueOf(it.id))) },
+                    position = SettingGroupPosition.Middle,
+                    optionIcon = { option, modifier ->
+                        val scheme = MiuixTheme.colorScheme
+                        Box(
+                            modifier.widthIn(min = Dimens.readerBatteryPreviewMinWidth).clearAndSetSemantics {},
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            BatteryIndicator(
+                                level = 75,
+                                style = BatteryDisplayStyle.valueOf(option.id),
+                                color = scheme.onSurfaceContainer,
+                                background = scheme.surfaceContainer,
+                            )
+                        }
+                    },
+                )
+            }
         }
         SwitchRow(
             title = "阅读时保持屏幕常亮",
@@ -2249,8 +2277,7 @@ private fun ThemeSwatches(
     Row(
         Modifier
             .fillMaxWidth()
-            // 手指松开就停，紧接着点色板不必先截停惯性滚动。
-            .horizontalScroll(rememberScrollState(), overscrollEffect = null, flingBehavior = PaperSwatchFling)
+            .horizontalScroll(rememberScrollState(), flingBehavior = rememberPaperSwatchFling())
             .padding(horizontal = horizontalPadding)
             .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
@@ -2271,9 +2298,26 @@ private fun ThemeSwatches(
     }
 }
 
-private object PaperSwatchFling : FlingBehavior {
-    override suspend fun ScrollScope.performFling(initialVelocity: Float): Float = initialVelocity
+/** 慢拖后可以直接点色块，快划则沿用系统减速，限制初速度以免色条滑得太远。 */
+@Composable
+private fun rememberPaperSwatchFling(): FlingBehavior {
+    val defaultFling = ScrollableDefaults.flingBehavior()
+    val density = LocalDensity.current.density
+    return remember(defaultFling, density) {
+        val minVelocity = PAPER_SWATCH_MIN_FLING_SPEED * density
+        val maxVelocity = PAPER_SWATCH_MAX_FLING_SPEED * density
+        object : FlingBehavior {
+            override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
+                if (abs(initialVelocity) < minVelocity) return 0f
+                val velocity = initialVelocity.coerceIn(-maxVelocity, maxVelocity)
+                return with(defaultFling) { this@performFling.performFling(velocity) }
+            }
+        }
+    }
 }
+
+private const val PAPER_SWATCH_MIN_FLING_SPEED = 120f // dp/s
+private const val PAPER_SWATCH_MAX_FLING_SPEED = 360f // dp/s
 
 @Composable
 private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Unit) {

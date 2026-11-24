@@ -23,11 +23,10 @@ data class ReaderSettings(
     /** null = 跟随系统 */
     val brightnessOverride: Float? = null,
     val keepScreenOn: Boolean = true,
-    /**
-     * 页脚是否画电池图标。默认开，和从前「进度 · 时间 · 电量」三件套一致；
-     * 关掉只少一个图标，页码和时间还在。
-     */
+    /** 页脚是否显示电量。 */
     val showBattery: Boolean = true,
+    /** 页脚右侧的电量样式，默认仅显示图标。 */
+    val batteryDisplayStyle: BatteryDisplayStyle = BatteryDisplayStyle.ICON,
     /**
      * 是否显示章节名页眉。默认开。
      */
@@ -36,7 +35,7 @@ data class ReaderSettings(
     val showStatusBar: Boolean = false,
     /**
      * 正文下方画不画「页码 · 进度 · 时间 · 电量」（页脚）。关掉后页脚那条带让给正文，「下边距」照旧；
-     * [showBattery] 这时不起作用（设置里那一行也收起来）。默认开。
+     * [batteryDisplayStyle] 在页脚关闭时保留，重新开启页脚后继续使用。默认开。
      */
     val showFooter: Boolean = true,
     val volumeKeyFlip: Boolean = true,
@@ -125,6 +124,13 @@ data class ReaderSettings(
             FONT_MONO to "等宽",
         )
     }
+}
+
+enum class BatteryDisplayStyle(val label: String) {
+    ICON("仅图标"),
+    PERCENT_INSIDE("百分比在图标内"),
+    PERCENT_OUTSIDE("百分比在图标外"),
+    PERCENT_ONLY("仅百分比"),
 }
 
 enum class FlipAnimation(val label: String) {
