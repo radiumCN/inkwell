@@ -6,21 +6,26 @@ import android.app.Activity
 import android.content.ClipData
 import android.view.WindowManager
 import com.radium.inkwell.MainActivity
+import com.radium.inkwell.ui.theme.AppTheme
 import com.radium.inkwell.util.UsageLog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.areStatusBarsVisible
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.areStatusBarsVisible
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -149,7 +154,13 @@ fun ReaderScreen(
     val readerContext = LocalContext.current
     var showSpeechSheet by rememberSaveable { mutableStateOf(false) }
     val showOverlayBars = overlay.menuVisible || showSpeechSheet
-    val showRaisedHeader = !showOverlayBars && !WindowInsets.areStatusBarsVisible
+    val showRaisedHeader = !WindowInsets.areStatusBarsVisible
+    val motion = AppTheme.motionScheme
+    val menuProgress = animateFloatAsState(
+        targetValue = if (overlay.menuVisible) 1f else 0f,
+        animationSpec = if (overlay.menuVisible) motion.defaultEffectsSpec() else motion.fastEffectsSpec(),
+        label = "readerMenuChapterTitle",
+    )
     var miniPlayerHeight by remember { mutableStateOf(0.dp) }
     val speechInset = if (speechState.active && miniPlayerHeight > 0.dp) miniPlayerHeight + Dimens.gapS else 0.dp
     LaunchedEffect(speechState.active) {
@@ -400,8 +411,8 @@ fun ReaderScreen(
     KeepScreenOnEffect(activity, session.settings.keepScreenOn)
     ReaderSystemBarsEffect(
         activity,
-        showOverlayBars = showOverlayBars,
-        showStatusBar = session.settings.showStatusBar,
+        showNavigationBar = showOverlayBars,
+        showStatusBar = session.settings.showStatusBar || (showOverlayBars && !session.settings.usesRaisedHeader),
         lightPaper = !session.settings.theme.isDark,
         lightApp = MiuixTheme.colorScheme.surface.luminance() > 0.5f,
     )
@@ -431,8 +442,7 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(paper)
             // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
-            // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
-            // statusBarsPadding 让开状态栏，不受这里影响。
+            // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏单独让开顶部安全区。
     ) {
         /*
          * 进书 splash：正文还没就位时，在纸面上居中显示这本书的封面。
@@ -647,7 +657,7 @@ fun ReaderScreen(
                                 viewingImage = box.resourceId
                             },
                         )
-                        PageInfoBar(pageUi, session, layout, showRaisedHeader)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader, menuProgress)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -743,7 +753,7 @@ fun ReaderScreen(
                             highlight = speechSelection,
                             onImageTap = onImageTap,
                         )
-                        PageInfoBar(pageUi, session, layout, showRaisedHeader)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader, menuProgress)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -943,7 +953,7 @@ fun ReaderScreen(
         Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .then(if (overlay.menuVisible) Modifier.statusBarsPadding() else Modifier)
+                .then(if (overlay.menuVisible) Modifier.windowInsetsPadding(readerMenuTopInsets()) else Modifier)
                 .padding(top = if (overlay.menuVisible) Dimens.toolbarHeight + Dimens.gapS else Dimens.touchTarget)
                 .semantics { liveRegion = LiveRegionMode.Polite },
         ) {
@@ -965,6 +975,7 @@ fun ReaderScreen(
         // 常驻组合，可见性交给 AnimatedVisibility，保留退场动画。
         ReaderMenu(
             visible = overlay.menuVisible,
+            chapterHandoff = menuProgress.takeIf { layout?.raisedHeader != null },
             session = session,
             overlay = overlay,
             pageUi = pageUi,
@@ -1057,13 +1068,13 @@ internal fun buildLayoutSpec(
     val infoLinePx = if (infoLineHeight.isSp) infoLineHeight.toPx() else 18.dp.toPx()
     val leftMargin = settings.marginHorizontalDp.dp.toPx() + cutout.left
     val rightMargin = settings.marginHorizontalDp.dp.toPx() + cutout.right
-    val raisedHeader = if (settings.showHeader && !settings.showStatusBar) {
+    val raisedHeader = if (settings.usesRaisedHeader) {
         raisedReaderHeader(
             viewport.width, leftMargin, rightMargin, cutout.top, statusArea, layoutDirection,
             infoLinePx,
         )
     } else null
-    val preferredTop = (settings.headerTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f)
+    val preferredTop = (settings.effectiveHeaderTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f)
     val marginTop = when {
         raisedHeader != null -> maxOf(preferredTop, cutout.top.toFloat(), raisedHeader.topPx + infoLinePx + Dimens.gapS.toPx())
         settings.showStatusBar || settings.showHeader -> maxOf(preferredTop, cutout.top.toFloat(), statusArea.heightPx.toFloat())
@@ -1084,7 +1095,7 @@ internal fun buildLayoutSpec(
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,
         titleFontScale = settings.titleScale,
-        titleTopSpacingPx = settings.titleTopSpacingDp.dp.toPx(),
+        titleTopSpacingPx = settings.effectiveTitleTopSpacingDp.dp.toPx(),
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,
         justify = settings.justify,
@@ -1140,10 +1151,15 @@ private fun BrightnessEffect(windowBrightness: ReaderWindowBrightness?, brightne
     SideEffect { windowBrightness.update(reader, brightness) }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun readerMenuTopInsets(): WindowInsets =
+    WindowInsets.statusBarsIgnoringVisibility.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top)
+
 @Composable
 private fun ReaderSystemBarsEffect(
     activity: Activity?,
-    showOverlayBars: Boolean,
+    showNavigationBar: Boolean,
     showStatusBar: Boolean,
     lightPaper: Boolean,
     lightApp: Boolean,
@@ -1153,30 +1169,27 @@ private fun ReaderSystemBarsEffect(
     val latestLightApp by rememberUpdatedState(lightApp)
     val systemBars = WindowInsetsCompat.Type.systemBars()
     val statusBar = WindowInsetsCompat.Type.statusBars()
+    val navigationBar = WindowInsetsCompat.Type.navigationBars()
     // 开合面板只切换可见性。退出阅读时才归还系统栏和 App 主题的图标颜色。
     DisposableEffect(controller) {
         val previousBehavior = controller.systemBarsBehavior
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         onDispose {
             controller.systemBarsBehavior = previousBehavior
-            controller.show(systemBars)
             controller.isAppearanceLightStatusBars = latestLightApp
             controller.isAppearanceLightNavigationBars = latestLightApp
+            controller.show(systemBars)
         }
     }
     SideEffect {
         if (controller.isAppearanceLightStatusBars != lightPaper) controller.isAppearanceLightStatusBars = lightPaper
         if (controller.isAppearanceLightNavigationBars != lightPaper) controller.isAppearanceLightNavigationBars = lightPaper
     }
-    LaunchedEffect(controller, showOverlayBars, showStatusBar) {
-        when {
-            showOverlayBars -> controller.show(systemBars)
-            showStatusBar -> {
-                controller.hide(systemBars and statusBar.inv())
-                controller.show(statusBar)
-            }
-            else -> controller.hide(systemBars)
-        }
+    LaunchedEffect(controller, showStatusBar) {
+        if (showStatusBar) controller.show(statusBar) else controller.hide(statusBar)
+    }
+    LaunchedEffect(controller, showNavigationBar) {
+        if (showNavigationBar) controller.show(navigationBar) else controller.hide(navigationBar)
     }
 }
 

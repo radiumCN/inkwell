@@ -44,6 +44,7 @@ fun SegmentedChoice(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val scheme = MiuixTheme.colorScheme
     val spec = AppTheme.motionScheme.defaultEffectsSpec<Color>()
@@ -76,6 +77,7 @@ fun SegmentedChoice(
                     .squircleSurface(container, AppShapes.radiusSmall)
                     .selectable(
                         selected = selected,
+                        enabled = enabled,
                         onClick = { onSelect(i) },
                         role = Role.RadioButton,
                     ),

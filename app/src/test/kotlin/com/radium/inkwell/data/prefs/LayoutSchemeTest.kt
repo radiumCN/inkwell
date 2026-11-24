@@ -63,7 +63,7 @@ class LayoutSchemeTest {
 
     @Test
     fun `排版方案保存负的头部留白并为旧版保留零值`() {
-        val settings = tight.copy(headerTopSpacingDp = -16f, marginVerticalDp = 0f)
+        val settings = tight.copy(headerTopSpacingDp = -16f, titleTopSpacingDp = 12f, marginVerticalDp = 0f)
         val scheme = LayoutScheme.capture("贴边", settings)
         val decoded = LayoutSchemeCodec.decode(LayoutSchemeCodec.encode(listOf(scheme))).single()
         assertEquals(0f, decoded.headerTopSpacingDp)

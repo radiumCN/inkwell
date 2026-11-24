@@ -73,6 +73,7 @@ class ReaderPrefs(
         val SHOW_BATTERY = booleanPreferencesKey("show_battery")
         val SHOW_HEADER = booleanPreferencesKey("show_header")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
+        val RAISE_HEADER = booleanPreferencesKey("raise_header")
         val SHOW_FOOTER = booleanPreferencesKey("show_footer")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
@@ -131,11 +132,11 @@ class ReaderPrefs(
 
     private fun readSettings(p: Preferences, dark: Boolean): ReaderSettings {
         val customPaper = ReaderPaperPrefs.custom(p, dark)
-        val headerSpacing = p[Keys.HEADER_TOP_SPACING] ?: 24f
+        val headerSpacing = p[Keys.HEADER_TOP_SPACING]
         return ReaderSettings(
             fontSizeSp = p[Keys.FONT_SIZE] ?: 18f,
             titleScale = p[Keys.TITLE_SCALE] ?: 1.4f,
-            titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING] ?: 24f,
+            titleTopSpacingDp = p[Keys.TITLE_TOP_SPACING],
             headerTopSpacingDp = if (headerSpacing == 0f) p[Keys.HEADER_TOP_OFFSET] ?: 0f else headerSpacing,
             fontId = p[Keys.FONT_ID] ?: ReaderSettings.FONT_SYSTEM,
             bodyFontWeight = p[Keys.BODY_FONT_WEIGHT]?.takeIf { it in ReaderSettings.BODY_FONT_WEIGHTS }
@@ -156,6 +157,7 @@ class ReaderPrefs(
             showBattery = p[Keys.SHOW_BATTERY] ?: true,
             showHeader = p[Keys.SHOW_HEADER] ?: true,
             showStatusBar = p[Keys.SHOW_STATUS_BAR] ?: false,
+            raiseHeader = p[Keys.RAISE_HEADER] ?: false,
             showFooter = p[Keys.SHOW_FOOTER] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
@@ -209,8 +211,10 @@ class ReaderPrefs(
     private fun writeTypography(p: MutablePreferences, settings: ReaderSettings) {
         p[Keys.FONT_SIZE] = settings.fontSizeSp
         p[Keys.TITLE_SCALE] = settings.titleScale
-        p[Keys.TITLE_TOP_SPACING] = settings.titleTopSpacingDp
+        settings.titleTopSpacingDp?.let { p[Keys.TITLE_TOP_SPACING] = it }
+            ?: p.remove(Keys.TITLE_TOP_SPACING)
         writeHeaderTopSpacing(p, settings.headerTopSpacingDp)
+        p[Keys.RAISE_HEADER] = settings.raiseHeader
         p[Keys.FONT_ID] = settings.fontId
         p[Keys.BODY_FONT_WEIGHT] = settings.bodyFontWeight
         p[Keys.LINE_SPACING] = settings.lineSpacingMult
@@ -273,9 +277,9 @@ class ReaderPrefs(
                 "custom_night_text" to p[Keys.CUSTOM_NIGHT_TEXT]?.toString().orEmpty(),
                 "font_size_sp" to s.fontSizeSp.toString(),
                 "title_scale" to s.titleScale.toString(),
-                "title_top_spacing" to s.titleTopSpacingDp.toString(),
-                Keys.HEADER_TOP_SPACING.name to s.headerTopSpacingDp.coerceAtLeast(0f).toString(),
-                Keys.HEADER_TOP_OFFSET.name to s.headerTopSpacingDp.coerceAtMost(0f).toString(),
+                Keys.TITLE_TOP_SPACING.name to s.titleTopSpacingDp?.toString().orEmpty(),
+                Keys.HEADER_TOP_SPACING.name to p[Keys.HEADER_TOP_SPACING]?.toString().orEmpty(),
+                Keys.HEADER_TOP_OFFSET.name to p[Keys.HEADER_TOP_OFFSET]?.toString().orEmpty(),
                 "font_id" to s.fontId,
                 Keys.BODY_FONT_WEIGHT.name to s.bodyFontWeight.toString(),
                 "line_spacing" to s.lineSpacingMult.toString(),
@@ -292,6 +296,7 @@ class ReaderPrefs(
                 "show_battery" to s.showBattery.toString(),
                 "show_header" to s.showHeader.toString(),
                 Keys.SHOW_STATUS_BAR.name to s.showStatusBar.toString(),
+                Keys.RAISE_HEADER.name to s.raiseHeader.toString(),
                 "show_footer" to s.showFooter.toString(),
                 "volume_key_flip" to s.volumeKeyFlip.toString(),
                 "flip_haptic" to s.flipHaptic.toString(),
@@ -318,9 +323,15 @@ class ReaderPrefs(
 }
 
 /** 旧版直接把头部留白用于布局，因此旧键始终保存非负值。 */
-private fun writeHeaderTopSpacing(p: MutablePreferences, spacing: Float) {
-    p[ReaderPrefs.Keys.HEADER_TOP_SPACING] = spacing.coerceAtLeast(0f)
-    p[ReaderPrefs.Keys.HEADER_TOP_OFFSET] = spacing.coerceAtMost(0f)
+private fun writeHeaderTopSpacing(p: MutablePreferences, spacing: Float?) {
+    val keys = ReaderPrefs.Keys
+    if (spacing == null) {
+        p.remove(keys.HEADER_TOP_SPACING)
+        p.remove(keys.HEADER_TOP_OFFSET)
+    } else {
+        p[keys.HEADER_TOP_SPACING] = spacing.coerceAtLeast(0f)
+        p[keys.HEADER_TOP_OFFSET] = spacing.coerceAtMost(0f)
+    }
 }
 
 /** 日夜分别记当前主题和自定义配色；旧单槽只迁移到日间。 */
@@ -371,12 +382,17 @@ internal object ReaderBackupImport {
             keys.FIRST_LINE_INDENT, keys.LETTER_SPACING, keys.BRIGHTNESS).forEach { key ->
             v[key.name]?.toFloatOrNull()?.takeIf { it.isFinite() }?.let { p[key] = it }
         }
-        val headerSpacing = v[keys.HEADER_TOP_SPACING.name]?.toFloatOrNull()?.takeIf { it.isFinite() }
-        if (headerSpacing != null) {
+        // 空值表示用户恢复了默认值。旧备份缺键时保留本机设置。
+        if (v[keys.TITLE_TOP_SPACING.name] == "") p.remove(keys.TITLE_TOP_SPACING)
+        val headerValue = v[keys.HEADER_TOP_SPACING.name]
+        val headerSpacing = headerValue?.toFloatOrNull()?.takeIf { it.isFinite() }
+        if (headerValue == "") {
+            writeHeaderTopSpacing(p, null)
+        } else if (headerSpacing != null) {
             val headerOffset = v[keys.HEADER_TOP_OFFSET.name]?.toFloatOrNull()?.takeIf { it.isFinite() && it < 0f }
             writeHeaderTopSpacing(p, if (headerSpacing == 0f) headerOffset ?: 0f else headerSpacing)
         }
-        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_STATUS_BAR,
+        listOf(keys.JUSTIFY, keys.KEEP_SCREEN_ON, keys.SHOW_BATTERY, keys.SHOW_HEADER, keys.SHOW_STATUS_BAR, keys.RAISE_HEADER,
             keys.SHOW_FOOTER, keys.VOLUME_KEY_FLIP, keys.FLIP_HAPTIC, keys.SCROLL_CLICK_TO_FLIP, keys.PINCH_FONT_SIZE,
             keys.EDGE_BRIGHTNESS, keys.SHOW_IMAGES, keys.LOCAL_SHOW_IMAGES).forEach { key ->
             v[key.name]?.toBooleanStrictOrNull()?.let { p[key] = it }

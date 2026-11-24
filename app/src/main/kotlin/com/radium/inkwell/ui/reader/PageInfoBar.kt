@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -55,7 +57,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 页眉的位置跟随已经应用到正文的分页结果，系统栏临时出现时收起上移的页眉。
  */
 @Composable
-fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec, showRaisedHeader: Boolean) {
+fun PageInfoBar(
+    pageUi: ReaderPageUi,
+    session: ReaderSessionUi,
+    spec: LayoutSpec,
+    showRaisedHeader: Boolean,
+    menuProgress: State<Float>,
+) {
     val density = LocalDensity.current
     val context = LocalContext.current
     val footerColor = remember(session.settings.theme.footerColor) {
@@ -119,11 +127,16 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
             val left = with(density) { (raisedHeader?.leftInsetPx ?: spec.marginLeftPx).toDp() }
             val right = with(density) { (raisedHeader?.rightInsetPx ?: spec.marginRightPx).toDp() }
             val top = with(density) { (raisedHeader?.topPx ?: spec.marginTopPx).toDp() }
+            val chapterFade = if (raisedHeader == null) Modifier else Modifier.graphicsLayer {
+                // 页眉先淡出，章名再在菜单栏里淡入。
+                alpha = (1f - 2f * menuProgress.value).coerceIn(0f, 1f)
+            }
             Text(
                 pageUi.chapterTitle,
                 Modifier
                     .align(Alignment.TopStart)
-                    .absolutePadding(left = left, right = right, top = top),
+                    .absolutePadding(left = left, right = right, top = top)
+                    .then(chapterFade),
                 color = footerColor,
                 style = footerStyle,
                 maxLines = 1,

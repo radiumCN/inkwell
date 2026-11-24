@@ -36,20 +36,39 @@ class ReaderLayoutSpecTest {
 
     @Test
     fun `隐藏状态栏时页眉用挖孔左侧且正文收回原页眉带`() {
-        val raised = spec(ReaderSettings())
-        val regular = spec(ReaderSettings(showStatusBar = true))
+        val settings = ReaderSettings(raiseHeader = true, headerTopSpacingDp = 24f)
+        val raised = spec(settings)
+        val regular = spec(settings.copy(showStatusBar = true))
         assertEquals(RaisedReaderHeader(18f, 72f, 588f), raised.raisedHeader)
         assertEquals(0f, raised.headerHeightPx)
         assertEquals(regular.marginTopPx, raised.marginTopPx)
         assertEquals(regular.contentHeightPx + regular.headerHeightPx, raised.contentHeightPx)
 
-        val rtl = spec(ReaderSettings(), layoutDirection = LayoutDirection.Rtl)
+        val rtl = spec(settings, layoutDirection = LayoutDirection.Rtl)
         assertEquals(RaisedReaderHeader(18f, 588f, 72f), rtl.raisedHeader)
     }
 
     @Test
+    fun `页眉模式决定默认间距且保留用户保存的值`() {
+        val regular = ReaderSettings()
+        val raised = regular.copy(raiseHeader = true)
+        assertNull(spec(regular).raisedHeader)
+        assertEquals(126f, spec(regular).marginTopPx)
+        assertEquals(36f, spec(regular).titleTopSpacingPx)
+        assertEquals(114f, spec(raised).marginTopPx)
+        assertEquals(0f, spec(raised).titleTopSpacingPx)
+        assertEquals(spec(regular.copy(showStatusBar = true)), spec(raised.copy(showStatusBar = true)))
+
+        for (settings in listOf(regular, raised)) {
+            val saved = spec(settings.copy(headerTopSpacingDp = 20f, titleTopSpacingDp = 24f))
+            assertEquals(150f, saved.marginTopPx)
+            assertEquals(72f, saved.titleTopSpacingPx)
+        }
+    }
+
+    @Test
     fun `挖孔前空间不足或缺少坐标时用安全区下方的常规页眉`() {
-        val settings = ReaderSettings(headerTopSpacingDp = -48f)
+        val settings = ReaderSettings(raiseHeader = true, headerTopSpacingDp = -48f)
         for (status in listOf(ReaderStatusArea(90, listOf(IntRect(132, 12, 182, 72))), ReaderStatusArea(90))) {
             val s = spec(settings, status = status)
             assertNull(s.raisedHeader)
@@ -60,7 +79,7 @@ class ReaderLayoutSpecTest {
 
     @Test
     fun `顶部放不下放大的页眉时整行留在安全区下方`() {
-        val settings = ReaderSettings(headerTopSpacingDp = -48f)
+        val settings = ReaderSettings(raiseHeader = true, headerTopSpacingDp = -48f)
         val s = buildLayoutSpec(IntSize(1080, 2400), settings, density, cutout, 36.sp, 0f, statusArea)
         assertNull(s.raisedHeader)
         assertEquals(90f, s.marginTopPx)

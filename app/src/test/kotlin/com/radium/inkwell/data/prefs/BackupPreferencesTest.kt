@@ -120,4 +120,24 @@ class BackupPreferencesTest {
         assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf("show_status_bar" to "false"))) { true })
         assertEquals(false, p[keys.SHOW_STATUS_BAR])
     }
+
+    @Test fun `reader backup distinguishes saved zero spacing, defaults, and omitted values`() {
+        val keys = ReaderPrefs.Keys
+        val p = mutablePreferencesOf()
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(100, mapOf(
+            "raise_header" to "true", "title_top_spacing" to "0", "header_top_spacing" to "0",
+        ))) { true })
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(200, emptyMap())) { true })
+        assertEquals(true, p[keys.RAISE_HEADER])
+        assertEquals(0f, p[keys.TITLE_TOP_SPACING])
+        assertEquals(0f, p[keys.HEADER_TOP_SPACING])
+
+        assertTrue(ReaderBackupImport.apply(p, BackupSettings(300, mapOf(
+            "raise_header" to "false", "title_top_spacing" to "", "header_top_spacing" to "",
+        ))) { true })
+        assertEquals(false, p[keys.RAISE_HEADER])
+        assertFalse(p.contains(keys.TITLE_TOP_SPACING))
+        assertFalse(p.contains(keys.HEADER_TOP_SPACING))
+        assertFalse(p.contains(keys.HEADER_TOP_OFFSET))
+    }
 }

@@ -68,8 +68,8 @@ data class LayoutScheme(
             near(firstLineIndentEm, s.firstLineIndentEm) &&
             justify == s.justify &&
             near(titleScale, s.titleScale) &&
-            near(titleTopSpacingDp, s.titleTopSpacingDp) &&
-            near(effectiveHeaderTopSpacingDp, s.headerTopSpacingDp) &&
+            near(titleTopSpacingDp, s.effectiveTitleTopSpacingDp) &&
+            near(effectiveHeaderTopSpacingDp, s.effectiveHeaderTopSpacingDp) &&
             near(marginHorizontalDp, s.marginHorizontalDp) &&
             near(marginVerticalDp, s.marginVerticalDp)
 
@@ -88,9 +88,9 @@ data class LayoutScheme(
             firstLineIndentEm = s.firstLineIndentEm,
             justify = s.justify,
             titleScale = s.titleScale,
-            titleTopSpacingDp = s.titleTopSpacingDp,
-            headerTopSpacingDp = s.headerTopSpacingDp.coerceAtLeast(0f),
-            headerTopOffsetDp = s.headerTopSpacingDp.coerceAtMost(0f),
+            titleTopSpacingDp = s.effectiveTitleTopSpacingDp,
+            headerTopSpacingDp = s.effectiveHeaderTopSpacingDp.coerceAtLeast(0f),
+            headerTopOffsetDp = s.effectiveHeaderTopSpacingDp.coerceAtMost(0f),
             marginHorizontalDp = s.marginHorizontalDp,
             marginVerticalDp = s.marginVerticalDp,
         )

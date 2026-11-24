@@ -5,10 +5,10 @@ data class ReaderSettings(
     val fontSizeSp: Float = 18f,
     /** 章节标题相对正文的倍数（legado 的标题字号）。1.0 = 与正文同大 */
     val titleScale: Float = 1.4f,
-    /** 章节标题上方的留白（dp）。让标题跟正文之间/跟页顶之间松紧可调 */
-    val titleTopSpacingDp: Float = 24f,
-    /** 顶部挖孔区之外的排版留白（dp）。页眉或系统状态栏显示时，保留对应的安全空间。 */
-    val headerTopSpacingDp: Float = 24f,
+    /** 章节标题上方的留白（dp）。null 表示使用当前页眉模式的默认值。 */
+    val titleTopSpacingDp: Float? = null,
+    /** 顶部挖孔区之外的排版留白（dp）。null 表示使用当前页眉模式的默认值。 */
+    val headerTopSpacingDp: Float? = null,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
     val paragraphSpacingEm: Float = 0.6f,
@@ -29,7 +29,7 @@ data class ReaderSettings(
      */
     val showBattery: Boolean = true,
     /**
-     * 是否显示章节名页眉。默认开。顶部系统状态栏隐藏时，页眉优先使用屏幕顶部可用区域。
+     * 是否显示章节名页眉。默认开。
      */
     val showHeader: Boolean = true,
     /** 正文阅读时是否常驻顶部系统状态栏。 */
@@ -80,7 +80,15 @@ data class ReaderSettings(
     /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
     val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
     val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
+    /** 隐藏系统状态栏时，允许章节页眉使用屏幕顶部的可用区域。 */
+    val raiseHeader: Boolean = false,
 ) {
+    val usesRaisedHeader: Boolean get() = showHeader && !showStatusBar && raiseHeader
+    val effectiveHeaderTopSpacingDp: Float
+        get() = headerTopSpacingDp ?: if (usesRaisedHeader) 8f else 12f
+    val effectiveTitleTopSpacingDp: Float
+        get() = titleTopSpacingDp ?: if (usesRaisedHeader) 0f else 12f
+
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
         const val FONT_SIZE_MIN = 12f
