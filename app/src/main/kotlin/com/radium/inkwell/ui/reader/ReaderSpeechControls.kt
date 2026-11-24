@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,9 +49,11 @@ import com.radium.inkwell.ui.components.SpinnerSettingRow
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.pageScroll
+import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Pause
@@ -151,7 +155,7 @@ internal fun ReaderSpeechSheet(
                     when (current) {
                         SpeechPanel.CONTROLS -> when (state.status) {
                             SpeechStatus.NO_VOICE -> {
-                                val hasVoices = state.voices.isNotEmpty() || state.hasDefaultVoice
+                                val hasVoices = state.hasVoiceOptions
                                 val hasEngines = state.engines.isNotEmpty()
                                 val connectionError = state.voiceError
                                 if (connectionError != null && !hasVoices) {
@@ -240,6 +244,14 @@ internal fun ReaderSpeechSheet(
                             )
                         }
                         SpeechPanel.VOICES -> {
+                            val pending = state.pendingVoice
+                            var showPending by remember(pending) { mutableStateOf(false) }
+                            LaunchedEffect(pending) {
+                                if (pending != null) {
+                                    delay(VOICE_SWITCH_INDICATOR_DELAY_MS)
+                                    showPending = true
+                                }
+                            }
                             if (state.hasDefaultVoice || state.voices.any { it.requiresNetwork }) {
                                 Text(
                                     NETWORK_VOICE_HINT,
@@ -251,26 +263,24 @@ internal fun ReaderSpeechSheet(
                                 val defaultCount = if (state.hasDefaultVoice) 1 else 0
                                 val size = state.voices.size + defaultCount + 1
                                 if (state.hasDefaultVoice) {
-                                    val selected = state.voice == SpeechVoiceChoice()
-                                    SettingRow(
+                                    SpeechVoiceRow(
+                                        choice = SpeechVoiceChoice(),
+                                        state = state,
+                                        showPending = showPending,
                                         title = "引擎默认音色",
                                         subtitle = "联网状态由引擎决定",
-                                        value = if (selected) "当前" else null,
-                                        onClick = if (state.status == SpeechStatus.LOADING || selected) null
-                                        else ({ speech.service?.selectVoice(null, state.engineConnection) }),
                                         position = SettingGroupPosition.First,
-                                    )
+                                    ) { speech.service?.selectVoice(null, state.engineConnection) }
                                 }
                                 state.voices.forEachIndexed { index, voice ->
-                                    val selected = voice.name == state.voice?.name
-                                    SettingRow(
+                                    SpeechVoiceRow(
+                                        choice = SpeechVoiceChoice(voice.name),
+                                        state = state,
+                                        showPending = showPending,
                                         title = voiceTitle(state.voices, index),
                                         subtitle = voice.name,
-                                        value = if (selected) "当前" else null,
-                                        onClick = if (state.status == SpeechStatus.LOADING || selected) null
-                                        else ({ speech.service?.selectVoice(voice.name, state.engineConnection) }),
                                         position = groupPosition(index + defaultCount, size),
-                                    )
+                                    ) { speech.service?.selectVoice(voice.name, state.engineConnection) }
                                 }
                                 SettingRow(
                                     title = MANAGE_VOICES,
@@ -280,8 +290,8 @@ internal fun ReaderSpeechSheet(
                                 )
                             }
                             val message = settingsMessage ?: state.voiceError ?: when {
-                                state.status == SpeechStatus.LOADING -> "正在检查音色…"
-                                state.voices.isEmpty() && !state.hasDefaultVoice -> MISSING_VOICE_HINT
+                                state.checkingVoiceOptions -> "正在检查音色…"
+                                !state.hasVoiceOptions -> MISSING_VOICE_HINT
                                 else -> null
                             }
                             if (message != null) {
@@ -306,6 +316,36 @@ internal fun ReaderSpeechSheet(
             }
         }
     }
+}
+
+private const val VOICE_SWITCH_INDICATOR_DELAY_MS = 180L
+
+@Composable
+private fun SpeechVoiceRow(
+    choice: SpeechVoiceChoice,
+    state: SpeechState,
+    showPending: Boolean,
+    title: String,
+    subtitle: String,
+    position: SettingGroupPosition,
+    onClick: () -> Unit,
+) {
+    val selected = state.voice == choice
+    SettingRow(
+        title = title,
+        subtitle = subtitle,
+        onClick = onClick.takeIf { state.canRequestVoiceChange(choice) },
+        position = position,
+        trailing = {
+            // 勾选、等待和未选共用同一个行尾尺寸。换音色时长音色名也不会重新换行。
+            Box(Modifier.size(Dimens.iconSm), contentAlignment = Alignment.Center) {
+                when {
+                    showPending && state.pendingVoice == choice -> AppLoadingIndicator(size = Dimens.iconSm)
+                    selected -> Icon(MiuixIcons.Basic.Check, contentDescription = "当前音色", tint = MiuixTheme.colorScheme.primary)
+                }
+            }
+        },
+    )
 }
 
 private fun voiceTitle(voices: List<SpeechVoice>, index: Int): String {

@@ -167,7 +167,7 @@ internal class ReaderSpeechService : Service() {
         publish((previous ?: current.state.value).copy(
             status = SpeechStatus.LOADING, enginePackage = preferred, systemEngine = null, voice = null,
             engineConnection = ++engineSequence,
-            voices = emptyList(), hasDefaultVoice = false, error = null, voiceError = null,
+            voices = emptyList(), hasDefaultVoice = false, pendingVoice = null, error = null, voiceError = null,
         ))
         runEngineOperation(engine, "语音引擎准备超时，请切换引擎或重试。") {
             val connection = engine.connect(
@@ -254,7 +254,7 @@ internal class ReaderSpeechService : Service() {
 
     private fun unavailableVoice(state: SpeechState, message: String? = null) {
         releaseFocus()
-        publish(state.copy(status = SpeechStatus.NO_VOICE, voiceError = message))
+        publish(state.copy(status = SpeechStatus.NO_VOICE, pendingVoice = null, voiceError = message))
         leaveForeground()
     }
 
@@ -306,14 +306,14 @@ internal class ReaderSpeechService : Service() {
         val engine = tts ?: return
         val state = current.state.value
         val choice = SpeechVoiceChoice(name)
-        if (engineTimeout != null || state.voice == choice || !state.offersVoice(choice, connection)) return
+        if (engineTimeout != null || !state.canRequestVoiceChange(choice) || !state.offersVoice(choice, connection)) return
         val option = state.voices.firstOrNull { it.name == name }
 
         val checkpoint = checkpoint(current)
         loadJob?.cancel()
         stopUtterance()
         if (!enterForeground()) return
-        publish(checkpoint.copy(status = SpeechStatus.LOADING, voice = null, voiceError = null, error = null))
+        publish(checkpoint.copy(status = SpeechStatus.LOADING, pendingVoice = choice, voiceError = null, error = null))
         runEngineOperation(engine, "切换音色超时，请重试或切换引擎。") {
             val selected = engine.selectVoice(choice)
             if (!finishEngineOperation(engine)) return@runEngineOperation
@@ -327,7 +327,7 @@ internal class ReaderSpeechService : Service() {
                     preferences.edit().putString(key, option.name).apply()
                 }
             }
-            resumeAtTarget(current, latest.copy(voice = choice))
+            resumeAtTarget(current, latest.copy(voice = choice, pendingVoice = null))
         }
     }
 
@@ -373,7 +373,7 @@ internal class ReaderSpeechService : Service() {
         when {
             state.status == SpeechStatus.LOADING -> if (!alreadyRequested) publish(state)
             state.voice != null && tts != null -> if (enterForeground()) seek(current.targetChapter, current.targetOffset, autoplay = true)
-            tts != null && (state.voices.isNotEmpty() || state.hasDefaultVoice) -> publish(state)
+            tts != null && state.hasVoiceOptions -> publish(state)
             else -> retryVoice()
         }
     }
@@ -438,7 +438,8 @@ internal class ReaderSpeechService : Service() {
         if (chapter !in 0 until current.chapterCount()) return
         playWhenReady = autoplay
         current.setTarget(chapter, offset)
-        if (current.state.value.voice == null) return
+        val state = current.state.value
+        if (state.voice == null || state.pendingVoice != null) return
         loadJob?.cancel()
         stopUtterance()
         val previous = current.state.value

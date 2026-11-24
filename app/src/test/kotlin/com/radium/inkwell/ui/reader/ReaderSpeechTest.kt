@@ -102,6 +102,38 @@ class ReaderSpeechTest {
     }
 
     @Test
+    fun `switching a listed voice does not show the voice catalog loading footer`() {
+        val loading = SpeechState(status = SpeechStatus.LOADING)
+        val voices = listOf(SpeechVoice("offline", false))
+        val switching = loading.copy(
+            voices = voices, hasDefaultVoice = true, voice = SpeechVoiceChoice("offline"), pendingVoice = SpeechVoiceChoice(),
+        )
+        assertTrue(loading.checkingVoiceOptions)
+        assertFalse(switching.checkingVoiceOptions)
+        assertFalse(switching.copy(voice = SpeechVoiceChoice(), pendingVoice = null).checkingVoiceOptions)
+        assertFalse(loading.copy(hasDefaultVoice = true).checkingVoiceOptions)
+    }
+
+    @Test
+    fun `a chapter loading after a voice switch keeps other voices selectable`() {
+        val offline = SpeechVoiceChoice("offline")
+        val default = SpeechVoiceChoice()
+        val switching = SpeechState(
+            status = SpeechStatus.LOADING,
+            voices = listOf(SpeechVoice("offline", false), SpeechVoice("online", true)),
+            hasDefaultVoice = true,
+            voice = offline,
+            pendingVoice = default,
+        )
+        assertFalse(switching.canRequestVoiceChange(default))
+        assertFalse(switching.canRequestVoiceChange(SpeechVoiceChoice("online")))
+
+        val loadingChapter = switching.copy(voice = default, pendingVoice = null)
+        assertTrue(loadingChapter.canRequestVoiceChange(offline))
+        assertFalse(loadingChapter.canRequestVoiceChange(default))
+    }
+
+    @Test
     fun `offline preferences use the returned voice catalog even when engines reuse a name`() {
         val voice = SpeechVoice("default", false, "zh-CN")
         val other = SpeechVoice("backup", false, "zh-TW")

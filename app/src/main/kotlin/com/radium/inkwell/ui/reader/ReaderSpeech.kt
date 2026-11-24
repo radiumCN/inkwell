@@ -98,6 +98,7 @@ internal data class SpeechState(
     val voices: List<SpeechVoice> = emptyList(),
     val hasDefaultVoice: Boolean = false,
     val voice: SpeechVoiceChoice? = null,
+    val pendingVoice: SpeechVoiceChoice? = null,
     val voiceError: String? = null,
     val rate: Float = 1f,
     // null = 关闭，0 = 本章结束，正数 = 分钟。
@@ -107,6 +108,10 @@ internal data class SpeechState(
     val paragraph: SpeechParagraph? get() = chapter?.paragraphs?.getOrNull(paragraphIndex)
     val chapterOffset: Int? get() = paragraph?.let { it.offset + paragraphStart }
     val active: Boolean get() = status != SpeechStatus.IDLE
+    val hasVoiceOptions: Boolean get() = hasDefaultVoice || voices.isNotEmpty()
+    val checkingVoiceOptions: Boolean get() = status == SpeechStatus.LOADING && !hasVoiceOptions
+
+    fun canRequestVoiceChange(choice: SpeechVoiceChoice): Boolean = pendingVoice == null && voice != choice
 
     fun offersVoice(choice: SpeechVoiceChoice, connection: Long): Boolean =
         engineConnection == connection && (choice.name?.let { name -> voices.any { it.name == name } } ?: hasDefaultVoice)
