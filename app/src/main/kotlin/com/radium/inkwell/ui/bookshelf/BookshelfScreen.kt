@@ -188,9 +188,25 @@ fun BookshelfScreen(
     /** 返回栈里还有没有阅读页。从这里开的书，读完退回来、退出动画播完，书架才放开冻住的顺序 */
     readerOpen: Boolean = false,
 ) {
-    val books by viewModel.books.collectAsStateWithLifecycle()
-    val continueReading by viewModel.continueReading.collectAsStateWithLifecycle()
+    val snapshot by viewModel.content.collectAsStateWithLifecycle()
+    val allBooks = snapshot?.allBooks.orEmpty()
+    val books = snapshot?.books.orEmpty()
+    val groups = snapshot?.groups.orEmpty()
+    val group = snapshot?.group
     val onboarded by viewModel.onboarded.collectAsStateWithLifecycle()
+    val savedLayout by viewModel.layout.collectAsStateWithLifecycle()
+    val savedColumns by viewModel.columns.collectAsStateWithLifecycle()
+    val layout = savedLayout ?: BookshelfLayout.GRID
+    val columns = savedColumns ?: ShelfColumns.DEFAULT
+    val shelfReady = snapshot?.let {
+        when {
+            it.allBooks.isEmpty() -> onboarded != null
+            it.allHidden -> true
+            else -> savedLayout != null && (layout == BookshelfLayout.LIST || savedColumns != null)
+        }
+    } == true
+    // 首批书、筛选和布局已就绪，等 Compose 画到这一帧再报充分绘制。
+    ReportDrawnWhen { shelfReady }
     // 阅读页退干净了再放开顺序（见 BookshelfViewModel.frozenOrder）：退出动画是缩回这本书原来的位置，
     // 放早了它已经跑到第一格。返回栈在转场**开始**时就去掉了阅读页，这里得等过整段转场：
     // 普通返回是 READER_EXIT_MS 的 tween；侧滑返回跟手 seek，松手后剩下的那段按 PREDICTIVE_BACK_MS 的
@@ -202,17 +218,13 @@ fun BookshelfScreen(
             viewModel.releaseShelfOrder()
         }
     }
-    val shelfReady by viewModel.shelfReady.collectAsStateWithLifecycle()
-    // 首批书架数据落地再报 fully drawn，启动基准才是「看见书」而不是首帧空白
-    ReportDrawnWhen { shelfReady }
     // 换算进书展开原点用：把封面在窗口里的坐标除以窗口尺寸
     val windowSize = LocalWindowInfo.current.containerSize
-    val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
-    val groups by viewModel.groups.collectAsStateWithLifecycle()
-    val group by viewModel.group.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val selectionMode = selected.isNotEmpty()
-    val selectedVolumes = remember(allBooks, selected) { allBooks.filter { it.id in selected } }
+    val selectedVolumes = remember(allBooks, selected) {
+        if (selected.isEmpty()) emptyList() else allBooks.filter { it.id in selected }
+    }
     val canCreateSeries = selectedVolumes.size == selected.size &&
         selectedVolumes.size in 2..MAX_LOCAL_SERIES_VOLUMES &&
         selectedVolumes.all { it.isLocalOriginal() && it.localPath != null }
@@ -249,10 +261,7 @@ fun BookshelfScreen(
     CollectMessages(viewModel.messages, snackbar)
     val exploreEnabled by viewModel.exploreEnabled.collectAsStateWithLifecycle()
     val rssEntryVisible by viewModel.rssEntryVisible.collectAsStateWithLifecycle()
-    val layout by viewModel.layout.collectAsStateWithLifecycle()
-    val columns by viewModel.columns.collectAsStateWithLifecycle()
     val showHidden by viewModel.showHidden.collectAsStateWithLifecycle()
-    val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val requireAuth by viewModel.hiddenRequireAuth.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val duplicateHint by viewModel.duplicateHint.collectAsStateWithLifecycle()
@@ -309,7 +318,7 @@ fun BookshelfScreen(
     var groupSwitchFrom by remember { mutableStateOf<List<BookEntity>?>(null) }
     LaunchedEffect(groupSwitchFrom) {
         val from = groupSwitchFrom ?: return@LaunchedEffect
-        withTimeoutOrNull(GROUP_SWITCH_WAIT_MS) { snapshotFlow { books }.first { it !== from } }
+        withTimeoutOrNull(GROUP_SWITCH_WAIT_MS) { snapshotFlow { snapshot?.books.orEmpty() }.first { it !== from } }
         if (layout == BookshelfLayout.GRID) gridState.requestScrollToItem(0)
         else listState.requestScrollToItem(0)
         groupSwitchFrom = null
@@ -410,7 +419,7 @@ fun BookshelfScreen(
     // 书全被隐藏了也走这同一个空态。这里**不能**写「N 本书已隐藏」—— 那等于把秘密写在最显眼的地方。
     // 必须和真正的空书架一模一样（连「导入本地书」按钮也在）：别人看不出区别，而你知道长按标题能回来。
     // 从前是两段各写一份，全隐藏那份漏了导入按钮，一眼就和真空架对不上 —— 所以合成一个分支。
-    val allHidden = allBooks.isNotEmpty() && hiddenCount == allBooks.size && !showHidden
+    val allHidden = snapshot?.allHidden == true
     // 欢迎页只给真正空、且从没用过的书架（全藏起来的不算，见 WelcomeState）。
     // 标记还没读到（null）时两样都先不画：别先闪一下普通空态再换成欢迎页
     val showWelcome = allBooks.isEmpty() && onboarded != true
@@ -676,8 +685,7 @@ fun BookshelfScreen(
             }
         },
     ) { padding ->
-        // Room 第一帧还没到：先空着。这时 allBooks 的空不代表书架是空的，落进下面的空态
-        // 就是每次启动都先闪一下「书架空空如也 / 导入本地书」。本地库通常几十毫秒就回来，转圈也只会一闪
+        // 等首批书和视图设置就绪后再排架，避免先闪空态或默认网格。
         if (!shelfReady) return@AppScaffold
         if (showWelcome) {
             if (onboarded == false) {
@@ -739,7 +747,7 @@ fun BookshelfScreen(
                 // 多选时收起卡片：那时人在挑书，顶上一张大卡片只是挡路，也说不清它算不算被选上。
                 // 卡片在的时候，这本书就不再在下面的网格里重复一格 —— 它们本来就紧挨着，同一张封面摆两遍；
                 // 卡片收起（多选）时它回到网格里，照样能选
-                val hero = continueReading?.takeIf { !selectionMode }
+                val hero = snapshot?.continuingBook?.takeIf { !selectionMode && it.stillVisible() }
                 // 「发现 N 组重复的书」：同「继续阅读」，只在「全部」里出现、多选时收起 —— 提示说的是整个书架，
                 // 筛到某个分组时人在找书；多选时人在挑书，提示只是挡路
                 val dupHint = duplicateHint.takeIf { it.isNotEmpty() && !selectionMode && group == null }
@@ -750,7 +758,7 @@ fun BookshelfScreen(
                         onDismiss = viewModel::dismissDuplicateHint,
                     )
                 }
-                val shelfItems = if (hero == null) books else books.filter { it.id != hero.book.id }
+                val shelfItems = if (hero == null) books else snapshot?.booksBelowContinueCard.orEmpty()
                 // 平时长按 = 单本操作菜单；已在多选里则长按继续勾选切换。
                 // 触觉只挂在长按上 —— 点选切换不震，避免选十几本震十几下。
                 fun longPress(book: BookEntity) {
@@ -761,7 +769,7 @@ fun BookshelfScreen(
                     if (selectionMode) viewModel.toggleSelect(book.id)
                     else {
                         // 先冻住书架顺序再进书：开书会把它顶到第一位，退出动画却要缩回这里
-                        viewModel.freezeShelfOrder()
+                        viewModel.freezeShelfOrder(books)
                         onOpenBook(book.id, originOf(bounds, windowSize))
                     }
                 }
@@ -813,11 +821,12 @@ fun BookshelfScreen(
                                     ),
                                 ) {
                                     ContinueReadingCard(
-                                        entry = hero,
-                                        onClick = { bounds -> click(hero.book, bounds) },
-                                        onLongClick = { longPress(hero.book) },
+                                        book = hero,
+                                        loadChapterTitle = viewModel::chapterTitle,
+                                        onClick = { bounds -> click(hero, bounds) },
+                                        onLongClick = { longPress(hero) },
                                     )
-                                    bookMenu(hero.book)
+                                    bookMenu(hero)
                                 }
                             }
                         }
@@ -883,11 +892,12 @@ fun BookshelfScreen(
                                         .padding(bottom = Dimens.gapM),
                                 ) {
                                     ContinueReadingCard(
-                                        entry = hero,
-                                        onClick = { bounds -> click(hero.book, bounds) },
-                                        onLongClick = { longPress(hero.book) },
+                                        book = hero,
+                                        loadChapterTitle = viewModel::chapterTitle,
+                                        onClick = { bounds -> click(hero, bounds) },
+                                        onLongClick = { longPress(hero) },
                                     )
-                                    bookMenu(hero.book)
+                                    bookMenu(hero)
                                 }
                             }
                         }

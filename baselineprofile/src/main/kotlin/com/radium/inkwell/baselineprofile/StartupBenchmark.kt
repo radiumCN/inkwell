@@ -2,6 +2,7 @@ package com.radium.inkwell.baselineprofile
 
 import androidx.benchmark.macro.BaselineProfileMode
 import androidx.benchmark.macro.CompilationMode
+import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.StartupTimingMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
@@ -41,6 +42,40 @@ class StartupBenchmark {
     @Test
     fun startupBaselineProfile() =
         measure(CompilationMode.Partial(baselineProfileMode = BaselineProfileMode.Require))
+
+    /** 把「继续阅读」和书籍显示出的帧纳入采样，避免用空书架测首屏动画。 */
+    @Test
+    fun populatedShelfStartup() {
+        var seeded = false
+        rule.measureRepeated(
+            packageName = PACKAGE,
+            metrics = listOf(StartupTimingMetric(), FrameTimingMetric()),
+            compilationMode = CompilationMode.Partial(),
+            startupMode = StartupMode.COLD,
+            iterations = 10,
+            setupBlock = {
+                if (!seeded) {
+                    startActivityAndWait { it.putExtra("com.radium.inkwell.seed_profile_book", true) }
+                    val book = device.wait(Until.findObject(By.textContains("Benchmark")), 20_000L)
+                    checkNotNull(book) { "书架启动夹具未导入" }
+                    if (!device.hasObject(By.textContains("继续阅读"))) {
+                        book.click()
+                        check(device.wait(Until.gone(By.desc("搜索")), 10_000L)) { "未进入阅读页" }
+                        device.pressBack()
+                        check(device.wait(Until.hasObject(By.textContains("继续阅读")), 10_000L)) {
+                            "未保存夹具书的继续阅读位置"
+                        }
+                    }
+                    seeded = true
+                }
+                pressHome()
+            },
+        ) {
+            startActivityAndWait()
+            check(device.wait(Until.hasObject(By.textContains("继续阅读")), 10_000L)) { "未看到书架首屏内容" }
+            device.waitForIdle()
+        }
+    }
 
     private fun measure(mode: CompilationMode) = rule.measureRepeated(
         packageName = PACKAGE,

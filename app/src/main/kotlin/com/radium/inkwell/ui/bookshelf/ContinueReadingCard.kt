@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +29,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import com.radium.inkwell.data.db.entity.BookEntity
 import com.radium.inkwell.ui.components.BookCover
 import com.radium.inkwell.ui.components.CoverGlassCard
 import com.radium.inkwell.ui.components.Dimens
@@ -63,16 +67,14 @@ import com.radium.inkwell.ui.theme.AppShapes
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ContinueReadingCard(
-    entry: ContinueReading,
+    book: BookEntity,
+    loadChapterTitle: suspend (String, Int) -> String?,
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val book = entry.book
     val cover = remember { CoverAnchor() }
     val progress = book.readingProgress()
-    val chapterLine = entry.chapterTitle?.takeIf { it.isNotBlank() }
-        ?: "第 ${book.readChapterIndex + 1} 章"
     // 有更新时，读到的那章下面多一行最新章：上下一比就知道差几章、新的是什么（常见的「请假条」不用点进去才知道）
     val latestLine = book.latestChapterTitle
         ?.compactWhitespace()
@@ -151,13 +153,9 @@ internal fun ContinueReadingCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = Dimens.gapXS),
                 )
-                Text(
-                    chapterLine,
-                    style = MiuixTheme.textStyles.body2,
-                    color = content,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                key(book.id, book.readChapterIndex) {
+                    ContinueChapterLine(book, content, loadChapterTitle)
+                }
                 if (latestLine != null) {
                     // 同一种颜色、字号小一档：玻璃上的字只用一种颜色，层级靠字号拉开（同「上次阅读」那行）
                     Text(
@@ -196,6 +194,25 @@ internal fun ContinueReadingCard(
             }
         }
     }
+}
+
+/** 查章名只更新这一行，首屏可以先画卡片和固定章号。 */
+@Composable
+private fun ContinueChapterLine(
+    book: BookEntity,
+    color: Color,
+    loadChapterTitle: suspend (String, Int) -> String?,
+) {
+    val title by produceState<String?>(null, book) {
+        value = loadChapterTitle(book.id, book.readChapterIndex)?.takeIf { it.isNotBlank() }
+    }
+    Text(
+        title ?: "第 ${book.readChapterIndex + 1} 章",
+        style = MiuixTheme.textStyles.body2,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /**
