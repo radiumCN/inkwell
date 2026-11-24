@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
@@ -26,7 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -41,8 +39,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -51,6 +50,7 @@ import androidx.core.content.ContextCompat
 import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.theme.AppThemes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -218,23 +218,7 @@ internal fun BatteryIndicator(level: Int, style: BatteryDisplayStyle, color: Col
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (style == BatteryDisplayStyle.PERCENT_INSIDE) {
-            Text(
-                level.toString(),
-                modifier = Modifier
-                    .widthIn(min = Dimens.readerBatteryNumberMinWidth)
-                    .drawBehind {
-                        val bodyWidth = size.width - batteryTipWidth()
-                        if (bodyWidth > 0f) {
-                            drawRoundRect(color, size = Size(bodyWidth, size.height), cornerRadius = CornerRadius(3.dp.toPx()))
-                            drawBatteryTip(color, bodyWidth)
-                        }
-                    }
-                    .absolutePadding(left = Dimens.gapXS, right = Dimens.gapXS + Dimens.strokeThick),
-                color = background,
-                style = textStyle.copy(lineHeight = TextUnit.Unspecified, fontWeight = FontWeight.SemiBold),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
+            NumberedBattery(level, color, background, textStyle)
         } else {
             if (style != BatteryDisplayStyle.PERCENT_ONLY) BatteryIcon(level, color)
             if (style != BatteryDisplayStyle.ICON) {
@@ -247,6 +231,36 @@ internal fun BatteryIndicator(level: Int, style: BatteryDisplayStyle, color: Col
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun NumberedBattery(level: Int, color: Color, background: Color, textStyle: TextStyle) {
+    val measurer = rememberTextMeasurer()
+    val number = remember(measurer, level, textStyle) {
+        measurer.measure(
+            text = level.toString(),
+            style = textStyle.copy(lineHeight = TextUnit.Unspecified, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+    val density = LocalDensity.current
+    val width = with(density) { number.size.width.toDp() } + Dimens.gapS + Dimens.strokeThick
+    val height = with(density) { number.size.height.toDp() }
+    val numberColor = remember(background, color) { AppThemes.readableOn(background, color) }
+
+    // 数字与外形在同一个画布里绘制，弹窗预览和页脚都使用同一份测量结果。
+    Canvas(Modifier.size(width = maxOf(width, Dimens.readerBatteryNumberMinWidth), height = height)) {
+        val bodyWidth = size.width - batteryTipWidth()
+        if (bodyWidth < number.size.width || size.height < number.size.height) return@Canvas
+        drawRoundRect(color, size = Size(bodyWidth, size.height), cornerRadius = CornerRadius(3.dp.toPx()))
+        drawBatteryTip(color, bodyWidth)
+        drawText(
+            textLayoutResult = number,
+            color = numberColor,
+            topLeft = Offset((bodyWidth - number.size.width) / 2f, (size.height - number.size.height) / 2f),
+        )
     }
 }
 

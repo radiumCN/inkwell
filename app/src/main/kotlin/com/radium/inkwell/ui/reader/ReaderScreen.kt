@@ -996,7 +996,7 @@ fun ReaderScreen(
             onPreviewSettings = { viewModel.previewSettings(it) },
             onCommitSettings = { viewModel.commitSettings() },
             onSelectPaper = viewModel::selectPaper,
-            onCommitCustomPaper = viewModel::commitCustomPaper,
+            onCustomPaperChange = viewModel::updateCustomPaper,
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },

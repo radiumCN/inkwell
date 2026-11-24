@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrightnessHigh
 import androidx.compose.material.icons.outlined.BrightnessLow
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,7 +25,6 @@ import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.layout.BottomSheetDefaults
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.mutableFloatStateOf
@@ -70,9 +70,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.gestures.FlingBehavior
-import androidx.compose.foundation.gestures.ScrollScope
-import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
@@ -98,6 +95,7 @@ import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radium.inkwell.ui.components.SwitchRow
 import androidx.compose.ui.Modifier
@@ -211,7 +209,7 @@ fun ReaderMenu(
     onPreviewSettings: (ReaderSettings) -> Unit,
     onCommitSettings: () -> Unit,
     onSelectPaper: (String) -> Unit,
-    onCommitCustomPaper: () -> Unit,
+    onCustomPaperChange: (ReaderTheme, commit: Boolean) -> Unit,
     onSetTextSelection: (Boolean) -> Unit,
     typography: TypographyActions,
     onSearchSources: () -> Unit,
@@ -541,7 +539,7 @@ fun ReaderMenu(
                         onPreview = onPreviewSettings,
                         onCommit = onCommitSettings,
                         onSelectPaper = onSelectPaper,
-                        onCommitCustomPaper = onCommitCustomPaper,
+                        onCustomPaperChange = onCustomPaperChange,
                         textSelectionEnabled = session.textSelectionEnabled,
                         onTextSelectionChange = onSetTextSelection,
                         typography = typography,
@@ -1042,7 +1040,7 @@ private fun TypographyPanel(
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onSelectPaper: (String) -> Unit,
-    onCommitCustomPaper: () -> Unit,
+    onCustomPaperChange: (ReaderTheme, commit: Boolean) -> Unit,
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
     typography: TypographyActions,
@@ -1124,7 +1122,7 @@ private fun TypographyPanel(
                             onPreview = onPreview,
                             onCommit = onCommit,
                             onSelectPaper = onSelectPaper,
-                            onCommitCustomPaper = onCommitCustomPaper,
+                            onCustomPaperChange = onCustomPaperChange,
                             typography = typography,
                             dragging = dragging,
                             onDragging = onDragging,
@@ -1289,7 +1287,7 @@ private fun MainPage(
     onPreview: (ReaderSettings) -> Unit,
     onCommit: () -> Unit,
     onSelectPaper: (String) -> Unit,
-    onCommitCustomPaper: () -> Unit,
+    onCustomPaperChange: (ReaderTheme, commit: Boolean) -> Unit,
     typography: TypographyActions,
     dragging: SettingsSlider?,
     onDragging: (SettingsSlider?) -> Unit,
@@ -1341,8 +1339,7 @@ private fun MainPage(
                     Column(Modifier.padding(horizontal = Dimens.listHorizontal)) {
                         CustomPaperEditor(
                             theme = settings.theme,
-                            onChange = { onPreview(settings.copy(theme = it)) },
-                            onChangeFinished = onCommitCustomPaper,
+                            onChange = onCustomPaperChange,
                         )
                     }
                 }
@@ -2101,16 +2098,39 @@ private fun MoreTab(
 @Composable
 private fun CustomPaperEditor(
     theme: ReaderTheme,
-    onChange: (ReaderTheme) -> Unit,
-    onChangeFinished: () -> Unit,
+    onChange: (ReaderTheme, commit: Boolean) -> Unit,
 ) {
     val held = remember { HeldPaper() }
+    val scope = rememberCoroutineScope()
+    val latestOnChange by rememberUpdatedState(onChange)
     val parsed = remember(theme.background, theme.textColor) { PaperHsv.of(theme) }
-    val paper = held.value?.takeIf { it.background == theme.background && it.text == theme.textColor } ?: parsed
+    fun currentPaper(): PaperHsv = held.value?.takeIf {
+        held.changed || (it.background == theme.background && it.text == theme.textColor)
+    } ?: parsed
+    val paper = currentPaper()
 
-    fun update(next: PaperHsv) {
+    fun update(change: PaperHsv.() -> PaperHsv) {
+        val current = currentPaper()
+        val next = current.change()
+        if (next == current) return
         held.value = next
-        onChange(ReaderTheme.custom(next.background, next.text))
+        held.changed = true
+        if (held.preview?.isActive == true) return
+        // 高采样率触摸屏一帧能送来多个坐标。正文和面板只按这一帧最新的颜色重新绘制。
+        held.preview = scope.launch {
+            withFrameNanos {
+                held.value?.let { latestOnChange(ReaderTheme.custom(it.background, it.text), false) }
+            }
+        }
+    }
+
+    fun finish() {
+        if (!held.changed) return
+        held.changed = false
+        held.preview?.cancel()
+        held.preview = null
+        // 抬手可能早于下一帧，直接提交最后收到的坐标所对应的颜色。
+        held.value?.let { latestOnChange(ReaderTheme.custom(it.background, it.text), true) }
     }
 
     val hueValue = paper.v.coerceAtLeast(HUE_TRACK_MIN_VALUE)
@@ -2138,8 +2158,8 @@ private fun CustomPaperEditor(
             AppColorSlider(
                 value = paper.h,
                 valueRange = 0f..360f,
-                onValueChange = { update(paper.copy(h = it)) },
-                onValueChangeFinished = onChangeFinished,
+                onValueChange = { update { copy(h = it) } },
+                onValueChangeFinished = ::finish,
                 trackColors = hueTrack,
                 thumbColor = hsvToColor(paper.h, PAPER_SAT_MAX, hueValue),
                 label = "纸色色相",
@@ -2150,8 +2170,8 @@ private fun CustomPaperEditor(
             AppColorSlider(
                 value = paper.s,
                 valueRange = 0f..PAPER_SAT_MAX,
-                onValueChange = { update(paper.copy(s = it)) },
-                onValueChangeFinished = onChangeFinished,
+                onValueChange = { update { copy(s = it) } },
+                onValueChangeFinished = ::finish,
                 trackColors = satTrack,
                 thumbColor = paperColor,
                 label = "纸色浓度",
@@ -2161,8 +2181,8 @@ private fun CustomPaperEditor(
         PaperSliderRow("明度") {
             AppColorSlider(
                 value = paper.v,
-                onValueChange = { update(paper.copy(v = it)) },
-                onValueChangeFinished = onChangeFinished,
+                onValueChange = { update { copy(v = it) } },
+                onValueChangeFinished = ::finish,
                 trackColors = valueTrack,
                 thumbColor = paperColor,
                 label = "纸色明度",
@@ -2173,8 +2193,8 @@ private fun CustomPaperEditor(
         PaperSliderRow("字色", Modifier.padding(top = Dimens.gapXS)) {
             AppColorSlider(
                 value = paper.t,
-                onValueChange = { update(paper.copy(t = it)) },
-                onValueChangeFinished = onChangeFinished,
+                onValueChange = { update { copy(t = it) } },
+                onValueChangeFinished = ::finish,
                 trackColors = textTrack,
                 thumbColor = Color(paper.text),
                 label = "字色深浅",
@@ -2237,9 +2257,11 @@ private data class PaperHsv(val h: Float, val s: Float, val v: Float, val t: Flo
     }
 }
 
-/** 最近一次调出来的那份 HSV。只在回调里写、组合时读（读到的那一拍 theme 已经是它调出来的了），不用是 State */
+/** 保留手指调整的 HSV 精度，以及等待合并到下一帧的颜色。 */
 private class HeldPaper {
     var value: PaperHsv? = null
+    var preview: Job? = null
+    var changed: Boolean = false
 }
 
 /** 字色沿用纸的色相，但压低浓度 —— 完全同色相的浓字会显脏，完全无彩的灰字又跟纸不搭 */
@@ -2277,7 +2299,7 @@ private fun ThemeSwatches(
     Row(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState(), flingBehavior = rememberPaperSwatchFling())
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = horizontalPadding)
             .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.gapM),
@@ -2297,27 +2319,6 @@ private fun ThemeSwatches(
         )
     }
 }
-
-/** 慢拖后可以直接点色块，快划则沿用系统减速，限制初速度以免色条滑得太远。 */
-@Composable
-private fun rememberPaperSwatchFling(): FlingBehavior {
-    val defaultFling = ScrollableDefaults.flingBehavior()
-    val density = LocalDensity.current.density
-    return remember(defaultFling, density) {
-        val minVelocity = PAPER_SWATCH_MIN_FLING_SPEED * density
-        val maxVelocity = PAPER_SWATCH_MAX_FLING_SPEED * density
-        object : FlingBehavior {
-            override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
-                if (abs(initialVelocity) < minVelocity) return 0f
-                val velocity = initialVelocity.coerceIn(-maxVelocity, maxVelocity)
-                return with(defaultFling) { this@performFling.performFling(velocity) }
-            }
-        }
-    }
-}
-
-private const val PAPER_SWATCH_MIN_FLING_SPEED = 120f // dp/s
-private const val PAPER_SWATCH_MAX_FLING_SPEED = 360f // dp/s
 
 @Composable
 private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Unit) {

@@ -970,15 +970,16 @@ class ReaderViewModel(
         viewModelScope.launch { readerPrefs.selectPaper(themeId) }
     }
 
-    fun commitCustomPaper() {
-        val theme = _state.value.settings.theme
-        if (theme.id == ReaderTheme.CUSTOM_ID) {
-            viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
+    fun updateCustomPaper(theme: ReaderTheme, commit: Boolean) {
+        if (_state.value.settings.theme.id != ReaderTheme.CUSTOM_ID) return
+        _state.update { state ->
+            state.copy(settings = state.settings.copy(theme = theme))
         }
+        if (commit) viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
     }
 
     /**
-     * 拖滑块（亮度、自定义纸色）时的实时预览：只改内存里的 settings，不落盘。
+     * 拖滑块（亮度、字号）时的实时预览：只改内存里的 settings，不落盘。
      * 松手由 [commitSettings] 写一次。
      *
      * 从前 onValueChange 直接走 [updateSettings]：每一帧整份 DataStore 重写一遍（一秒几十次），
