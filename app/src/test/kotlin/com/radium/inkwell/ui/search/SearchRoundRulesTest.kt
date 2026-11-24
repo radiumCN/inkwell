@@ -96,6 +96,26 @@ class SearchRoundRulesTest {
         assertTrue(SearchPageHistory().canContinue("a", SearchPage(listOf(item), hasMore = true)))
     }
 
+    @Test fun `rewritten search matches stay with that source and keep their relevance`() {
+        val query = "书名@子源"
+        val exact = result("书名", "/exact")
+        val partial = result("书名续篇", "/partial")
+        val unrelated = result("子源作品", "/unrelated")
+        val page = SearchPage(listOf(partial, unrelated, exact), true, rewrittenKeyword = "书名")
+        val matches = page.matchingResults(normalizeSearchMatch(query))
+        assertEquals(mapOf(partial to SearchMatch.PARTIAL_TITLE, exact to SearchMatch.EXACT_TITLE), matches)
+        assertTrue(page.copy(rewrittenKeyword = null).matchingResults(normalizeSearchMatch(query)).isEmpty())
+        val literal = result(query, "/literal")
+        assertEquals(SearchMatch.EXACT_TITLE, SearchPage(listOf(literal), false)
+            .matchingResults(normalizeSearchMatch(query))[literal])
+
+        val hits = linkedMapOf<Pair<String, String>, SearchHit>()
+        mergeSearchResults(hits, matches.keys, relevance = { matches.getValue(it).ordinal })
+        mergeSearchResults(hits, listOf(partial.copy(sourceId = "b")))
+        assertEquals(listOf(exact, partial), orderSearchHits(hits.values.toList(), query, SearchSort.RELEVANCE)
+            .map { it.result })
+    }
+
     @Test fun `search failures distinguish wrapped HTTP status from timeout and rule errors`() {
         assertEquals(SearchStatus.RATE_LIMITED, searchFailure(SourceException("wrapper", HttpStatusException(429, "url"))))
         assertEquals(SearchStatus.HTTP, searchFailure(HttpStatusException(403, "url")))

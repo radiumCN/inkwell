@@ -26,7 +26,7 @@ internal class SearchPageHistory {
 internal class ExactBookMatches(private val keyword: String) {
     private val hostsByAuthor = mutableMapOf<String, MutableSet<String>>()
 
-    fun record(source: BookSourceRule, items: List<SearchResult>): Boolean {
+    fun record(source: BookSourceRule, items: Collection<SearchResult>): Boolean {
         val host = source.baseUrl.toHttpUrlOrNull()?.host?.removePrefix("www.") ?: return false
         return items.any { item ->
             if (!SearchScheduling.isExactTitle(item.title, keyword)) return@any false
@@ -65,5 +65,16 @@ internal fun SearchResult.matchSearch(normalizedKeyword: String): SearchMatch {
         normalizedKeyword in normalizedTitle -> SearchMatch.PARTIAL_TITLE
         normalizedKeyword in normalizedAuthor -> SearchMatch.PARTIAL_AUTHOR
         else -> SearchMatch.NONE
+    }
+}
+
+/** 保留原词匹配，同时接受该书源地址脚本实际提取的书名或作者。 */
+internal fun SearchPage.matchingResults(normalizedKeyword: String): Map<SearchResult, SearchMatch> {
+    val rewritten = rewrittenKeyword?.let(::normalizeSearchMatch)?.takeIf { it != normalizedKeyword }.orEmpty()
+    return buildMap {
+        for (item in items) {
+            val match = minOf(item.matchSearch(normalizedKeyword), item.matchSearch(rewritten))
+            if (match != SearchMatch.NONE) put(item, match)
+        }
     }
 }

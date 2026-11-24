@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Before
 import kotlin.test.Test
@@ -58,6 +59,47 @@ class BookSourceEngineTest {
         val result = engine().search(src, "modao", 1)
         assertEquals("/search?q=modao&page=1", server.takeRequest().path)
         assertEquals(2, result.items.size)
+    }
+
+    @Test
+    fun `search reports a key rewritten by the URL script and keeps fetch timing separate`() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setBody(SEARCH_PAGE).setBodyDelay(120, TimeUnit.MILLISECONDS)
+        }
+        val source = searchSource(
+            """<js>
+                var parts = splitKey(key);
+                key = parts[0];
+                '/search?title=' + encodeURIComponent(key) + '&source=' + parts[1] + '&page={{page}}'
+            </js>""",
+        ).copy(jsLib = "function splitKey(input) { return String(input).split('@'); }")
+        val engine = engine()
+        val timing = SearchPageTiming()
+        val result = engine.search(source, "魔道修真@a", page = 2, timing = timing)
+        val request = server.takeRequest().requestUrl!!
+
+        assertEquals("魔道修真", request.queryParameter("title"))
+        assertEquals("a", request.queryParameter("source"))
+        assertEquals("2", request.queryParameter("page"))
+        assertEquals("魔道修真", result.rewrittenKeyword)
+        assertEquals(2, result.items.size)
+        assertTrue(result.hasMore)
+        assertTrue(timing.requestSetupMs != null)
+        assertTrue((timing.fetchMs ?: -1) >= 100)
+        assertTrue(timing.parseMs != null)
+        assertNull(engine.search(searchSource("/s?q={{key}}"), "原样@保留").rewrittenKeyword)
+    }
+
+    @Test
+    fun `search timing leaves parsing absent when the fetch fails`() = runBlocking {
+        val timing = SearchPageTiming()
+        assertFailsWith<SourceHttpClient.HttpStatusException> {
+            engine().search(searchSource("/missing"), "test", timing = timing)
+        }
+        assertTrue(timing.requestSetupMs != null)
+        assertTrue(timing.fetchMs != null)
+        assertNull(timing.parseMs)
     }
 
     // ---- 全链路 ----

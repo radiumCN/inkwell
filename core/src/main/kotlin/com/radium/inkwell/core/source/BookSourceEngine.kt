@@ -18,6 +18,7 @@ import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.TimeSource
 
 /** 书源业务错误（规则未配置/规则不匹配等） */
 open class SourceException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -56,7 +57,34 @@ data class SearchResult(
 data class SearchPage(
     val items: List<SearchResult>,
     val hasMore: Boolean,
+    val rewrittenKeyword: String? = null,
 )
+
+/** 只收集一次搜索中的耗时。尚未进入的阶段为 null。 */
+class SearchPageTiming {
+    internal enum class Stage { REQUEST_SETUP, FETCH, PARSE }
+
+    private var stage: Stage? = null
+    private var started = TimeSource.Monotonic.markNow()
+    var requestSetupMs: Long? = null
+        private set
+    var fetchMs: Long? = null
+        private set
+    var parseMs: Long? = null
+        private set
+
+    internal fun enter(next: Stage?) {
+        val elapsed = started.elapsedNow().inWholeMilliseconds
+        when (stage) {
+            Stage.REQUEST_SETUP -> requestSetupMs = elapsed
+            Stage.FETCH -> fetchMs = elapsed
+            Stage.PARSE -> parseMs = elapsed
+            null -> Unit
+        }
+        stage = next
+        started = TimeSource.Monotonic.markNow()
+    }
+}
 
 data class RemoteBookDetail(
     val title: String,
@@ -223,21 +251,37 @@ class BookSourceEngine(
         synchronized(recentPages) { recentPages.keys.removeAll { it.sourceId == source.id } }
     }
 
-    suspend fun search(source: BookSourceRule, keyword: String, page: Int = 1): SearchPage =
-        engineIo(source) {
-            val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
-                ?: throw SourceException("来源「${source.name}」未配置搜索规则")
-            val rule = source.ruleSearch ?: throw SourceException("来源「${source.name}」未配置搜索规则")
-            val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
-            // 地址脚本和列表规则用同一张变量表（同 Legado 的 ruleData）：搜索地址里 java.put 的东西，
-            // 解析结果时 java.get 要拿得到。从前两边各开一张，put 进去的转头就没了
-            val js = jsContextOf(source)
-            val fetched = fetchByRequest(source, searchUrl, vars, "search", js)
-            parseListPage(
-                source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-                pageable = pageable(searchUrl), js = js,
-            )
+    suspend fun search(
+        source: BookSourceRule,
+        keyword: String,
+        page: Int = 1,
+        timing: SearchPageTiming? = null,
+    ): SearchPage {
+        timing?.enter(SearchPageTiming.Stage.REQUEST_SETUP)
+        return try {
+            engineIo(source) {
+                val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
+                    ?: throw SourceException("来源「${source.name}」未配置搜索规则")
+                val rule = source.ruleSearch ?: throw SourceException("来源「${source.name}」未配置搜索规则")
+                val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
+                // 地址脚本和列表规则共用变量表，列表可以读取搜索地址里用 java.put 存下的值。
+                val js = jsContextOf(source)
+                var rewrittenKeyword: String? = null
+                val fetched = fetchByRequest(
+                    source, searchUrl, vars, "search", js, timing,
+                    onKey = { key -> if (key != keyword && key.isNotBlank()) rewrittenKeyword = key },
+                )
+                timing?.enter(SearchPageTiming.Stage.PARSE)
+                val result = parseListPage(
+                    source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+                    pageable = pageable(searchUrl), js = js,
+                )
+                rewrittenKeyword?.let { result.copy(rewrittenKeyword = it) } ?: result
+            }
+        } finally {
+            timing?.enter(null)
         }
+    }
 
     /**
      * 按书源的 searchUrl 抓搜索结果页、不解析。「新建书源」要在结果页上认列表：认的必须是**引擎**
@@ -793,6 +837,8 @@ class BookSourceEngine(
         vars: Map<String, String>,
         stage: String,
         js: JsContext = jsContextOf(source),
+        timing: SearchPageTiming? = null,
+        onKey: ((String) -> Unit)? = null,
     ): FetchedPage {
         // 地址里的 {{}} 同样按 Legado 语义展开（JS 表达式 / 嵌套规则），不只是变量替换
         val urlCtx = urlContext(source, vars, js)
@@ -800,7 +846,7 @@ class BookSourceEngine(
 
         // 地址整串可能是 JS（<js>…</js> / @js:…），脚本的返回值才是真地址；
         // 而且地址常自带 ,{method/body/charset/headers} —— 拿到最终地址后才谈得上解析。
-        val rawUrl = evaluator.evalUrlJs(urlTemplate, urlCtx) ?: urlTemplate
+        val rawUrl = evaluator.evalUrlJs(urlTemplate, urlCtx, onKey) ?: urlTemplate
 
         // 与 Legado 同序：先展开模板、再解析选项。选项块在展开前常常不是合法 JSON ——
         // `,{"method":"POST","body":{"page":{{page}}}}` 里的 {{page}} 没有引号。从前先拿 JSON 校验去找选项，
@@ -827,6 +873,7 @@ class BookSourceEngine(
         val expanded = evaluator.expandTemplate(markKeyword(urlPart), urlCtx)
             .replace(KEYWORD_MARK, encodeUrlComponent(keyword, charset))
         val url = resolveUrl(source.baseUrl, encodeNonAsciiQuery(expanded, charset))
+        timing?.enter(SearchPageTiming.Stage.FETCH)
         return doFetch(source, stage, url, method, body, headers, charset, urlCtx, opt.webView)
     }
 

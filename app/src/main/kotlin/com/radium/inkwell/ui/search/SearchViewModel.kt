@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.BookSourceRule
 import com.radium.inkwell.core.source.SearchPage
+import com.radium.inkwell.core.source.SearchPageTiming
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.prefs.AppPrefs
 import com.radium.inkwell.data.prefs.normalizeSearchKeyword
@@ -67,7 +68,7 @@ internal val SearchResult.searchKey: Pair<String, String>
  * 保留每个书源各自的结果（bookUrl 各不相同）—— 预览页要靠它换源：
  * 代表书源挂了还有别的可用，否则用户就卡死在报错页。
  */
-data class SearchHit(val results: List<SearchResult>) {
+data class SearchHit(val results: List<SearchResult>, internal val relevance: Int? = null) {
     // key / result / origins 算一次就记住：排序比较器每比一次都要读它们，每次发布、每次重组又各读一遍，
     // 从前是 getter，几百条结果排一次序就是成千上万次现算（origins 每次还新建一个 Set）。
     // results 不可变，懒算安全；委托属性不进 data class 的 equals。
@@ -199,6 +200,8 @@ class SearchViewModel(
 
     private var searchStartedAt = 0L
     private var prepareMs = 0L
+    private var firstMatchReadyAt: Long? = null
+    private var sourceTimingSamples = 0
     private var pausedAt = 0L
     private var pausedMs = 0L
     private var firstResultPlaced = false
@@ -208,8 +211,10 @@ class SearchViewModel(
         val state = _state.value
         if (searchId != state.searchId || state.results.isEmpty() || firstResultPlaced) return
         firstResultPlaced = true
+        val placedAt = nowMs()
         UsageLog.event("search.first_visible", "search_id" to searchId,
-            "duration_ms" to nowMs() - searchStartedAt, "prepare_ms" to prepareMs)
+            "duration_ms" to placedAt - searchStartedAt, "prepare_ms" to prepareMs,
+            "publish_ms" to firstMatchReadyAt?.let { placedAt - it })
     }
 
     /** 暂停时拍下还没跑完的源；返回列表后 [resumeSearch] 接着跑，不重开一轮、不清已有结果 */
@@ -377,6 +382,8 @@ class SearchViewModel(
         pendingIds.clear()
         searchStartedAt = submittedAt
         prepareMs = 0L
+        firstMatchReadyAt = null
+        sourceTimingSamples = 0
         pausedAt = 0L
         pausedMs = 0L
         firstResultPlaced = false
@@ -555,13 +562,13 @@ class SearchViewModel(
             async {
                 try {
                     limiter.withPermit {
-                        val pageResult = searchPage(rule, keyword, page)
+                        val pageResult = searchPage(rule, keyword, page, searchId)
                         if (_state.value.searchId != searchId || gen != roundGen) return@withPermit
-                        val items = pageResult?.items.orEmpty().filter {
-                            it.matchSearch(normalizedKeyword) != SearchMatch.NONE
-                        }
+                        val readyAt = nowMs()
+                        val items = pageResult?.matchingResults(normalizedKeyword).orEmpty()
                         hitsMutex.withLock {
                             if (gen != roundGen) return@withLock
+                            if (items.isNotEmpty() && firstMatchReadyAt == null) firstMatchReadyAt = readyAt
                             merge(items)
                         }
                         if (gen != roundGen) return@withPermit
@@ -572,7 +579,7 @@ class SearchViewModel(
                             }
                             doneCounter.incrementAndGet()
                             schedulePublish(keyword, searchId)
-                            if (earlyStopArmed && exactMatches?.record(rule, items) == true) {
+                            if (earlyStopArmed && exactMatches?.record(rule, items.keys) == true) {
                                 // 最后一个源不暂停，照常收尾并保留加载更多。
                                 pendingIds.remove(rule.id)
                                 if (pendingIds.isNotEmpty()) stopEarly()
@@ -676,8 +683,10 @@ class SearchViewModel(
      * 懒算好的 key / result / origins 每次作废，列表每一行也因为换了实例跟着重组。
      * 一本书只在多了一个源的那一刻才可能换顺序，在这里排一次就够了 —— 排的只是这一本的几条，主线程上也不费事。
      */
-    private fun merge(items: List<SearchResult>) =
-        mergeSearchResults(hits, items) { AutoSourceSwitcher.rankSearchResults(it, sourceMetaById) }
+    private fun merge(items: Map<SearchResult, SearchMatch>) =
+        mergeSearchResults(hits, items.keys, relevance = { items.getValue(it).ordinal }) {
+            AutoSourceSwitcher.rankSearchResults(it, sourceMetaById)
+        }
 
     /**
      * 单个书源搜一页：网络/规则错误按「这个源没结果」降级，但**取消必须往外抛**。
@@ -687,7 +696,7 @@ class SearchViewModel(
      * 旧关键词的结果会串进刚 clear 过的 hits，翻页那一轮还会把过期的 page/hasMore 盖回去
      * （新搜索刚设成 page=1，僵尸协程一句 `page = next` 就把它推到 2）。
      */
-    private suspend fun searchPage(rule: BookSourceRule, keyword: String, page: Int): SearchPage? {
+    private suspend fun searchPage(rule: BookSourceRule, keyword: String, page: Int, searchId: Int): SearchPage? {
         // 每个源按自己的历史定超时（见 SearchScheduling.timeoutMs）：吊源别占着 Semaphore 名额拖整轮搜索。
         // 从前统一等 30 秒，几十个死源就能把一轮搜索拖到几分钟
         val source = liveSpeed[rule.id]
@@ -698,11 +707,20 @@ class SearchViewModel(
         }
         val limit = SearchScheduling.timeoutMs(source, now)
         val startedAt = nowMs()
+        val timing = SearchPageTiming()
+        var status: SearchStatus? = null
+        var resultCount: Int? = null
         return try {
             val result = withTimeoutOrNull(limit) {
-                engine.search(rule, keyword, page = page)
+                engine.search(rule, keyword, page = page, timing = timing)
             }
             currentCoroutineContext().ensureActive()
+            resultCount = result?.items?.size
+            status = when {
+                result == null -> SearchStatus.TIMEOUT
+                result.items.isEmpty() -> SearchStatus.EMPTY
+                else -> SearchStatus.MATCHES
+            }
             record(rule.id, if (result == null) SearchOutcome.TimedOut(limit) else SearchOutcome.Ok(nowMs() - startedAt))
             if (page == 1 && result == null) recordStatus(SearchStatus.TIMEOUT)
             result
@@ -711,16 +729,31 @@ class SearchViewModel(
         } catch (e: Exception) {
             currentCoroutineContext().ensureActive()
             // 反馈只需知道失败类别，日志不要写用户输入、来源名或网络地址。
-            val status = searchFailure(e)
-            Log.w(TAG, "来源搜索失败，第 $page 页：${status.name}")
-            val outcome = when (status) {
+            val failure = searchFailure(e)
+            status = failure
+            Log.w(TAG, "来源搜索失败，第 $page 页：${failure.name}")
+            val outcome = when (failure) {
                 SearchStatus.RATE_LIMITED -> SearchOutcome.RateLimited(httpSearchFailure(e)?.retryAfter)
                 SearchStatus.TIMEOUT -> SearchOutcome.TimedOut(nowMs() - startedAt)
                 else -> SearchOutcome.Failed
             }
             record(rule.id, outcome)
-            if (page == 1) recordStatus(status)
+            if (page == 1) recordStatus(failure)
             null
+        } finally {
+            val state = _state.value
+            val duration = nowMs() - startedAt
+            if (status != null && state.searchId == searchId && sourceTimingSamples < SOURCE_TIMING_LIMIT &&
+                (state.sourceCount <= SearchScheduling.CONCURRENCY || duration >= SLOW_SOURCE_TIMING_MS)
+            ) {
+                sourceTimingSamples++
+                UsageLog.event(
+                    "search.source.timing", "search_id" to searchId, "page" to page,
+                    "source_ref" to UsageLog.reference(rule.id), "status" to status.name.lowercase(Locale.ROOT),
+                    "duration_ms" to duration, "request_setup_ms" to timing.requestSetupMs,
+                    "fetch_ms" to timing.fetchMs, "parse_ms" to timing.parseMs, "results" to resultCount,
+                )
+            }
         }
     }
 
@@ -877,6 +910,8 @@ class SearchViewModel(
     companion object {
         private const val TAG = "Search"
         private const val PUBLISH_THROTTLE_MS = 250L
+        private const val SOURCE_TIMING_LIMIT = 12
+        private const val SLOW_SOURCE_TIMING_MS = 1_000L
         /** 详情+目录两个请求；三个源串起来不超过一分钟 */
         private const val ADD_TIMEOUT_MS = 20_000L
         private const val MAX_ADD_TRIES = 3
@@ -891,17 +926,26 @@ class SearchViewModel(
  */
 internal fun mergeSearchResults(
     hits: MutableMap<Pair<String, String>, SearchHit>,
-    items: List<SearchResult>,
+    items: Collection<SearchResult>,
+    relevance: (SearchResult) -> Int? = { null },
     rank: (List<SearchResult>) -> List<SearchResult> = { it },
 ): Boolean {
     var changed = false
     for (r in items) {
         val key = r.searchKey
         val old = hits[key]
-        if (old?.results?.any { it.sourceId == r.sourceId } == true) continue
+        val incoming = relevance(r)
+        val previous = old?.relevance
+        val best = if (incoming != null && previous != null) minOf(incoming, previous) else incoming ?: previous
+        if (old?.results?.any { it.sourceId == r.sourceId } == true) {
+            if (best == old.relevance) continue
+            hits[key] = old.copy(relevance = best)
+            changed = true
+            continue
+        }
         hits[key] = when {
-            old == null -> SearchHit(listOf(r))
-            else -> SearchHit(rank(old.results + r))
+            old == null -> SearchHit(listOf(r), best)
+            else -> SearchHit(rank(old.results + r), best)
         }
         changed = true
     }
@@ -918,8 +962,8 @@ internal fun orderSearchHits(
     return when (sort) {
         SearchSort.RELEVANCE -> {
             val normalized = normalizeSearchMatch(keyword)
-            val matches = items.map { hit -> hit to hit.result.matchSearch(normalized) }
-            matches.sortedWith(compareBy<Pair<SearchHit, SearchMatch>> { it.second }
+            val matches = items.map { hit -> hit to (hit.relevance ?: hit.result.matchSearch(normalized).ordinal) }
+            matches.sortedWith(compareBy<Pair<SearchHit, Int>> { it.second }
                 .thenByDescending { it.first.origins.size }).map { it.first }
         }
         SearchSort.WORD_COUNT -> items.sortedWith(

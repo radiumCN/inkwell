@@ -1,12 +1,27 @@
 package com.radium.inkwell.ui.reader
 
+import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.reader.measure.ResolvedTextStyle
+import com.radium.inkwell.reader.paginate.LayoutSpec
+import com.radium.inkwell.reader.paginate.PageItem
+import com.radium.inkwell.reader.paginate.PageSpec
+import com.radium.inkwell.reader.render.RenderablePage
+import com.radium.inkwell.reader.render.SelectionEnd
+import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.drawPageItems
+import com.radium.inkwell.reader.render.selectionHandlePosition
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -64,6 +79,51 @@ class ReaderHanJustificationTest {
         }
         val last = plain.lineCount - 1
         assertEquals(plain.getLineRight(last), justified.getLineRight(last), 1f)
+    }
+
+    @Test
+    fun highlightReachesSelectionHandleWhenSelectionEndsAtWrappedHanLine() {
+        val sample = "晨雾沿着旧码头慢慢散开渡船还停在河心岸边的钟声已经响了三遍"
+        val glyphWidth = layout("晨", 200, justify = false).getLineRight(0) - 2 * style.fontSizePx
+        val width = (glyphWidth * 9.65f).roundToInt()
+        val paragraph = facade.measureParagraph(sample, style, width)
+        val textLayout = paragraph.renderHandle as TextLayoutResult
+        assertTrue(textLayout.lineCount > 1)
+        val end = textLayout.getLineEnd(0)
+        val start = end - 2
+        val selection = TextSelection(0, start, end, sample.substring(start, end))
+        val height = textLayout.getLineBottom(textLayout.lineCount - 1)
+        val layout = LayoutSpec(
+            viewportWidthPx = width + 16, viewportHeightPx = height.roundToInt() + 8,
+            marginLeftPx = 8f, marginTopPx = 0f, marginRightPx = 8f, marginBottomPx = 0f,
+            headerHeightPx = 0f, footerHeightPx = 0f, fontSizePx = style.fontSizePx,
+            lineHeightPx = style.lineHeightPx, paragraphSpacingPx = 0f,
+        )
+        val slice = PageItem.TextSlice(0, 0, textLayout.lineCount - 1, 0f, height, false)
+        val page = RenderablePage(PageSpec(0, 0, listOf(slice), 0, sample.length), mapOf(0 to paragraph))
+        val handle = checkNotNull(page.selectionHandlePosition(selection, SelectionEnd.END, layout))
+        val sampleX = handle.anchor.x.roundToInt()
+        val sampleY = handle.anchor.y.roundToInt() - 3
+        fun render(selected: TextSelection?): Bitmap {
+            val bitmap = Bitmap.createBitmap(layout.viewportWidthPx, layout.viewportHeightPx, Bitmap.Config.ARGB_8888)
+            CanvasDrawScope().draw(
+                Density(1f), LayoutDirection.Ltr, Canvas(bitmap.asImageBitmap()),
+                Size(bitmap.width.toFloat(), bitmap.height.toFloat()),
+            ) {
+                drawPageItems(page, layout, ReaderTheme.PAPER, originY = 0f, selection = selected)
+            }
+            return bitmap
+        }
+
+        val plain = render(null)
+        val highlighted = render(selection)
+        try {
+            assertTrue(highlighted.getPixel(sampleX - 2, sampleY) != plain.getPixel(sampleX - 2, sampleY))
+            assertEquals(plain.getPixel(sampleX + 2, sampleY), highlighted.getPixel(sampleX + 2, sampleY))
+        } finally {
+            plain.recycle()
+            highlighted.recycle()
+        }
     }
 
     @Test
