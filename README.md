@@ -2,6 +2,8 @@
 
 > 一款克制、专注的文本阅读器 —— 暖纸质感、仿真翻页、进度永不丢失。本地 txt / EPUB / MOBI(AZW3) 阅读 · 可选自定义规则 · WebDAV 跨端同步。Android 客户端无需账号；[网页版](https://book.skylark.run) 需登录注册后使用。
 
+[安卓 APK 官方下载](https://book.skylark.run/android) · [TXT 和 EPUB 离线朗读教程](https://book.skylark.run/guide/read-aloud)
+
 ![platform](https://img.shields.io/badge/Android-13%2B%20(minSdk%2033)-3DDC84?logo=android&logoColor=white)
 [![web](https://img.shields.io/badge/Web-book.skylark.run-111111)](https://book.skylark.run)
 ![kotlin](https://img.shields.io/badge/Kotlin-2.3-7F52FF?logo=kotlin&logoColor=white)
@@ -135,10 +137,11 @@ Inkwell Android 用 Jetpack Compose 从零写成，没有广告、无需账号�
 
 ## 📦 下载与发布
 
-- **下载**：前往 [Releases](https://github.com/radiumCN/inkwell/releases) 获取签名 APK。应用内「设置 → 检查更新」也可直接拉取。
+- **下载** [官网安卓下载页](https://book.skylark.run/android)提供稳定版签名 APK 和安装说明。[GitHub Releases](https://github.com/radiumCN/inkwell/releases)提供各版本安装包。已安装用户可打开「设置 → 检查更新」。
 - **网页版**：打开 [book.skylark.run](https://book.skylark.run)。官网可直接浏览；使用书架与阅读需登录注册。与 App 填同一套 WebDAV 即可同步进度、来源与设置。
 - **发版流程**：改 `gradle/libs.versions.toml` 的 `inkwell` 版本号 → 提交 → 打**带注解**的 tag（`git tag -a vX.Y.Z`）→ 推送 tag。CI 校验 tag 与版本号一致后自动构建签名 APK 并发布 Release。
 - **Release 正文取自 tag 注解本身**，且应用内更新弹窗按**纯文本**渲染 —— tag 注解请写纯文本、不要用 Markdown。
+- 稳定版 tag 注解结尾加一行 `安卓 APK 官方下载 https://book.skylark.run/android`，让 GitHub Release 和应用内更新说明都能指向官网。
 - 带 `-` 后缀的 tag（如 `v0.1.9-beta.7`）会标为预发布，只推测试渠道。
 
 ## ⚠️ 用户协议与免责声明
