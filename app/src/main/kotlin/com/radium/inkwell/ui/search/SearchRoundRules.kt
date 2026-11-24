@@ -5,6 +5,7 @@ import com.radium.inkwell.core.source.SearchPage
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.data.repo.TitleMatch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.text.Normalizer
 import java.util.Locale
 
 /** 与全局书籍去重分开：一个源仍可翻到新页，即使这一页的书其他源都已经返回过。 */
@@ -41,4 +42,28 @@ internal class ExactBookMatches(private val keyword: String) {
 private val AUTHOR_PREFIX = Regex("^作者\\s*[:：]\\s*")
 
 internal fun normalizeAuthor(author: String): String =
-    TitleMatch.normalize(author.trim().replaceFirst(AUTHOR_PREFIX, ""))
+    TitleMatch.normalize(author.withoutAuthorPrefix())
+
+private fun String.withoutAuthorPrefix(): String = trim().replaceFirst(AUTHOR_PREFIX, "")
+
+private val SEARCH_SEPARATORS = Regex("[\\s\\p{Z}《》·・･]")
+
+internal fun normalizeSearchMatch(text: String): String =
+    Normalizer.normalize(text, Normalizer.Form.NFKC).replace(SEARCH_SEPARATORS, "").lowercase(Locale.ROOT)
+
+internal enum class SearchMatch {
+    EXACT_TITLE, EXACT_AUTHOR, PARTIAL_TITLE, PARTIAL_AUTHOR, NONE,
+}
+
+internal fun SearchResult.matchSearch(normalizedKeyword: String): SearchMatch {
+    if (normalizedKeyword.isEmpty()) return SearchMatch.NONE
+    val normalizedTitle = normalizeSearchMatch(title)
+    if (normalizedTitle == normalizedKeyword) return SearchMatch.EXACT_TITLE
+    val normalizedAuthor = normalizeSearchMatch(author.orEmpty().withoutAuthorPrefix())
+    return when {
+        normalizedAuthor == normalizedKeyword -> SearchMatch.EXACT_AUTHOR
+        normalizedKeyword in normalizedTitle -> SearchMatch.PARTIAL_TITLE
+        normalizedKeyword in normalizedAuthor -> SearchMatch.PARTIAL_AUTHOR
+        else -> SearchMatch.NONE
+    }
+}

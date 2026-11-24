@@ -2,6 +2,8 @@ package com.radium.inkwell.reader.measure
 
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
@@ -13,7 +15,9 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlin.math.floor
 
 internal fun supportsHanJustification(text: String): Boolean =
     text.none { it == '\n' || it == '\r' || it == '\u2028' || it == '\u2029' || it == '\u0085' } &&
@@ -29,11 +33,12 @@ internal fun measureJustifiedHanParagraph(
     density: Density,
 ): TextLayoutResult {
     val constraints = Constraints(maxWidth = width)
+    fun nativeJustification() = measurer.measure(text, style, constraints = constraints)
     val startStyle = style.copy(textAlign = TextAlign.Start)
     val plain = measurer.measure(text, startStyle, constraints = constraints)
     if (plain.lineCount <= 1) return plain
     if (plain.getParagraphDirection(0) != ResolvedTextDirection.Ltr) {
-        return measurer.measure(text, style, constraints = constraints)
+        return nativeJustification()
     }
 
     if ((0 until plain.lineCount - 1).none { width - plain.getLineRight(it) > FIT_TOLERANCE_PX }) return plain
@@ -41,14 +46,21 @@ internal fun measureJustifiedHanParagraph(
     val lines = List(plain.lineCount) { index ->
         val start = plain.getLineStart(index)
         val end = plain.getLineEnd(index)
-        val ranges = if (index < plain.lineCount - 1) {
-            hanSpacingRanges(text.text, start, plain.getLineEnd(index, visibleEnd = true))
+        if (index == plain.lineCount - 1) return@List HanLine(start, end)
+        val visibleEnd = plain.getLineEnd(index, visibleEnd = true)
+        val ranges = hanSpacingRanges(text.text, start, visibleEnd)
+        val characterCount = ranges.sumOf { (from, to) -> text.text.codePointCount(from, to) }
+        val wordGaps = if (characterCount < 2) {
+            (start until visibleEnd).dropWhile { text.text[it] == ' ' }.filter { text.text[it] == ' ' }
         } else emptyList()
-        HanLine(start, end, ranges, ranges.sumOf { (from, to) -> text.text.codePointCount(from, to) })
+        HanLine(start, end, ranges, characterCount, wordGaps)
     }
-    if (lines.none { it.characterCount >= 2 }) return plain
+    if (lines.none { it.characterCount >= 2 }) return nativeJustification()
 
-    fun measureLines(spacing: FloatArray): TextLayoutResult {
+    fun measureLines(
+        spacing: FloatArray,
+        wordSpaces: List<AnnotatedString.Range<Placeholder>> = emptyList(),
+    ): TextLayoutResult {
         val builder = AnnotatedString.Builder(text)
         lines.forEachIndexed { index, line ->
             if (line.start == line.end) return@forEachIndexed
@@ -60,13 +72,40 @@ internal fun measureJustifiedHanParagraph(
                 for ((start, end) in line.ranges) builder.addStyle(tracking, start, end)
             }
         }
-        return measurer.measure(builder.toAnnotatedString(), startStyle, softWrap = false, constraints = constraints)
+        return measurer.measure(
+            builder.toAnnotatedString(), startStyle,
+            softWrap = false, constraints = constraints, placeholders = wordSpaces,
+        )
     }
 
     // 单行测量的字宽可能和原段落中的行不同，用相同分行方式量一次基础宽度。
     val unspaced = measureLines(FloatArray(lines.size))
-    if (!unspaced.keepsLineOffsets(plain)) return plain
+    if (!unspaced.keepsLineOffsets(plain)) return nativeJustification()
     val target = width - .5f
+    val wordSpaces = buildList {
+        lines.forEachIndexed { index, line ->
+            val room = target - unspaced.getLineRight(index)
+            if (room > FIT_TOLERANCE_PX && line.wordGaps.isNotEmpty()) {
+                val extra = room / line.wordGaps.size
+                var total = 0f
+                var assigned = 0
+                // 只扩展原有词间空格，保留字形、原文和用于选字的字符偏移。
+                for (offset in line.wordGaps) {
+                    total += unspaced.getBoundingBox(offset).width + extra
+                    val next = floor(total).toInt()
+                    val pixels = (next - assigned).coerceAtLeast(1)
+                    assigned = next
+                    // Android 将占位宽度向上取整，略低于整数可避免浮点误差多出一像素。
+                    val placeholder = Placeholder(
+                        width = ((pixels - .01f) / fontSizePx).em,
+                        height = 0.sp,
+                        placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+                    )
+                    add(AnnotatedString.Range(placeholder, offset, offset + 1))
+                }
+            }
+        }
+    }
     val spacing = FloatArray(lines.size) { index ->
         val count = lines[index].characterCount
         val room = target - unspaced.getLineRight(index)
@@ -74,10 +113,10 @@ internal fun measureJustifiedHanParagraph(
             (room / (fontSizePx * count)).coerceAtMost(MAX_ADDED_SPACING_EM)
         }
     }
-    if (spacing.all { it == 0f }) return plain
+    if (spacing.all { it == 0f } && wordSpaces.isEmpty()) return nativeJustification()
 
-    val trial = measureLines(spacing)
-    if (!trial.keepsLineOffsets(plain)) return plain
+    val trial = measureLines(spacing, wordSpaces)
+    if (!trial.keepsLineOffsets(plain)) return nativeJustification()
     var needsCorrection = false
     for (index in spacing.indices) {
         if (spacing[index] == 0f) continue
@@ -90,10 +129,10 @@ internal fun measureJustifiedHanParagraph(
             spacing[index] = corrected
         }
     }
-    val aligned = if (needsCorrection) measureLines(spacing) else trial
+    val aligned = if (needsCorrection) measureLines(spacing, wordSpaces) else trial
     return if (aligned.keepsLineOffsets(plain) && (0 until aligned.lineCount).all {
         aligned.getLineRight(it) <= maxOf(width + FIT_TOLERANCE_PX, plain.getLineRight(it))
-    }) aligned else plain
+    }) aligned else nativeJustification()
 }
 
 private fun TextLayoutResult.keepsLineOffsets(original: TextLayoutResult): Boolean =
@@ -101,7 +140,13 @@ private fun TextLayoutResult.keepsLineOffsets(original: TextLayoutResult): Boole
         getLineStart(it) == original.getLineStart(it) && getLineEnd(it) == original.getLineEnd(it)
     }
 
-private data class HanLine(val start: Int, val end: Int, val ranges: List<Pair<Int, Int>>, val characterCount: Int)
+private data class HanLine(
+    val start: Int,
+    val end: Int,
+    val ranges: List<Pair<Int, Int>> = emptyList(),
+    val characterCount: Int = 0,
+    val wordGaps: List<Int> = emptyList(),
+)
 
 /** 中文和全角标点参与分配，拉丁字母相邻的间距保留。组合标记跟随它前面的字。 */
 private fun hanSpacingRanges(text: String, start: Int, end: Int): List<Pair<Int, Int>> = buildList {

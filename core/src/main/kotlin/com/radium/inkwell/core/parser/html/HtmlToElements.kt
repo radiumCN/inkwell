@@ -35,17 +35,29 @@ class HtmlToElements(
     private val resolveImage: ((Element) -> String?)? = null,
 ) {
 
-    fun convert(body: Element): List<ContentElement> {
-        val run = Run()
+    fun convert(body: Element, anchors: MutableMap<String, Int>? = null): List<ContentElement> {
+        val run = Run(anchors)
+        run.recordAnchors(body)
         body.childNodes().forEach(run::walk)
         run.flushText()
         return run.out
     }
 
     /** 一次转换的状态。写成类而不是 convert 里的局部函数：遍历、列表、引用要互相递归调用 */
-    private inner class Run {
+    private inner class Run(private val anchors: MutableMap<String, Int>?) {
         val out = mutableListOf<ContentElement>()
         private val textBuf = StringBuilder()
+
+        fun recordAnchors(element: Element, includeChildren: Boolean = false) {
+            val targets = anchors ?: return
+            fun record(node: Element) {
+                node.id().takeIf(String::isNotEmpty)?.let { targets.putIfAbsent(it, out.size) }
+                if (node.normalName() == "a") {
+                    node.attr("name").takeIf(String::isNotEmpty)?.let { targets.putIfAbsent(it, out.size) }
+                }
+            }
+            if (includeChildren) element.getAllElements().forEach(::record) else record(element)
+        }
 
         fun flushText() {
             val raw = textBuf.toString()
@@ -64,7 +76,17 @@ class HtmlToElements(
                 // 用 wholeText 而不是 text()：后者当场把换行归一化成空格，
                 // 上面那类源的段落结构在这一步就没了，再也救不回来
                 is TextNode -> textBuf.append(node.wholeText)
-                is Element -> when (node.tagName().lowercase()) {
+                is Element -> walkElement(node)
+            }
+        }
+
+        private fun walkElement(node: Element) {
+            val tag = node.normalName()
+            if (anchors != null && tag !in IGNORED_ANCHOR_TAGS) {
+                if (tag in ANCHOR_BLOCKS) flushText()
+                recordAnchors(node, includeChildren = tag in HEADING_TAGS || tag == "svg")
+            }
+            when (tag) {
                     "h1", "h2", "h3", "h4", "h5", "h6" -> {
                         flushText()
                         val level = node.tagName()[1].digitToInt()
@@ -120,6 +142,7 @@ class HtmlToElements(
                             node.select("td, th").filter { cell ->
                                 cell.parents().firstOrNull { it.tagName() == "table" } === node
                             }.forEach { cell ->
+                                recordAnchors(cell)
                                 cell.childNodes().forEach(::walk)
                                 flushText()
                             }
@@ -132,7 +155,6 @@ class HtmlToElements(
                     }
                     "script", "style", "head" -> Unit
                     else -> node.childNodes().forEach(::walk)
-                }
             }
         }
 
@@ -334,6 +356,12 @@ class HtmlToElements(
             .trim()
 
     private companion object {
+        val HEADING_TAGS = setOf("h1", "h2", "h3", "h4", "h5", "h6")
+        val IGNORED_ANCHOR_TAGS = setOf("script", "style", "head")
+        val ANCHOR_BLOCKS = HEADING_TAGS + setOf(
+            "p", "div", "li", "td", "section", "article", "dd", "dt", "figure", "figcaption",
+            "blockquote", "br", "hr", "table", "svg",
+        )
         val WHITESPACE = Regex("[ \\t\\r\\n]+")
 
         /** 懒加载放真地址的属性，常见的几种 */

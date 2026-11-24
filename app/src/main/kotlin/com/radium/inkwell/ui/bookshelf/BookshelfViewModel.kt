@@ -527,6 +527,28 @@ class BookshelfViewModel(
     private val _selected = MutableStateFlow<Set<String>>(emptySet())
     val selected: StateFlow<Set<String>> = _selected.asStateFlow()
 
+    private val _creatingSeries = MutableStateFlow(false)
+    val creatingSeries = _creatingSeries.asStateFlow()
+
+    fun createSeries(title: String, ids: List<String>, onCreated: () -> Unit) {
+        if (_creatingSeries.value) return
+        _creatingSeries.value = true
+        viewModelScope.launch {
+            try {
+                bookRepo.saveLocalSeries(title, ids)
+                clearSelection()
+                onCreated()
+                messages.emit("已创建合订本")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit(e.message ?: "无法创建合订本")
+            } finally {
+                _creatingSeries.value = false
+            }
+        }
+    }
+
     init {
         // 多选只对**看得见的**书生效。选了几本再切分组、或收起隐藏区，看不见的书还留在选中集合里，
         // 「删除 N 本」就会把它们一起删掉 —— 用户根本不知道自己选过。可见列表一变就把选中收窄。

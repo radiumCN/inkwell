@@ -26,6 +26,9 @@ interface ReadingStatDao {
     @Query("SELECT * FROM reading_stat")
     fun observeAll(): Flow<List<ReadingStatEntity>>
 
+    @Query("SELECT COALESCE(SUM(millis), 0) FROM reading_stat WHERE day = :day")
+    suspend fun totalForDay(day: Long): Long
+
     /** 本地最近一次记时长的时间，并进同步的「本地有没有动过」判断 */
     @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM reading_stat")
     suspend fun lastChangeAt(): Long

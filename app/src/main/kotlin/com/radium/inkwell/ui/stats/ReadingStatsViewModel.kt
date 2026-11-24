@@ -8,6 +8,7 @@ import com.radium.inkwell.data.db.entity.StatsBook
 import com.radium.inkwell.data.repo.ReadingStatsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -29,20 +30,35 @@ data class ReadingStatsUi(
     val today: LocalDate,
     val summary: ReadingSummary,
     val topBooks: List<TopBook>,
+    val range: ReadingDateRange?,
+    val rangeSummary: ReadingSummary,
 )
+
+data class ReadingDateRange(val start: LocalDate, val end: LocalDate)
 
 class ReadingStatsViewModel(
     stats: ReadingStatsRepository,
     private val bookDao: BookDao,
 ) : ViewModel() {
+    private val selectedRange = MutableStateFlow<ReadingDateRange?>(null)
+
+    fun selectRange(range: ReadingDateRange?) {
+        if (range == null || (!range.end.isBefore(range.start) && !range.end.isAfter(LocalDate.now()))) {
+            selectedRange.value = range
+        }
+    }
 
     /** null = 还没读到第一份数据（与「读到了，但是空的」分开，别先闪一下空态） */
     val state: StateFlow<ReadingStatsUi?> = combine(
-        stats.observeAll(), bookDao.observeStatsBooks().distinctUntilChanged(),
-    ) { rows, books ->
+        stats.observeAll(), bookDao.observeStatsBooks().distinctUntilChanged(), selectedRange,
+    ) { rows, books, range ->
         val today = LocalDate.now()
         val summary = summarize(rows, today, topN = Int.MAX_VALUE)
-        ReadingStatsUi(today, summary, topBooks(summary, books))
+        val rangeSummary = if (range == null) summary else {
+            val days = range.start.toEpochDay()..range.end.toEpochDay()
+            summarize(rows.filter { it.day in days }, range.end, topN = Int.MAX_VALUE, rankingStart = range.start)
+        }
+        ReadingStatsUi(today, summary, topBooks(rangeSummary, books), range, rangeSummary)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

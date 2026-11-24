@@ -66,6 +66,19 @@ class BackupSettingsMergeTest {
         assertEquals("22.0", m.mergedReaderSettings?.values?.get("font_size_sp"))
     }
 
+    @Test fun `per-book typography merges independently of shared settings`() {
+        val a = BackupBookLayout(100, "A")
+        val oldB = BackupBookLayout(100, "B")
+        val disabledB = BackupBookLayout(200, "B disabled")
+        val c = BackupBookLayout(90, "C")
+        val local = payload(reader = BackupSettings(300, mapOf("shared" to "local"), mapOf("a" to a, "b" to oldB)))
+        val remote = payload(reader = BackupSettings(50, mapOf("shared" to "remote"), mapOf("b" to disabledB, "c" to c)))
+
+        val merged = BackupMerger.merge(local, remote)
+        assertEquals(mapOf("shared" to "local"), merged.readerSettings?.values)
+        assertEquals(mapOf("a" to a, "b" to disabledB, "c" to c), merged.mergedReaderSettings?.bookLayouts)
+    }
+
     @Test
     fun `净化规则逐条按时间戳合并`() {
         val local = payload(

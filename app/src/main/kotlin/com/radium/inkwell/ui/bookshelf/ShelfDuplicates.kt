@@ -75,7 +75,7 @@ fun findDuplicates(books: List<BookEntity>): List<DuplicateGroup> {
  * [includeHidden] 只在隐藏区展开时才可能为 true（「包含隐藏的书」开关）。
  */
 fun shelfDuplicates(books: List<BookEntity>, includeHidden: Boolean): List<DuplicateGroup> =
-    findDuplicates(if (includeHidden) books else books.filter { !it.hidden })
+    findDuplicates(books.filter { it.type != BookType.LOCAL_SERIES && (includeHidden || !it.hidden) })
 
 /** 书架上要不要亮提示：有一组里出现了没被 ✕ 掉、也没被「都保留」过的书 */
 fun hasFreshDuplicates(groups: List<DuplicateGroup>, dismissedIds: Set<String>): Boolean =

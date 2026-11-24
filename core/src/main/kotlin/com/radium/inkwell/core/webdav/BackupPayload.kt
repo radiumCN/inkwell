@@ -64,7 +64,11 @@ data class BackupReadingStat(
 data class BackupSettings(
     val updatedAt: Long = 0,
     val values: Map<String, String> = emptyMap(),
+    val bookLayouts: Map<String, BackupBookLayout> = emptyMap(),
 )
+
+@Serializable
+data class BackupBookLayout(val updatedAt: Long, val value: String)
 
 @Serializable
 data class BackupRssSource(
@@ -139,6 +143,7 @@ data class BackupBook(
      * 老备份没有这个键 → 默认 null，读起来就是「这条没带封面」，不影响。
      */
     val coverUrl: String? = null,
+    val localFileHash: String? = null,
     val sourceId: String? = null,
     val bookUrl: String? = null,
     val tocUrl: String? = null,
@@ -297,7 +302,7 @@ object BackupMerger {
         val mergedStats = mergeReadingStats(local.readingStats, remote.readingStats)
         val changedStats = mergedStats.filter { it != localStats[it.key] }
 
-        val readerWinner = newer(local.readerSettings, remote.readerSettings)
+        val readerWinner = mergeReaderSettings(local.readerSettings, remote.readerSettings)
         val appWinner = newer(local.appSettings, remote.appSettings)
 
         return MergeResult(
@@ -310,8 +315,7 @@ object BackupMerger {
             changedReplaceRules = changedRules,
             changedRssSources = changedRss,
             // 只有远端确实更新时才回写本地；否则别拿一份等价的设置去覆盖用户当前的
-            readerSettings = remote.readerSettings
-                ?.takeIf { it === readerWinner && it != local.readerSettings },
+            readerSettings = readerWinner?.takeIf { it != local.readerSettings },
             appSettings = remote.appSettings
                 ?.takeIf { it === appWinner && it != local.appSettings },
             mergedReaderSettings = readerWinner,
@@ -342,6 +346,17 @@ object BackupMerger {
         else -> local
     }
 
+    private fun mergeReaderSettings(local: BackupSettings?, remote: BackupSettings?): BackupSettings? {
+        if (local == null || remote == null) return local ?: remote
+        val shared = checkNotNull(newer(local, remote))
+        val bookLayouts = local.bookLayouts.toMutableMap()
+        remote.bookLayouts.forEach { (bookId, incoming) ->
+            val existing = bookLayouts[bookId]
+            if (existing == null || incoming.updatedAt > existing.updatedAt) bookLayouts[bookId] = incoming
+        }
+        return shared.copy(bookLayouts = bookLayouts)
+    }
+
     /**
      * 一本书两边都有时怎么合。元数据（书名/分组/隐藏/删除）按 updatedAt，进度按 readAt。
      *
@@ -362,6 +377,7 @@ object BackupMerger {
         // 「这台机器还没拿到」。按 LWW 裁的话，接收端只要读过一次书（updatedAt 一更新），
         // 本地那条空封面就会一直赢下去，封面永远补不回来。
         val coverUrl = meta.coverUrl ?: l.coverUrl ?: r.coverUrl
+        val localFileHash = meta.localFileHash ?: l.localFileHash ?: r.localFileHash
         if (sameSource(l, r)) {
             val progress = if (r.readAt > l.readAt) r else l
             return meta.copy(
@@ -369,6 +385,7 @@ object BackupMerger {
                 readCharOffset = progress.readCharOffset,
                 readAt = progress.readAt,
                 coverUrl = coverUrl,
+                localFileHash = localFileHash,
             )
         }
         val position = when {
@@ -387,6 +404,7 @@ object BackupMerger {
             readCharOffset = position.readCharOffset,
             readAt = position.readAt,
             coverUrl = coverUrl,
+            localFileHash = localFileHash,
         )
     }
 

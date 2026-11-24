@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/reading_widget_description"
+    android:initialLayout="@layout/reading_widget"
+    android:minWidth="110dp"
+    android:minHeight="64dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

@@ -195,6 +195,11 @@ fun ReaderMenu(
     toc: StateFlow<List<TocItem>>,
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
+    onGotoTocEntry: (TocItem) -> Unit,
+    textSearch: StateFlow<ReaderTextSearchState>,
+    onFindText: (String, Boolean) -> Unit,
+    onResetTextSearch: () -> Unit,
+    onOpenTextMatch: (ReaderTextMatch) -> Unit,
     onSeekPercent: (Float) -> Unit,
     onUpdateSettings: (ReaderSettings) -> Unit,
     onPreviewSettings: (ReaderSettings) -> Unit,
@@ -215,6 +220,7 @@ fun ReaderMenu(
     pageBackdrop: LayerBackdrop? = null,
 ) {
     var showToc by remember { mutableStateOf(false) }
+    var showFind by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var dragging by remember { mutableStateOf<SettingsSlider?>(null) }
     var showMore by remember { mutableStateOf(false) }
@@ -232,13 +238,15 @@ fun ReaderMenu(
     LaunchedEffect(visible) {
         if (!visible) {
             showToc = false
+            if (showFind) onResetTextSearch()
+            showFind = false
             showSettings = false
             dragging = null
             showMore = false
         }
     }
-    LaunchedEffect(showToc, showSettings) {
-        onReaderSheetOpen(showToc || showSettings)
+    LaunchedEffect(showToc, showSettings, showFind) {
+        onReaderSheetOpen(showToc || showSettings || showFind)
     }
 
     // 菜单这一层靠**色阶 + 毛玻璃**跟纸面分开，不靠阴影和蒙层：
@@ -356,6 +364,13 @@ fun ReaderMenu(
                                 items = buildList {
                                     add(
                                         AppMenuItem(
+                                            text = "查找正文",
+                                            enabled = pageUi.page != null,
+                                            onClick = { showFind = true },
+                                        ),
+                                    )
+                                    add(
+                                        AppMenuItem(
                                             text = if (overlay.autoFlipping) "停止自动翻页" else "自动翻页",
                                             summary = when {
                                                 overlay.autoFlipping -> null
@@ -427,6 +442,16 @@ fun ReaderMenu(
         }
     }
 
+    if (showFind) {
+        ReaderTextSearchSheet(
+            state = textSearch,
+            onFind = onFindText,
+            onReset = onResetTextSearch,
+            onDismiss = { showFind = false; onResetTextSearch() },
+            onOpenMatch = { showFind = false; onOpenTextMatch(it); onDismiss() },
+        )
+    }
+
     if (showToc) {
         val tocItems by toc.collectAsStateWithLifecycle()
         // 正序 / 倒序记在本机（见 AppPrefs.tocReversedState），下次打开还是那个顺序
@@ -455,7 +480,7 @@ fun ReaderMenu(
                 reversed = reversed,
                 // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻。
                 // 跳章不等面板的退场动画（dismiss { }）：那会让翻到目标章晚上三百毫秒，像点了没反应
-                onSelect = { showToc = false; onGotoChapter(it); onDismiss() },
+                onSelect = { showToc = false; onGotoTocEntry(it); onDismiss() },
             )
         }
     }
@@ -706,7 +731,7 @@ private fun TocList(
     current: Int,
     showCacheState: Boolean,
     reversed: Boolean,
-    onSelect: (Int) -> Unit,
+    onSelect: (TocItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
     var query by remember { mutableStateOf("") }
@@ -717,7 +742,8 @@ private fun TocList(
     }
     val cachedCount = remember(toc) { toc.count { it.cached } }
     // 在读那章在当前列表里的第几行；不在（搜索没搜到它）是 -1
-    val currentPos = remember(shown, current) { shown.indexOfFirst { it.index == current } }
+    val currentKey = remember(toc, current) { toc.firstOrNull { it.index == current }?.key }
+    val currentPos = remember(shown, currentKey) { shown.indexOfFirst { it.key == currentKey } }
     val animate = animationsEnabled()
     val scope = rememberCoroutineScope()
 
@@ -747,7 +773,7 @@ private fun TocList(
             modifier = Modifier.padding(horizontal = cardMargin(), vertical = Dimens.gapXS),
         )
         TocSummary(
-            text = if (q.isEmpty()) "共 ${toc.size} 章" else "找到 ${shown.size} 章",
+            text = if (q.isEmpty()) "共 ${toc.size} 项" else "找到 ${shown.size} 项",
             cachedCount = if (showCacheState && q.isEmpty()) cachedCount else null,
         )
         if (shown.isEmpty()) {
@@ -787,15 +813,16 @@ private fun TocList(
                         contentPadding = listPadding,
                         overscrollEffect = null,
                     ) {
-                        itemsIndexed(shown, key = { _, it -> it.index }) { i, item ->
+                        itemsIndexed(shown, key = { _, it -> it.key }) { i, item ->
                             val read = item.index < current
                             ChapterListItem(
                                 title = item.title,
-                                selected = item.index == current,
+                                selected = item.key == currentKey,
                                 read = read,
                                 highlight = q,
-                                onClick = { onSelect(item.index) },
-                                modifier = Modifier.groupedCardItem(i, shown.size),
+                                onClick = { onSelect(item) },
+                                modifier = Modifier.groupedCardItem(i, shown.size)
+                                    .padding(start = Dimens.gapM * item.depth.coerceIn(0, 4)),
                                 trailingContent = if (showCacheState && item.cached) {
                                     {
                                         // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
@@ -1566,6 +1593,15 @@ private fun TypesetTab(
     var schemesExpanded by rememberSaveable { mutableStateOf(false) }
     val currentScheme = typography.schemes.firstOrNull { it.matches(settings) }
     ReaderGroup {
+        ReaderRow("排版范围", slots = 2) {
+            SegmentedChoice(
+                options = listOf("通用", "仅本书"),
+                selectedIndex = if (typography.bookLayoutEnabled) 1 else 0,
+                onSelect = { typography.onSetBookLayoutEnabled(it == 1) },
+            )
+        }
+    }
+    ReaderGroup {
         SettingRow(
             title = "排版方案",
             value = currentScheme?.name,
@@ -1897,6 +1933,15 @@ private fun MoreTab(
     textSelectionEnabled: Boolean,
     onTextSelectionChange: (Boolean) -> Unit,
 ) {
+    ReaderGroup("性能") {
+        SwitchRow(
+            title = "轻量显示",
+            subtitle = "关闭阅读控件实时模糊，仿真翻页临时使用覆盖效果",
+            checked = settings.lightweightEffects,
+            onCheckedChange = { onUpdate(settings.copy(lightweightEffects = it)) },
+            position = SettingGroupPosition.Alone,
+        )
+    }
     ReaderGroup("显示") {
         SwitchRow(
             title = "阅读时显示系统状态栏",

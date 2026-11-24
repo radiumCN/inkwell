@@ -63,6 +63,7 @@ internal class ReaderSpeechService : Service() {
     private var utteranceSequence = 0L
     private var utterance: String? = null
     private var chunkStart = 0
+    private var spokenOffset = 0
     private var nextChunk = 0
     private var paragraphStarted = false
     private var foreground = false
@@ -189,6 +190,13 @@ internal class ReaderSpeechService : Service() {
                 engine.setAudioAttributes(attributes)
                 engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(id: String) = Unit
+                    override fun onRangeStart(id: String, start: Int, end: Int, frame: Int) {
+                        handler.post {
+                            if (utterance == id && start >= 0 && start < nextChunk - chunkStart) {
+                                spokenOffset = maxOf(spokenOffset, chunkStart + start)
+                            }
+                        }
+                    }
                     override fun onDone(id: String) { handler.post { if (utterance == id) speakNextChunk() } }
                     @Deprecated("Android may still dispatch this callback from a TTS engine")
                     override fun onError(id: String) { handler.post { if (utterance == id) fail("朗读失败，请重试") } }
@@ -265,12 +273,13 @@ internal class ReaderSpeechService : Service() {
     }
 
     fun pause() {
-        val state = owner?.state?.value ?: return
+        val state = positionForInterruption(owner?.state?.value ?: return)
         if (state.status != SpeechStatus.PLAYING && state.status != SpeechStatus.LOADING) return
         loadJob?.cancel()
         stopUtterance()
         releaseFocus()
         publish(state.copy(status = SpeechStatus.PAUSED))
+        if (state.status == SpeechStatus.PLAYING) recordPosition()
         // 暂停时留在前台，同媒体 App：出了前台就是个普通后台服务，App 退到后台一分钟左右就被系统收掉 ——
         // onDestroy 清掉朗读状态，通知、锁屏控件一起没了，回来想继续都没处点。继续时也不用再从后台进前台（Android 12 起会被拒）。
         // 也不一直挂着：暂停超过 PAUSED_TIMEOUT_MS 就当是不听了，记下位置、收掉通知
@@ -406,6 +415,7 @@ internal class ReaderSpeechService : Service() {
         }
         val start = nextChunk
         chunkStart = start
+        spokenOffset = start
         val end = speechChunkEnd(paragraph.text, start, TextToSpeech.getMaxSpeechInputLength())
         val id = (++utteranceSequence).toString()
         utterance = id
@@ -443,11 +453,18 @@ internal class ReaderSpeechService : Service() {
     }
 
     private fun fail(message: String) {
-        val state = owner?.state?.value ?: return
+        val state = positionForInterruption(owner?.state?.value ?: return)
         stopUtterance()
         releaseFocus()
         publish(state.copy(status = SpeechStatus.ERROR, error = message))
+        if (state.status == SpeechStatus.PLAYING) recordPosition()
         leaveForeground()
+    }
+
+    private fun positionForInterruption(state: SpeechState): SpeechState {
+        val paragraph = state.paragraph ?: return state
+        if (state.status != SpeechStatus.PLAYING || utterance == null) return state
+        return state.copy(paragraphStart = paragraph.startWithin(paragraph.offset + spokenOffset))
     }
 
     fun finishPlayback(notifyReader: Boolean = true) {
@@ -466,6 +483,7 @@ internal class ReaderSpeechService : Service() {
     private fun stopUtterance() {
         utterance = null
         chunkStart = 0
+        spokenOffset = 0
         nextChunk = 0
         paragraphStarted = false
         tts?.stop()

@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.detail
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -58,6 +60,9 @@ import com.radium.inkwell.ui.components.SecondaryButton
 import com.radium.inkwell.ui.components.DeterminateProgressBar
 import com.radium.inkwell.data.repo.OfflineDownload
 import com.radium.inkwell.data.repo.OfflineRange
+import com.radium.inkwell.ui.bookshelf.SeriesEditorDialog
+import com.radium.inkwell.ui.bookshelf.SeriesEditorVolume
+import com.radium.inkwell.ui.components.AppAlertDialog
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -80,6 +85,14 @@ fun BookDetailScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val download by viewModel.download.collectAsStateWithLifecycle()
+    val recovering by viewModel.recovering.collectAsStateWithLifecycle()
+    val seriesVolumes by viewModel.seriesVolumes.collectAsStateWithLifecycle()
+    val savingSeries by viewModel.savingSeries.collectAsStateWithLifecycle()
+    var showSeriesMenu by remember { mutableStateOf(false) }
+    var confirmSplit by remember { mutableStateOf(false) }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::recoverLocalFile)
+    }
     val snackbar = remember { SnackbarHostState() }
     CollectMessages(viewModel.messages, snackbar)
     // 点目录：进度写完才进阅读器（见 BookDetailViewModel.openChapter）
@@ -87,6 +100,28 @@ fun BookDetailScreen(
         viewModel.openReader.collect { onRead() }
     }
     val book = state.book
+    if (book?.type == BookType.LOCAL_SERIES) {
+        seriesVolumes?.let { volumes ->
+            SeriesEditorDialog(
+                initialTitle = book.title,
+                initialVolumes = volumes.map { SeriesEditorVolume(it.bookId, it.title) },
+                creating = false,
+                saving = savingSeries,
+                onDismiss = viewModel::closeSeriesEditor,
+                onSave = viewModel::updateSeries,
+            )
+        }
+        if (confirmSplit) {
+            AppAlertDialog(
+                title = "拆分合订本？",
+                text = "会移除这条合订本及其进度，各卷原书和各自的进度仍可在书架查看。",
+                onDismissRequest = { confirmSplit = false },
+                confirmText = "拆分",
+                closeOnConfirm = true,
+                onConfirm = { viewModel.splitSeries(onBack) },
+            )
+        }
+    }
     val chapters = state.chapters
     val refreshing = state.refreshing
     val listState = rememberLazyListState()
@@ -110,6 +145,19 @@ fun BookDetailScreen(
                         null
                     },
                     actions = {
+                        if (book?.type == BookType.LOCAL_SERIES) {
+                            Box {
+                                AppTextButton("分卷", enabled = !savingSeries, onClick = { showSeriesMenu = true })
+                                AppDropdownMenu(
+                                    expanded = showSeriesMenu,
+                                    onDismissRequest = { showSeriesMenu = false },
+                                    items = listOf(
+                                        AppMenuItem("管理分卷", onClick = viewModel::loadSeriesEditor),
+                                        AppMenuItem("拆分合订本", onClick = { confirmSplit = true }),
+                                    ),
+                                )
+                            }
+                        }
                         if (book?.type == BookType.NET) {
                             AppIconButton(
                                 onClick = { viewModel.refresh() },
@@ -167,8 +215,11 @@ fun BookDetailScreen(
                         chapterCount = chapters.size.takeIf { it > 0 } ?: b.totalChapters,
                         cachedCount = if (state.chaptersLoaded) chapters.count { it.isCached } else 0,
                         download = download,
-                        onRead = onRead,
+                        onRead = if (state.missingLocalFile) ({ filePicker.launch(arrayOf("*/*")) }) else onRead,
+                        missingLocalFile = state.missingLocalFile,
+                        recovering = recovering,
                         onStartDownload = viewModel::startDownload,
+                        onResumeDownload = viewModel::resumeDownload,
                         onCancelDownload = viewModel::cancelDownload,
                     )
                 }
@@ -244,6 +295,7 @@ fun BookDetailScreen(
                             ChapterListItem(
                                 title = chapter.title,
                                 selected = current,
+                                enabled = !state.missingLocalFile,
                                 // 读过的变灰：一眼看出读到哪、后面还剩多少（同阅读页的目录面板）
                                 read = b.readAt > 0 && chapter.index < b.readChapterIndex,
                                 onClick = { viewModel.openChapter(chapter.index) },
@@ -280,7 +332,10 @@ private fun Header(
     cachedCount: Int,
     download: OfflineDownload?,
     onRead: () -> Unit,
+    missingLocalFile: Boolean,
+    recovering: Boolean,
     onStartDownload: (OfflineRange) -> Unit,
+    onResumeDownload: () -> Unit,
     onCancelDownload: () -> Unit,
 ) {
     Box {
@@ -328,7 +383,12 @@ private fun Header(
                     )
                 }
             }
-            val readLabel = if (book.readAt > 0) "继续阅读" else "开始阅读"
+            val readLabel = when {
+                recovering -> "正在校验原文件…"
+                missingLocalFile -> "选择原文件"
+                book.readAt > 0 -> "继续阅读"
+                else -> "开始阅读"
+            }
             if (book.type == BookType.NET) {
                 val running = download?.running == true
                 var offlineMenuOpen by remember { mutableStateOf(false) }
@@ -355,9 +415,9 @@ private fun Header(
                         )
                     }
                 }
-                OfflineStatus(download, cachedCount, chapterCount, onCancelDownload)
+                OfflineStatus(download, cachedCount, chapterCount, onCancelDownload, onResumeDownload)
             } else {
-                PrimaryButton(text = readLabel, onClick = onRead, modifier = Modifier.fillMaxWidth())
+                PrimaryButton(text = readLabel, onClick = onRead, enabled = !recovering, modifier = Modifier.fillMaxWidth())
             }
             val intro = remember(book.intro) { book.intro?.htmlToPlainText().orEmpty() }
             if (intro.isNotBlank()) BookIntro(intro)
@@ -375,6 +435,7 @@ private fun OfflineStatus(
     cachedCount: Int,
     chapterCount: Int,
     onCancel: () -> Unit,
+    onResume: () -> Unit,
 ) {
     val muted = MiuixTheme.colorScheme.onSurfaceVariantSummary
     when {
@@ -382,7 +443,7 @@ private fun OfflineStatus(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "正在缓存 ${download.done} / ${download.total} 章" +
-                        if (download.failed > 0) "，${download.failed} 章没抓到" else "",
+                        if (download.failed > 0) "，${download.failed} 章未缓存完整" else "",
                     style = MiuixTheme.textStyles.footnote1,
                     color = muted,
                     modifier = Modifier.weight(1f),
@@ -390,26 +451,26 @@ private fun OfflineStatus(
                 AppTextButton("停止", onClick = onCancel)
             }
             DeterminateProgressBar(
-                progress = if (download.total == 0) 0f else download.done.toFloat() / download.total,
+                progress = if (download.total == 0) 0f else (download.done + download.failed).toFloat() / download.total,
             )
             // 从前写在选范围的面板顶上；范围改成按钮上弹出的列表后放不下长说明，挪到正在缓存时 ——
             // 这时候用户才会想「能不能先走开」「重复的会不会再下一遍」
             Text(
-                "离开这一页也会接着缓存；已经缓存过的章直接跳过。需要网页渲染才抓得到的章，留到阅读时再加载",
+                "离开这一页也会接着缓存正文和插图。中断后可以继续原范围",
                 style = MiuixTheme.textStyles.footnote1,
                 color = muted,
             )
         }
-        download != null -> Text(
-            when {
+        download != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val summary = when {
                 download.stoppedBecause != null -> download.stoppedBecause
-                download.done < download.total -> "已停止，缓存了 ${download.done} / ${download.total} 章"
-                download.failed > 0 -> "缓存完成，${download.failed} 章没抓到（阅读时会再试）"
-                else -> "缓存完成，已缓存 $cachedCount / $chapterCount 章"
-            },
-            style = MiuixTheme.textStyles.footnote1,
-            color = muted,
-        )
+                download.failed > 0 -> "${download.failed} 章未缓存完整，其中 ${download.imageFailures} 章只缺插图"
+                download.canResume -> "可继续缓存原范围（${download.total} 章）"
+                else -> "本次正文和插图已缓存"
+            }
+            Text(summary, Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1, color = muted)
+            if (download.canResume) AppTextButton("继续缓存", onClick = onResume)
+        }
         cachedCount > 0 -> Text(
             "已缓存 $cachedCount / $chapterCount 章",
             style = MiuixTheme.textStyles.footnote1,

@@ -82,7 +82,11 @@ data class ReaderSettings(
     val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
     /** 隐藏系统状态栏时，允许章节页眉使用屏幕顶部的可用区域。 */
     val raiseHeader: Boolean = false,
+    val lightweightEffects: Boolean = false,
 ) {
+    val renderedFlipAnimation: FlipAnimation
+        get() = if (lightweightEffects && flipAnimation == FlipAnimation.CURL) FlipAnimation.COVER else flipAnimation
+
     val usesRaisedHeader: Boolean get() = showHeader && !showStatusBar && raiseHeader
     val effectiveHeaderTopSpacingDp: Float
         get() = headerTopSpacingDp ?: if (usesRaisedHeader) 8f else 12f

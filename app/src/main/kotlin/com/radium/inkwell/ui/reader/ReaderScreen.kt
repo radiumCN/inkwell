@@ -178,6 +178,9 @@ fun ReaderScreen(
         speechChapter == pageUi.chapterIndex && speechState.status != SpeechStatus.LOADING
     }
         ?.let { TextSelection(it.elementIndex, 0, it.text.length, it.text) }
+    val textMatch by viewModel.textMatch.collectAsStateWithLifecycle()
+    val readingHighlight = textMatch?.takeIf { it.position.chapterIndex == pageUi.chapterIndex }?.selection
+        ?: speechSelection
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -418,10 +421,11 @@ fun ReaderScreen(
     )
 
     val paper = remember(session.settings.theme.background) { Color(session.settings.theme.background) }
-    val pageBackdrop = rememberLayerBackdrop {
+    val backdrop = rememberLayerBackdrop {
         drawRect(paper)
         drawContent()
     }
+    val pageBackdrop = backdrop.takeUnless { session.settings.lightweightEffects }
     // 录图层要把整页再画一遍：滚动模式下每一帧都是一整页字。所以只在有毛玻璃露着时录（菜单、选字工具条），
     // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
     // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明。
@@ -518,7 +522,7 @@ fun ReaderScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .then(if (recordPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)
+                .then(if (recordPage && pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier)
                 // 挂在翻页容器、长按选字的父节点上：它在 Initial 阶段先看到事件，认出是自己的手势才接走
                 .quickAdjustGestures(
                     enabled = quickAdjustEnabled,
@@ -626,7 +630,7 @@ fun ReaderScreen(
                     ) {
                         ScrollPageReader(
                             onTrace = viewModel::traceInteraction,
-                            highlight = speechSelection,
+                            highlight = readingHighlight,
                             selectedPage = scrollPageSpec,
                             textSelection = selection,
                             onTextSelection = if (!session.textSelectionEnabled) null else { page, offsetY, selected ->
@@ -730,7 +734,7 @@ fun ReaderScreen(
                             next = pageUi.nextPage,
                             layout = layout,
                             theme = session.settings.theme,
-                            animation = session.settings.flipAnimation,
+                            animation = session.settings.renderedFlipAnimation,
                             animationsEnabled = animationsEnabled(),
                             hapticOnFlip = session.settings.flipHaptic,
                             // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
@@ -750,7 +754,7 @@ fun ReaderScreen(
                             tapZones = session.settings.tapZones,
                             selection = selection,
                             // 朗读到的那一段只画不拦：传进 selection 会被当成在选字，菜单上滑动翻页没反应
-                            highlight = speechSelection,
+                            highlight = readingHighlight,
                             onImageTap = onImageTap,
                         )
                         PageInfoBar(pageUi, session, layout, showRaisedHeader, menuProgress)
@@ -982,6 +986,11 @@ fun ReaderScreen(
             toc = viewModel.toc,
             onExit = requestExit,
             onGotoChapter = viewModel::jumpFromReaderMenu,
+            onGotoTocEntry = viewModel::jumpFromToc,
+            textSearch = viewModel.textSearch,
+            onFindText = viewModel::findText,
+            onResetTextSearch = viewModel::clearTextSearch,
+            onOpenTextMatch = viewModel::openTextMatch,
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },

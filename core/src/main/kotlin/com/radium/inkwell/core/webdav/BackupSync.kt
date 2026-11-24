@@ -45,12 +45,23 @@ class BackupSync(private val client: WebDavClient) {
             if (snapshot != null && snapshot.etag == null) {
                 throw IOException("服务器未提供可靠的备份版本标识，已读取远端更新，但未覆盖上传；请检查 WebDAV 服务的 ETag 支持")
             }
+            val encoded = BackupCodec.encode(payload)
             try {
-                val written = client.putConditional(path, BackupCodec.encode(payload), snapshot?.etag)
+                val written = client.putConditional(path, encoded, snapshot?.etag)
                 return Result(written?.let { "etag:$it" })
             } catch (e: WebDavClient.WebDavException) {
                 if (e.code != 412) throw e
                 // 对面抢先写入：重新下载，再拍本地快照。上一轮已采纳的更新也会参与合并。
+            } catch (e: IOException) {
+                // 响应可以在服务器提交后丢失。只读回确认，下一次同步再决定是否需要写入。
+                val confirmed = try {
+                    client.getSnapshot(path)?.takeIf { it.bytes.contentEquals(encoded) }
+                } catch (_: IOException) {
+                    null
+                }
+                if (confirmed != null) return Result(confirmed.etag?.let { "etag:$it" })
+                val localStatus = if (merged == null) "本机数据已保留" else "已下载的更新已合并到本机"
+                throw IOException("服务器上的备份写入尚未确认，$localStatus。下次同步会重新读取服务器备份", e)
             }
         }
         throw IOException("其他设备正在更新备份，本次同步未完成，请稍后重试")

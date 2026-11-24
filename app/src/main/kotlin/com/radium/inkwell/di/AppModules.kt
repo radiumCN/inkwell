@@ -47,7 +47,12 @@ val appModule = module {
     single { get<InkwellDb>().rssSourceDao() }
     single { get<InkwellDb>().readingStatDao() }
     single { get<InkwellDb>().rssArticleDao() }
-    single { com.radium.inkwell.data.repo.ReadingStatsRepository(get(), get(), get()) }
+    single {
+        val context = androidContext()
+        com.radium.inkwell.data.repo.ReadingStatsRepository(get(), get(), get()) {
+            com.radium.inkwell.ui.stats.ReadingWidgetProvider.refresh(context)
+        }
+    }
 
     // EPUB/MOBI 的 sniff 靠魔数，txt 兜底放最后
     // txt 的解码结果与拆章表缓存在系统可清理的缓存目录：没了只是下次打开慢一次（见 TxtParser / TxtCache）

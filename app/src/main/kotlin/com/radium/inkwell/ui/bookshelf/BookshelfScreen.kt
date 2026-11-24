@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.bookshelf
 
+import com.radium.inkwell.data.repo.MAX_LOCAL_SERIES_VOLUMES
+import com.radium.inkwell.data.repo.isLocalOriginal
 import androidx.compose.ui.semantics.stateDescription
 import org.koin.compose.koinInject
 import com.radium.inkwell.update.UpdateNotifier
@@ -210,6 +212,22 @@ fun BookshelfScreen(
     val group by viewModel.group.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val selectionMode = selected.isNotEmpty()
+    val selectedVolumes = remember(allBooks, selected) { allBooks.filter { it.id in selected } }
+    val canCreateSeries = selectedVolumes.size == selected.size &&
+        selectedVolumes.size in 2..MAX_LOCAL_SERIES_VOLUMES &&
+        selectedVolumes.all { it.isLocalOriginal() && it.localPath != null }
+    var showSeriesEditor by remember { mutableStateOf(false) }
+    val creatingSeries by viewModel.creatingSeries.collectAsStateWithLifecycle()
+    if (showSeriesEditor && canCreateSeries) {
+        SeriesEditorDialog(
+            initialTitle = "",
+            initialVolumes = selectedVolumes.sortedBy { it.title }.map { SeriesEditorVolume(it.id, it.title) },
+            creating = true,
+            saving = creatingSeries,
+            onDismiss = { showSeriesEditor = false },
+            onSave = { title, ids -> viewModel.createSeries(title, ids) { showSeriesEditor = false } },
+        )
+    }
     // 多选态底部操作条占掉的高度（BatchActionBar 量好报上来），垫到书架末尾
     var batchBarHeight by remember { mutableStateOf(0.dp) }
     // 隐藏区展开时底部那颗状态胶囊的高度，同上
@@ -637,6 +655,9 @@ fun BookshelfScreen(
             BatchActionBar(
                 visible = selectionMode,
                 actions = buildList {
+                    if (canCreateSeries) {
+                        add(BatchAction(MiuixIcons.Notes, "合订", onClick = { showSeriesEditor = true }))
+                    }
                     add(
                         BatchAction(MiuixIcons.Folder, "分组", onClick = {
                             groupInput = ""

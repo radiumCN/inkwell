@@ -17,8 +17,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** v1 夹具取自 be399b89 的三个实体；实际执行应用注册的整条迁移，再与 Room 导出的 v23 结构核对。 */
+/** v1 夹具取自 be399b89 的三个实体，再核对 Room 导出的最新结构。 */
 class MigrationChainTest {
+    private val currentVersion = 24
     private fun SQLiteConnection.seedV1() {
         execSQL("""CREATE TABLE book (
             id TEXT NOT NULL PRIMARY KEY, type INTEGER NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL,
@@ -46,8 +47,8 @@ class MigrationChainTest {
         BundledSQLiteDriver().open(":memory:").use { db ->
             db.seedV1()
             val chain = InkwellDb.ALL_MIGRATIONS
-            assertEquals((1 until 23).toList(), chain.map { it.startVersion })
-            assertEquals((2..23).toList(), chain.map { it.endVersion })
+            assertEquals((1 until currentVersion).toList(), chain.map { it.startVersion })
+            assertEquals((2..currentVersion).toList(), chain.map { it.endVersion })
             chain.forEach { migration ->
                 if (migration.startVersion == 22) {
                     db.execSQL("""
@@ -62,7 +63,7 @@ class MigrationChainTest {
                     db.execSQL("INSERT INTO rss_source (id, name, json, groupName, icon, sortOrder) VALUES ('rss', '订阅', '{}', '技术', 'icon.png', 7)")
                 }
             }
-            db.prepare("SELECT localPath, readChapterIndex, readCharOffset, readAt, inShelf, removedFromShelf FROM book WHERE id = 'local'").use {
+            db.prepare("SELECT localPath, readChapterIndex, readCharOffset, readAt, inShelf, removedFromShelf, localFileHash FROM book WHERE id = 'local'").use {
                 assertTrue(it.step())
                 assertEquals("/books/kept.txt", it.getText(0))
                 assertEquals(42L, it.getLong(1))
@@ -70,6 +71,7 @@ class MigrationChainTest {
                 assertEquals(123456L, it.getLong(3))
                 assertEquals(1L, it.getLong(4))
                 assertEquals(0L, it.getLong(5))
+                assertTrue(it.isNull(6))
             }
             db.prepare("SELECT title, start, end, isCached FROM chapter WHERE bookId = 'local' AND `index` = 42").use {
                 assertTrue(it.step())
@@ -100,9 +102,9 @@ class MigrationChainTest {
     }
 
     private fun SQLiteConnection.validateCurrentSchema() {
-        val schema = Json.parseToJsonElement(File("schemas/com.radium.inkwell.data.db.InkwellDb/23.json").readText())
+        val schema = Json.parseToJsonElement(File("schemas/com.radium.inkwell.data.db.InkwellDb/$currentVersion.json").readText())
             .jsonObject.getValue("database").jsonObject
-        assertEquals(23, schema.getValue("version").jsonPrimitive.int)
+        assertEquals(currentVersion, schema.getValue("version").jsonPrimitive.int)
         val entities = schema.getValue("entities").jsonArray.map { it.jsonObject }
         val expectedTables = entities.map { it.string("tableName") }.toSet()
         val actualTables = prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").use { st ->

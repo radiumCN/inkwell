@@ -36,7 +36,7 @@ import com.radium.inkwell.data.db.entity.SourceReadHealthEntity
         RssArticleEntity::class,
         SourceReadHealthEntity::class,
     ],
-    version = 23,
+    version = 24,
     exportSchema = true,
 )
 abstract class InkwellDb : RoomDatabase() {
@@ -51,6 +51,12 @@ abstract class InkwellDb : RoomDatabase() {
     abstract fun sourceReadHealthDao(): SourceReadHealthDao
 
     companion object {
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE book ADD COLUMN localFileHash TEXT")
+            }
+        }
+
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override suspend fun migrate(connection: SQLiteConnection) {
                 connection.execSQL("ALTER TABLE book_source ADD COLUMN searchAt INTEGER NOT NULL DEFAULT 0")
@@ -387,6 +393,7 @@ abstract class InkwellDb : RoomDatabase() {
             MIGRATION_20_21,
             MIGRATION_21_22,
             MIGRATION_22_23,
+            MIGRATION_23_24,
         )
     }
 }

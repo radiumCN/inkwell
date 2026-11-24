@@ -18,6 +18,7 @@ import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.api.TapZones
 import com.radium.inkwell.core.webdav.BackupSettings
+import com.radium.inkwell.core.webdav.BackupBookLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 private val Context.readerDataStore by preferencesDataStore(
     name = "reader_settings",
@@ -35,6 +39,37 @@ private val Context.readerDataStore by preferencesDataStore(
     // 不兜的话应用每次启动都崩，唯一的出路是清除数据 —— 连同书架数据库一起没了。退回默认值
     corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
 )
+
+@Serializable
+internal data class BookLayout(
+    val enabled: Boolean,
+    val scheme: LayoutScheme,
+    val updatedAt: Long = 0,
+    val useDefaultTitleSpacing: Boolean = false,
+    val useDefaultHeaderSpacing: Boolean = false,
+) {
+    fun applyTo(settings: ReaderSettings): ReaderSettings {
+        val applied = scheme.applyTo(settings)
+        return applied.copy(
+            titleTopSpacingDp = applied.titleTopSpacingDp.takeUnless { useDefaultTitleSpacing },
+            headerTopSpacingDp = applied.headerTopSpacingDp.takeUnless { useDefaultHeaderSpacing },
+        )
+    }
+
+    companion object {
+        fun capture(enabled: Boolean, settings: ReaderSettings, updatedAt: Long = 0) = BookLayout(
+            enabled = enabled,
+            scheme = LayoutScheme.capture("", settings.copy(raiseHeader = false)),
+            updatedAt = updatedAt,
+            useDefaultTitleSpacing = settings.titleTopSpacingDp == null,
+            useDefaultHeaderSpacing = settings.headerTopSpacingDp == null,
+        )
+    }
+}
+
+private const val BOOK_LAYOUT_PREFIX = "book_layout_"
+private fun bookLayoutKey(bookId: String) = stringPreferencesKey(BOOK_LAYOUT_PREFIX + bookId)
+private fun decodeBookLayout(raw: String): BookLayout? = runCatching { Json.decodeFromString<BookLayout>(raw) }.getOrNull()
 
 /**
  * @param fontAvailable 这个字体在本机能不能用（见 ReaderFontStore.isAvailable）。只在导入备份时用：
@@ -74,6 +109,7 @@ class ReaderPrefs(
         val SHOW_HEADER = booleanPreferencesKey("show_header")
         val SHOW_STATUS_BAR = booleanPreferencesKey("show_status_bar")
         val RAISE_HEADER = booleanPreferencesKey("raise_header")
+        val LIGHTWEIGHT_EFFECTS = booleanPreferencesKey("lightweight_reader_effects")
         val SHOW_FOOTER = booleanPreferencesKey("show_footer")
         val VOLUME_KEY_FLIP = booleanPreferencesKey("volume_key_flip")
         val FLIP_HAPTIC = booleanPreferencesKey("flip_haptic")
@@ -93,6 +129,7 @@ class ReaderPrefs(
         val LETTER_SPACING = floatPreferencesKey("letter_spacing")
         /** 排版方案列表（JSON），见 [LayoutScheme] */
         val LAYOUT_SCHEMES = stringPreferencesKey("layout_schemes")
+        val BOOK_LAYOUTS_CHANGED_AT = longPreferencesKey("book_layouts_changed_at")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("updated_at")
     }
@@ -158,6 +195,7 @@ class ReaderPrefs(
             showHeader = p[Keys.SHOW_HEADER] ?: true,
             showStatusBar = p[Keys.SHOW_STATUS_BAR] ?: false,
             raiseHeader = p[Keys.RAISE_HEADER] ?: false,
+            lightweightEffects = p[Keys.LIGHTWEIGHT_EFFECTS] ?: false,
             showFooter = p[Keys.SHOW_FOOTER] ?: true,
             volumeKeyFlip = p[Keys.VOLUME_KEY_FLIP] ?: true,
             flipHaptic = p[Keys.FLIP_HAPTIC] ?: false,
@@ -172,16 +210,17 @@ class ReaderPrefs(
         )
     }
 
-    suspend fun update(settings: ReaderSettings, localBook: Boolean = false) {
+    suspend fun update(settings: ReaderSettings, localBook: Boolean = false, bookId: String? = null) {
         context.readerDataStore.edit { p ->
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
-            writeTypography(p, settings)
+            writeScopedTypography(p, settings, bookId)
             p[Keys.FLIP] = settings.flipAnimation.name
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
             p[Keys.KEEP_SCREEN_ON] = settings.keepScreenOn
             p[Keys.SHOW_BATTERY] = settings.showBattery
             p[Keys.SHOW_HEADER] = settings.showHeader
             p[Keys.SHOW_STATUS_BAR] = settings.showStatusBar
+            p[Keys.LIGHTWEIGHT_EFFECTS] = settings.lightweightEffects
             p[Keys.SHOW_FOOTER] = settings.showFooter
             p[Keys.VOLUME_KEY_FLIP] = settings.volumeKeyFlip
             p[Keys.FLIP_HAPTIC] = settings.flipHaptic
@@ -198,14 +237,58 @@ class ReaderPrefs(
     }
 
     /** 连点微调按钮时，每一次都基于 DataStore 里的最新值计算。 */
-    suspend fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
+    suspend fun adjustTypography(bookId: String? = null, change: ReaderSettings.() -> ReaderSettings) {
         context.readerDataStore.edit { p ->
-            val before = readSettings(p, darkActive.value)
+            val shared = readSettings(p, darkActive.value)
+            val before = bookId?.let { applyBookLayout(shared, readBookLayout(p, it)) } ?: shared
             val after = before.change()
             if (before == after) return@edit
-            writeTypography(p, after)
-            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+            writeScopedTypography(p, after, bookId)
+            if (bookId == null || readBookLayout(p, bookId)?.enabled != true || before.raiseHeader != after.raiseHeader) {
+                p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+            }
         }
+    }
+
+    internal fun bookLayout(bookId: String) = context.readerDataStore.data.map { readBookLayout(it, bookId) }
+
+    internal suspend fun setBookLayoutEnabled(bookId: String, enabled: Boolean) {
+        context.readerDataStore.edit { p ->
+            val previous = readBookLayout(p, bookId)
+            if ((previous?.enabled ?: false) == enabled) return@edit
+            val layout = previous?.copy(enabled = enabled)
+                ?: BookLayout.capture(enabled, readSettings(p, darkActive.value))
+            saveBookLayout(p, bookId, layout)
+        }
+    }
+
+    internal fun applyBookLayout(shared: ReaderSettings, layout: BookLayout?): ReaderSettings {
+        if (layout?.enabled != true) return shared
+        return layout.applyTo(shared).let { settings ->
+            if (fontAvailable(settings.fontId)) settings else settings.copy(fontId = shared.fontId)
+        }
+    }
+
+    private fun writeScopedTypography(p: MutablePreferences, settings: ReaderSettings, bookId: String?) {
+        val layout = bookId?.let { readBookLayout(p, it) }
+        if (bookId != null && layout?.enabled == true) {
+            val previous = applyBookLayout(readSettings(p, darkActive.value), layout)
+            val fontId = if (settings.fontId == previous.fontId) layout.scheme.fontId else settings.fontId
+            val updated = BookLayout.capture(layout.enabled, settings.copy(fontId = fontId), layout.updatedAt)
+            if (layout != updated) saveBookLayout(p, bookId, updated)
+            p[Keys.RAISE_HEADER] = settings.raiseHeader
+        } else {
+            writeTypography(p, settings)
+        }
+    }
+
+    private fun readBookLayout(p: Preferences, bookId: String): BookLayout? =
+        p[bookLayoutKey(bookId)]?.let(::decodeBookLayout)
+
+    private fun saveBookLayout(p: MutablePreferences, bookId: String, layout: BookLayout) {
+        val stamp = maxOf(System.currentTimeMillis(), layout.updatedAt + 1, (p[Keys.BOOK_LAYOUTS_CHANGED_AT] ?: 0L) + 1)
+        p[bookLayoutKey(bookId)] = Json.encodeToString(layout.copy(updatedAt = stamp))
+        p[Keys.BOOK_LAYOUTS_CHANGED_AT] = stamp
     }
 
     private fun writeTypography(p: MutablePreferences, settings: ReaderSettings) {
@@ -260,7 +343,9 @@ class ReaderPrefs(
     }
 
     /** 最后一次改动时间；WebDAV 整块 LWW 用 */
-    suspend fun updatedAt(): Long = context.readerDataStore.data.first()[Keys.UPDATED_AT] ?: 0L
+    suspend fun updatedAt(): Long = context.readerDataStore.data.first().let {
+        maxOf(it[Keys.UPDATED_AT] ?: 0L, it[Keys.BOOK_LAYOUTS_CHANGED_AT] ?: 0L)
+    }
 
     /** 值与时间戳来自同一份磁盘快照，不依赖可能滞后的热流。 */
     internal suspend fun backupSnapshot(): BackupSettings {
@@ -309,6 +394,11 @@ class ReaderPrefs(
                 "auto_flip_seconds" to s.autoFlipSeconds.toString(),
                 "preload_chapters" to s.preloadChapters.toString(),
             ),
+            bookLayouts = p.asMap().entries.mapNotNull { (key, value) ->
+                if (!key.name.startsWith(BOOK_LAYOUT_PREFIX) || value !is String) return@mapNotNull null
+                val layout = decodeBookLayout(value) ?: return@mapNotNull null
+                key.name.removePrefix(BOOK_LAYOUT_PREFIX) to BackupBookLayout(layout.updatedAt, value)
+            }.toMap(),
         )
     }
 
@@ -375,7 +465,18 @@ internal object ReaderBackupImport {
     fun apply(
         p: MutablePreferences, backup: BackupSettings, fontAvailable: (String) -> Boolean,
     ): Boolean {
-        if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return false
+        var layoutChanged = false
+        backup.bookLayouts.forEach { (bookId, incoming) ->
+            val key = bookLayoutKey(bookId)
+            val previous = p[key]?.let(::decodeBookLayout)
+            val layout = decodeBookLayout(incoming.value)
+            if (layout != null && incoming.updatedAt == layout.updatedAt && incoming.updatedAt > (previous?.updatedAt ?: 0L)) {
+                p[key] = incoming.value
+                p[keys.BOOK_LAYOUTS_CHANGED_AT] = maxOf(incoming.updatedAt, p[keys.BOOK_LAYOUTS_CHANGED_AT] ?: 0L)
+                layoutChanged = true
+            }
+        }
+        if (backup.updatedAt <= (p[keys.UPDATED_AT] ?: 0L)) return layoutChanged
         val v = backup.values
         listOf(keys.FONT_SIZE, keys.TITLE_SCALE, keys.TITLE_TOP_SPACING,
             keys.LINE_SPACING, keys.PARA_SPACING, keys.MARGIN_H, keys.MARGIN_V,

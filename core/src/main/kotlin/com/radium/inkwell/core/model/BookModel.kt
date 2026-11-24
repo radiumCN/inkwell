@@ -92,6 +92,8 @@ private val LINE_BREAKS = Regex("\\s*\\n\\s*")
 
 data class ChapterContent(
     val elements: List<ContentElement>,
+    /** EPUB 原书锚点对应的正文元素下标。 */
+    val anchors: Map<String, Int> = emptyMap(),
 )
 
 /** 已打开的书；章节内容惰性加载 */

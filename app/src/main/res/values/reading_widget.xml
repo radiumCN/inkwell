@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reading_widget_title">今日阅读</string>
+    <string name="reading_widget_description">查看今日阅读时长，点按打开阅读记录</string>
+    <string name="reading_widget_loading">正在读取</string>
+    <color name="reading_widget_surface">#F7EED9</color>
+    <color name="reading_widget_foreground">#302418</color>
+    <color name="reading_widget_secondary">#654D35</color>
+</resources>

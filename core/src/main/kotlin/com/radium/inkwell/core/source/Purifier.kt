@@ -1,5 +1,6 @@
 package com.radium.inkwell.core.source
 
+import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
 
 /**
@@ -30,6 +31,27 @@ class Purifier private constructor(
 
     fun apply(text: String): String = guarded { apply(text, it) }
 
+    fun apply(content: ChapterContent): ChapterContent {
+        if (compiled.isEmpty()) return content
+        if (content.anchors.isEmpty()) return content.copy(elements = apply(content.elements))
+        return guarded { run ->
+            val elements = content.elements
+            if (compiled.any { it.multiline }) {
+                val cleaned = applyCrossParagraph(elements, run)
+                return@guarded if (cleaned == elements) content else ChapterContent(cleaned)
+            }
+            val indices = IntArray(elements.size + 1)
+            val cleaned = buildList {
+                elements.forEachIndexed { index, element ->
+                    indices[index] = size
+                    cleanElement(element, run)?.let(::add)
+                }
+                indices[elements.size] = size
+            }
+            ChapterContent(cleaned, content.anchors.mapValues { (_, index) -> indices[index] })
+        }
+    }
+
     /**
      * 整章一次交给 [RegexWatchdog]：真机上 [GuardedText] 拦不住 ICU 的回溯，只能靠看门狗
      * 让调用方别陪着卡死（阅读器是在互斥锁里净化的，卡住就是此后每一章都转圈）。
@@ -58,13 +80,13 @@ class Purifier private constructor(
         // 逐段各自 apply 永远匹配不到（这正是「规则页试算对、书里不生效」的一类成因）。
         // 有这类规则时退回「整章文本 join → apply → 按换行重新拆段」路径。
         if (compiled.any { it.multiline }) return applyCrossParagraph(elements, run)
-        return elements.mapNotNull { el ->
-            when (el) {
-                is ContentElement.Paragraph -> clean(el.text, run)?.let { ContentElement.Paragraph(it) }
-                is ContentElement.Heading -> clean(el.text, run)?.let { ContentElement.Heading(el.level, it) }
-                else -> el
-            }
-        }
+        return elements.mapNotNull { cleanElement(it, run) }
+    }
+
+    private fun cleanElement(element: ContentElement, run: Run): ContentElement? = when (element) {
+        is ContentElement.Paragraph -> clean(element.text, run)?.let { ContentElement.Paragraph(it) }
+        is ContentElement.Heading -> clean(element.text, run)?.let { ContentElement.Heading(element.level, it) }
+        else -> element
     }
 
     /**

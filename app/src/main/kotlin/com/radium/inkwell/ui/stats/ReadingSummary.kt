@@ -33,18 +33,24 @@ internal const val ACTIVE_DAY_MILLIS = 60_000L
  * 连续天数从今天往回数；今天还没读不算断：早上打开 App 看到「连续 0 天」很扫兴，
  * 这种时候从昨天往回数，今天读了再加上。
  */
-fun summarize(rows: List<ReadingStatEntity>, today: LocalDate, topN: Int = 5): ReadingSummary {
+fun summarize(
+    rows: List<ReadingStatEntity>,
+    today: LocalDate,
+    topN: Int = 5,
+    rankingStart: LocalDate = today.withDayOfYear(1),
+): ReadingSummary {
     if (rows.isEmpty()) return ReadingSummary()
     val daily = HashMap<Long, Long>()
     val yearBooks = HashMap<String, Long>()
     val todayDay = today.toEpochDay()
     val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toEpochDay()
     val yearStart = today.withDayOfYear(1).toEpochDay()
+    val rankingStartDay = rankingStart.toEpochDay()
     var total = 0L
     rows.forEach { r ->
         daily.merge(r.day, r.millis, Long::plus)
         total += r.millis
-        if (r.day in yearStart..todayDay) yearBooks.merge(r.bookId, r.millis, Long::plus)
+        if (r.day in rankingStartDay..todayDay) yearBooks.merge(r.bookId, r.millis, Long::plus)
     }
 
     fun active(day: Long) = (daily[day] ?: 0L) >= ACTIVE_DAY_MILLIS

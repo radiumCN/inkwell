@@ -93,7 +93,25 @@ data class PaginatedChapter(
     val title: String,
     val pages: List<PageSpec>,
     val totalChars: Int,
+    val anchorOffsets: Map<String, Int> = emptyMap(),
+    val anchorElements: Map<String, Int> = emptyMap(),
 ) {
+    fun pageIndexForAnchor(anchor: String): Int? {
+        val elementIndex = anchorElements[anchor]?.plus(1) ?: return null
+        val offset = anchorOffsets[anchor] ?: return null
+        val start = pageIndexFor(offset)
+        // 插图不占字符偏移，按字符查出的页面可能已经越过插图。
+        val matching = pages.indexOfFirst { page ->
+            page.items.any { item ->
+                when (item) {
+                    is PageItem.TextSlice -> item.elementIndex == elementIndex
+                    is PageItem.ImageBox -> item.elementIndex == elementIndex
+                }
+            }
+        }
+        return matching.takeIf { it >= 0 } ?: start
+    }
+
     /** 按章内字符偏移二分定位页 */
     fun pageIndexFor(charOffset: Int): Int {
         if (pages.isEmpty()) return 0

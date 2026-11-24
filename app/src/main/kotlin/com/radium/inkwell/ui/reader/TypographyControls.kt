@@ -59,16 +59,19 @@ class TypographyActions(
     val onApplyScheme: (LayoutScheme) -> Unit,
     val onSaveScheme: (String) -> Unit,
     val onDeleteScheme: (String) -> Unit,
+    val bookLayoutEnabled: Boolean,
+    val onSetBookLayoutEnabled: (Boolean) -> Unit,
 )
 
 @Composable
 fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
     val fonts by viewModel.userFonts.collectAsStateWithLifecycle()
     val schemes by viewModel.layoutSchemes.collectAsStateWithLifecycle()
+    val bookLayoutEnabled by viewModel.bookLayoutEnabled.collectAsStateWithLifecycle()
     val importStage by viewModel.fontImportStage.collectAsStateWithLifecycle()
     val importError by viewModel.fontImportError.collectAsStateWithLifecycle()
     val fontRegistry = koinInject<ReaderFontStore>().registry
-    return remember(fonts, schemes, importStage, importError, viewModel, fontRegistry) {
+    return remember(fonts, schemes, bookLayoutEnabled, importStage, importError, viewModel, fontRegistry) {
         TypographyActions(
             fonts = fonts,
             fontRegistry = fontRegistry,
@@ -82,6 +85,8 @@ fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
             onApplyScheme = viewModel::applyLayoutScheme,
             onSaveScheme = viewModel::saveLayoutScheme,
             onDeleteScheme = viewModel::deleteLayoutScheme,
+            bookLayoutEnabled = bookLayoutEnabled,
+            onSetBookLayoutEnabled = viewModel::setBookLayoutEnabled,
         )
     }
 }

@@ -66,6 +66,56 @@ class ReaderHanJustificationTest {
         assertEquals(plain.getLineRight(last), justified.getLineRight(last), 1f)
     }
 
+    @Test
+    fun englishLinesStillJustifyWhenOnlyTheLastLineHasHanCharacters() {
+        val sample = "The old captain walked along the quiet harbor ".repeat(4) + "最后"
+        val width = 380
+        val plain = layout(sample, width, justify = false)
+        val justified = layout(sample, width, justify = true)
+        val last = plain.lineCount - 1
+
+        assertTrue(last > 1)
+        assertTrue(plain.getLineStart(last) <= sample.indexOf('最'))
+        assertTrue((0 until last).any { justified.getLineRight(it) > plain.getLineRight(it) + 2f })
+        assertEquals(plain.getLineRight(last), justified.getLineRight(last), 1f)
+    }
+
+    @Test
+    fun separateChineseAndEnglishLinesJustifyInTheSameParagraph() {
+        val chinese = "晨雾沿着码头慢慢散开渡船停在河心".repeat(3)
+        val english = "The old captain walked along the quiet harbor ".repeat(4)
+        val sample = "$chinese $english 最后"
+        val englishStart = chinese.length + 1
+        val englishEnd = englishStart + english.length
+        val fixture = (330..440 step 5).firstNotNullOf { width ->
+            val plain = layout(sample, width, justify = false)
+            val eligible = (0 until plain.lineCount - 1).filter { width - plain.getLineRight(it) > 5f }
+            val hanLine = eligible.firstOrNull {
+                plain.getLineStart(it) > 0 && plain.getLineEnd(it, visibleEnd = true) <= chinese.length
+            }
+            val wordLine = eligible.firstOrNull {
+                val start = plain.getLineStart(it)
+                val end = plain.getLineEnd(it, visibleEnd = true)
+                start >= englishStart && end <= englishEnd && sample.substring(start, end).trim().contains(' ')
+            }
+            if (hanLine != null && wordLine != null) Triple(width, hanLine, wordLine) else null
+        }
+        val (width, hanLine, wordLine) = fixture
+        val plain = layout(sample, width, justify = false)
+        val justified = layout(sample, width, justify = true)
+
+        assertEquals(sample, justified.layoutInput.text.text)
+        assertEquals(plain.lineCount, justified.lineCount)
+        for (line in 0 until plain.lineCount) {
+            assertEquals(plain.getLineStart(line), justified.getLineStart(line))
+            assertEquals(plain.getLineEnd(line), justified.getLineEnd(line))
+        }
+        assertEquals(width.toFloat(), justified.getLineRight(hanLine), 2f)
+        assertEquals(width.toFloat(), justified.getLineRight(wordLine), 2f)
+        val last = plain.lineCount - 1
+        assertEquals(plain.getLineRight(last), justified.getLineRight(last), 1f)
+    }
+
     private fun layout(text: String, width: Int, justify: Boolean): TextLayoutResult =
         facade.measureParagraph(text, style.copy(justify = justify), width).renderHandle as TextLayoutResult
 }

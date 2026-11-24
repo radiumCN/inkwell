@@ -8,6 +8,7 @@ object BookType {
     const val LOCAL_EPUB = 1
     const val LOCAL_MOBI = 2
     const val NET = 3
+    const val LOCAL_SERIES = 4
 }
 
 @Entity(tableName = "book")
@@ -27,6 +28,8 @@ data class BookEntity(
     val intro: String? = null,
     /** 本地书：应用私有目录内的副本路径 */
     val localPath: String? = null,
+    /** 用于校验缺失后选回的本地原文件。旧书可为空。 */
+    val localFileHash: String? = null,
     /** 网络书：当前书源与地址（换源时更新） */
     val sourceId: String? = null,
     val bookUrl: String? = null,

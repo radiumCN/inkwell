@@ -1,5 +1,6 @@
 package com.radium.inkwell.ui.detail
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.dao.ChapterDao
@@ -12,6 +13,7 @@ import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.OfflineDownload
 import com.radium.inkwell.data.repo.OfflineDownloader
 import com.radium.inkwell.data.repo.OfflineRange
+import com.radium.inkwell.data.repo.LocalSeriesVolume
 import com.radium.inkwell.ui.components.MessageBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
@@ -40,6 +43,7 @@ data class BookDetailUiState(
     val chaptersLoaded: Boolean = false,
     /** 正在追更（顶栏转圈、空目录时的「正在获取目录…」） */
     val refreshing: Boolean = false,
+    val missingLocalFile: Boolean = false,
 )
 
 /**
@@ -59,6 +63,12 @@ class BookDetailViewModel(
 ) : ViewModel() {
 
     private val refreshing = MutableStateFlow(false)
+    private val recoveringFile = MutableStateFlow(false)
+    val recovering = recoveringFile
+    private val _seriesVolumes = MutableStateFlow<List<LocalSeriesVolume>?>(null)
+    val seriesVolumes = _seriesVolumes.asStateFlow()
+    private val _savingSeries = MutableStateFlow(false)
+    val savingSeries = _savingSeries.asStateFlow()
 
     /**
      * 书行 + 章节表 + 追更中，**只在页面看得见时**订阅（WhileSubscribed）。
@@ -80,25 +90,93 @@ class BookDetailViewModel(
             chapters = chapters.orEmpty(),
             chaptersLoaded = chapters != null,
             refreshing = refreshing,
+            missingLocalFile = book?.let { bookRepo.needsLocalFile(it) } ?: false,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookDetailUiState())
 
     val messages = MessageBus()
 
-    /** 这本书的整本缓存：在跑的、或上一轮的结果（null = 这次进程里没缓存过它） */
+    /** 当前缓存任务或上次留下的可续跑范围。 */
     val download: StateFlow<OfflineDownload?> = downloader.downloads
         .map { it[bookId] }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), downloader.downloads.value[bookId])
 
     fun startDownload(range: OfflineRange) = downloader.start(bookId, range)
 
+    fun resumeDownload() = downloader.resume(bookId)
+
     fun cancelDownload() = downloader.cancel(bookId)
+
+    fun recoverLocalFile(uri: Uri) {
+        if (recoveringFile.value) return
+        recoveringFile.value = true
+        viewModelScope.launch {
+            try {
+                bookRepo.recoverLocalBook(bookId, uri)
+                messages.emit("已恢复原文件，阅读进度已保留")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit(e.message ?: "无法恢复原文件")
+            } finally {
+                recoveringFile.value = false
+            }
+        }
+    }
+
+    fun loadSeriesEditor() {
+        viewModelScope.launch {
+            try {
+                val book = bookRepo.getBook(bookId)?.takeIf { it.type == BookType.LOCAL_SERIES } ?: return@launch
+                _seriesVolumes.value = bookRepo.volumesOf(book)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit(e.message ?: "无法打开分卷目录")
+            }
+        }
+    }
+
+    fun closeSeriesEditor() {
+        if (!_savingSeries.value) _seriesVolumes.value = null
+    }
+
+    fun updateSeries(title: String, volumeIds: List<String>) = changeSeries {
+        bookRepo.saveLocalSeries(title, volumeIds, bookId)
+        _seriesVolumes.value = null
+        messages.emit("已保存卷序")
+    }
+
+    fun splitSeries(onSplit: () -> Unit) = changeSeries {
+        if (bookRepo.getBook(bookId)?.type == BookType.LOCAL_SERIES) {
+            bookRepo.deleteBook(bookId)
+            _seriesVolumes.value = null
+            onSplit()
+        }
+    }
+
+    private fun changeSeries(change: suspend () -> Unit) {
+        if (_savingSeries.value) return
+        _savingSeries.value = true
+        viewModelScope.launch {
+            try {
+                change()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit(e.message ?: "无法修改合订本")
+            } finally {
+                _savingSeries.value = false
+            }
+        }
+    }
 
     /** 进度写完了，页面该进阅读器了 */
     private val _openReader = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val openReader: SharedFlow<Unit> = _openReader
 
     init {
+        viewModelScope.launch { downloader.restore(bookId) }
         // WebDAV 只同步书行、不同步章节表。同步下来的网络书进详情时目录是空的 ——
         // 以前要等进阅读器才补抓，详情页自己却装聋作哑（菜单还写着「目录」）。
         // 进页发现章节表为空就自动追更一次；失败不弹提示打扰，留给空态里的「重新获取」。
@@ -159,6 +237,7 @@ class BookDetailViewModel(
      * 这一笔也不能写丢（下次进书就不是你点的那章了）。
      */
     fun openChapter(chapterIndex: Int) {
+        if (state.value.missingLocalFile) return
         viewModelScope.launch(NonCancellable) {
             bookRepo.saveProgress(bookId, chapterIndex, 0)
             _openReader.emit(Unit)

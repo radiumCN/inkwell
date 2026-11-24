@@ -31,6 +31,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
          * 翻页时若已在最后一页且 !complete，不要跳下一章 —— 下一页马上就来。
          */
         val complete: Boolean = true,
+        val elementOffsets: IntArray = intArrayOf(),
     )
 
     /**
@@ -60,6 +61,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
             addAll(content.elements.map { it.asParagraph() })
         }
         val measured = HashMap<Int, MeasuredParagraph>()
+        val elementOffsets = IntArray(elements.size + 1)
         val pages = mutableListOf<PageSpec>()
         var cursor = PageCursor(spec)
         var charOffset = 0
@@ -80,11 +82,14 @@ class Paginator(private val measurer: TextMeasureFacade) {
             PaginatedChapter(
                 chapterIndex, title, pages.toList(),
                 if (complete) charOffset else maxOf(charOffset, pages.lastOrNull()?.endCharOffset ?: 0),
+                if (complete) content.anchors.mapValues { (_, index) -> elementOffsets[index + 1] } else emptyMap(),
+                if (complete) content.anchors else emptyMap(),
             ),
             // 完整结果不再拷测量表：paginate 返回后不会再往里写。中途回调必须拷一份，
             // 否则 Default 线程继续 put 时，主线程若正在遍历会 ConcurrentModification。
             if (complete) measured else HashMap(measured),
             complete,
+            if (complete) elementOffsets else intArrayOf(),
         )
 
         fun sealPage(endOfChapter: Boolean) {
@@ -104,6 +109,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
 
         elements.forEachIndexed { idx, element ->
             if (isAbandoned()) return snapshot(complete = false)
+            elementOffsets[idx] = charOffset
             when (element) {
                 is TitleElement -> {
                     if (element.text.isNotBlank()) {
@@ -176,6 +182,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
                 }
             }
         }
+        elementOffsets[elements.size] = charOffset
         sealPage(endOfChapter = true)
         if (pages.isEmpty()) {
             // 空章节兜底：产出一个空页，游标语义不塌

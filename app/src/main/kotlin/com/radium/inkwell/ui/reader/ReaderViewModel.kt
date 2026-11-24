@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -95,7 +96,14 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
-data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
+data class TocItem(
+    val index: Int,
+    val title: String,
+    val cached: Boolean = false,
+    val anchor: String? = null,
+    val depth: Int = 0,
+    val key: Int = index,
+)
 
 data class ReaderUiState(
     val bookTitle: String = "",
@@ -413,9 +421,11 @@ class ReaderViewModel(
     init {
         viewModelScope.launch {
             loadSession()
-            readerPrefs.settings.collect { s ->
+            combine(readerPrefs.settings, readerPrefs.bookLayout(bookId)) { shared, layout ->
+                settingsForBook(readerPrefs.applyBookLayout(shared, layout))
+            }.collect { s ->
                 val previous = _state.value.settings.theme.id
-                _state.value = _state.value.copy(settings = settingsForBook(s))
+                _state.value = _state.value.copy(settings = s)
                 if (previous != s.theme.id) {
                     trace("settings.paper_applied", "from_theme" to previous, "theme" to s.theme.id)
                 }
@@ -458,6 +468,7 @@ class ReaderViewModel(
                 .map { chapterDao.getTocRows(bookId) }
                 .distinctUntilChanged()
                 .collect { rows ->
+                    if (source is LocalReaderBookSource) return@collect
                     _state.value = _state.value.copy(toc = rows.map { TocItem(it.index, it.title, it.isCached) })
                     // 目录结构变了（后台追更）才把整行读出来，交给会话去对齐。条件同 syncSessionToc 开头那几条，
                     // 先在这里挡掉，免得换源途中每一声都白读一遍整本目录
@@ -547,6 +558,7 @@ class ReaderViewModel(
             ),
             measured = measured,
             complete = complete,
+            elementOffsets = elementOffsets,
         )
 
     private suspend fun loadSession() {
@@ -570,7 +582,7 @@ class ReaderViewModel(
             // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
             _state.value = _state.value.copy(
-                settings = settingsForBook(readerPrefs.settings.value),
+                settings = initialSettingsForBook(),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -629,13 +641,15 @@ class ReaderViewModel(
                 progressHeld = b.type == BookType.NET
             }
             _state.value = _state.value.copy(
-                settings = settingsForBook(readerPrefs.settings.value),
+                settings = initialSettingsForBook(),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
                 chapterCount = src.chapterCount,
                 chapterIndex = position.chapterIndex,
-                toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
+                toc = (src as? LocalReaderBookSource)?.toc?.takeIf { it.isNotEmpty() }
+                    ?.mapIndexed { key, entry -> TocItem(entry.chapterIndex, entry.title, anchor = entry.anchor, depth = entry.level, key = key) }
+                    ?: chapters.map { TocItem(it.index, it.title, it.isCached) },
                 isNetBook = b.type == BookType.NET,
                 currentSourceName = currentSourceName,
                 inShelf = b.inShelf && !b.deleted,
@@ -718,7 +732,7 @@ class ReaderViewModel(
      * [invalidate] 为 true 时**同步**清掉分页缓存（视口/净化规则/书源变了）：这一轮若还没拿到锁就被下一次
      * 跳转取代，锁里那句 clear 根本轮不到执行，新的那次就会捡到按旧排版/旧规则分好的页。
      */
-    private fun navigate(invalidate: Boolean = false, target: () -> ReadPosition) {
+    private fun navigate(invalidate: Boolean = false, tocAnchor: String? = null, target: suspend () -> ReadPosition) {
         navJob?.cancel()
         navTarget = null
         if (invalidate) paginated.clear()
@@ -728,7 +742,7 @@ class ReaderViewModel(
                 if (invalidate) paginated.clear()
                 val destination = target()
                 if (destination.chapterIndex != position.chapterIndex) stopLegacyImageUpgrade()
-                showPosition(destination)
+                showPosition(destination, tocAnchor)
             }
         }
     }
@@ -867,6 +881,13 @@ class ReaderViewModel(
         gotoChapter(index)
     }
 
+    internal fun jumpFromToc(item: TocItem) {
+        val anchor = item.anchor ?: return jumpFromReaderMenu(item.index)
+        progressHeld = false
+        releaseSpeechPosition()
+        navigate(tocAnchor = anchor) { ReadPosition(item.index, 0) }
+    }
+
     private suspend fun loadSpeechChapter(index: Int): SpeechChapter {
         val src = checkNotNull(source)
         val generation = tocGeneration
@@ -931,8 +952,12 @@ class ReaderViewModel(
     private fun settingsForBook(settings: ReaderSettings): ReaderSettings =
         if (book != null && book?.type != BookType.NET) settings.copy(showImages = settings.localShowImages) else settings
 
+    private suspend fun initialSettingsForBook(): ReaderSettings = settingsForBook(
+        readerPrefs.applyBookLayout(readerPrefs.settings.value, readerPrefs.bookLayout(bookId).first()),
+    )
+
     private suspend fun persistSettings(settings: ReaderSettings) {
-        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET)
+        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET, bookId = bookId)
     }
 
     fun updateSettings(settings: ReaderSettings) {
@@ -971,10 +996,23 @@ class ReaderViewModel(
 
     val userFonts: StateFlow<List<UserFont>> = fontStore.fonts
     val layoutSchemes: StateFlow<List<LayoutScheme>> = readerPrefs.layoutSchemes
+    val bookLayoutEnabled = readerPrefs.bookLayout(bookId).map { it?.enabled == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setBookLayoutEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                readerPrefs.setBookLayoutEnabled(bookId, enabled)
+            } catch (_: java.io.IOException) {
+                messageBus.emit("排版范围保存失败")
+            }
+        }
+    }
+
     fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
         viewModelScope.launch {
             try {
-                readerPrefs.adjustTypography(change)
+                readerPrefs.adjustTypography(bookId, change)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: java.io.IOException) {
@@ -997,7 +1035,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             try {
                 val font = fontStore.import(uri) { _fontImportStage.value = it }.getOrThrow()
-                readerPrefs.adjustTypography { copy(fontId = font.id) }
+                readerPrefs.adjustTypography(bookId) { copy(fontId = font.id) }
                 messageBus.emit("已导入字体「${font.label}」")
             } catch (e: CancellationException) {
                 throw e
@@ -1031,7 +1069,7 @@ class ReaderViewModel(
         }
     }
 
-    fun applyLayoutScheme(scheme: LayoutScheme) = updateSettings(scheme.applyTo(_state.value.settings))
+    fun applyLayoutScheme(scheme: LayoutScheme) = adjustTypography { scheme.applyTo(this) }
 
     fun saveLayoutScheme(name: String) {
         val trimmed = name.trim().take(LayoutScheme.MAX_NAME_LENGTH)
@@ -1286,6 +1324,88 @@ class ReaderViewModel(
     }
 
     // ---------- 长按选字 ----------
+
+    private val _textSearch = MutableStateFlow(ReaderTextSearchState())
+    val textSearch = _textSearch.asStateFlow()
+    private val _textMatch = MutableStateFlow<ReaderTextMatch?>(null)
+    val textMatch = _textMatch.asStateFlow()
+    private var textSearchJob: Job? = null
+
+    fun clearTextSearch() {
+        textSearchJob?.cancel()
+        _textSearch.value = ReaderTextSearchState()
+    }
+
+    fun findText(input: String, wholeBook: Boolean) {
+        clearTextSearch()
+        val query = input.trim()
+        val src = source ?: return
+        if (query.isEmpty() || query.length > MAX_READER_TEXT_QUERY) return
+        val generation = tocGeneration
+        val indices = if (wholeBook) 0 until src.chapterCount else _state.value.chapterIndex.let { it..it }
+        textSearchJob = viewModelScope.launch {
+            val matches = ArrayList<ReaderTextMatch>()
+            var scanned = 0
+            var unavailable = 0
+            fun snapshot(active: Boolean) = ReaderTextSearchState(indices.count(), scanned, unavailable, matches.toList(), active)
+            _textSearch.value = snapshot(active = true)
+            for (index in indices) {
+                ensureActive()
+                if (src !== source || generation != tocGeneration) break
+                val title = src.chapterTitle(index).orEmpty()
+                val found = try {
+                    val raw = if (src is NetReaderBookSource) {
+                        val url = src.chapters.getOrNull(index)?.url
+                        if (url == null) null else withContext(Dispatchers.IO) { contentCache.read(bookId, url) }
+                    } else {
+                        src.loadChapter(index)
+                    }
+                    raw?.let {
+                        val content = prepareChapter(loadPurified(it, index, reportTimeout = false), title)
+                        withContext(Dispatchers.Default) {
+                            readerTextMatches(content, index, title, query, MAX_READER_TEXT_MATCHES - matches.size)
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+                if (src !== source || generation != tocGeneration) break
+                scanned++
+                if (found == null) unavailable++ else matches.addAll(found)
+                if (matches.size >= MAX_READER_TEXT_MATCHES) break
+                if (found?.isNotEmpty() == true || scanned % 8 == 0) _textSearch.value = snapshot(active = true)
+            }
+            _textSearch.value = snapshot(active = false)
+        }
+    }
+
+    fun openTextMatch(match: ReaderTextMatch) {
+        clearTextSearch()
+        stopSpeech(returnToText = false)
+        progressHeld = false
+        _textMatch.value = null
+        navigate {
+            val result = ensurePaginated(match.position.chapterIndex, userFacing = true, notifyAfterChar = Int.MAX_VALUE)
+            val selection = match.selection
+            val currentText = result?.measured?.get(selection.elementIndex)?.text
+            val start = result?.elementOffsets?.getOrNull(selection.elementIndex)
+            if (start != null && currentText?.regionMatches(selection.start, selection.text, 0, selection.text.length) == true) {
+                val destination = match.position.copy(charOffset = start + selection.start)
+                val highlight = match.copy(position = destination)
+                _textMatch.value = highlight
+                viewModelScope.launch {
+                    delay(5_000)
+                    if (_textMatch.value === highlight) _textMatch.value = null
+                }
+                destination
+            } else {
+                messageBus.emit("正文已变化，请重新查找")
+                position
+            }
+        }
+    }
 
     fun setTextSelectionEnabled(on: Boolean) {
         viewModelScope.launch { appPrefs.setTextSelectionEnabled(on) }
@@ -1888,7 +2008,7 @@ class ReaderViewModel(
     // ---------- 内部 ----------
 
     /** 定位到指定位置：必要时加载+分页该章，并预取相邻章 */
-    private suspend fun showPosition(target: ReadPosition) {
+    private suspend fun showPosition(target: ReadPosition, tocAnchor: String? = null) {
         // 这条永远是"用户在等的那一章"（进书、翻章、跳目录、重试都走这里），预取不走这里
         pendingTarget = target
         val src = source
@@ -1897,7 +2017,7 @@ class ReaderViewModel(
         val result = ensurePaginated(
             target.chapterIndex,
             userFacing = true,
-            notifyAfterChar = target.charOffset,
+            notifyAfterChar = if (tocAnchor == null) target.charOffset else Int.MAX_VALUE,
         ) ?: run {
             // ensurePaginated 的前置守卫是静默返回 null 的。其中"排版环境还没就绪"
             // （source/facade/spec 为 null）属于正常启动时序 —— loadSession/onLayoutReady
@@ -1919,12 +2039,18 @@ class ReaderViewModel(
             }
             return
         }
-        val pageIdx = if (target.charOffset == Int.MAX_VALUE) {
-            result.chapter.pages.lastIndex
-        } else {
-            result.chapter.pageIndexFor(target.charOffset)
+        val anchorOffset = tocAnchor?.let(result.chapter.anchorOffsets::get)
+        val offset = anchorOffset ?: target.charOffset
+        val pageIdx = when {
+            tocAnchor != null -> result.chapter.pageIndexForAnchor(tocAnchor) ?: 0
+            offset == Int.MAX_VALUE -> result.chapter.pages.lastIndex
+            else -> result.chapter.pageIndexFor(offset)
         }
-        showPage(target.chapterIndex, pageIdx, keepOffset = target.charOffset)
+        if (tocAnchor != null) {
+            if (anchorOffset == null) messageBus.emit("无法定位此目录条目，已跳到本章开头")
+            if (speech.state.value.active) speech.seek(target.chapterIndex, offset)
+        }
+        showPage(target.chapterIndex, pageIdx, keepOffset = offset)
         preloadNeighbors(target.chapterIndex)
     }
 
@@ -1935,7 +2061,7 @@ class ReaderViewModel(
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
      * 本地书没有「抓取时」，通用规则也只能在这里跑。
      */
-    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int): ChapterContent {
+    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int, reportTimeout: Boolean = true): ChapterContent {
         // 本地书不经过引擎，通用规则从前一条都不跑（从阅读导进来一批去广告的规则，本地书毫无反应），在这里和书内规则一起跑。
         // 网上的书不加：通用规则在抓取时已经跑过、结果进了缓存，这里再跑一遍，「a → ab」这种规则会替换两次
         val b = book
@@ -1945,7 +2071,7 @@ class ReaderViewModel(
             replaceRules.purifyForBook(bookId)
         }
         if (rules.isEmpty()) {
-            purifySkipped.remove(chapterIndex)
+            if (reportTimeout) purifySkipped.remove(chapterIndex)
             return raw
         }
         // 编译规则、逐段替换都切到 Default。调用方在主线程（Main.immediate）上：正则规则交给
@@ -1959,12 +2085,21 @@ class ReaderViewModel(
         return withContext(Dispatchers.Default) {
             try {
                 val purifier = Purifier.lenient(rules)
-                raw.copy(elements = purifier.apply(raw.elements)).also { purifySkipped.remove(chapterIndex) }
+                purifier.apply(raw).also { if (reportTimeout) purifySkipped.remove(chapterIndex) }
             } catch (_: PurifyTimeoutException) {
-                purifySkipped.add(chapterIndex)
+                if (reportTimeout) purifySkipped.add(chapterIndex)
                 raw
             }
         }
+    }
+
+    private fun prepareChapter(content: ChapterContent, title: String): ChapterContent {
+        val elements = RepeatedTitle.strip(content.elements, title, book?.title.orEmpty())
+        val removed = content.elements.size - elements.size
+        return if (removed == 0) content else ChapterContent(
+            elements,
+            content.anchors.mapValues { (_, index) -> (index - removed).coerceAtLeast(0) },
+        )
     }
 
     /** 这一章是按未净化显示的（净化超时）：显示出来时提示一次 */
@@ -2157,9 +2292,7 @@ class ReaderViewModel(
             ) {
                 throw ImageOnlyChapterException()
             }
-            val content = purified.copy(
-                elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()),
-            )
+            val content = prepareChapter(purified, title)
             // 本地包可以同步取得尺寸；网络插图先留框，交给可见页的解码队列。
             if (spec.showImages && src !is NetReaderBookSource) {
                 measureChapterStage({ imageMeasureMs = it }) { readerImages.measure(src, content) }

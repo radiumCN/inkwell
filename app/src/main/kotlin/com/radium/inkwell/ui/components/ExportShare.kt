@@ -17,10 +17,13 @@ import kotlinx.coroutines.withContext
  * 同名覆盖：每次导出就是最新的那份，不在缓存里越攒越多。
  */
 suspend fun writeExportFile(context: Context, fileName: String, text: String): File =
+    writeExportFile(context, fileName) { it.writeText(text) }
+
+suspend fun writeExportFile(context: Context, fileName: String, write: (File) -> Unit): File =
     withContext(Dispatchers.IO) {
         val file = File(File(context.cacheDir, "export"), fileName)
         file.parentFile?.mkdirs()
-        file.writeText(text)
+        write(file)
         file
     }
 
@@ -29,17 +32,21 @@ suspend fun writeExportFile(context: Context, fileName: String, text: String): F
  * ViewModel 那边是一个 SharedFlow：导出一次分享一次，转屏回来不会再弹一遍。
  */
 @Composable
-fun CollectExportShares(files: Flow<File>, chooserTitle: String) {
+fun CollectExportShares(files: Flow<File>, chooserTitle: String, mimeType: String = "application/json") {
     val context = LocalContext.current
     LaunchedEffect(files) {
         files.collect { file ->
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(intent, chooserTitle))
+            shareExportFile(context, file, chooserTitle, mimeType)
         }
     }
+}
+
+internal fun shareExportFile(context: Context, file: File, chooserTitle: String, mimeType: String) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = mimeType
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, chooserTitle))
 }

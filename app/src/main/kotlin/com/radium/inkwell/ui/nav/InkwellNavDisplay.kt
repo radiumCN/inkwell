@@ -108,9 +108,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun InkwellNavDisplay(
     externalBook: Intent? = null,
     onExternalBookHandled: (Intent) -> Unit = {},
+    openReadingStats: Boolean = false,
+    onReadingStatsOpened: () -> Unit = {},
 ) {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
+    LaunchedEffect(openReadingStats) {
+        if (openReadingStats) {
+            if (backStack.lastOrNull() != ReadingStatsRoute) nav.go(ReadingStatsRoute)
+            onReadingStatsOpened()
+        }
+    }
     LaunchedEffect(backStack) {
         snapshotFlow { backStack.lastOrNull() }.collect { route ->
             UsageLog.screenVisible(route.diagnosticName(), backStack.size)
