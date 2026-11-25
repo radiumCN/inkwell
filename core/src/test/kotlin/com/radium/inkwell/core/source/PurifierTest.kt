@@ -1,6 +1,7 @@
 package com.radium.inkwell.core.source
 
 import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.core.model.ChapterContent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,6 +24,34 @@ import kotlin.test.assertTrue
  * 输入每加 4 个字符耗时约 ×8（n=22→282ms，n=26→2278ms）。
  */
 class PurifierTest {
+
+    @Test
+    fun multilineRulesRemapAnchorsAcrossRemovedAndInsertedParagraphs() {
+        fun p(text: String) = ContentElement.Paragraph(text)
+        val image = ContentElement.Image("pic")
+        val input = ChapterContent(
+            listOf(p("甲"), p("广告上"), p("广告下"), p("同名"), image, p("同名")),
+            mapOf("first" to 0, "ad" to 1, "second" to 3, "image" to 4, "last" to 5, "end" to 6),
+        )
+        val rules = listOf(
+            PurifyRule("广告上\\n广告下\\n", ""),
+            PurifyRule("(甲)", "\$1\n乙\n丙"),
+        )
+        val output = Purifier.strict(rules).apply(input)
+        assertEquals(listOf(p("甲"), p("乙"), p("丙"), p("同名"), image, p("同名")), output.elements)
+        assertEquals(mapOf("first" to 0, "ad" to 3, "second" to 3, "image" to 4, "last" to 5, "end" to 6), output.anchors)
+    }
+
+    @Test
+    fun failedMultilineReplacementPreservesPositionsForSubsequentRules() {
+        val input = ChapterContent(
+            listOf(ContentElement.Paragraph("a"), ContentElement.Paragraph("b"), ContentElement.Paragraph("c")),
+            mapOf("c" to 2),
+        )
+        val rules = listOf(PurifyRule("a\\nb", "\$8"), PurifyRule("a\n", "", isRegex = false))
+        assertEquals(1, Purifier.lenient(rules).apply(input).anchors["c"])
+        assertEquals(1, Purifier.legado(rules).apply(input).anchors["c"])
+    }
 
     /** 计数重复套 `.*`：JDK 21 上仍会指数级回溯（见类注释的实测数据） */
     private fun pathological() = listOf(PurifyRule(pattern = "(.*,){11}P", replacement = ""))

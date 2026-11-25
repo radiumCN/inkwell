@@ -106,6 +106,24 @@ data class TocItem(
     val key: Int = index,
 )
 
+data class TocReadingPosition(
+    val elementIndex: Int,
+    val anchorElements: Map<String, Int>,
+    val jumpedAnchor: String?,
+)
+
+internal fun currentTocKey(toc: List<TocItem>, chapterIndex: Int, position: TocReadingPosition?): Int? {
+    val entries = toc.asSequence().filter { it.index == chapterIndex }
+    if (position != null) {
+        position.jumpedAnchor?.let { anchor -> entries.firstOrNull { it.anchor == anchor }?.let { return it.key } }
+        val nearest = entries.mapNotNull { item ->
+            item.anchor?.let(position.anchorElements::get)?.takeIf { it <= position.elementIndex }?.let { it to item }
+        }.maxByOrNull { it.first }
+        if (nearest != null) return nearest.second.key
+    }
+    return entries.firstOrNull()?.key
+}
+
 data class ReaderUiState(
     val bookTitle: String = "",
     /** 书行上的作者。换源面板拿它认「作者对不上」的候选 */
@@ -179,6 +197,7 @@ data class ReaderUiState(
     val refreshingChapter: Boolean = false,
     val chapterRefreshFailed: Boolean = false,
     val pageLayout: LayoutSpec? = null,
+    val tocPosition: TocReadingPosition? = null,
 )
 
 /**
@@ -199,6 +218,7 @@ data class ReaderPageUi(
     val error: String? = null,
     val atBookEnd: Boolean = false,
     val layout: LayoutSpec? = null,
+    val tocPosition: TocReadingPosition? = null,
 )
 
 data class ReaderSessionUi(
@@ -237,7 +257,7 @@ data class ReaderOverlayUi(
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
     chapterTitle, chapterIndex, pageInChapter, pageCount,
-    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout,
+    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout, tocPosition,
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
@@ -2170,7 +2190,7 @@ class ReaderViewModel(
             if (anchorOffset == null) messageBus.emit("无法定位此目录条目，已跳到本章开头")
             if (speech.state.value.active) speech.seek(target.chapterIndex, offset)
         }
-        showPage(target.chapterIndex, pageIdx, keepOffset = offset)
+        showPage(target.chapterIndex, pageIdx, keepOffset = offset, tocAnchor = tocAnchor?.takeIf { anchorOffset != null })
         preloadNeighbors(target.chapterIndex)
     }
 
@@ -2272,7 +2292,7 @@ class ReaderViewModel(
      * 还顺手存回了库；第二遍视口变高、重新分页，再拿这个已经退化的偏移去定位，就退了一页。
      * 用户看到的正是「返回再进来，退回上一页」。
      */
-    private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
+    private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null, tocAnchor: String? = null) {
         val layout = spec ?: return
         val result = paginated[chapterIndex] ?: return
         if (pageIndex !in result.chapter.pages.indices) return
@@ -2311,6 +2331,18 @@ class ReaderViewModel(
             pageCount = result.chapter.pages.size,
             page = page,
             pageLayout = layout,
+            tocPosition = if (result.chapter.anchorElements.isEmpty()) null else {
+                val visibleElements = page.spec.items.asSequence().map {
+                    when (it) {
+                        is PageItem.TextSlice -> it.elementIndex
+                        is PageItem.ImageBox -> it.elementIndex
+                    }
+                }
+                val element = visibleElements.takeWhile { result.elementOffsets[it] <= offset }
+                    .maxByOrNull { result.elementOffsets[it] }
+                // 分页在正文前插入虚拟章标题，EPUB 锚点用的是原正文下标。
+                TocReadingPosition((element ?: 0) - 1, result.chapter.anchorElements, tocAnchor)
+            },
             prevPage = prev,
             nextPage = next,
             hasPrev = pageIndex > 0 || chapterIndex > 0,

@@ -18,6 +18,7 @@ class ImageBlob(
 )
 
 /** 逻辑目录条目；chapterIndex 指向物理章节列表下标 */
+@kotlinx.serialization.Serializable
 data class TocEntry(
     val title: String,
     val chapterIndex: Int,

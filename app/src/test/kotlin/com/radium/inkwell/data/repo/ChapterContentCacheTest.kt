@@ -16,6 +16,13 @@ import kotlin.test.assertTrue
 
 class ChapterContentCacheTest {
 
+    @Test
+    fun resumedPlanRetainsOnlyExistingTargetsInOriginalOrder() {
+        val saved = OfflinePlan("source", "book", listOf("b", "removed", "a"))
+        assertEquals(listOf("b", "a"), saved.currentTargets(setOf("a", "b", "new")).urls)
+        assertTrue(saved.currentTargets(setOf("new")).urls.isEmpty())
+    }
+
     private val root: File = Files.createTempDirectory("cache-test").toFile()
     private val cache = ChapterContentCache(root)
 

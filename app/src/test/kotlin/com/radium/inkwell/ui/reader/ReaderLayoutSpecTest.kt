@@ -15,6 +15,31 @@ import kotlin.test.assertTrue
 
 class ReaderLayoutSpecTest {
 
+    @Test
+    fun resetRestoresAllTypesetControlsInTheCurrentScope() {
+        val base = ReaderSettings(fontId = "serif", raiseHeader = true, showImages = true)
+        val edited = base.copy(
+            fontSizeSp = 24f, bodyFontWeight = 700, lineSpacingMult = 2f, letterSpacingEm = 0.1f,
+            paragraphSpacingEm = 1f, firstLineIndentEm = 0f, justify = false, titleScale = 2f,
+            titleTopSpacingDp = 32f, headerTopSpacingDp = -12f, marginHorizontalDp = 18f, marginVerticalDp = 16f,
+        )
+        assertEquals(base, edited.resetTypography())
+    }
+
+    @Test
+    fun tocSelectionFollowsTheSectionWithinOneSpineItem() {
+        val entries = listOf(
+            TocItem(0, "章", key = 10), TocItem(0, "甲", anchor = "a", key = 11),
+            TocItem(0, "乙", anchor = "b", key = 12), TocItem(1, "下一章", key = 13),
+        )
+        val anchors = mapOf("a" to 2, "b" to 8)
+        assertEquals(10, currentTocKey(entries, 0, TocReadingPosition(0, anchors, null)))
+        assertEquals(11, currentTocKey(entries, 0, TocReadingPosition(6, anchors, null)))
+        assertEquals(12, currentTocKey(entries, 0, TocReadingPosition(9, anchors, null)))
+        assertEquals(12, currentTocKey(entries, 0, TocReadingPosition(6, anchors, "b")))
+        assertEquals(13, currentTocKey(entries, 1, null))
+    }
+
     private val density = Density(density = 3f, fontScale = 1f)
     private val cutout = IntInsets(0, 90, 0, 0)
     private val statusArea = ReaderStatusArea(90, listOf(IntRect(516, 12, 564, 72)))

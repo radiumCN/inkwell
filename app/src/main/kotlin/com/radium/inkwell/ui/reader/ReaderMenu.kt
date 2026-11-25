@@ -462,6 +462,7 @@ fun ReaderMenu(
             TocList(
                 toc = tocItems,
                 current = pageUi.chapterIndex,
+                position = pageUi.tocPosition,
                 // 本地书正文一直在，缓存指示对它没有意义（isCached 恒为 false，
                 // 显示出来只会让每一章都像"没预加载"）
                 showCacheState = session.isNetBook,
@@ -719,6 +720,7 @@ private fun BarAction(
 private fun TocList(
     toc: List<TocItem>,
     current: Int,
+    position: TocReadingPosition?,
     showCacheState: Boolean,
     reversed: Boolean,
     onSelect: (TocItem) -> Unit,
@@ -732,7 +734,7 @@ private fun TocList(
     }
     val cachedCount = remember(toc) { toc.count { it.cached } }
     // 在读那章在当前列表里的第几行；不在（搜索没搜到它）是 -1
-    val currentKey = remember(toc, current) { toc.firstOrNull { it.index == current }?.key }
+    val currentKey = remember(toc, current, position) { currentTocKey(toc, current, position) }
     val currentPos = remember(shown, currentKey) { shown.indexOfFirst { it.key == currentKey } }
     val animate = animationsEnabled()
     val scope = rememberCoroutineScope()
@@ -1115,7 +1117,7 @@ private fun TypographyPanel(
                             shown = shown,
                             pageBackdrop = pageBackdrop,
                         )
-                        SettingsPage.Typeset -> TypesetTab(settings, onUpdate, typography)
+                        SettingsPage.Typeset -> TypesetTab(settings, typography)
                         SettingsPage.Flip -> FlipTab(settings, onUpdate, autoFlipping, canToggleAutoFlip, onToggleAutoFlip)
                         SettingsPage.More -> MoreTab(
                             settings, isNetBook, onUpdate, typography.onAdjust,
@@ -1575,7 +1577,6 @@ private fun Modifier.reportDragging(onDragging: (Boolean) -> Unit): Modifier {
 @Composable
 private fun TypesetTab(
     settings: ReaderSettings,
-    onUpdate: (ReaderSettings) -> Unit,
     typography: TypographyActions,
 ) {
     val onAdjust = typography.onAdjust
@@ -1630,16 +1631,16 @@ private fun TypesetTab(
 
     ReaderGroup("段落") {
         SegmentRow("段距", PARA_SPACING_OPTIONS, settings.paragraphSpacingEm, 0.05f) {
-            onUpdate(settings.copy(paragraphSpacingEm = it))
+            onAdjust { copy(paragraphSpacingEm = it) }
         }
         SegmentRow("首行缩进", INDENT_OPTIONS, settings.firstLineIndentEm, 0.05f) {
-            onUpdate(settings.copy(firstLineIndentEm = it))
+            onAdjust { copy(firstLineIndentEm = it) }
         }
         SwitchRow(
             title = "两端对齐",
             subtitle = "正文按两侧边距对齐，段落末行自然留白",
             checked = settings.justify,
-            onCheckedChange = { onUpdate(settings.copy(justify = it)) },
+            onCheckedChange = { onAdjust { copy(justify = it) } },
             position = SettingGroupPosition.Last,
         )
     }
@@ -1665,7 +1666,7 @@ private fun TypesetTab(
 
     ReaderGroup("章标题") {
         SegmentRow("字号", TITLE_SCALE_OPTIONS, settings.titleScale, 0.05f) {
-            onUpdate(settings.copy(titleScale = it))
+            onAdjust { copy(titleScale = it) }
         }
         SegmentRow("上间距", TITLE_TOP_OPTIONS, settings.effectiveTitleTopSpacingDp, 1f) {
             onAdjust { copy(titleTopSpacingDp = it) }
@@ -1674,12 +1675,16 @@ private fun TypesetTab(
 
 }
 
-private fun ReaderSettings.resetTypography(): ReaderSettings {
+internal fun ReaderSettings.resetTypography(): ReaderSettings {
     val defaults = ReaderSettings()
     return copy(
         fontSizeSp = defaults.fontSizeSp,
         bodyFontWeight = defaults.bodyFontWeight,
         lineSpacingMult = defaults.lineSpacingMult,
+        paragraphSpacingEm = defaults.paragraphSpacingEm,
+        firstLineIndentEm = defaults.firstLineIndentEm,
+        justify = defaults.justify,
+        titleScale = defaults.titleScale,
         letterSpacingEm = defaults.letterSpacingEm,
         headerTopSpacingDp = defaults.headerTopSpacingDp,
         titleTopSpacingDp = defaults.titleTopSpacingDp,

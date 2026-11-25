@@ -50,7 +50,9 @@ data class OfflineDownload(
 )
 
 @Serializable
-internal data class OfflinePlan(val sourceId: String, val bookUrl: String?, val urls: List<String>)
+internal data class OfflinePlan(val sourceId: String, val bookUrl: String?, val urls: List<String>) {
+    fun currentTargets(chapterUrls: Set<String>): OfflinePlan = copy(urls = urls.filter(chapterUrls::contains))
+}
 
 /**
  * 应用级缓存任务。目标 URL 保存在缓存目录中，重启后可继续原范围；清缓存或换源时同时失效。
@@ -174,16 +176,19 @@ class OfflineDownloader(
             return stopEarly(bookId, "目录还没加载，先刷新目录", canResume = saved != null, textOnly = textOnly)
         }
 
-        val plan = saved ?: OfflinePlan(
+        val byUrl = chapters.mapNotNull { chapter -> chapter.url?.let { it to chapter } }.toMap()
+        val plan = (saved ?: OfflinePlan(
             sourceId, book.bookUrl,
             textUrls ?: offlineTargetUrls(chapters, book.readChapterIndex, checkNotNull(range)),
-        )
-        if (plan.urls.isEmpty()) return stopEarly(bookId, "目录中没有可缓存的章节", textOnly = textOnly)
+        )).currentTargets(byUrl.keys)
         currentCoroutineContext().ensureActive()
-        if (saved == null && !cache.writeOfflinePlan(bookId, Json.encodeToString(plan), epoch, textOnly)) {
+        if (plan.urls.isEmpty()) {
+            cache.clearOfflinePlan(bookId, epoch, textOnly)
+            return stopEarly(bookId, "所选范围已无可缓存的章节，请重新选择范围", textOnly = textOnly)
+        }
+        if (plan != saved && !cache.writeOfflinePlan(bookId, Json.encodeToString(plan), epoch, textOnly)) {
             return stopEarly(bookId, "来源换了或缓存被清空，已停止", textOnly = textOnly)
         }
-        val byUrl = chapters.mapNotNull { chapter -> chapter.url?.let { it to chapter } }.toMap()
         val otherUrls = byUrl.keys
         val variables = SourceVariables.decode(book.variable)
 
@@ -194,33 +199,29 @@ class OfflineDownloader(
             for (url in plan.urls) {
                 currentCoroutineContext().ensureActive()
                 if (cache.epoch(bookId) != epoch) break
-                val chapter = byUrl[url]
+                val chapter = byUrl.getValue(url)
                 var bodyReady = false
                 val complete = try {
-                    if (chapter == null) {
-                        false
-                    } else {
-                        val cached = cache.readEntry(bookId, url)
-                        bodyReady = cached != null
-                        val content = if (cached != null && (textOnly || cached.withImages)) cached.content else {
-                            val remote = engine.getContent(
-                                rule, url, otherUrls,
-                                chapterVariable = chapter.variable,
-                                allowJsRender = false,
-                                chapterTitle = chapter.title,
-                                chapterIndex = chapter.index,
-                                variables = variables,
-                            )
-                            currentCoroutineContext().ensureActive()
-                            val fetched = ChapterContent(remote.elements)
-                            if (!cache.writeIfEpoch(bookId, url, fetched, epoch)) break
-                            chapterDao.markCachedByUrl(bookId, url, true)
-                            fetched
-                        }
-                        bodyReady = true
-                        textOnly || cache.cacheOfflineImages(bookId, content, epoch) { imageUrl ->
-                            engine.getImage(rule, imageUrl)
-                        }
+                    val cached = cache.readEntry(bookId, url)
+                    bodyReady = cached != null
+                    val content = if (cached != null && (textOnly || cached.withImages)) cached.content else {
+                        val remote = engine.getContent(
+                            rule, url, otherUrls,
+                            chapterVariable = chapter.variable,
+                            allowJsRender = false,
+                            chapterTitle = chapter.title,
+                            chapterIndex = chapter.index,
+                            variables = variables,
+                        )
+                        currentCoroutineContext().ensureActive()
+                        val fetched = ChapterContent(remote.elements)
+                        if (!cache.writeIfEpoch(bookId, url, fetched, epoch)) break
+                        chapterDao.markCachedByUrl(bookId, url, true)
+                        fetched
+                    }
+                    bodyReady = true
+                    textOnly || cache.cacheOfflineImages(bookId, content, epoch) { imageUrl ->
+                        engine.getImage(rule, imageUrl)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -228,7 +229,7 @@ class OfflineDownloader(
                     false
                 }
                 if (cache.epoch(bookId) != epoch) break
-                consecutiveBodyFailures = if (bodyReady || chapter == null) 0 else consecutiveBodyFailures + 1
+                consecutiveBodyFailures = if (bodyReady) 0 else consecutiveBodyFailures + 1
                 status = if (complete) status.copy(done = status.done + 1) else status.copy(
                     failed = status.failed + 1,
                     imageFailures = status.imageFailures + if (bodyReady) 1 else 0,

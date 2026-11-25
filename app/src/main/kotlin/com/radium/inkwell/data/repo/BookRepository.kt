@@ -41,6 +41,9 @@ class BookRepository(
 
     // 前台选文件与目录自动扫描可能同时导入，元数据去重与插入必须串行。
     private val localImportMutex = Mutex()
+    private val seriesFiles = LocalSeriesFiles(context.filesDir, context.cacheDir)
+
+    suspend fun migrateSeriesManifests() = withContext(Dispatchers.IO) { seriesFiles.migrateLegacy() }
 
     val books: Flow<List<BookEntity>> = bookDao.observeAll()
 
@@ -527,13 +530,17 @@ class BookRepository(
      * 清掉一本书在本机的附属文件：导入的书文件、本地封面、正文缓存。删书、丢弃试读、
      * 同步来的远端删除都走这里。
      *
-     * 路径一律经 [deleteOwnedFile] 限定在 books/ 与 covers/ 之内：同步来的书行里，路径与 id
+     * 路径经 [deleteOwnedFile] 限定在对应的私有目录内：同步来的书行里，路径与 id
      * 都出自备份文件，不能拿来直接删（见那里的说明）。只做文件 IO，调用方负责在 IO 线程、事务之外调。
      */
     fun deleteLocalFiles(book: BookEntity) {
         // 解析缓存（txt 的解码正文 + 章节表）按书文件路径记，先于书文件本身清掉
-        book.localPath?.let { parserRegistry.evictCaches(File(it)) }
-        deleteOwnedFile(book.localPath, booksDir())
+        if (book.type == BookType.LOCAL_SERIES) {
+            seriesFiles.delete(book.localPath)
+        } else {
+            book.localPath?.let { parserRegistry.evictCaches(File(it)) }
+            deleteOwnedFile(book.localPath, booksDir())
+        }
         deleteOwnedFile(book.coverPath, coversDir())
         cache.clear(book.id)
     }
@@ -576,9 +583,7 @@ class BookRepository(
 
     private fun readSeries(book: BookEntity): List<LocalSeriesVolume> {
         require(book.type == BookType.LOCAL_SERIES)
-        val file = book.localPath?.let(::File)?.takeIf { it.isFile }
-            ?: error("合订本目录文件缺失")
-        return Json.decodeFromString<List<LocalSeriesVolume>>(file.readText()).also { volumes ->
+        return seriesFiles.read(book.localPath).also { volumes ->
             require(volumes.size in 2..MAX_LOCAL_SERIES_VOLUMES &&
                 volumes.map { it.bookId }.distinct().size == volumes.size &&
                 volumes.all { it.chapterCount > 0 }
@@ -611,9 +616,11 @@ class BookRepository(
                 require(existing?.hidden != false || !originals.first().hidden) { "请先将合订本移入私密书架" }
                 val id = seriesId ?: UUID.randomUUID().toString()
                 val chapters = mutableListOf<ChapterEntity>()
+                val catalogs = mutableListOf<VolumeCatalog>()
                 val volumes = originals.mapIndexed { volumeIndex, original ->
                     openOriginal(original).use { handle ->
                         require(handle.chapters.isNotEmpty()) { "「${original.title}」没有可读章节" }
+                        catalogs += VolumeCatalog(handle)
                         val volume = "第 ${volumeIndex + 1} 卷"
                         handle.chapters.forEach { chapter ->
                             chapters += ChapterEntity(id, chapters.size, "$volume · 第 ${chapter.index + 1} 节")
@@ -622,10 +629,11 @@ class BookRepository(
                     }
                 }
                 val previousVolumeOrder = existing?.let(::readSeries)
-                val draft = File(booksDir(), "${UUID.randomUUID()}.series")
+                val draft = seriesFiles.newManifest()
                 val now = System.currentTimeMillis()
                 try {
                     draft.writeText(Json.encodeToString(volumes))
+                    seriesFiles.cacheCatalog(draft.absolutePath, catalogs)
                     db.withWriteTransaction {
                         val fresh = existing?.let { bookDao.getById(it.id) }
                         check(existing == null || (fresh != null && fresh.localPath == existing.localPath && !fresh.deleted)) {
@@ -655,9 +663,9 @@ class BookRepository(
                 } finally {
                     withContext(NonCancellable) {
                         if (bookDao.countByLocalPath(draft.absolutePath) == 0) {
-                            draft.delete()
+                            seriesFiles.delete(draft.absolutePath)
                         } else {
-                            deleteOwnedFile(existing?.localPath, booksDir())
+                            seriesFiles.delete(existing?.localPath)
                         }
                     }
                 }
@@ -669,26 +677,28 @@ class BookRepository(
     suspend fun openLocal(book: BookEntity): BookHandle {
         if (book.type != BookType.LOCAL_SERIES) return openOriginal(book)
         val volumes = readSeries(book)
-        val handles = mutableListOf<BookHandle>()
-        try {
-            for (volume in volumes) {
-                val original = bookDao.getById(volume.bookId)
-                check(
-                    original != null && !original.deleted && original.type in BookType.LOCAL_TXT..BookType.LOCAL_MOBI &&
-                        (!original.hidden || book.hidden) && original.hasLocalFile(),
-                ) { "有分卷不可用，请检查原书架条目" }
-                check(volume.fileHash == null || volume.fileHash == original.localFileHash) {
-                    "「${volume.title}」已更换原文件，请重新保存卷序"
-                }
-                val handle = openOriginal(original)
-                handles += handle
-                check(handle.chapters.size == volume.chapterCount) { "「${volume.title}」目录已变更，请重新保存卷序" }
+        val originals = volumes.map { volume ->
+            val original = bookDao.getById(volume.bookId)
+            check(
+                original != null && !original.deleted && original.type in BookType.LOCAL_TXT..BookType.LOCAL_MOBI &&
+                    (!original.hidden || book.hidden) && original.hasLocalFile(),
+            ) { "有分卷不可用，请检查原书架条目" }
+            check(volume.fileHash == null || volume.fileHash == original.localFileHash) {
+                "「${volume.title}」已更换原文件，请重新保存卷序"
             }
-            return LocalSeriesHandle(book, volumes, handles)
-        } catch (error: Throwable) {
-            handles.forEach { runCatching { it.close() } }
-            throw error
+            original
         }
+        fun open(index: Int): BookHandle {
+            val handle = openOriginal(originals[index])
+            if (handle.chapters.size == volumes[index].chapterCount) return handle
+            handle.close()
+            error("「${volumes[index].title}」目录已变更，请重新保存卷序")
+        }
+        val path = checkNotNull(book.localPath)
+        val catalogs = seriesFiles.readCatalog(path)?.takeIf { list ->
+            list.size == volumes.size && list.indices.all { list[it].titles.size == volumes[it].chapterCount }
+        } ?: volumes.indices.map { open(it).use(::VolumeCatalog) }.also { seriesFiles.cacheCatalog(path, it) }
+        return LocalSeriesHandle(book, volumes, catalogs, ::open)
     }
 
     private fun openOriginal(book: BookEntity): BookHandle {

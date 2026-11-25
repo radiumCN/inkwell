@@ -1,6 +1,7 @@
 package com.radium.inkwell.data.prefs
 
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import android.content.Context
 import android.content.res.Configuration
@@ -76,10 +77,18 @@ private fun decodeBookLayout(raw: String): BookLayout? = runCatching { Json.deco
  * @param fontAvailable 这个字体在本机能不能用（见 ReaderFontStore.isAvailable）。只在导入备份时用：
  * 另一台设备上导入的字体文件不会同步过来，拿它的 fontId 覆盖本地只会让排版静默回落默认字体
  */
-class ReaderPrefs(
-    private val context: Context,
-    private val fontAvailable: (String) -> Boolean = { true },
+class ReaderPrefs internal constructor(
+    private val store: DataStore<Preferences>,
+    initiallyDark: Boolean,
+    private val fontAvailable: (String) -> Boolean,
+    scope: CoroutineScope,
 ) {
+    constructor(context: Context, fontAvailable: (String) -> Boolean = { true }) : this(
+        context.readerDataStore,
+        (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES,
+        fontAvailable,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
 
     internal object Keys {
         val FONT_SIZE = floatPreferencesKey("font_size_sp")
@@ -136,18 +145,10 @@ class ReaderPrefs(
         val UPDATED_AT = longPreferencesKey("updated_at")
     }
 
-    // 单例生命周期作用域：settings 提前热起来，`.value` 可同步读，消除进书时的主题闪烁。
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    /** 系统当前是否夜间（同步可读，不依赖 Compose） */
-    private fun isSystemDark(): Boolean =
-        (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
-
     // 当前生效的是日间还是夜间。由 UI 层按 App 主题模式 + 系统日夜算出后喂进来（setDarkActive）。
     // 放内存不落库 —— 它是"此刻系统是不是夜间"，不是用户偏好。
     // 初值直接取系统夜间：UI 事后 setDarkActive 之前，首帧就已解析到正确的日/夜槽，不闪浅色。
-    private val darkActive = MutableStateFlow(isSystemDark())
+    private val darkActive = MutableStateFlow(initiallyDark)
 
     /** UI 层算出生效日夜后调这个；主题随之切到对应槽 */
     fun setDarkActive(dark: Boolean) { darkActive.value = dark }
@@ -160,13 +161,13 @@ class ReaderPrefs(
     // 于是预热永远赢不了自己的构造函数：VM 读到的是下面那个占位值，真实设置 ~90ms 后才到，
     // 每本书每次点开都要按默认边距白排一遍版、再在入场动画中间推翻重排。
     // 真正的预热在 `InkwellApp.onCreate` 的 `koin.get<ReaderPrefs>()`，别把那行删了。
-    val settings: StateFlow<ReaderSettings> = combine(context.readerDataStore.data, darkActive) { p, dark ->
+    val settings: StateFlow<ReaderSettings> = combine(store.data, darkActive) { p, dark ->
         readSettings(p, dark)
     }.stateIn(
         scope,
         SharingStarted.Eagerly,
         // 首个真实值到达前的占位：按系统日夜给深/浅底，绝不给浅色默认，杜绝进书闪一帧浅色
-        ReaderSettings(theme = if (isSystemDark()) ReaderTheme.NIGHT else ReaderTheme.PAPER),
+        ReaderSettings(theme = if (initiallyDark) ReaderTheme.NIGHT else ReaderTheme.PAPER),
     )
 
     private fun readSettings(p: Preferences, dark: Boolean): ReaderSettings {
@@ -214,8 +215,9 @@ class ReaderPrefs(
     }
 
     suspend fun update(settings: ReaderSettings, localBook: Boolean = false, bookId: String? = null) {
-        context.readerDataStore.edit { p ->
-            p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+        store.edit { p ->
+            val dark = darkActive.value
+            val sharedBefore = readSettings(p, dark)
             writeScopedTypography(p, settings, bookId)
             p[Keys.FLIP] = settings.flipAnimation.name
             p[Keys.BRIGHTNESS] = settings.brightnessOverride ?: -1f
@@ -237,12 +239,16 @@ class ReaderPrefs(
             p[Keys.TAP_ZONES] = settings.tapZones.encode()
             p[Keys.AUTO_FLIP_SECONDS] = settings.autoFlipSeconds
             p[Keys.PRELOAD_CHAPTERS] = settings.preloadChapters
+            // 轻量效果仅在本机生效，不参与 WebDAV 的通用设置合并。
+            if (readSettings(p, dark) != sharedBefore.copy(lightweightEffects = settings.lightweightEffects)) {
+                p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
+            }
         }
     }
 
     /** 连点微调按钮时，每一次都基于 DataStore 里的最新值计算。 */
     suspend fun adjustTypography(bookId: String? = null, change: ReaderSettings.() -> ReaderSettings) {
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             val shared = readSettings(p, darkActive.value)
             val before = bookId?.let { applyBookLayout(shared, readBookLayout(p, it)) } ?: shared
             val after = before.change()
@@ -254,10 +260,10 @@ class ReaderPrefs(
         }
     }
 
-    internal fun bookLayout(bookId: String) = context.readerDataStore.data.map { readBookLayout(it, bookId) }
+    internal fun bookLayout(bookId: String) = store.data.map { readBookLayout(it, bookId) }
 
     internal suspend fun setBookLayoutEnabled(bookId: String, enabled: Boolean) {
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             val previous = readBookLayout(p, bookId)
             if ((previous?.enabled ?: false) == enabled) return@edit
             val layout = previous?.copy(enabled = enabled)
@@ -315,7 +321,7 @@ class ReaderPrefs(
 
     suspend fun selectPaper(themeId: String) {
         val dark = darkActive.value
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             ReaderPaperPrefs.select(p, dark, themeId)
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
         }
@@ -323,14 +329,14 @@ class ReaderPrefs(
 
     suspend fun saveCustomPaper(theme: ReaderTheme) {
         val dark = darkActive.value
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             ReaderPaperPrefs.saveCustom(p, dark, theme)
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
         }
     }
 
     /** 排版方案。跟阅读设置同一个 DataStore、同一个时间戳，WebDAV 里也随阅读设置整块走 */
-    val layoutSchemes: StateFlow<List<LayoutScheme>> = context.readerDataStore.data
+    val layoutSchemes: StateFlow<List<LayoutScheme>> = store.data
         .map { LayoutSchemeCodec.decode(it[Keys.LAYOUT_SCHEMES]) }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -340,20 +346,20 @@ class ReaderPrefs(
     suspend fun deleteLayoutScheme(name: String) = editSchemes { list -> list.filterNot { it.name == name } }
 
     private suspend fun editSchemes(change: (List<LayoutScheme>) -> List<LayoutScheme>) {
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             p[Keys.LAYOUT_SCHEMES] = LayoutSchemeCodec.encode(change(LayoutSchemeCodec.decode(p[Keys.LAYOUT_SCHEMES])))
             p[Keys.UPDATED_AT] = maxOf(System.currentTimeMillis(), (p[Keys.UPDATED_AT] ?: 0L) + 1)
         }
     }
 
     /** 最后一次改动时间；WebDAV 整块 LWW 用 */
-    suspend fun updatedAt(): Long = context.readerDataStore.data.first().let {
+    suspend fun updatedAt(): Long = store.data.first().let {
         maxOf(it[Keys.UPDATED_AT] ?: 0L, it[Keys.BOOK_LAYOUTS_CHANGED_AT] ?: 0L)
     }
 
     /** 值与时间戳来自同一份磁盘快照，不依赖可能滞后的热流。 */
     internal suspend fun backupSnapshot(): BackupSettings {
-        val p = context.readerDataStore.data.first()
+        val p = store.data.first()
         val s = readSettings(p, false)
         return BackupSettings(
             updatedAt = p[Keys.UPDATED_AT] ?: 0L,
@@ -409,7 +415,7 @@ class ReaderPrefs(
 
     internal suspend fun restoreBackup(backup: BackupSettings): Boolean {
         var applied = false
-        context.readerDataStore.edit { p ->
+        store.edit { p ->
             applied = ReaderBackupImport.apply(p, backup, fontAvailable)
         }
         return applied

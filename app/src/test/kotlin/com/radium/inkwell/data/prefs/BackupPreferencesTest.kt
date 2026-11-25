@@ -1,15 +1,42 @@
 package com.radium.inkwell.data.prefs
 
 import androidx.datastore.preferences.core.mutablePreferencesOf
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import com.radium.inkwell.core.webdav.BackupSettings
 import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.api.ReaderTheme
+import com.radium.inkwell.reader.api.ReaderSettings
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BackupPreferencesTest {
+    @Test fun bookOnlyEditDoesNotWinOverNewerSharedSettings() = runTest {
+        val store = object : DataStore<Preferences> {
+            override val data = MutableStateFlow<Preferences>(mutablePreferencesOf(ReaderPrefs.Keys.UPDATED_AT to 100L))
+            override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+                transform(data.value).also { data.value = it }
+        }
+        val prefs = ReaderPrefs(store, initiallyDark = false, fontAvailable = { true }, scope = backgroundScope)
+        prefs.setBookLayoutEnabled("local", true)
+        val layout = ReaderSettings(paragraphSpacingEm = 1.2f, showImages = true)
+        prefs.update(layout, localBook = true, bookId = "local")
+        val beforeSync = prefs.backupSnapshot()
+        assertEquals(100L, beforeSync.updatedAt)
+        assertEquals("0.6", beforeSync.values["para_spacing"])
+        assertTrue(beforeSync.bookLayouts.getValue("local").updatedAt > 100L)
+        assertTrue(prefs.restoreBackup(BackupSettings(200, mapOf("font_size_sp" to "22"))))
+        assertEquals("22.0", prefs.backupSnapshot().values["font_size_sp"])
+        prefs.update(layout.copy(lightweightEffects = true), localBook = true, bookId = "local")
+        assertEquals(200L, prefs.backupSnapshot().updatedAt)
+        prefs.update(layout.copy(keepScreenOn = false), localBook = true, bookId = "local")
+        assertTrue(prefs.backupSnapshot().updatedAt > 200L)
+    }
+
     @Test fun `local reader edit after snapshot wins without changing any field or stamp`() {
         val keys = ReaderPrefs.Keys
         val p = mutablePreferencesOf(keys.UPDATED_AT to 300L, keys.FONT_SIZE to 24f, keys.SHOW_IMAGES to true)
