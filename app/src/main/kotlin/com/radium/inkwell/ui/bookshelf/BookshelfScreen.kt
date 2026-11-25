@@ -1,5 +1,7 @@
 package com.radium.inkwell.ui.bookshelf
 
+import android.os.SystemClock
+import com.radium.inkwell.util.UsageLog
 import com.radium.inkwell.data.repo.MAX_LOCAL_SERIES_VOLUMES
 import com.radium.inkwell.data.repo.isLocalOriginal
 import androidx.compose.ui.semantics.stateDescription
@@ -49,6 +51,7 @@ import com.radium.inkwell.ui.components.AppDropdownMenu
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppMenuItem
 import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.SelectionToolbar
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.settingGroupItemCorners
 import com.radium.inkwell.ui.components.AppSnackbarHost
@@ -90,6 +93,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
@@ -126,7 +130,6 @@ import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.icon.extended.Search
-import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.basic.Icon
@@ -188,6 +191,7 @@ fun BookshelfScreen(
     /** 返回栈里还有没有阅读页。从这里开的书，读完退回来、退出动画播完，书架才放开冻住的顺序 */
     readerOpen: Boolean = false,
 ) {
+    val openedAt = remember { SystemClock.elapsedRealtime() }
     val snapshot by viewModel.content.collectAsStateWithLifecycle()
     val allBooks = snapshot?.allBooks.orEmpty()
     val books = snapshot?.books.orEmpty()
@@ -207,6 +211,12 @@ fun BookshelfScreen(
     } == true
     // 首批书、筛选和布局已就绪，等 Compose 画到这一帧再报充分绘制。
     ReportDrawnWhen { shelfReady }
+    if (shelfReady) LaunchedEffect(Unit) {
+        UsageLog.event(
+            "bookshelf.ready", "layout" to layout.name,
+            "duration_ms" to SystemClock.elapsedRealtime() - openedAt,
+        )
+    }
     // 阅读页退干净了再放开顺序（见 BookshelfViewModel.frozenOrder）：退出动画是缩回这本书原来的位置，
     // 放早了它已经跑到第一格。返回栈在转场**开始**时就去掉了阅读页，这里得等过整段转场：
     // 普通返回是 READER_EXIT_MS 的 tween；侧滑返回跟手 seek，松手后剩下的那段按 PREDICTIVE_BACK_MS 的
@@ -530,24 +540,13 @@ fun BookshelfScreen(
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
-                // HyperOS 编辑模式：顶栏只留 × · 已选 N 本 · 全选，批量动作在底部的操作条里（见 floatingToolbar）。
-                // 从前四个动作全挤在顶栏，「设置分组」还藏在 ⋮ 里
-                AppToolbar(
-                    navigationIcon = {
-                        AppIconButton(onClick = viewModel::clearSelection) {
-                            Icon(MiuixIcons.Close, contentDescription = "退出多选")
-                        }
-                    },
+                SelectionToolbar(
+                    title = "已选 ${selected.size} 本",
                     containerColor = pageColor,
-                    actions = {
-                        AppIconButton(onClick = viewModel::selectAll) {
-                            Icon(MiuixIcons.SelectAll, contentDescription = "全选")
-                        }
-                    },
+                    onExit = viewModel::clearSelection,
+                    onSelectAll = viewModel::selectAll,
                     bottomContent = shelfHeader,
-                ) {
-                    ToolbarTitle("已选 ${selected.size} 本")
-                }
+                )
             } else {
                 AppToolbar(
                     containerColor = pageColor,
@@ -1172,6 +1171,8 @@ private fun BookShelfListLeading(
                 .fillMaxSize()
                 .onPlaced { anchor.coordinates = it },
             placeholderChars = 2,
+            shelfThumbnail = true,
+            fixedSize = DpSize(Dimens.coverThumbWidth, Dimens.coverThumbHeight),
             // 书名是这一行的标题，封面不再进读屏
             contentDescription = null,
         )
@@ -1261,6 +1262,7 @@ private fun BookCard(
                     .onPlaced { cover.coordinates = it },
                 // 默认封面有三行可用，别把书名截半截：「女总裁的全能兵王」take(6) = 「女总裁的全能」
                 placeholderChars = 14,
+                shelfThumbnail = true,
                 // 卡片下面就印着书名，封面不再进读屏
                 contentDescription = null,
             )

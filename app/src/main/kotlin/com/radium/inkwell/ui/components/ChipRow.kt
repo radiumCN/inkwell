@@ -2,8 +2,6 @@ package com.radium.inkwell.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -19,12 +17,10 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
@@ -32,18 +28,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import com.radium.inkwell.ui.theme.AppTheme
 import top.yukonga.miuix.kmp.basic.Text
@@ -233,48 +224,3 @@ private fun ChipPill(
         }
     }
 }
-
-/**
- * chip 条末尾的「添加」：和 chip 一样高的一颗圆，**空心**细线描边、中间一个 ＋（阅读设置里的导入字体）。
- *
- * 动作不和选项长成一个样：从前「导入字体」是条末尾一颗普通 chip，和「默认」「衬线」一模一样，看着像一款叫「导入字体」的字。
- * 空心的圆框一眼和填了底色的选项分开。描边是实线：从前是虚线，被要求改成实线。可点区照样保底 48dp（同 [ChipPill] 的外框），
- * 按压反馈画在里面那颗圆上；只有图标，读屏名字由 [contentDescription] 给。
- *
- * 圈用 [CircleShape] + [border]（同 [SwatchChoice] 的圆色板），线整条画在圆里面、处处一样粗。
- * 别改回「沿轮廓描粗线、靠 squircleClip 裁掉外面一半」：裁切是 Miuix 的着色器遮罩、描边是路径，两条边在像素上对不齐，
- * 各处裁掉的不一样多 —— 虚线时有间隙遮着，换成实线就是一圈粗一截细一截（被指出过）。
- */
-@Composable
-fun AddChip(
-    onClick: () -> Unit,
-    contentDescription: String,
-    modifier: Modifier = Modifier,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    Box(
-        modifier
-            .defaultMinSize(minWidth = Dimens.touchTarget, minHeight = Dimens.touchTarget)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onClick,
-            )
-            .semantics { this.contentDescription = contentDescription },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(Dimens.chipHeight)
-                .clip(CircleShape)
-                .border(Dimens.strokeThin, color, CircleShape)
-                .indication(interactionSource, LocalIndication.current),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(MiuixIcons.Add, contentDescription = null, modifier = Modifier.size(Dimens.iconSm), tint = color)
-        }
-    }
-}
-

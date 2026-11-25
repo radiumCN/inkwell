@@ -10,6 +10,8 @@ import com.radium.inkwell.data.repo.RssImportReport
 import com.radium.inkwell.data.repo.RssRepository
 import com.radium.inkwell.ui.components.MessageBus
 import com.radium.inkwell.ui.components.writeExportFile
+import com.radium.inkwell.util.MAX_SOURCE_IMPORT_BYTES
+import com.radium.inkwell.util.readImportText
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +67,7 @@ class RssSourceViewModel(
 
     fun importFromFile(uri: Uri) = runImport {
         val text = withContext(Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            context.contentResolver.openInputStream(uri)?.use { it.readImportText(MAX_SOURCE_IMPORT_BYTES) }
         } ?: error("文件读不出内容")
         repo.import(text)
     }

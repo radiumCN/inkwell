@@ -50,6 +50,7 @@ import com.radium.inkwell.ui.components.AppSlider
 import com.radium.inkwell.ui.components.AppSnackbarHost
 import com.radium.inkwell.ui.components.AppTextButton
 import com.radium.inkwell.ui.components.AppToolbar
+import com.radium.inkwell.ui.components.SelectionToolbar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.BatchAction
 import com.radium.inkwell.ui.components.BatchActionBar
@@ -86,7 +87,6 @@ import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.Search
-import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.Tasks
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -169,23 +169,13 @@ fun SourceManageScreen(
         containerColor = pageColor,
         topBar = {
             if (selectionMode) {
-                // HyperOS 编辑模式：顶栏只留 × · 已选 N 个 · 全选，批量动作在底部的操作条里（见 floatingToolbar）
-                AppToolbar(
-                    navigationIcon = {
-                        AppIconButton(onClick = viewModel::clearSelection) {
-                            Icon(MiuixIcons.Close, contentDescription = "退出多选")
-                        }
-                    },
+                SelectionToolbar(
+                    title = "已选 ${selected.size} 个",
                     containerColor = pageColor,
-                    actions = {
-                        AppIconButton(onClick = viewModel::selectAll) {
-                            Icon(MiuixIcons.SelectAll, contentDescription = "全选")
-                        }
-                    },
+                    onExit = viewModel::clearSelection,
+                    onSelectAll = viewModel::selectAll,
                     bottomContent = listHeader,
-                ) {
-                    ToolbarTitle("已选 ${selected.size} 个")
-                }
+                )
             } else AppToolbar(
                 navigationIcon = { BackButton(onClick = onBack) },
                 containerColor = pageColor,

@@ -107,6 +107,7 @@ class AppPrefs(private val context: Context) {
         val UPDATE_KNOWN_LATEST = stringPreferencesKey("update_known_latest")
         val UPDATE_KNOWN_FOR = stringPreferencesKey("update_known_for")
         val UPDATE_SEEN = stringPreferencesKey("update_seen_version")
+        val GITHUB_RETRY_AT = longPreferencesKey("github_update_retry_at")
         val UPDATE_CHECKED_AT = longPreferencesKey("update_checked_at")
         /** 最后一次改动的时间戳；WebDAV 整块 LWW 靠它裁决 */
         val UPDATED_AT = longPreferencesKey("settings_updated_at")
@@ -595,6 +596,12 @@ class AppPrefs(private val context: Context) {
             checkedAt = p[Keys.UPDATE_CHECKED_AT] ?: 0L,
         )
     }.distinctUntilChanged()
+
+    suspend fun githubRetryAt(): Long = context.appDataStore.data.first()[Keys.GITHUB_RETRY_AT] ?: 0L
+
+    suspend fun recordGithubRateLimit(until: Long) {
+        context.appDataStore.edit { it[Keys.GITHUB_RETRY_AT] = until }
+    }
 
     /** 记下一次查成的结果：[latest] 为 null = 已是最新。查失败不调它（上次查到的照旧算数） */
     suspend fun recordUpdateCheck(latest: String?, checkedFor: String, at: Long) {

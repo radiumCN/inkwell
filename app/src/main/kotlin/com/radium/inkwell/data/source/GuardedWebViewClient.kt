@@ -1,8 +1,12 @@
 package com.radium.inkwell.data.source
 
 import android.net.Uri
+import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import com.radium.inkwell.core.source.isPrivateNetworkHost
 import com.radium.inkwell.core.source.isPrivateNetworkLiteral
 import java.io.ByteArrayInputStream
@@ -13,25 +17,34 @@ import java.util.concurrent.ConcurrentHashMap
  * WebView 的请求由 Chromium 自己发，没有这一层就一路畅通：渲染一个公网页，它的脚本就能去读
  * `http://192.168.1.1/`。Android 17 起应用拿到局域网权限（WebDAV 连 NAS 要用）后，WebView 也跟着能连局域网。
  *
- * 阅读器的渲染回退（[WebViewPageRenderer]）和新建书源里给用户看、给用户点的网页共用这一份：
- * 安全相关的拦截只该有一处，改一处漏一处，加载任意网站、开着脚本的那个 WebView 就留在旧行为上。
+ * 后台渲染、订阅网页、来源登录和来源向导共用同一套拦截。渲染进程退出时，
+ * [onRendererGone] 通知持有方释放失效的实例，界面可以按需重建。
  *
  * 一个实例管一次渲染 / 一个网页：内网判定按主机缓存，一页几十个子请求多半是同几个域，别每个都解析一次。
  */
-internal class WebViewNetworkGuard {
+internal abstract class GuardedWebViewClient(
+    private val onRendererGone: (WebView) -> Unit,
+) : WebViewClient() {
 
     private val verdicts = ConcurrentHashMap<String, Boolean>()
 
     /** 子请求：内网的回 403。这个回调跑在 WebView 的 IO 线程上，可以解析 DNS */
-    fun intercept(request: WebResourceRequest): WebResourceResponse? =
+    final override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
         if (blocks(request.url)) blockedResponse() else null
 
     /**
      * 跳转（含主文档的 302）。这里在主线程上，做 DNS 会直接抛异常，只能认字面量：
-     * 内网 IP、localhost。跳去的若是域名，新请求随后还会经过 [intercept]。
+     * 内网 IP、localhost。
      */
-    fun blocksNavigation(request: WebResourceRequest): Boolean =
+    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         request.url.host?.let { isPrivateNetworkLiteral(it) } ?: false
+
+    final override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+        // 后台时组合可能暂不重绘；先移除失效的 View，持有方按自己的生命周期销毁它。
+        (view.parent as? ViewGroup)?.removeView(view)
+        onRendererGone(view)
+        return true
+    }
 
     private fun blocks(uri: Uri): Boolean {
         // data:/blob:/about: 没有主机，不出网；file:/content: 已在 settings 里关掉
@@ -44,3 +57,5 @@ internal class WebViewNetworkGuard {
         "text/plain", "utf-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)),
     )
 }
+
+internal const val WEB_RENDERER_ERROR = "网页进程已退出，请重试"

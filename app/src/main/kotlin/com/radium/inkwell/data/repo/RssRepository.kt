@@ -105,13 +105,13 @@ class RssRepository(
      * 允许直接粘一个地址进来（而不是一份 JSON）—— 用户手里最常有的就是一个 `https://…/rss.xml`，
      * 或者源仓库里一个订阅源合集的地址，逼他先把 JSON 下载下来毫无道理。地址见 [importFromAddress]。
      */
-    suspend fun import(text: String): RssImportReport {
+    suspend fun import(text: String): RssImportReport = withContext(Dispatchers.Default) {
         val trimmed = text.trim()
-        if (isAddress(trimmed)) return importFromAddress(LegadoLinks.unwrap(trimmed))
+        if (isAddress(trimmed)) return@withContext importFromAddress(LegadoLinks.unwrap(trimmed))
         if (!LegadoRssConverter.looksLikeLegadoRss(trimmed)) {
-            return RssImportReport(0, 0, listOf("不是订阅源：既不是阅读的订阅源 JSON，也不是一个地址"))
+            return@withContext RssImportReport(0, 0, listOf("不是订阅源：既不是阅读的订阅源 JSON，也不是一个地址"))
         }
-        return importSources(trimmed)
+        importSources(trimmed)
     }
 
     /** 一行网址，或者阅读的一键导入链接（legado://import/rssSource?src=…） */
@@ -148,23 +148,23 @@ class RssRepository(
 
     /** 阅读的订阅源 JSON（单条或合集） */
     private suspend fun importSources(trimmed: String): RssImportReport {
-        // 转换整份订阅源合集是纯 CPU 活，调用方在主线程上
-        val result = withContext(Dispatchers.Default) { LegadoRssConverter.convert(trimmed) }
+        val result = LegadoRssConverter.convert(trimmed)
         val existing = dao.getAll().associateBy { it.id }
         val now = System.currentTimeMillis()
         var added = 0
         var updated = 0
         val toWrite = result.converted.map { c ->
-            if (existing.containsKey(c.rule.id)) updated++ else added++
+            val previous = existing[c.rule.id]
+            if (previous == null || previous.deleted) added++ else updated++
             c.rule.toEntity(
                 sourceJson = c.sourceJson,
                 // 重复导入保留用户的启用/禁用与排序
-                enabled = existing[c.rule.id]?.enabled ?: c.rule.enabled,
-                sortOrder = existing[c.rule.id]?.sortOrder ?: 0,
-                groupName = importedGroup(existing[c.rule.id], c.rule),
+                enabled = previous?.enabled ?: c.rule.enabled,
+                sortOrder = previous?.sortOrder ?: 0,
+                groupName = importedGroup(previous, c.rule),
                 // 同书源导入：原样重导不算修改，盖 now 会让本机旧的启停在 WebDAV 合并里赢过别的设备；
                 // 墓碑被重新导入是「加回来」，要盖新时间戳
-                updatedAt = existing[c.rule.id]
+                updatedAt = previous
                     ?.takeIf { !it.deleted && it.sourceJson == c.sourceJson }
                     ?.updatedAt
                     ?: now,
@@ -196,15 +196,16 @@ class RssRepository(
                 )
             )
         )
+        val isNew = existing == null || existing.deleted
         return RssImportReport(
-            added = if (existing == null) 1 else 0,
-            updated = if (existing == null) 0 else 1,
+            added = if (isNew) 1 else 0,
+            updated = if (isNew) 0 else 1,
             skipped = emptyList(),
         )
     }
 
     /**
-     * 重新导入时分组听谁的（同 BookSourceRepository.importedGroup）：用户在订阅源页改过分组
+     * 重新导入时分组听谁的：用户在订阅源页改过分组
      * （库里的分组 ≠ 旧规则自带的分组）就留用户的 —— 否则重导一次合集，设好的分组全回到作者写的那个；
      * 没改过就跟着新规则走，作者在新版里调整了分组，用户理应拿到。
      */

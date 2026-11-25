@@ -65,7 +65,7 @@ class BookRepository(
      * 合并靠 (书名,作者) —— 判断"已在书架"、以及直达已存在的那本，都得按这个键，否则换个
      * 代表书源就认不出是同一本，于是要么重复显示"加入"、要么再入库一份重复的。
      *
-     * **必须排除墓碑和试读未上架**（getAllVisible 而非 getAll）：删过的书行还在库里，若把它也
+     * **必须排除墓碑和试读未上架**：删过的书行还在库里，若把它也
      * 认成"已在书架"，预览页会显示「已在书架」而书架上根本没有 —— 加不进去（被这里挡住）、
      * 点"读"打开的是那条墓碑（读得了但永远不回书架）。试读行同样不在架上，不能当成已加入。
      *
@@ -75,9 +75,7 @@ class BookRepository(
      */
     suspend fun shelfBookIdByKey(title: String, author: String?, includeHidden: Boolean = true): String? {
         val key = bookKey(title, author)
-        return bookDao.getAllVisible().firstOrNull {
-            (includeHidden || !it.hidden) && bookKey(it.title, it.author) == key
-        }?.id
+        return bookDao.findShelfBookId(key.first, key.second, includeHidden, BOOK_KEY_WHITESPACE)
     }
 
     /**

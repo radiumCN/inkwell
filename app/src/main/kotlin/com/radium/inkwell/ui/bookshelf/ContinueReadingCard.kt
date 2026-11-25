@@ -1,5 +1,8 @@
 package com.radium.inkwell.ui.bookshelf
 
+import android.os.SystemClock
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -24,6 +30,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.DpSize
+import coil3.compose.AsyncImagePainter
+import com.radium.inkwell.util.UsageLog
+import com.radium.inkwell.ui.theme.AppTheme
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -82,11 +95,24 @@ internal fun ContinueReadingCard(
         ?.let { "最新：$it" }
     // 按下时整张玻璃卡朝按住的那个角倾一下（见 tiltOnPress）：反馈挂在卡片外层，点击在里面那行，共用这一个源
     val press = remember { MutableInteractionSource() }
+    var artwork by remember(book.id, book.coverPath) { mutableStateOf<Painter?>(null) }
+    val coverStarted = remember(book.id, book.coverPath) { SystemClock.elapsedRealtime() }
     CoverGlassCard(
         coverTitle = book.title,
         coverModel = book.coverPath,
         modifier = modifier.fillMaxWidth().tiltOnPress(press),
         tiltHighlight = true,
+        coverBackdrop = {
+            key(book.id, book.coverPath) {
+                val alpha by animateFloatAsState(
+                    if (artwork == null) 0f else 1f,
+                    AppTheme.motionScheme.defaultEffectsSpec(), label = "shelfCoverBackdrop",
+                )
+                artwork?.let { painter ->
+                    Image(painter, null, Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha }, contentScale = ContentScale.Crop)
+                }
+            }
+        },
     ) {
         val content = LocalContentColor.current
         Row(
@@ -112,6 +138,15 @@ internal fun ContinueReadingCard(
                         .matchParentSize()
                         .onPlaced { cover.coordinates = it },
                     placeholderChars = 14,
+                    shelfThumbnail = true,
+                    fixedSize = DpSize(Dimens.coverDetailWidth, Dimens.coverDetailHeight),
+                    onCoverResult = { state ->
+                        val success = state as? AsyncImagePainter.State.Success
+                        artwork = success?.painter
+                        UsageLog.event("bookshelf.continue.cover",
+                            "result" to (success?.result?.dataSource?.name ?: "error"),
+                            "duration_ms" to SystemClock.elapsedRealtime() - coverStarted)
+                    },
                     // 书名就在旁边，封面不再进读屏
                     contentDescription = null,
                 )

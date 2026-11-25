@@ -72,6 +72,8 @@ fun CoverGlassCard(
     modifier: Modifier = Modifier,
     pending: Boolean = false,
     tiltHighlight: Boolean = false,
+    // 书架可以直接复用前景缩略图，尚未解码时保留下方的主题底色。
+    coverBackdrop: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -100,7 +102,8 @@ fun CoverGlassCard(
     )
     Box(modifier.squircleClip(AppShapes.radiusLarge)) {
         Box(Modifier.matchParentSize().layerBackdrop(backdrop)) {
-            if (coverTitle != null) {
+            if (coverBackdrop != null) coverBackdrop()
+            else if (coverTitle != null) {
                 BookCover(
                     title = coverTitle,
                     coverModel = coverModel,

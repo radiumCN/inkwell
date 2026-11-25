@@ -363,7 +363,7 @@ class WebDavRepository(
     private suspend fun applySources(merged: BackupMerger.MergeResult): Int {
         var applied = 0
         merged.changedSources.forEach { s ->
-            // 与 importJson 一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
+            // 与来源导入一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
             if (!isTextNovelSourceJson(s.json)) return@forEach
             // 本地测速和校验只适用于当前这份规则。规则相同的启停/分组改动保留它们。
             val existing = sourceDao.getById(s.id)

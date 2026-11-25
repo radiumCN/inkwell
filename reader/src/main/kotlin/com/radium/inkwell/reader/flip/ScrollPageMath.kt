@@ -111,9 +111,6 @@ internal fun List<ScrollPagePlacement>.pageAt(
     return firstOrNull { relativeY >= it.offsetY && relativeY < it.offsetY + it.height }
 }
 
-/** 本页正文实际高度（最后一项底 + 页尾段距），不是视口高 —— 按视口叠会在页底留一道空白 */
-fun pageContentHeight(page: RenderablePage?): Float = scrollPageHeight(page)
-
 /**
  * 滚动叠页高度：最后一项的底 + 页尾段距。
  *

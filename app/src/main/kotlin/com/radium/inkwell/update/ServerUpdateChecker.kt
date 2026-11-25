@@ -56,7 +56,7 @@ class ServerUpdateChecker(
                     }
                     // 该渠道当前无版本（如上游还没正式版时 stable 会 404）→ 当作无更新，不报错
                     404 -> CheckResult.UpToDate
-                    else -> CheckResult.Failed("HTTP ${resp.code}")
+                    else -> CheckResult.Failed("HTTP ${resp.code}", resp.code)
                 }
             }
         } catch (e: CancellationException) {

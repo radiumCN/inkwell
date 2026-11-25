@@ -7,6 +7,22 @@ import kotlin.test.assertTrue
 class LegadoRssConverterTest {
 
     @Test
+    fun duplicateAddressesKeepLastValidRuleAndReportSkippedEntries() {
+        val result = LegadoRssConverter.convert("""
+            [
+                {"sourceUrl":"https://a.example","sourceName":"旧规则"},
+                {"sourceUrl":"https://b.example","sourceName":"另一站"},
+                {"sourceUrl":" https://a.example ","sourceName":"新规则","sourceGroup":"新分组"}
+            ]
+        """.trimIndent())
+
+        assertEquals(listOf("新规则", "另一站"), result.converted.map { it.rule.name })
+        assertEquals("新分组", result.converted.first().rule.group)
+        assertTrue(result.converted.first().sourceJson.contains("新规则"))
+        assertEquals(listOf(LegadoRssConverter.Skipped("旧规则", "https://a.example", "重复订阅源地址")), result.skipped)
+    }
+
+    @Test
     fun `分类按「名称__地址」逐行拆开`() {
         val legado = """
         [{

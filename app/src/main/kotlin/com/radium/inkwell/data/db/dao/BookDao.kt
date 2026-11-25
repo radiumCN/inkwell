@@ -1,7 +1,6 @@
 package com.radium.inkwell.data.db.dao
 
 import androidx.room3.Dao
-import androidx.room3.Delete
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
@@ -75,13 +74,16 @@ interface BookDao {
     suspend fun updateProgress(id: String, chapterIndex: Int, charOffset: Int, readAt: Long)
 
     /** 含墓碑，**只给 WebDAV 备份用** —— 合并要靠 deleted 行表达「这本书被删过」。
-     *  面向用户的查询一律用 [getAllVisible]，否则删掉的书会以「已在书架」的身份复活。 */
+     *  面向用户的书架查询需排除墓碑及未上架条目，否则删掉的书会以「已在书架」的身份复活。 */
     @Query("SELECT * FROM book")
     suspend fun getAll(): List<BookEntity>
 
-    /** 不含墓碑、不含试读未上架。与 [observeAll] 同一套过滤，供「这本书是不是已经在架上」判定用 */
+    /** 不含墓碑、不含试读未上架。与 [observeAll] 同一套过滤，供本地书备份枚举在架文件 */
     @Query("SELECT * FROM book WHERE deleted = 0 AND inShelf = 1")
     suspend fun getAllVisible(): List<BookEntity>
+
+    @Query(FIND_SHELF_BOOK_ID_SQL)
+    suspend fun findShelfBookId(title: String, author: String, includeHidden: Boolean, whitespace: String): String?
 
     /** 只返回同名同作者的本地书，避免逐本导入时把含简介/封面的整库读进内存。 */
     @Query(FIND_LOCAL_BOOKS_SQL)
@@ -115,3 +117,7 @@ interface BookDao {
 internal const val FIND_LOCAL_BOOKS_SQL = """SELECT * FROM book WHERE deleted = 0 AND type != 3
         AND (inShelf = 1 OR (:includeRemoved AND removedFromShelf = 1))
         AND trim(title, :whitespace) = :title AND trim(author, :whitespace) = :author"""
+
+internal const val FIND_SHELF_BOOK_ID_SQL = """SELECT id FROM book WHERE deleted = 0 AND inShelf = 1
+        AND (:includeHidden OR hidden = 0)
+        AND trim(title, :whitespace) = :title AND trim(author, :whitespace) = :author LIMIT 1"""

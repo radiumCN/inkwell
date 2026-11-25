@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.padding
@@ -23,6 +24,8 @@ import com.radium.inkwell.update.UpdateInfo
 import com.radium.inkwell.update.UpdateManager
 import com.radium.inkwell.update.UpdateNotifier
 import com.radium.inkwell.update.UpdateSource
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -60,6 +63,8 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
     val channel = appPrefs.updateChannelState.collectAsStateWithLifecycle().value ?: UpdateChannel.STABLE
     val source = appPrefs.updateSourceState.collectAsStateWithLifecycle().value ?: UpdateSource.GITHUB
 
+    val currentTarget by rememberUpdatedState(source to channel)
+    var denied by remember(source, channel) { mutableStateOf<CheckResult.Failed?>(null) }
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateInfo?>(null) }
     var downloading by remember { mutableStateOf(false) }
@@ -73,33 +78,42 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
     var downloadError by remember { mutableStateOf<String?>(null) }
 
     /** 弹出 [info] 的更新弹窗；看过了，两处红点一起收（见 UpdateNotifier.markSeen） */
-    fun showUpdate(info: UpdateInfo) {
+    fun showUpdate(info: UpdateInfo, markSeen: Boolean = true) {
         downloadError = null
         update = info
-        scope.launch { notifier.markSeen(info.latestVersion) }
+        if (markSeen) scope.launch { notifier.markSeen(info.latestVersion) }
     }
 
-    fun checkUpdate() {
+    fun checkUpdate(useMirror: Boolean = false) {
+        val actualSource = if (useMirror) UpdateSource.SERVER else source
         if (checking) return
         // 启动时在后台已经查到了（行上写着「可更新」、亮着红点）：直接弹那一版，不再转一圈重查
-        notifier.cachedInfo(source, channel)?.let {
+        if (!useMirror) notifier.cachedInfo(source, channel)?.let {
             showUpdate(it)
             return
         }
+        denied = null
         checking = true
         scope.launch {
             // 先收「正在检查…」再发提示：提示与它无关，不该陪着挂
             val result = try {
-                updateManager.check(source, channel, currentVersion)
+                updateManager.check(actualSource, channel, currentVersion, trigger = if (useMirror) "fallback" else "manual")
             } finally {
                 checking = false
             }
+            if (currentTarget != (source to channel)) return@launch
             // 手动查到的也记一笔：书架齿轮上的红点、这一行的「可更新」跟着对上
-            notifier.record(result, source, channel)
+            if (!useMirror) notifier.record(result, actualSource, channel)
+            if (currentTarget != (source to channel)) return@launch
             when (result) {
-                is CheckResult.Available -> showUpdate(result.info)
-                CheckResult.UpToDate -> messages.emit("已是最新版本")
-                is CheckResult.Failed -> messages.emit("检查失败: ${result.message}")
+                is CheckResult.Available -> showUpdate(result.info, markSeen = !useMirror)
+                CheckResult.UpToDate -> messages.emit(if (useMirror) "中转服务器暂无更新版本" else "已是最新版本")
+                is CheckResult.Failed -> {
+                    if (actualSource == UpdateSource.GITHUB &&
+                        (result.httpStatus == 403 || result.httpStatus == 429 || result.retryAt != null)
+                    ) denied = result
+                    else messages.emit("${actualSource.label}检查失败：${result.message}")
+                }
             }
         }
     }
@@ -110,6 +124,21 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
     }
 
     val dialog: @Composable () -> Unit = {
+        denied?.let { failure ->
+            val retry = failure.retryAt?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(it)) }
+            AppAlertDialog(
+                onDismissRequest = { denied = null },
+                title = "GitHub 更新检查失败",
+                text = listOfNotNull(
+                    failure.message,
+                    retry?.let { "可在 $it 后重试。" },
+                    "也可以仅本次通过中转服务器检查${channel.label}。",
+                ).joinToString("\n"),
+                confirmText = "用中转服务器检查",
+                dismissText = "关闭",
+                onConfirm = { checkUpdate(useMirror = true) },
+            )
+        }
         update?.let { info ->
             val direct = info.directInstall
             AppAlertDialog(
@@ -181,7 +210,7 @@ internal fun rememberUpdateCheckState(messages: MessageBus): UpdateCheckState {
         checking = checking,
         available = badge.latest,
         dot = badge.dot,
-        check = ::checkUpdate,
+        check = { checkUpdate() },
         UpdateDialog = dialog,
     )
 }

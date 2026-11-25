@@ -18,7 +18,13 @@ enum class UpdateSource(val label: String) {
 sealed interface CheckResult {
     data object UpToDate : CheckResult
     data class Available(val info: UpdateInfo) : CheckResult
-    data class Failed(val message: String) : CheckResult
+    data class Failed(
+        val message: String,
+        val httpStatus: Int? = null,
+        val retryAt: Long? = null,
+        val limitSignal: String? = null,
+        val responseMarker: String? = null,
+    ) : CheckResult
 }
 
 /**

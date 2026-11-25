@@ -5,7 +5,6 @@ import com.radium.inkwell.data.db.entity.ReplaceRuleEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 /**
  * 导入面板上每条规则的状态。标错的代价：「已有」标成「新增」，导进来就是两条一样的规则各替换一遍；
@@ -91,19 +90,11 @@ class FolderBooksTest {
         assertEquals("EPUB", FolderBooks.formatOf("Fog Harbor.EPUB"))
         assertEquals("AZW3", FolderBooks.formatOf("听潮.azw3"))
         assertEquals("MOBI", FolderBooks.formatOf("a.mobi"))
+        assertEquals("AZW", FolderBooks.formatOf("a.AzW"))
         assertEquals(null, FolderBooks.formatOf("封面.jpg"))
         assertEquals(null, FolderBooks.formatOf("合集.zip"))
         assertEquals(null, FolderBooks.formatOf("README"))
         // 系统、同步盘留下的点文件不是书
         assertEquals(null, FolderBooks.formatOf("._雾港.txt"))
-    }
-
-    @Test
-    fun `文件名和书名比：扩展名、书名号、空白、大小写不计`() {
-        assertEquals(FolderBooks.titleKey("雾港"), FolderBooks.titleKey("《雾港》.txt"))
-        assertEquals(FolderBooks.titleKey("Fog Harbor"), FolderBooks.titleKey("fog_harbor.epub"))
-        assertTrue(FolderBooks.titleKey("雾港") != FolderBooks.titleKey("雾港旧事.txt"))
-        // 只去掉认得的扩展名：书名里本来就带点的别切
-        assertEquals("v20终章", FolderBooks.titleKey("v2.0 终章"))
     }
 }

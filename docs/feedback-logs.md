@@ -23,6 +23,9 @@
 | `reader.session.load.* / menu.toggle / sheet / settings.apply / source.* / auto_flip.*` | 进书、阅读面板、设置、换源与自动翻页状态 |
 | `reader.settings.paper_selected / paper_applied` | 接收到的纸张选择与实际生效的主题切换，只记录主题 ID |
 | `bookshelf.* / search.* / feedback.*` | 导入和移除数量、搜索耗时及失败数量、日志选项、附件数量和反馈结果，不记录输入值或附件名称 |
+| `bookshelf.ready` | 书架进入组合至首批数据和视图配置就绪的耗时及布局，可与继续阅读封面加载时间对照 |
+| `bookshelf.continue.cover` | 继续阅读卡片前景与背景共用的缩略图加载结果、来源（内存、磁盘或网络）和耗时。不含地址或书名，不代表屏幕实际呈现时刻 |
+| `update.check.result` | 手动、启动或单次中转检查的实际来源、渠道、结果和失败状态码。限流时记录判断依据及重试时间；403/429 仅记录是否有 GitHub 请求标记或边缘验证标记，不保存原始响应 |
 | `webdav.sync.result / webdav.book_files.result` | 同步和文件传输结果、耗时、失败类别，以及文件成功、隐藏跳过和失败数量 |
 
 搜索首个结果行布局时记录 `search.first_visible`，耗时从提交搜索开始，并单列书源准备耗时。

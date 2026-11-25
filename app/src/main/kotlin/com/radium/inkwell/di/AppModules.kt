@@ -141,7 +141,10 @@ val appModule = module {
             com.radium.inkwell.update.InstalledAppAuthenticity(androidContext()),
         )
     }
-    single { com.radium.inkwell.update.UpdateManager(get(), get(), get()) }
+    single {
+        val prefs = get<com.radium.inkwell.data.prefs.AppPrefs>()
+        com.radium.inkwell.update.UpdateManager(get(), get(), get(), prefs::githubRetryAt, prefs::recordGithubRateLimit)
+    }
     // 启动时查更新、书架齿轮与设置页的红点读它（见 UpdateNotifier）
     single { com.radium.inkwell.update.UpdateNotifier(androidContext(), get(), get()) }
 
