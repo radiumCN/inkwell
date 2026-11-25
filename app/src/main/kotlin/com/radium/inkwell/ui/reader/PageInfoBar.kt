@@ -217,89 +217,85 @@ internal fun BatteryIndicator(level: Int, style: BatteryDisplayStyle, color: Col
         Modifier.clearAndSetSemantics { contentDescription = "电量 $percent" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (style == BatteryDisplayStyle.PERCENT_INSIDE) {
-            NumberedBattery(level, color, background, textStyle)
+        if (style != BatteryDisplayStyle.PERCENT_ONLY) {
+            BatteryIcon(level, style == BatteryDisplayStyle.PERCENT_INSIDE, color, background, textStyle)
+        }
+        if (style == BatteryDisplayStyle.PERCENT_ONLY || style == BatteryDisplayStyle.PERCENT_OUTSIDE) {
+            Text(
+                percent,
+                modifier = if (style == BatteryDisplayStyle.PERCENT_OUTSIDE) Modifier.padding(start = Dimens.gapXS) else Modifier,
+                color = color,
+                style = textStyle,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BatteryIcon(level: Int, showNumber: Boolean, color: Color, background: Color, textStyle: TextStyle) {
+    val numberStyle = remember(textStyle) {
+        textStyle.copy(fontSize = 10.sp, lineHeight = TextUnit.Unspecified, fontWeight = FontWeight.SemiBold)
+    }
+    val measurer = rememberTextMeasurer()
+    // 三种样式都按满电数字预留空间，电量变化时图标宽度不跳，放大系统字号时也一起撑开。
+    val fullNumber = remember(measurer, numberStyle) {
+        measurer.measure("100", style = numberStyle, maxLines = 1, softWrap = false)
+    }
+    val number = if (showNumber) {
+        remember(measurer, level, numberStyle, fullNumber) {
+            if (level == 100) fullNumber
+            else measurer.measure(level.toString(), style = numberStyle, maxLines = 1, softWrap = false)
+        }
+    } else {
+        null
+    }
+    val density = LocalDensity.current
+    val width = maxOf(
+        Dimens.readerBatteryIconWidth,
+        with(density) { fullNumber.size.width.toDp() } + Dimens.gapXS + Dimens.strokeThick,
+    )
+    val height = maxOf(Dimens.readerBatteryIconHeight, with(density) { fullNumber.size.height.toDp() })
+    val numberColor = if (showNumber) {
+        remember(background, color) { AppThemes.readableOn(background.copy(alpha = 1f), color) }
+    } else {
+        Color.Unspecified
+    }
+
+    Canvas(Modifier.size(width = width, height = height)) {
+        val bodyWidth = size.width - batteryTipWidth()
+        val bodyRadius = 3.dp.toPx()
+        if (number != null && bodyWidth >= number.size.width && size.height >= number.size.height) {
+            drawRoundRect(color, size = Size(bodyWidth, size.height), cornerRadius = CornerRadius(bodyRadius))
+            drawText(
+                textLayoutResult = number,
+                color = numberColor,
+                topLeft = Offset((bodyWidth - number.size.width) / 2f, (size.height - number.size.height) / 2f),
+            )
         } else {
-            if (style != BatteryDisplayStyle.PERCENT_ONLY) BatteryIcon(level, color)
-            if (style != BatteryDisplayStyle.ICON) {
-                Text(
-                    percent,
-                    modifier = if (style == BatteryDisplayStyle.PERCENT_OUTSIDE) Modifier.padding(start = Dimens.gapXS) else Modifier,
+            val stroke = Dimens.strokeThin.roundToPx().coerceAtLeast(1).toFloat()
+            val fillInset = 2 * stroke
+            if (bodyWidth <= fillInset * 2 || size.height <= fillInset * 2) return@Canvas
+            // 描边沿路径居中，内缩半个线宽让外沿正好贴住画布边。
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(stroke / 2, stroke / 2),
+                size = Size(bodyWidth - stroke, size.height - stroke),
+                cornerRadius = CornerRadius(bodyRadius - stroke / 2),
+                style = Stroke(stroke),
+            )
+            // 填充与外框同心，满电时四边留同样宽的缝。
+            if (level > 0) {
+                val fillMax = bodyWidth - fillInset * 2
+                drawRoundRect(
                     color = color,
-                    style = textStyle,
-                    maxLines = 1,
+                    topLeft = Offset(fillInset, fillInset),
+                    size = Size((fillMax * level / 100f).coerceAtLeast(1f), size.height - fillInset * 2),
+                    cornerRadius = CornerRadius((bodyRadius - fillInset).coerceAtLeast(0f)),
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun NumberedBattery(level: Int, color: Color, background: Color, textStyle: TextStyle) {
-    val measurer = rememberTextMeasurer()
-    val number = remember(measurer, level, textStyle) {
-        measurer.measure(
-            text = level.toString(),
-            style = textStyle.copy(lineHeight = TextUnit.Unspecified, fontWeight = FontWeight.SemiBold),
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-    val density = LocalDensity.current
-    val width = with(density) { number.size.width.toDp() } + Dimens.gapS + Dimens.strokeThick
-    val height = with(density) { number.size.height.toDp() }
-    val numberColor = remember(background, color) { AppThemes.readableOn(background, color) }
-
-    // 数字与外形在同一个画布里绘制，弹窗预览和页脚都使用同一份测量结果。
-    Canvas(Modifier.size(width = maxOf(width, Dimens.readerBatteryNumberMinWidth), height = height)) {
-        val bodyWidth = size.width - batteryTipWidth()
-        if (bodyWidth < number.size.width || size.height < number.size.height) return@Canvas
-        drawRoundRect(color, size = Size(bodyWidth, size.height), cornerRadius = CornerRadius(3.dp.toPx()))
         drawBatteryTip(color, bodyWidth)
-        drawText(
-            textLayoutResult = number,
-            color = numberColor,
-            topLeft = Offset((bodyWidth - number.size.width) / 2f, (size.height - number.size.height) / 2f),
-        )
-    }
-}
-
-/**
- * 小电池图标：描边外框 + 正极触点 + 按电量填充。
- *
- * 几何都从外框推出来：填充块离外框内沿四边留一样宽的缝、圆角与外框同心，触点贴在外框右边。
- * 从前填充块的宽另算了一遍，左边空 1.3dp、右边只剩 0.3dp，满电时像顶到了右边框上；
- * 触点和外框之间还夹着半个 dp 的缝，抗锯齿后是一道发虚的细线，看着像画坏了（被指出过）。
- * 线宽、缝宽、触点尺寸取整像素（画布本身由 Row 放在整像素上）：边都落在像素格上，不会一边实一边虚。
- */
-@Composable
-private fun BatteryIcon(level: Int, color: Color) {
-    Canvas(Modifier.size(width = Dimens.readerBatteryIconWidth, height = Dimens.readerBatteryIconHeight)) {
-        val stroke = Dimens.strokeThin.roundToPx().coerceAtLeast(1).toFloat()
-        val fillInset = 2 * stroke
-        val bodyWidth = size.width - batteryTipWidth()
-        if (bodyWidth <= fillInset * 2 || size.height <= fillInset * 2) return@Canvas
-        // 外沿 3dp：往里减掉线宽与缝，填充块还剩 1dp 圆角；再小，填充块就成了直角，套在圆角框里发硬
-        val bodyRadius = 3.dp.toPx()
-        // 外框：描边以路径为中线，往里缩半个线宽，外沿才正好落在画布边上
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(stroke / 2, stroke / 2),
-            size = Size(bodyWidth - stroke, size.height - stroke),
-            cornerRadius = CornerRadius(bodyRadius - stroke / 2),
-            style = Stroke(stroke),
-        )
-        drawBatteryTip(color, bodyWidth)
-        // 电量填充：四边离外框内沿都是 gap
-        if (level > 0) {
-            val fillMax = bodyWidth - fillInset * 2
-            drawRoundRect(
-                color = color,
-                topLeft = Offset(fillInset, fillInset),
-                size = Size((fillMax * level / 100f).coerceAtLeast(1f), size.height - fillInset * 2),
-                cornerRadius = CornerRadius((bodyRadius - fillInset).coerceAtLeast(0f)),
-            )
-        }
     }
 }
 

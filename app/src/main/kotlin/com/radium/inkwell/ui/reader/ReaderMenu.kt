@@ -487,6 +487,8 @@ fun ReaderMenu(
         val textStyles = MiuixTheme.textStyles
         var sheetOpen by remember { mutableStateOf(true) }
         val sheetColor = overlayColor.copy(alpha = overlayColor.alpha * settingsShown)
+        // 浮层在独立宿主里组合，显示期间从 State 读取最新设置。
+        val currentSession by rememberUpdatedState(session)
         OverlayBottomSheet(
             show = sheetOpen,
             onDismissRequest = { sheetOpen = false },
@@ -517,14 +519,14 @@ fun ReaderMenu(
                         onDragging = { dragging = it },
                         shown = settingsShown,
                         pageBackdrop = pageBackdrop,
-                        settings = session.settings,
-                        isNetBook = session.isNetBook,
+                        settings = currentSession.settings,
+                        isNetBook = currentSession.isNetBook,
                         onUpdate = onUpdateSettings,
                         onPreview = onPreviewSettings,
                         onCommit = onCommitSettings,
                         onSelectPaper = onSelectPaper,
                         onCustomPaperChange = onCustomPaperChange,
-                        textSelectionEnabled = session.textSelectionEnabled,
+                        textSelectionEnabled = currentSession.textSelectionEnabled,
                         onTextSelectionChange = onSetTextSelection,
                         typography = typography,
                         autoFlipping = overlay.autoFlipping,
