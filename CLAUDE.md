@@ -68,7 +68,7 @@ App 的 UI 库是 **[Miuix](https://github.com/compose-miuix-ui/miuix)**（Hyper
 
 「跟随壁纸」是一个预设 id（`AppThemes.DYNAMIC`），日/夜两槽都能选；颜色由 Miuix `ThemeController`（Monet 模式、不给 keyColor）读系统调色板生成。解析统一走 `rememberResolvedScheme`（MainActivity 设窗体底色、`InkwellTheme` 铺整树共用这一个结果），别在别处直接调 `AppThemes.resolve` 而漏掉壁纸配色。
 
-Miuix 是 **0.x 实验线**，升级前先读发行说明的破坏性变更，再核对 Compose 版本。当前 Miuix 0.9.5-beta03 基于 Compose 1.13 RC，Android 侧使用同一版本线的稳定 BOM。玻璃边缘高光由 `miuix-material` 的 `GlassEdgeStrokes` 与 `Modifier.edgeStroke` 提供。
+Miuix 是 **0.x 实验线**，升级前先读发行说明的破坏性变更，再核对 Compose 版本。当前 Miuix 0.9.5-beta04 基于 Compose 1.13 RC，Android 侧使用同一版本线的稳定 BOM。玻璃边缘高光由 `miuix-material` 的 `GlassEdgeStrokes` 与 `Modifier.edgeStroke` 提供。
 
 ### 圆角 → `AppShapes`（`ui/theme/AppTheme.kt`）
 
