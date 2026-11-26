@@ -73,6 +73,10 @@ private const val BOOK_LAYOUT_PREFIX = "book_layout_"
 private fun bookLayoutKey(bookId: String) = stringPreferencesKey(BOOK_LAYOUT_PREFIX + bookId)
 private fun decodeBookLayout(raw: String): BookLayout? = runCatching { Json.decodeFromString<BookLayout>(raw) }.getOrNull()
 
+internal enum class BookTocRule { ORIGINAL, GROUP_VOLUMES, HIDE_VOLUME }
+
+private fun bookTocRuleKey(bookId: String) = stringPreferencesKey("book_toc_rule_$bookId")
+
 /**
  * @param fontAvailable 这个字体在本机能不能用（见 ReaderFontStore.isAvailable）。只在导入备份时用：
  * 另一台设备上导入的字体文件不会同步过来，拿它的 fontId 覆盖本地只会让排版静默回落默认字体
@@ -261,6 +265,19 @@ class ReaderPrefs internal constructor(
     }
 
     internal fun bookLayout(bookId: String) = store.data.map { readBookLayout(it, bookId) }
+
+    /** 单书的目录显示规则只保存在本机，目录刷新和换源共用同一个书 id。 */
+    internal suspend fun bookTocRule(bookId: String): BookTocRule {
+        val stored = store.data.first()[bookTocRuleKey(bookId)]
+        return BookTocRule.entries.firstOrNull { it.name == stored } ?: BookTocRule.ORIGINAL
+    }
+
+    internal suspend fun setBookTocRule(bookId: String, rule: BookTocRule) {
+        val key = bookTocRuleKey(bookId)
+        store.edit { prefs ->
+            if (rule == BookTocRule.ORIGINAL) prefs.remove(key) else prefs[key] = rule.name
+        }
+    }
 
     internal suspend fun setBookLayoutEnabled(bookId: String, enabled: Boolean) {
         store.edit { p ->

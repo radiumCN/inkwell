@@ -15,6 +15,24 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BackupPreferencesTest {
+    @Test fun `directory display rule is saved by book and excluded from backup`() = runTest {
+        val store = object : DataStore<Preferences> {
+            override val data = MutableStateFlow<Preferences>(mutablePreferencesOf())
+            override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+                transform(data.value).also { data.value = it }
+        }
+        val prefs = ReaderPrefs(store, initiallyDark = false, fontAvailable = { true }, scope = backgroundScope)
+        val before = prefs.backupSnapshot()
+        prefs.setBookTocRule("first", BookTocRule.GROUP_VOLUMES)
+        assertEquals(BookTocRule.ORIGINAL, prefs.bookTocRule("second"))
+        prefs.setBookTocRule("second", BookTocRule.HIDE_VOLUME)
+        assertEquals(BookTocRule.GROUP_VOLUMES, prefs.bookTocRule("first"))
+        prefs.setBookTocRule("first", BookTocRule.ORIGINAL)
+        assertEquals(BookTocRule.ORIGINAL, prefs.bookTocRule("first"))
+        assertEquals(BookTocRule.HIDE_VOLUME, prefs.bookTocRule("second"))
+        assertEquals(before, prefs.backupSnapshot())
+    }
+
     @Test fun bookOnlyEditDoesNotWinOverNewerSharedSettings() = runTest {
         val store = object : DataStore<Preferences> {
             override val data = MutableStateFlow<Preferences>(mutablePreferencesOf(ReaderPrefs.Keys.UPDATED_AT to 100L))

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.SourceVariables
+import com.radium.inkwell.core.util.VolumeChapterTitle
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -16,6 +17,7 @@ import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.data.prefs.BookTocRule
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.ReaderFontStore
@@ -344,6 +346,9 @@ class ReaderViewModel(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toc)
 
+    private val _tocRule = MutableStateFlow(BookTocRule.ORIGINAL)
+    internal val tocRule = _tocRule.asStateFlow()
+
     /**
      * 一次性提示（建了净化规则、换源失败、本章未净化……），由阅读页按纸张主题浮在页顶。
      *
@@ -456,6 +461,11 @@ class ReaderViewModel(
 
     init {
         viewModelScope.launch {
+            _tocRule.value = try {
+                readerPrefs.bookTocRule(bookId)
+            } catch (_: java.io.IOException) {
+                BookTocRule.ORIGINAL
+            }
             loadSession()
             combine(readerPrefs.settings, readerPrefs.bookLayout(bookId)) { shared, layout ->
                 settingsForBook(readerPrefs.applyBookLayout(shared, layout))
@@ -925,6 +935,21 @@ class ReaderViewModel(
         releaseSpeechPosition()
         navigate(tocAnchor = anchor) { ReadPosition(item.index, 0) }
     }
+
+    internal suspend fun applyTocRule(rule: BookTocRule) {
+        readerPrefs.setBookTocRule(bookId, rule)
+        val wasShortened = shortenChapterTitle(source)
+        _tocRule.value = rule
+        if (wasShortened != shortenChapterTitle(source)) {
+            // 章首页的大标题需要重排，正文仍按原始标题占用的字符位置定位。
+            decodeJob?.cancel()
+            pendingDecodes.clear()
+            navigate(invalidate = true) { pendingTarget ?: speechPosition ?: position }
+        }
+    }
+
+    private fun shortenChapterTitle(src: ReaderBookSource?): Boolean =
+        _tocRule.value != BookTocRule.ORIGINAL && (src as? LocalReaderBookSource)?.hasNestedToc != true
 
     private suspend fun loadSpeechChapter(index: Int): SpeechChapter {
         val src = checkNotNull(source)
@@ -2154,6 +2179,7 @@ class ReaderViewModel(
         val src = source
         val startSpec = spec
         val startGen = tocGeneration
+        val shortened = shortenChapterTitle(src)
         val result = ensurePaginated(
             target.chapterIndex,
             userFacing = true,
@@ -2169,7 +2195,7 @@ class ReaderViewModel(
             // 排着队，拿到锁就会按 [pendingTarget] 重来 —— 这里报错只会闪一下假的「读不出来」。
             // 加载期间目录换过（后台追更）也一样：旧序号的结果被丢掉，syncSessionToc 已按新序号重新发起。
             if (src != null && source === src && facade != null && spec != null &&
-                spec == startSpec && tocGeneration == startGen && _state.value.error == null
+                spec == startSpec && tocGeneration == startGen && shortened == shortenChapterTitle(src) && _state.value.error == null
             ) {
                 Log.w(TAG, "第 ${target.chapterIndex} 章取不到分页结果，且排版环境已就绪")
                 _state.value = _state.value.copy(
@@ -2409,6 +2435,7 @@ class ReaderViewModel(
         val facade = facade ?: return null
         val spec = spec ?: return null
         val gen = tocGeneration
+        val shortenTitle = shortenChapterTitle(src)
         // 发起这次加载的协程（跳章时就是 navJob）。部分结果的 showPage 是另投递到主线程的，
         // 不随它取消 —— 这一跳已经被下一次取代的话，别再把人拽回被放弃的那一章
         val caller = currentCoroutineContext()[Job]
@@ -2426,6 +2453,7 @@ class ReaderViewModel(
         trace("chapter.load.start", "chapter" to chapterIndex, "user_facing" to userFacing, "load_id" to loadId)
         return try {
             val title = src.chapterTitle(chapterIndex) ?: ""
+            val displayTitle = if (shortenTitle) VolumeChapterTitle.parse(title)?.chapter ?: title else title
             // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
             // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
             // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
@@ -2453,7 +2481,8 @@ class ReaderViewModel(
                 ImageInfo.Reserved(content.elements.all { it is ContentElement.Image })
             } else null
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
-            fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
+            fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration ||
+                shortenTitle != shortenChapterTitle(src)
             val waitStarted = TimeSource.Monotonic.markNow()
             val result = try {
                 measureMutex.withLock {
@@ -2472,6 +2501,7 @@ class ReaderViewModel(
                             val job = coroutineContext[Job]
                             Paginator(facade).paginate(
                                 chapterIndex, title, content, spec,
+                                displayTitle = displayTitle,
                                 notifyAfterChar = notifyAfterChar,
                                 images = { reservedImage ?: readerImages.info(it.resourceId) },
                                 // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
@@ -2516,7 +2546,7 @@ class ReaderViewModel(
             // 写回去，下一章翻过去看到的还是旧源的内容 —— 而换源多半就是嫌它的正文不对。
             if (src !== source) return null
             // 同理：拉正文期间目录换过、序号整体错了位，chapterIndex 已经指向另一章
-            if (gen != tocGeneration) return null
+            if (gen != tocGeneration || shortenTitle != shortenChapterTitle(src)) return null
             paginated[chapterIndex] = result
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
             // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。

@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 class LocalReaderBookSource(private val handle: BookHandle) : ReaderBookSource, AutoCloseable {
 
     val toc get() = handle.toc
+    internal val hasNestedToc = handle.toc.any { it.level > 0 }
 
     override val chapterCount: Int get() = handle.chapters.size
 

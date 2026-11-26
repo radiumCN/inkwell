@@ -53,9 +53,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -113,15 +110,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import com.radium.inkwell.ui.components.ChapterListItem
-import com.radium.inkwell.ui.components.CardViewport
 import com.radium.inkwell.ui.components.CardLayer
 import com.radium.inkwell.ui.components.ChipRow
 import com.radium.inkwell.ui.components.LocalCardLayer
 import com.radium.inkwell.ui.components.IconLabelButton
 import com.radium.inkwell.ui.components.cardMargin
-import com.radium.inkwell.ui.components.groupedCardItem
-import com.radium.inkwell.ui.components.settingsCardColor
 import com.radium.inkwell.ui.components.Dimens
 import com.radium.inkwell.ui.components.SectionHeader
 import com.radium.inkwell.ui.components.SettingGroupPosition
@@ -149,9 +142,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
-import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.SegmentedChoice
-import com.radium.inkwell.ui.components.SearchField
 import com.radium.inkwell.ui.theme.AppShapes
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -174,30 +165,23 @@ import top.yukonga.miuix.kmp.theme.LocalContentColor
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.radium.inkwell.ui.components.sinkOnPress
-import com.radium.inkwell.ui.components.FastScroller
-import com.radium.inkwell.ui.components.animationsEnabled
-import com.radium.inkwell.data.prefs.AppPrefs
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.runtime.derivedStateOf
+import com.radium.inkwell.data.prefs.BookTocRule
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.semantics.stateDescription
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
-import top.yukonga.miuix.kmp.icon.extended.ExpandLess
-import top.yukonga.miuix.kmp.icon.extended.ExpandMore
-import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.VolumeUp
 
 @Composable
-fun ReaderMenu(
+internal fun ReaderMenu(
     visible: Boolean,
     chapterHandoff: State<Float>?,
     session: ReaderSessionUi,
     overlay: ReaderOverlayUi,
     pageUi: ReaderPageUi,
     toc: StateFlow<List<TocItem>>,
+    tocRule: StateFlow<BookTocRule>,
+    onApplyTocRule: suspend (BookTocRule) -> Unit,
     onExit: () -> Unit,
     onGotoChapter: (Int) -> Unit,
     onGotoTocEntry: (TocItem) -> Unit,
@@ -442,36 +426,18 @@ fun ReaderMenu(
 
     if (showToc) {
         val tocItems by toc.collectAsStateWithLifecycle()
-        // 正序 / 倒序记在本机（见 AppPrefs.tocReversedState），下次打开还是那个顺序
-        val appPrefs = koinInject<AppPrefs>()
-        val reversed = appPrefs.tocReversedState.collectAsStateWithLifecycle().value ?: false
-        val prefsScope = rememberCoroutineScope()
-        // 面板底是浮层色（AppBottomSheet 默认的 background），章节行是卡片色，两者差一档。
-        // 目录会滚到手势条下面：导航栏高度垫在列表末尾（见 TocList），不让面板在外面垫
-        AppBottomSheet(
-            onDismissRequest = { showToc = false },
-            padNavigationBar = false,
-            title = "目录",
-            endAction = {
-                TocOrderButton(
-                    reversed = reversed,
-                    onToggle = { prefsScope.launch { appPrefs.setTocReversed(!reversed) } },
-                )
-            },
-        ) {
-            TocList(
-                toc = tocItems,
-                current = pageUi.chapterIndex,
-                position = pageUi.tocPosition,
-                // 本地书正文一直在，缓存指示对它没有意义（isCached 恒为 false，
-                // 显示出来只会让每一章都像"没预加载"）
-                showCacheState = session.isNetBook,
-                reversed = reversed,
-                // 目录跳章后收起整个菜单；上一章/下一章则留着菜单，方便连着翻。
-                // 跳章不等面板的退场动画（dismiss { }）：那会让翻到目标章晚上三百毫秒，像点了没反应
-                onSelect = { showToc = false; onGotoTocEntry(it); onDismiss() },
-            )
-        }
+        val rule by tocRule.collectAsStateWithLifecycle()
+        ReaderTocSheet(
+            rule = rule,
+            toc = tocItems,
+            current = pageUi.chapterIndex,
+            position = pageUi.tocPosition,
+            showCacheState = session.isNetBook,
+            onDismiss = { showToc = false },
+            // 目录跳章立即关菜单，不等面板退场，以免延迟翻到目标章。
+            onSelect = { showToc = false; onGotoTocEntry(it); onDismiss() },
+            onApplyRule = onApplyTocRule,
+        )
     }
 
     if (showSettings) {
@@ -702,261 +668,6 @@ private fun BarAction(
         contentPadding = PaddingValues(vertical = Dimens.gapXS),
     )
 }
-
-/**
- * 目录面板：搜索框、一行概况、章节卡，叠着快速滚动条和「定位当前章」。
- *
- * - **一行概况**：共多少章；网络书再加「● 已缓存多少章」—— 顺手把行尾那颗点讲明白（从前没有任何地方说它是什么）。
- *   搜索时换成「找到多少章」。
- * - **章节行**（[ChapterListItem]）：读过的字变灰、在读那章淡强调底 + 「在读」，没读的照常。
- * - **正序 / 倒序**（[reversed]，标题行右边的按钮切）：追连载的人倒过来看，最新章在最上面。
- * - **快速滚动条**（[FastScroller]）：上百章才出现，拖着走，气泡写章名和全书位置。
- * - **定位当前章**：在读那章滚出视野时底部浮出一颗胶囊（和详情页那个按钮同名），箭头指它在上面还是下面。
- *
- * 位置：打开时在读那章停在第四行左右（上面露三章，看得出前后）；换顺序回到顶上（倒序就是为了看最新几章）；
- * 搜索从第一条结果看起，清空搜索回到在读那章。
- */
-@Composable
-private fun TocList(
-    toc: List<TocItem>,
-    current: Int,
-    position: TocReadingPosition?,
-    showCacheState: Boolean,
-    reversed: Boolean,
-    onSelect: (TocItem) -> Unit,
-) {
-    val listState = rememberLazyListState()
-    var query by remember { mutableStateOf("") }
-    val q = query.trim()
-    val ordered = remember(toc, reversed) { if (reversed) toc.asReversed() else toc }
-    val shown = remember(ordered, q) {
-        if (q.isEmpty()) ordered else ordered.filter { it.title.contains(q, ignoreCase = true) }
-    }
-    val cachedCount = remember(toc) { toc.count { it.cached } }
-    // 在读那章在当前列表里的第几行；不在（搜索没搜到它）是 -1
-    val currentKey = remember(toc, current, position) { currentTocKey(toc, current, position) }
-    val currentPos = remember(shown, currentKey) { shown.indexOfFirst { it.key == currentKey } }
-    val animate = animationsEnabled()
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        if (currentPos > TOC_ROWS_ABOVE_CURRENT) listState.scrollToItem(currentPos - TOC_ROWS_ABOVE_CURRENT)
-    }
-    var lastOrder by remember { mutableStateOf(reversed to q) }
-    LaunchedEffect(reversed, q) {
-        val order = reversed to q
-        if (order == lastOrder) return@LaunchedEffect
-        val reordered = order.first != lastOrder.first
-        lastOrder = order
-        listState.scrollToItem(
-            if (!reordered && q.isEmpty()) (currentPos - TOC_ROWS_ABOVE_CURRENT).coerceAtLeast(0) else 0,
-        )
-    }
-
-    Column {
-        // SearchField 默认的底是 surfaceContainerHigh（「页面上的搜索栏」那一档）；浅色纸上浮层恰好也是这一档，
-        // 框会整个隐身。这里换成面板里的卡片色 —— 搜索框与下面的目录卡同一层，浅纸深纸都浮得起来。
-        // 左右与目录卡对齐（面板里的卡离两边 cardMargin）
-        SearchField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = "搜索章节",
-            containerColor = settingsCardColor(),
-            modifier = Modifier.padding(horizontal = cardMargin(), vertical = Dimens.gapXS),
-        )
-        TocSummary(
-            text = if (q.isEmpty()) "共 ${toc.size} 项" else "找到 ${shown.size} 项",
-            cachedCount = if (showCacheState && q.isEmpty()) cachedCount else null,
-        )
-        if (shown.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = Dimens.gapXXL, bottom = Dimens.gapXXL + sheetBottomInset()),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (q.isEmpty()) "还没有章节" else "没有匹配的章节",
-                    style = MiuixTheme.textStyles.body1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        } else {
-            // 导航栏高度垫在列表末尾、也加进高度上限：列表一直铺到屏幕底、滚到手势条下面，看得见的条数不变。
-            // 章节拼成一张卡（同详情页的目录），不再一章一张小卡、行间留缝
-            val bottomInset = sheetBottomInset()
-            val listPadding = PaddingValues(bottom = bottomInset)
-            val cachedDot = MiuixTheme.colorScheme.primary
-            val readDot = MiuixTheme.colorScheme.onSurfaceVariantSummary
-            Box(
-                Modifier
-                    .heightIn(max = Dimens.sheetListMaxHeight + bottomInset)
-                    // 和概况行之间的缝垫在视口外面：从前在列表的 contentPadding.top 里，一滚就跟着内容滚走，
-                    // 章名直接顶到「共 N 章」底下。先限高再垫，整块的高度上限不变，面板不因此变高
-                    .padding(top = Dimens.gapS),
-            ) {
-                // 视口裁成卡的圆上角：一滚，顶上切过的是中间的行，不裁的话卡顶是一刀直线（见 CardViewport）。
-                // 快速滚动条和「定位当前章」留在视口外面，别被裁掉
-                CardViewport {
-                    LazyColumn(
-                        state = listState,
-                        // HyperOS 的回弹 + 到头轻震；主题自带的那份关掉，免得叠成双倍（见 pageScroll）
-                        modifier = Modifier.pageScroll(),
-                        contentPadding = listPadding,
-                        overscrollEffect = null,
-                    ) {
-                        itemsIndexed(shown, key = { _, it -> it.key }) { i, item ->
-                            val read = item.index < current
-                            ChapterListItem(
-                                title = item.title,
-                                selected = item.key == currentKey,
-                                read = read,
-                                highlight = q,
-                                onClick = { onSelect(item) },
-                                modifier = Modifier.groupedCardItem(i, shown.size)
-                                    .padding(start = Dimens.gapM * item.depth.coerceIn(0, 4)),
-                                trailingContent = if (showCacheState && item.cached) {
-                                    {
-                                        // 有点=正文已缓存，翻到它不用等网络。没点的章节才是"翻过去要现抓"的，
-                                        // 也就是可能卡住的那些 —— 这正是预加载到底跑到哪了的唯一可见线索。
-                                        // 读过的那几章点也跟着字淡一档
-                                        Box(
-                                            Modifier
-                                                .size(Dimens.gapS)
-                                                .semantics { contentDescription = "已缓存" }
-                                                .background(if (read) readDot else cachedDot, CircleShape),
-                                        )
-                                    }
-                                } else {
-                                    null
-                                },
-                            )
-                        }
-                    }
-                }
-                FastScroller(
-                    state = listState,
-                    itemCount = shown.size,
-                    label = { shown.getOrNull(it)?.title.orEmpty() },
-                    detail = { row ->
-                        val index = shown.getOrNull(row)?.index ?: 0
-                        "全书 ${(index + 1) * 100 / toc.size.coerceAtLeast(1)}%"
-                    },
-                    contentPadding = listPadding,
-                    modifier = Modifier.matchParentSize(),
-                )
-                if (q.isEmpty() && currentPos >= 0) {
-                    CurrentChapterPill(
-                        listState = listState,
-                        currentPos = currentPos,
-                        onClick = {
-                            scope.launch {
-                                val target = (currentPos - TOC_ROWS_ABOVE_CURRENT).coerceAtLeast(0)
-                                if (animate) listState.animateScrollToItem(target) else listState.scrollToItem(target)
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = bottomInset + Dimens.gapM),
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 目录上方的一行概况。左边与卡里的章名对齐 */
-@Composable
-private fun TocSummary(text: String, cachedCount: Int?) {
-    val summary = MiuixTheme.colorScheme.onSurfaceVariantSummary
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = cardMargin() + Dimens.listHorizontal)
-            .padding(top = Dimens.gapS)
-            .semantics(mergeDescendants = true) {},
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text, style = MiuixTheme.textStyles.footnote1, color = summary)
-        if (cachedCount != null) {
-            Text(" · ", style = MiuixTheme.textStyles.footnote1, color = summary)
-            // 和章节行尾那颗点同一个样子：概况里就把它是什么讲了
-            Box(
-                Modifier
-                    .padding(end = Dimens.gapXS)
-                    .size(Dimens.gapS)
-                    .background(MiuixTheme.colorScheme.primary, CircleShape),
-            )
-            Text("已缓存 $cachedCount 章", style = MiuixTheme.textStyles.footnote1, color = summary)
-        }
-    }
-}
-
-/**
- * 「定位当前章」：在读那章滚出视野时浮出来。实心强调色胶囊（和阅读设置面板里实心的选中段同一种「强调」），
- * 压在章节卡上也分得出来；箭头指在读那章在上面还是下面。高度保底触控下限。
- */
-@Composable
-private fun CurrentChapterPill(
-    listState: LazyListState,
-    currentPos: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val offscreen by remember(listState, currentPos) {
-        derivedStateOf { listState.layoutInfo.visibleItemsInfo.none { it.index == currentPos } }
-    }
-    val above by remember(listState, currentPos) {
-        derivedStateOf { currentPos < listState.firstVisibleItemIndex }
-    }
-    AnimatedVisibility(
-        visible = offscreen,
-        modifier = modifier,
-        enter = bottomBarEnter(),
-        exit = bottomBarExit(),
-    ) {
-        val scheme = MiuixTheme.colorScheme
-        Row(
-            Modifier
-                .heightIn(min = Dimens.touchTarget)
-                .squircleSurface(scheme.primary, Dimens.touchTarget / 2)
-                .clickable(role = Role.Button, onClick = onClick)
-                .padding(horizontal = Dimens.gapL),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Dimens.gapXS),
-        ) {
-            Icon(
-                if (above) MiuixIcons.ExpandLess else MiuixIcons.ExpandMore,
-                contentDescription = null,
-                tint = scheme.onPrimary,
-                modifier = Modifier.size(Dimens.iconSm),
-            )
-            Text(
-                "定位当前章",
-                style = MiuixTheme.textStyles.body2,
-                fontWeight = FontWeight.Medium,
-                color = scheme.onPrimary,
-            )
-        }
-    }
-}
-
-/**
- * 目录标题行右边的「正序 / 倒序」。倒序开着时图标换强调色，一眼看得出现在是倒着的；读屏念当前是哪种顺序。
- */
-@Composable
-private fun TocOrderButton(reversed: Boolean, onToggle: () -> Unit) {
-    AppIconButton(
-        onClick = onToggle,
-        modifier = Modifier.semantics { stateDescription = if (reversed) "倒序" else "正序" },
-        contentColor = if (reversed) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-    ) {
-        Icon(MiuixIcons.Sort, contentDescription = "切换目录顺序")
-    }
-}
-
-/** 定位到在读那章时，它上面留几章：看得出前后是哪几章 */
-private const val TOC_ROWS_ABOVE_CURRENT = 3
 
 // ---------- 阅读设置面板 ----------
 

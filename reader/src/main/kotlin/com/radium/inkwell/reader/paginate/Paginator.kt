@@ -43,6 +43,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
      *   排版是纯 CPU 循环、没有挂起点，协程取消对它无效：不问这一句的话，连点几下 A+，
      *   每一档都要把整章排完、还一路占着测量锁，新字号排在它们后面干等。
      * @param images 每张图的尺寸或占位方式（只在 [LayoutSpec.showImages] 开着时问）。null = 不排这张。
+     * @param displayTitle 用于排版和页眉的标题，可隐藏原始 [title] 中的卷名。正文偏移继续从原始标题末尾起算。
      */
     fun paginate(
         chapterIndex: Int,
@@ -52,10 +53,11 @@ class Paginator(private val measurer: TextMeasureFacade) {
         notifyAfterChar: Int = 0,
         onPartial: ((Result) -> Unit)? = null,
         isAbandoned: () -> Boolean = { false },
+        displayTitle: String = title,
         images: (ContentElement.Image) -> ImageInfo? = { null },
     ): Result {
         val elements = buildList {
-            add(TitleElement(title))
+            add(TitleElement(displayTitle))
             // 代码、列表、引用只有订阅文章有，书里不会出现；万一出现也排成段落，别在下面的 when 里悄悄漏掉。
             // 一对一换，下标不变（PageItem.elementIndex 指的还是同一块）
             addAll(content.elements.map { it.asParagraph() })
@@ -80,7 +82,7 @@ class Paginator(private val measurer: TextMeasureFacade) {
             // 目标偏移落在一个跨页的长段里（大字号、文学类 EPUB 很常见）时，pageIndexFor 会把目标
             // 夹到这段开头之前 —— 先出的是前一页、还顺手把进度挪了过去，排完再跳回来。
             PaginatedChapter(
-                chapterIndex, title, pages.toList(),
+                chapterIndex, displayTitle, pages.toList(),
                 if (complete) charOffset else maxOf(charOffset, pages.lastOrNull()?.endCharOffset ?: 0),
                 if (complete) content.anchors.mapValues { (_, index) -> elementOffsets[index + 1] } else emptyMap(),
                 if (complete) content.anchors else emptyMap(),
@@ -94,7 +96,9 @@ class Paginator(private val measurer: TextMeasureFacade) {
 
         fun sealPage(endOfChapter: Boolean) {
             if (!cursor.isEmpty) {
-                pages += cursor.seal(chapterIndex, pages.size, keepTrailingGap = !endOfChapter)
+                val page = cursor.seal(chapterIndex, pages.size, keepTrailingGap = !endOfChapter)
+                // 缩短后的标题第一行指向原文中的章序，章首页仍覆盖被隐藏的卷名前缀。
+                pages += if (pages.isEmpty() && displayTitle != title) page.copy(startCharOffset = 0) else page
                 cursor = PageCursor(spec)
                 // 目标偏移已经落在已封页里 → 先让 UI 出这一屏，余下继续排
                 if (partialCb != null && !partialEmitted && notifyAfterChar < pages.last().endCharOffset) {
@@ -116,11 +120,13 @@ class Paginator(private val measurer: TextMeasureFacade) {
                         val mp = measurer.measureParagraph(element.text, titleStyle, spec.contentWidthPx)
                         measured[idx] = mp
                         cursor.addLeadingSpace(spec.titleTopSpacingPx)
-                        placeParagraph(idx, element.text.length, mp, spec, cursor, charOffset,
+                        val titleOffset = title.indexOf(displayTitle).coerceAtLeast(0)
+                        placeParagraph(idx, element.text.length, mp, spec, cursor, titleOffset,
                             isTitle = true, onSeal = ::seal, currentCursor = { cursor })
                         cursor.addGap(spec.paragraphSpacingPx * 1.5f)
                     }
-                    charOffset += element.text.length
+                    charOffset += title.length
+                    cursor.noteCharEnd(charOffset)
                 }
                 is ContentElement.Paragraph -> {
                     if (element.text.isNotBlank()) {

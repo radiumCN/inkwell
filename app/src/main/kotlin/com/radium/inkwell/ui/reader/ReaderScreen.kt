@@ -1034,6 +1034,8 @@ fun ReaderScreen(
             overlay = overlay,
             pageUi = pageUi,
             toc = viewModel.toc,
+            tocRule = viewModel.tocRule,
+            onApplyTocRule = viewModel::applyTocRule,
             onExit = requestExit,
             onGotoChapter = viewModel::jumpFromReaderMenu,
             onGotoTocEntry = viewModel::jumpFromToc,

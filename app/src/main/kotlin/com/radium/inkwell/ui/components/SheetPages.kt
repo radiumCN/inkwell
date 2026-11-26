@@ -52,7 +52,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 不在过渡里：第一帧就整个冒出来、把内容往下顶一行，内容却还在慢慢淡入 —— 两样不同步，被指出「动画割裂」。
  * 所以二级页的标题行（[SheetPageHeader]）是页面自己的第一行，跟着整页一起滑；面板自己不再有标题行。
  *
- * - **不淡入淡出、不回弹**：spring 同整页转场（[Motion.PAGE_ENTER_STIFFNESS] / [Motion.PAGE_EXIT_STIFFNESS]）；
+ * - **不淡入淡出、不回弹**：默认用整页转场的 spring（[Motion.PAGE_ENTER_STIFFNESS] / [Motion.PAGE_EXIT_STIFFNESS]）；
  *   侧滑跟手、以及松手后补完或弹回的那一段用线性（同 [Motion.PREDICTIVE_BACK_MS]），理由见 [Motion]。
  * - **两个位移自己驱动**（两个 [Animatable]），不走 AnimatedContent：被打断时（刚推进来又返回、侧滑到一半松手）
  *   Animatable 带着当前速度掉头；AnimatedContent 换目标时内置 slide 会换成它自己的默认 spring（见 ui/nav/PageSlide.kt）。
@@ -66,6 +66,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 侧滑跟手要靠系统把手势进度送进面板窗口（Android 14 起）；拿不到进度时松手照样返回，只是走点 ‹ 时那段 spring。
  *
  * @param onBack 回到 [root]：调用方把 [page] 换成 [root]。返回键、侧滑和标题行的 ‹ 都走它
+ * @param linearSlide 点按进出也用线性位移。目录面板的两个页面由此全程以同一进度横滑。
  */
 @Composable
 fun <T> SheetPages(
@@ -75,6 +76,7 @@ fun <T> SheetPages(
     background: Color,
     modifier: Modifier = Modifier,
     wrapContentHeight: Boolean = false,
+    linearSlide: Boolean = false,
     content: @Composable (T) -> Unit,
 ) {
     val animate = animationsEnabled()
@@ -116,11 +118,11 @@ fun <T> SheetPages(
     }
     LaunchedEffect(page) {
         if (page == root) {
-            settle(subX, rootX, toSub = false, linear = gesture.active, animate = animate, width = width)
+            settle(subX, rootX, toSub = false, linear = linearSlide || gesture.active, animate = animate, width = width)
             leaving = null
         } else {
             leaving = page
-            settle(subX, rootX, toSub = true, linear = false, animate = animate, width = width)
+            settle(subX, rootX, toSub = true, linear = linearSlide, animate = animate, width = width)
         }
         gesture.active = false
     }

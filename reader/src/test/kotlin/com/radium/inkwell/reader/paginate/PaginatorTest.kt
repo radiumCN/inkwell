@@ -63,6 +63,26 @@ class PaginatorTest {
     }
 
     @Test
+    fun `shortened chapter title keeps original reading and anchor offsets`() {
+        val title = "第一卷 ${cjk(70)} 第一章 渡船靠岸"
+        val displayTitle = "第一章 渡船靠岸"
+        val body = cjk(150)
+        val content = ChapterContent(listOf(ContentElement.Paragraph(body)), anchors = mapOf("body" to 0))
+        val full = paginator.paginate(0, title, content, spec(viewportH = 160))
+        val short = paginator.paginate(0, title, content, spec(viewportH = 160), displayTitle = displayTitle)
+
+        assertEquals(displayTitle, short.chapter.title)
+        assertTrue(short.chapter.pages.size < full.chapter.pages.size)
+        assertEquals(full.chapter.totalChars, short.chapter.totalChars)
+        assertEquals(title.length, short.elementOffsets[1])
+        assertEquals(full.chapter.anchorOffsets, short.chapter.anchorOffsets)
+        assertEquals(0, short.chapter.pages.first().startCharOffset)
+        val savedOffset = title.length + 80
+        val restored = short.chapter.pages[short.chapter.pageIndexFor(savedOffset)]
+        assertTrue(savedOffset in restored.startCharOffset until restored.endCharOffset)
+    }
+
+    @Test
     fun `标题上间距在章首页生效并挤占正文行数`() {
         // 上间距 80px = 2 行：标题 1 行 + 正文最多 7 行（400 - 80 - 40 = 280）
         val content = ChapterContent(listOf(ContentElement.Paragraph(cjk(150)))) // 10 行
