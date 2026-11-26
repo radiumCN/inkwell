@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +43,7 @@ import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.TocOrderButton
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
@@ -123,6 +125,10 @@ fun BookDetailScreen(
         }
     }
     val chapters = state.chapters
+    var tocReversed by rememberSaveable { mutableStateOf(false) }
+    val shownChapters = remember(chapters, tocReversed) {
+        if (tocReversed) chapters.asReversed() else chapters
+    }
     val refreshing = state.refreshing
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -197,7 +203,7 @@ fun BookDetailScreen(
             }
 
             // 当前章在目录里的位置；没读过、或目录里找不到就是 -1（不给「定位当前章」）
-            val currentPos = if (b.readAt > 0) chapters.indexOfFirst { it.index == b.readChapterIndex } else -1
+            val currentPos = if (b.readAt > 0) shownChapters.indexOfFirst { it.index == b.readChapterIndex } else -1
             // 只让开两侧：内容滚到玻璃顶栏与手势条下面（见 AppScaffold）。顶栏高度不进 contentPadding，
             // 而是垫在头部的**封面底里面**（Header 的 topInset）—— 封面一直铺到顶栏底下，顶栏糊的就是它，
             // 停在顶部时栏和头部之间不是一道页面底色的空白
@@ -230,14 +236,21 @@ fun BookDetailScreen(
                         "目录 · 共 ${if (state.chaptersLoaded) chapters.size else b.totalChapters} 章",
                         // 读到第 1500 章时当前章虽然高亮，从前得手动滑很远才看得到。不在进页时自动滚过去：
                         // 那会把封面、简介和「继续阅读」推出屏幕。上面留两行，看得出前后是哪几章
-                        trailing = if (currentPos >= 0) {
+                        trailing = if (chapters.size > 1 || currentPos >= 0) {
                             {
-                                AppTextButton("定位当前章", onClick = {
-                                    val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
-                                    scope.launch {
-                                        if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (currentPos >= 0) {
+                                        AppTextButton("定位当前章", onClick = {
+                                            val target = TOC_FIRST_ITEM + (currentPos - 2).coerceAtLeast(0)
+                                            scope.launch {
+                                                if (motionOn) listState.animateScrollToItem(target) else listState.scrollToItem(target)
+                                            }
+                                        })
                                     }
-                                })
+                                    if (chapters.size > 1) {
+                                        TocOrderButton(reversed = tocReversed, onToggle = { tocReversed = !tocReversed })
+                                    }
+                                }
                             }
                         } else {
                             null
@@ -290,7 +303,7 @@ fun BookDetailScreen(
                     }
                     else -> {
                         // 整个目录装进一张卡（灰底白卡，同书架列表、搜索结果），从前是一章一张小卡、卡间留缝
-                        itemsIndexed(chapters, key = { _, it -> it.index }) { i, chapter ->
+                        itemsIndexed(shownChapters, key = { _, it -> it.index }) { i, chapter ->
                             val current = chapter.index == b.readChapterIndex && b.readAt > 0
                             ChapterListItem(
                                 title = chapter.title,
@@ -299,7 +312,7 @@ fun BookDetailScreen(
                                 // 读过的变灰：一眼看出读到哪、后面还剩多少（同阅读页的目录面板）
                                 read = b.readAt > 0 && chapter.index < b.readChapterIndex,
                                 onClick = { viewModel.openChapter(chapter.index) },
-                                modifier = Modifier.groupedCardItem(i, chapters.size),
+                                modifier = Modifier.groupedCardItem(i, shownChapters.size),
                             )
                         }
                     }

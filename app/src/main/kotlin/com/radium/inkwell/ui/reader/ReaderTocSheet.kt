@@ -61,6 +61,7 @@ import com.radium.inkwell.ui.components.SettingFootnote
 import com.radium.inkwell.ui.components.SettingGroup
 import com.radium.inkwell.ui.components.SheetPageHeader
 import com.radium.inkwell.ui.components.SheetPages
+import com.radium.inkwell.ui.components.TocOrderButton
 import com.radium.inkwell.ui.components.animationsEnabled
 import com.radium.inkwell.ui.components.bottomBarEnter
 import com.radium.inkwell.ui.components.bottomBarExit
@@ -79,7 +80,6 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
-import top.yukonga.miuix.kmp.icon.extended.Sort
 import top.yukonga.miuix.kmp.icon.extended.Tune
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -550,20 +550,6 @@ private fun CurrentChapterPill(
                 color = scheme.onPrimary,
             )
         }
-    }
-}
-
-/**
- * 目录标题行右边的「正序 / 倒序」。倒序开着时图标换强调色，一眼看得出现在是倒着的；读屏念当前是哪种顺序。
- */
-@Composable
-private fun TocOrderButton(reversed: Boolean, onToggle: () -> Unit, modifier: Modifier) {
-    AppIconButton(
-        onClick = onToggle,
-        modifier = modifier.semantics { stateDescription = if (reversed) "倒序" else "正序" },
-        contentColor = if (reversed) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-    ) {
-        Icon(MiuixIcons.Sort, contentDescription = "切换目录顺序")
     }
 }
 
