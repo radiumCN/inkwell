@@ -46,6 +46,11 @@ internal class SourceLoginSessions(context: Context) : SourceSessionStore {
         val updated = previous.toMutableMap()
         for ((key, value) in changes) {
             if (value == null) updated.remove(key.name) else updated[key.name] = value
+            // 登录设置可能切换搜索线路，下一次实搜再记住新站点。
+            if (value != previous[key.name] && (key == SourceSessionKey.VARIABLE ||
+                    key == SourceSessionKey.INFO || key == SourceSessionKey.HEADERS)) {
+                updated.remove(SourceSessionKey.SEARCH_ORIGIN.name)
+            }
         }
         if (updated == previous) return
         val file = file(sourceId)

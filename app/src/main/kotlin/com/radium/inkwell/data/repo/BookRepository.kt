@@ -289,7 +289,8 @@ class BookRepository(
                     }
                     check(!existing.hasLocalFile()) { "本机已有原文件" }
                     val expectedHash = existing.localFileHash
-                    if (expectedHash != null) {
+                    // 云端文件已按用户选中的备份版本校验；手动补原文件才与书架记录比对。
+                    if (verifyMetadata && expectedHash != null) {
                         check(hash == expectedHash) { "文件内容与原书不同，请选择原文件" }
                     } else if (verifyMetadata) {
                         val previousChapters = chapterDao.getByBook(restoreId)

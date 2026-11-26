@@ -188,9 +188,7 @@ fun ReaderScreen(
         ?.let { TextSelection(it.elementIndex, 0, it.text.length, it.text) }
     val textMatch by viewModel.textMatch.collectAsStateWithLifecycle()
     val searchDestination by viewModel.textSearchDestination.collectAsStateWithLifecycle()
-    val onSearchResultPage = searchDestination?.let {
-        pageUi.chapterIndex == it.match.position.chapterIndex && pageUi.pageInChapter == it.pageIndex
-    } == true
+    val onSearchResultPage = searchDestination?.isOnPage(pageUi.page?.spec) == true
     val readingHighlight = textMatch?.takeIf { it.position.chapterIndex == pageUi.chapterIndex }?.selection
         ?: speechSelection
     val density = LocalDensity.current

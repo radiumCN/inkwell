@@ -33,6 +33,7 @@ import com.radium.inkwell.core.model.asParagraph
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.core.model.textOrNull
 import com.radium.inkwell.reader.api.ReadPosition
+import com.radium.inkwell.reader.paginate.PageSpec
 import com.radium.inkwell.reader.render.TextSelection
 import com.radium.inkwell.ui.components.AppBottomSheet
 import com.radium.inkwell.ui.components.AppTextButton
@@ -73,10 +74,13 @@ data class ReaderTextSearchState(
 
 internal data class ReaderTextSearchDestination(
     val match: ReaderTextMatch,
-    val pageIndex: Int,
+    val charOffset: Int,
     val matchNumber: Int,
     val totalMatches: Int,
-)
+) {
+    fun isOnPage(page: PageSpec?): Boolean = page != null && page.chapterIndex == match.position.chapterIndex &&
+        charOffset in page.startCharOffset until page.endCharOffset
+}
 
 internal fun readerTextMatches(
     content: ChapterContent,

@@ -372,6 +372,11 @@ class BookSourceRepository(
         inLanes(dao.getEnabledMeta()) { ruleAt(it.id, it.updatedAt) }.filterNotNull()
     }
 
+    suspend fun singleEnabledForSearchWarmup(): BookSourceRule? = withContext(Dispatchers.Default) {
+        dao.getEnabledMeta().singleOrNull()?.takeIf { it.searchRetryAt <= System.currentTimeMillis() }
+            ?.let { ruleAt(it.id, it.updatedAt) }
+    }
+
     /**
      * 启用的书源，**连校验结果一起带出来**。
      *

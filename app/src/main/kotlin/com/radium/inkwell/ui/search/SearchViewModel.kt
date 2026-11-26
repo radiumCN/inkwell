@@ -273,6 +273,13 @@ class SearchViewModel(
     }
 
     init {
+        viewModelScope.launch {
+            try {
+                sourceRepo.singleEnabledForSearchWarmup()?.let { engine.warmSearchConnection(it) }
+            } catch (_: Exception) {
+                currentCoroutineContext().ensureActive()
+            }
+        }
         // 书架变动时刷新"已加入"标记（本页加书、别处加/删、跨书源加了同名书都算）。
         // 隐藏区上了锁时隐藏的书不算在架 —— 否则一次搜索就绕开了那把锁，见 searchableShelf
         viewModelScope.launch {
@@ -712,7 +719,8 @@ class SearchViewModel(
         var resultCount: Int? = null
         return try {
             val result = withTimeoutOrNull(limit) {
-                engine.search(rule, keyword, page = page, timing = timing)
+                engine.search(rule, keyword, page = page, timing = timing,
+                    rememberOrigin = page == 1 && sourceMetaById.size == 1)
             }
             currentCoroutineContext().ensureActive()
             resultCount = result?.items?.size

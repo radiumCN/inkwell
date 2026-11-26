@@ -3,10 +3,24 @@ package com.radium.inkwell.ui.reader
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
 import com.radium.inkwell.reader.api.ReadPosition
+import com.radium.inkwell.reader.paginate.PageSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ReaderTextSearchTest {
+    @Test fun `return to results follows the verified character after repagination`() {
+        val match = readerTextMatches(ChapterContent(listOf(ContentElement.Paragraph("渡口"))), 4, "", "渡口", 1).single()
+        val destination = ReaderTextSearchDestination(match, charOffset = 60, matchNumber = 1, totalMatches = 1)
+        val oldPage = PageSpec(4, 2, emptyList(), 50, 75)
+        assertTrue(destination.isOnPage(oldPage))
+        assertFalse(destination.isOnPage(oldPage.copy(endCharOffset = 60)))
+        assertTrue(destination.isOnPage(oldPage.copy(pageIndexInChapter = 3, startCharOffset = 60)))
+        assertFalse(destination.isOnPage(oldPage.copy(chapterIndex = 5)))
+        assertFalse(destination.isOnPage(null))
+    }
+
     @Test fun `match offsets follow the reader stream across dividers and images`() {
         val content = ChapterContent(
             listOf(

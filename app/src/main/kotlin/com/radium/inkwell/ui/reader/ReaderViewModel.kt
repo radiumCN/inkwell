@@ -1530,7 +1530,7 @@ class ReaderViewModel(
                 val highlight = match.copy(position = destination)
                 _textMatch.value = highlight
                 _textSearchDestination.value = ReaderTextSearchDestination(
-                    match, result.chapter.pageIndexFor(destination.charOffset), index + 1, matches.size,
+                    match, destination.charOffset, index + 1, matches.size,
                 )
                 viewModelScope.launch {
                     delay(5_000)

@@ -49,7 +49,7 @@ interface SourceSessionStore {
     }
 }
 
-enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS, WEB_USER_AGENTS }
+enum class SourceSessionKey { INFO, HEADERS, VARIABLE, COOKIES, WEB_ORIGINS, WEB_USER_AGENTS, SEARCH_ORIGIN }
 
 enum class SourceLoginDiagnostic(val message: String) {
     SCRIPT_FAILED("登录脚本执行失败，请检查规则或脚本接口兼容性"),

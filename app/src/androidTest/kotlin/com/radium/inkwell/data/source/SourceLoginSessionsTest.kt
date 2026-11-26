@@ -18,6 +18,7 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -26,6 +27,24 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class SourceLoginSessionsTest {
+    @Test
+    fun changingSourceSettingsForgetsTheLastSearchOrigin() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val id = UUID.randomUUID().toString()
+        val sessions = SourceLoginSessions(context)
+        val origin = "https://books.example/"
+        try {
+            sessions.write(id, SourceSessionKey.VARIABLE, "server-1")
+            sessions.write(id, SourceSessionKey.SEARCH_ORIGIN, origin)
+            sessions.write(id, SourceSessionKey.VARIABLE, "server-1")
+            assertEquals(origin, SourceLoginSessions(context).read(id, SourceSessionKey.SEARCH_ORIGIN))
+            sessions.write(id, SourceSessionKey.VARIABLE, "server-2")
+            assertNull(SourceLoginSessions(context).read(id, SourceSessionKey.SEARCH_ORIGIN))
+        } finally {
+            sessions.writeAll(id, mapOf(SourceSessionKey.VARIABLE to null, SourceSessionKey.SEARCH_ORIGIN to null))
+        }
+    }
+
     @Test
     @SuppressLint("SetJavaScriptEnabled")
     fun webLoginCookieIsAvailableOnlyToTheSourceThatFinishedLogin() = runBlocking {

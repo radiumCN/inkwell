@@ -1,21 +1,26 @@
 package com.radium.inkwell.core.source
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlin.coroutines.resumeWithException
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Cookie
 import okhttp3.CookieJar
+import okhttp3.Connection
+import okhttp3.EventListener
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -84,6 +89,8 @@ class FetchedPage(
     val detectedCharset: String,
     /** 响应头（同名多值保留）；脚本里的 `StrResponse.headers(name)` 靠它 */
     val headers: Map<String, List<String>> = emptyMap(),
+    /** HTTP 跳转链最后一次实际发出的方法；合成响应不提供此值。 */
+    val requestMethod: String? = null,
 )
 
 /**
@@ -157,6 +164,43 @@ class SourceHttpClient(
     }
 
     private val sharedSession = SessionClient(client, cookieJar)
+    private class WarmConnection(val origin: HttpUrl, val ready: CompletableDeferred<Unit> = CompletableDeferred())
+    @Volatile private var warming: WarmConnection? = null
+    private val warmupClient by lazy {
+        client.newBuilder().cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false).retryOnConnectionFailure(false)
+            .callTimeout(4.seconds.toJavaDuration()).build()
+    }
+
+    /** 与搜索共用连接池。只向站点根路径发匿名 HEAD，不运行规则、提交搜索或接收登录 Cookie。 */
+    internal suspend fun warmSearchConnection(url: HttpUrl) {
+        if (!url.isHttps || isPrivateNetworkLiteral(url.host)) return
+        val pending = WarmConnection(url.sourceOrigin())
+        val call = warmupClient.newCall(Request.Builder().url(pending.origin).head().build())
+        call.addEventListener(object : EventListener() {
+            override fun connectionAcquired(call: Call, connection: Connection) {
+                // HTTP/2 可同时发搜索和 HEAD；HTTP/1 要等 HEAD 归还连接。
+                if (connection.protocol() == Protocol.HTTP_2) pending.ready.complete(Unit)
+            }
+        })
+        warming = pending
+        try {
+            execute(call).close()
+        } catch (_: IOException) {
+            // 搜索仍按原路径独立发起。
+        } finally {
+            warming = null
+            pending.ready.complete(Unit)
+        }
+    }
+
+    internal suspend fun awaitSearchConnection(url: String) {
+        val pending = warming ?: return
+        if (url.toHttpUrlOrNull()?.sourceOrigin() == pending.origin) {
+            // 已在握手时给它短暂的先机；失效的预连接不能拖到四秒总超时。
+            withTimeoutOrNull(1_000) { pending.ready.await() }
+        }
+    }
     private val sourceSessions = ConcurrentHashMap<String, SessionClient>()
 
     private fun clientSession(sourceId: String?): SessionClient = if (sourceId == null) sharedSession else {
@@ -303,6 +347,7 @@ class SourceHttpClient(
                     bodyText = String(bytes, charset),
                     detectedCharset = charset.name(),
                     headers = resp.headers.toMultimap(),
+                    requestMethod = resp.request.method,
                 )
             }
         }

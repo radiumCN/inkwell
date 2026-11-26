@@ -18,6 +18,7 @@ import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.jsoup.Jsoup
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.TimeSource
 
 /** 书源业务错误（规则未配置/规则不匹配等） */
@@ -251,11 +252,21 @@ class BookSourceEngine(
         synchronized(recentPages) { recentPages.keys.removeAll { it.sourceId == source.id } }
     }
 
+    private val searchConnectionWarmed = AtomicBoolean()
+
+    suspend fun warmSearchConnection(source: BookSourceRule) = withContext(Dispatchers.IO) {
+        if (source.rateLimit != null || source.search == null || searchConnectionWarmed.get()) return@withContext
+        val origin = source.loginSessionId?.let { sessionStore?.read(it, SourceSessionKey.SEARCH_ORIGIN) }
+            ?.toHttpUrlOrNull() ?: return@withContext
+        if (searchConnectionWarmed.compareAndSet(false, true)) http.warmSearchConnection(origin)
+    }
+
     suspend fun search(
         source: BookSourceRule,
         keyword: String,
         page: Int = 1,
         timing: SearchPageTiming? = null,
+        rememberOrigin: Boolean = false,
     ): SearchPage {
         timing?.enter(SearchPageTiming.Stage.REQUEST_SETUP)
         return try {
@@ -267,19 +278,33 @@ class BookSourceEngine(
                 // 地址脚本和列表规则共用变量表，列表可以读取搜索地址里用 java.put 存下的值。
                 val js = jsContextOf(source)
                 var rewrittenKeyword: String? = null
-                val fetched = fetchByRequest(
+                val response = fetchByRequest(
                     source, searchUrl, vars, "search", js, timing,
                     onKey = { key -> if (key != keyword && key.isNotBlank()) rewrittenKeyword = key },
                 )
                 timing?.enter(SearchPageTiming.Stage.PARSE)
                 val result = parseListPage(
-                    source, "search", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
-                    pageable = pageable(searchUrl), js = js,
+                    source, "search", response, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+                    pageable = pageable(searchUrl), js = js, searchKeyword = rewrittenKeyword ?: keyword,
                 )
+                if (rememberOrigin && result.items.isNotEmpty()) rememberSearchOrigin(source, response.page)
                 rewrittenKeyword?.let { result.copy(rewrittenKeyword = it) } ?: result
             }
         } finally {
             timing?.enter(null)
+        }
+    }
+
+    private fun rememberSearchOrigin(source: BookSourceRule, page: FetchedPage) {
+        if (source.rateLimit != null) return
+        val store = sessionStore ?: return
+        val id = source.loginSessionId ?: return
+        val url = page.finalUrl.toHttpUrlOrNull()?.takeIf { it.isHttps } ?: return
+        searchConnectionWarmed.set(true)
+        try {
+            store.write(id, SourceSessionKey.SEARCH_ORIGIN, url.sourceOrigin().toString())
+        } catch (_: Exception) {
+            // 提示可丢弃。缓存写入失败时仍交付本次结果。
         }
     }
 
@@ -293,7 +318,7 @@ class BookSourceEngine(
             val searchUrl = source.searchUrl?.takeIf { it.isNotBlank() }
                 ?: throw SourceException("来源「${source.name}」未配置搜索地址")
             val vars = varsOf(source, "key" to keyword, "keyword" to keyword, "page" to page.toString())
-            fetchByRequest(source, searchUrl, vars, "search")
+            fetchByRequest(source, searchUrl, vars, "search").page
         }
 
     /**
@@ -316,9 +341,9 @@ class BookSourceEngine(
                 ?: throw SourceException("来源「${source.name}」未配置发现规则")
             val vars = varsOf(source, "key" to "", "keyword" to "", "page" to page.toString())
             val js = jsContextOf(source)
-            val fetched = fetchByRequest(source, item.url, vars, "explore", js)
+            val response = fetchByRequest(source, item.url, vars, "explore", js)
             parseListPage(
-                source, "explore", fetched, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
+                source, "explore", response, vars, rule.bookList.orEmpty(), listFieldMap(rule), nextPageRule = null,
                 pageable = pageable(item.url), js = js,
             )
         }
@@ -370,9 +395,20 @@ class BookSourceEngine(
             )
         }
         val fetched = fetchPage(source, url, "detail", render)
-        val js = jsContextOf(source, bookUrl = url)
+        val scriptBookUrl = if (splitUrlOptions(url)?.second?.inkwellSearch != null) fetched.finalUrl else url
+        val js = jsContextOf(source, bookUrl = scriptBookUrl)
         js.scriptVars.putAll(variables)
-        val pageCtx = pageContext(fetched, varsOf(source), js)
+        return parseDetailFields(info, url, fetched, pageContext(fetched, varsOf(source), js))
+    }
+
+    private fun parseDetailFields(
+        info: BookInfoRuleSet,
+        url: String,
+        fetched: FetchedPage,
+        pageCtx: EvalContext,
+        requireTitle: Boolean = false,
+    ): RemoteBookDetail? {
+        val js = pageCtx.js
         // Legado 先跑 init，再在它**选中的那块内容**上求后面的字段（setContent(getElement(init))）。
         // 常见两种写法：@put:{n,a,k} 存变量给后面 @get:{n}；`$.data` / `class.info` 切换求值内容。
         // 从前只为副作用跑一遍，后一种的 `"init":"$.data"` 配 `"name":"$.book_name"` 会全部取空，
@@ -381,6 +417,7 @@ class BookSourceEngine(
             ?.let { initContentOf(it, pageCtx) }
             ?: pageCtx
         val title = evalField("detail", "title", info.name, ctx)
+        if (requireTitle && title.isNullOrBlank()) return null
         val author = evalField("detail", "author", info.author, ctx)
         js.book.name = title.orEmpty()
         js.book.author = author.orEmpty()
@@ -404,8 +441,10 @@ class BookSourceEngine(
 
         // 缺省：详情页即目录页。书的地址带着请求选项（`,{"method":"POST",…}`）的照原样用：
         // 跳转后的 finalUrl 把选项丢了，接口源的目录变成一次不带参数的 GET（画涯爱子：详情规则是空的，目录一章都没有）
-        val tocUrl = tocRule?.let { resolveUrl(fetched.finalUrl, it) }
-            ?: url.takeIf { splitUrlOptions(it) != null }
+        val resolvedToc = tocRule?.let { resolveUrl(fetched.finalUrl, it) }
+        val urlOptions = splitUrlOptions(url)?.second
+        val tocUrl = resolvedToc?.takeUnless { urlOptions?.inkwellSearch != null && it == fetched.finalUrl }
+            ?: url.takeIf { urlOptions != null }
             ?: fetched.finalUrl
         return RemoteBookDetail(
             title = title.orEmpty(), // 可能为空 → 调用方回落到搜索结果的书名
@@ -802,7 +841,7 @@ class BookSourceEngine(
     private fun recentKey(source: BookSourceRule, url: String, render: Boolean): RecentPageKey? {
         if (trace != null) return null
         val opt = splitUrlOptions(url)?.second
-        if (opt != null && (opt.body != null || !(opt.method ?: "GET").equals("GET", ignoreCase = true))) return null
+        if (opt != null && (opt.inkwellSearch != null || opt.body != null || !(opt.method ?: "GET").equals("GET", ignoreCase = true))) return null
         return RecentPageKey(source.id, source.loginSessionId, render, pageKey(url))
     }
 
@@ -831,6 +870,18 @@ class BookSourceEngine(
     private fun varsOf(source: BookSourceRule, vararg extra: Pair<String, String>): Map<String, String> =
         mapOf("baseUrl" to source.baseUrl, *extra)
 
+    private class ListResponse(val page: FetchedPage, val publicRedirect: Boolean) {
+        fun detailUrl(source: BookSourceRule, search: SearchPageRef): String {
+            val final = page.finalUrl.toHttpUrlOrNull()
+            if (publicRedirect && final != null && final.username.isEmpty() && final.password.isEmpty() &&
+                final.query == null && final.fragment == null) return page.finalUrl
+            // 这条地址会进书架和备份。只保存用户的搜索输入；脚本产生的地址、头和请求体随会话重新求值。
+            val origin = source.baseUrl.toHttpUrlOrNull()?.sourceOrigin() ?: final?.sourceOrigin()
+            return (origin?.toString() ?: "https://inkwell.invalid/") + "," +
+                VARS_JSON.encodeToString(UrlOptions(inkwellSearch = search))
+        }
+    }
+
     private suspend fun fetchByRequest(
         source: BookSourceRule,
         urlTemplate: String,
@@ -838,8 +889,9 @@ class BookSourceEngine(
         stage: String,
         js: JsContext = jsContextOf(source),
         timing: SearchPageTiming? = null,
+        forceRender: Boolean = false,
         onKey: ((String) -> Unit)? = null,
-    ): FetchedPage {
+    ): ListResponse {
         // 地址里的 {{}} 同样按 Legado 语义展开（JS 表达式 / 嵌套规则），不只是变量替换
         val urlCtx = urlContext(source, vars, js)
         val keyword = vars["keyword"].orEmpty()
@@ -874,7 +926,12 @@ class BookSourceEngine(
             .replace(KEYWORD_MARK, encodeUrlComponent(keyword, charset))
         val url = resolveUrl(source.baseUrl, encodeNonAsciiQuery(expanded, charset))
         timing?.enter(SearchPageTiming.Stage.FETCH)
-        return doFetch(source, stage, url, method, body, headers, charset, urlCtx, opt.webView)
+        if (stage == "search") http.awaitSearchConnection(url)
+        val page = doFetch(source, stage, url, method, body, headers, charset, urlCtx, opt.webView || forceRender)
+        // 公开的 GET 详情落地页可直接打开，常见的 GBK 搜索也无需重跑一遍。依赖请求选项的则重放。
+        val publicRedirect = page.requestMethod == "GET" && page.finalUrl != url && opt.headers.isEmpty() &&
+            !opt.webView && rawUrl == urlTemplate && source.loginSessionId == null
+        return ListResponse(page, publicRedirect)
     }
 
     private suspend fun render(source: BookSourceRule, target: String, headers: RequestHeaders): FetchedPage? {
@@ -903,6 +960,12 @@ class BookSourceEngine(
     /** 详情、目录与正文的地址也允许声明方法、请求头和 WebView。 */
     private suspend fun fetchUrl(source: BookSourceRule, url: String, stage: String, render: Boolean): FetchedPage {
         val (target, options) = splitUrlOptions(url) ?: (url to UrlOptions())
+        options.inkwellSearch?.let { search ->
+            val template = source.searchUrl?.takeIf { it.isNotBlank() } ?: throw SourceException("来源未配置搜索地址")
+            val vars = varsOf(source, "key" to search.key, "keyword" to search.key, "page" to search.page.toString())
+            // 从原入口走同一条 HTTP 跳转链，307/308 保留 POST，302/303 按客户端语义转为 GET。
+            return fetchByRequest(source, template, vars, stage, forceRender = render).page
+        }
         val method = options.method ?: "GET"
         val charset = options.charset ?: source.charset
         val vars = varsOf(source)
@@ -1109,16 +1172,23 @@ class BookSourceEngine(
     private fun parseListPage(
         source: BookSourceRule,
         stage: String,
-        fetched: FetchedPage,
+        response: ListResponse,
         vars: Map<String, String>,
         listRule: String,
         fields: Map<String, String>,
         nextPageRule: String?,
         pageable: Boolean = false,
         js: JsContext = jsContextOf(source),
+        searchKeyword: String? = null,
     ): SearchPage {
+        val fetched = response.page
         val ctx = pageContext(fetched, vars, js)
-        val items = evalList(stage, listRule, ctx).mapNotNull { node ->
+        val nodes = evalList(stage, listRule, ctx)
+        if (searchKeyword != null && nodes.isEmpty()) {
+            val item = searchDetailResult(source, response, ctx, searchKeyword)
+            return SearchPage(listOfNotNull(item), hasMore = false)
+        }
+        val items = nodes.mapNotNull { node ->
             // 每条结果拷一份页面的变量表（同 Legado：每个 searchBook 拷一份 ruleData 的变量）：
             // 一条结果的规则里 put 的，不串到下一条
             val itemCtx = node.copy(
@@ -1150,6 +1220,27 @@ class BookSourceEngine(
         val hasNextRule = nextPageRule != null &&
             !evalUrlField(stage, "nextPage", nextPageRule, ctx).isNullOrBlank()
         return SearchPage(items, hasNextRule || (pageable && items.isNotEmpty()))
+    }
+
+    private fun searchDetailResult(
+        source: BookSourceRule, response: ListResponse, ctx: EvalContext, keyword: String,
+    ): SearchResult? {
+        val info = source.ruleBookInfo ?: return null
+        if (info.name.isNullOrBlank()) return null
+        val url = response.detailUrl(source, SearchPageRef(ctx.vars.getValue("key"), ctx.vars.getValue("page").toInt()))
+        ctx.js.book.bookUrl = response.page.finalUrl
+        val detail = parseDetailFields(info, url, response.page, ctx, requireTitle = true) ?: return null
+        // 有的站把未命中的查询跳到推荐书。缺少作者时，只凭通用 h1 也可能把搜索提示当成书名。
+        val query = keyword.trim().removeSurrounding("《", "》")
+        val title = detail.title.trim().removeSurrounding("《", "》")
+        val author = detail.author
+        val matches = title.equals(query, ignoreCase = true) || (!author.isNullOrBlank() &&
+            (title.contains(query, ignoreCase = true) || author.contains(query, ignoreCase = true)))
+        if (query.isEmpty() || !matches) return null
+        return SearchResult(
+            title = detail.title, author = detail.author, coverUrl = detail.coverUrl, intro = detail.intro,
+            bookUrl = url, sourceId = source.id, sourceName = source.name, variables = detail.variables,
+        )
     }
 
     private fun evalList(
@@ -1383,6 +1474,7 @@ internal fun pageKey(url: String): String {
 }
 
 /** Legado 的地址选项后缀：`url,{"method":"POST","body":"…"}`（常用单引号） */
+@kotlinx.serialization.Serializable
 internal data class UrlOptions(
     val method: String? = null,
     val body: String? = null,
@@ -1393,7 +1485,11 @@ internal data class UrlOptions(
      * 结果是页面加载后再由脚本拉回来的站（七猫的网页版搜索），静态抓到的只是一个空壳。
      */
     val webView: Boolean = false,
+    val inkwellSearch: SearchPageRef? = null,
 )
+
+@kotlinx.serialization.Serializable
+internal data class SearchPageRef(val key: String, val page: Int)
 
 /**
  * 找到地址里真正开启 `,{…}` 选项块的下标，找不到返回 -1。
@@ -1488,6 +1584,9 @@ private fun parseUrlOptions(text: String): UrlOptions? {
         else -> b.toString()
     }
     return UrlOptions(
+        inkwellSearch = obj["inkwellSearch"]?.let {
+            runCatching { kotlinx.serialization.json.Json.decodeFromJsonElement(SearchPageRef.serializer(), it) }.getOrNull()
+        },
         method = str("method")?.uppercase(),
         body = body,
         charset = str("charset"),
