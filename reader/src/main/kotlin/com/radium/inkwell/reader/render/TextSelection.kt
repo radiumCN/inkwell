@@ -46,9 +46,17 @@ data class SelectionHandlePosition(val anchor: Offset, val lineCenterY: Float)
 /** 选区和手柄共用实际排版的字框，包含对齐后行末的字符宽度。 */
 internal inline fun TextLayoutResult.forEachSelectionBox(start: Int, end: Int, action: (Rect) -> Unit) {
     val bounds = multiParagraph.fillBoundingBoxes(TextRange(start, end), FloatArray((end - start) * 4), 0)
-    for (i in bounds.indices step 4) {
-        if (bounds[i] < bounds[i + 2]) {
-            action(Rect(bounds[i], bounds[i + 1], bounds[i + 2], bounds[i + 3]))
+    // 批量字框的纵坐标可能从选区所在的子段落重新起算；中文两端对齐会给每行建一个子段落。
+    for (line in getLineForOffset(start)..getLineForOffset(end - 1)) {
+        val top = getLineTop(line)
+        val bottom = getLineBottom(line)
+        val from = maxOf(start, getLineStart(line))
+        val to = minOf(end, getLineEnd(line))
+        for (offset in from until to) {
+            val i = (offset - start) * 4
+            val left = bounds[i]
+            val right = bounds[i + 2]
+            if (left < right) action(Rect(left, top, right, bottom))
         }
     }
 }

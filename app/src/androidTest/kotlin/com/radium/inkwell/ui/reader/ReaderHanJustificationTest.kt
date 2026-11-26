@@ -5,21 +5,29 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.radium.inkwell.core.model.ChapterContent
+import com.radium.inkwell.core.model.ContentElement
+import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
 import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.reader.measure.ResolvedTextStyle
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageItem
 import com.radium.inkwell.reader.paginate.PageSpec
+import com.radium.inkwell.reader.paginate.Paginator
 import com.radium.inkwell.reader.render.RenderablePage
 import com.radium.inkwell.reader.render.SelectionEnd
 import com.radium.inkwell.reader.render.TextSelection
+import com.radium.inkwell.reader.render.drawPage
 import com.radium.inkwell.reader.render.drawPageItems
 import com.radium.inkwell.reader.render.selectionHandlePosition
 import kotlin.math.roundToInt
@@ -83,47 +91,130 @@ class ReaderHanJustificationTest {
 
     @Test
     fun highlightReachesSelectionHandleWhenSelectionEndsAtWrappedHanLine() {
+        assertWrappedHanSelectionHighlight(firstVisibleLine = 0, selectedLine = 0)
+    }
+
+    @Test
+    fun highlightStaysOnSelectedHanLineAfterWrap() {
+        assertWrappedHanSelectionHighlight(firstVisibleLine = 0, selectedLine = 1)
+        assertWrappedHanSelectionHighlight(firstVisibleLine = 1, selectedLine = 1)
+    }
+
+    @Test
+    fun paginatedSelectionFollowsReflowedReaderSettings() {
+        val sample = "晨雾沿着旧码头慢慢散开，渡船停在河心，岸边的灯还亮着。".repeat(72)
+        val chapter = ChapterContent(listOf(ContentElement.Paragraph("港湾"), ContentElement.Paragraph(sample)))
+        val presets = listOf(
+            ReaderSettings(),
+            ReaderSettings(
+                fontSizeSp = ReaderSettings.FONT_SIZE_MIN, lineSpacingMult = 1.2f,
+                firstLineIndentEm = 0f, paragraphSpacingEm = 0f,
+                marginHorizontalDp = 8f, marginVerticalDp = 0f, showHeader = false, showFooter = false,
+                fontId = ReaderSettings.FONT_SERIF,
+            ),
+            ReaderSettings(
+                fontSizeSp = ReaderSettings.FONT_SIZE_MAX, lineSpacingMult = 2.2f,
+                letterSpacingEm = 0.15f, paragraphSpacingEm = 1f,
+                marginHorizontalDp = 48f, marginVerticalDp = 48f, bodyFontWeight = ReaderSettings.FONT_WEIGHT_BOLD,
+                fontId = ReaderSettings.FONT_SANS,
+            ),
+        )
+        val paginator = Paginator(facade)
+        for (settings in presets) {
+            for (viewport in listOf(IntSize(360, 640), IntSize(640, 360))) {
+                for (justify in listOf(true, false)) {
+                    val layout = buildLayoutSpec(
+                        viewport, settings.copy(justify = justify), Density(1f),
+                        cutout = IntInsets(0, 0, 0, 0), infoLineHeight = 18.sp, speechInsetPx = 0f,
+                    )
+                    val result = paginator.paginate(0, "渡口", chapter, layout)
+                    val pageSpec = result.chapter.pages.first { page ->
+                        page.items.filterIsInstance<PageItem.TextSlice>().any { it.startLine > 0 }
+                    }
+                    val slice = pageSpec.items.filterIsInstance<PageItem.TextSlice>().first { it.startLine > 0 }
+                    val page = RenderablePage(pageSpec, result.measured)
+                    val paragraph = result.measured.getValue(slice.elementIndex)
+                    val textLayout = paragraph.renderHandle as TextLayoutResult
+                    val line = slice.startLine
+                    val start = textLayout.getLineStart(line) + 1
+                    val end = start + 2
+                    assertTrue(end < textLayout.getLineEnd(line, visibleEnd = true))
+                    val selected = TextSelection(slice.elementIndex, start, end, paragraph.text.substring(start, end))
+                    val startHandle = checkNotNull(page.selectionHandlePosition(selected, SelectionEnd.START, layout))
+                    val endHandle = checkNotNull(page.selectionHandlePosition(selected, SelectionEnd.END, layout))
+                    val lineHeight = paragraph.lineBottom(line) - paragraph.lineTop(line)
+                    val bottom = layout.marginTopPx + layout.headerHeightPx + slice.yTopInPage + lineHeight
+                    val description = "viewport=$viewport, font=${settings.fontSizeSp}, justify=$justify"
+                    assertEquals(description, bottom, startHandle.anchor.y, 0.1f)
+                    assertEquals(description, bottom, endHandle.anchor.y, 0.1f)
+                    val x = ((startHandle.anchor.x + endHandle.anchor.x) / 2).roundToInt()
+                    val y = bottom.roundToInt() - 3
+                    val plain = renderPage(layout) { drawPage(page, layout, settings.theme) }
+                    val highlighted = renderPage(layout) { drawPage(page, layout, settings.theme, selected) }
+                    try {
+                        assertTrue(description, plain.getPixel(x, y) != highlighted.getPixel(x, y))
+                        assertEquals(description, plain.getPixel(x, y + 6), highlighted.getPixel(x, y + 6))
+                    } finally {
+                        plain.recycle()
+                        highlighted.recycle()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun assertWrappedHanSelectionHighlight(firstVisibleLine: Int, selectedLine: Int) {
         val sample = "晨雾沿着旧码头慢慢散开渡船还停在河心岸边的钟声已经响了三遍"
         val glyphWidth = layout("晨", 200, justify = false).getLineRight(0) - 2 * style.fontSizePx
         val width = (glyphWidth * 9.65f).roundToInt()
         val paragraph = facade.measureParagraph(sample, style, width)
         val textLayout = paragraph.renderHandle as TextLayoutResult
-        assertTrue(textLayout.lineCount > 1)
-        val end = textLayout.getLineEnd(0)
+        val lastLine = textLayout.lineCount - 1
+        assertTrue(lastLine > selectedLine)
+        val end = textLayout.getLineEnd(selectedLine)
         val start = end - 2
         val selection = TextSelection(0, start, end, sample.substring(start, end))
-        val height = textLayout.getLineBottom(textLayout.lineCount - 1)
+        val sliceTop = textLayout.getLineTop(firstVisibleLine)
+        val height = textLayout.getLineBottom(lastLine) - sliceTop
         val layout = LayoutSpec(
             viewportWidthPx = width + 16, viewportHeightPx = height.roundToInt() + 8,
             marginLeftPx = 8f, marginTopPx = 0f, marginRightPx = 8f, marginBottomPx = 0f,
             headerHeightPx = 0f, footerHeightPx = 0f, fontSizePx = style.fontSizePx,
             lineHeightPx = style.lineHeightPx, paragraphSpacingPx = 0f,
         )
-        val slice = PageItem.TextSlice(0, 0, textLayout.lineCount - 1, 0f, height, false)
+        val slice = PageItem.TextSlice(0, firstVisibleLine, lastLine, 0f, height, false)
         val page = RenderablePage(PageSpec(0, 0, listOf(slice), 0, sample.length), mapOf(0 to paragraph))
         val handle = checkNotNull(page.selectionHandlePosition(selection, SelectionEnd.END, layout))
         val sampleX = handle.anchor.x.roundToInt()
         val sampleY = handle.anchor.y.roundToInt() - 3
-        fun render(selected: TextSelection?): Bitmap {
-            val bitmap = Bitmap.createBitmap(layout.viewportWidthPx, layout.viewportHeightPx, Bitmap.Config.ARGB_8888)
-            CanvasDrawScope().draw(
-                Density(1f), LayoutDirection.Ltr, Canvas(bitmap.asImageBitmap()),
-                Size(bitmap.width.toFloat(), bitmap.height.toFloat()),
-            ) {
-                drawPageItems(page, layout, ReaderTheme.PAPER, originY = 0f, selection = selected)
-            }
-            return bitmap
+        val plain = renderPage(layout) { drawPageItems(page, layout, ReaderTheme.PAPER, originY = 0f) }
+        val highlighted = renderPage(layout) {
+            drawPageItems(page, layout, ReaderTheme.PAPER, originY = 0f, selection = selection)
         }
-
-        val plain = render(null)
-        val highlighted = render(selection)
         try {
-            assertTrue(highlighted.getPixel(sampleX - 2, sampleY) != plain.getPixel(sampleX - 2, sampleY))
+            assertTrue(
+                "选区高亮应当贴在第 ${selectedLine + 1} 行的手柄上方",
+                highlighted.getPixel(sampleX - 2, sampleY) != plain.getPixel(sampleX - 2, sampleY),
+            )
             assertEquals(plain.getPixel(sampleX + 2, sampleY), highlighted.getPixel(sampleX + 2, sampleY))
+            if (selectedLine > firstVisibleLine) {
+                val precedingY = (textLayout.getLineBottom(selectedLine - 1) - sliceTop).roundToInt() - 3
+                assertEquals(plain.getPixel(sampleX - 2, precedingY), highlighted.getPixel(sampleX - 2, precedingY))
+            }
         } finally {
             plain.recycle()
             highlighted.recycle()
         }
+    }
+
+    private fun renderPage(layout: LayoutSpec, draw: DrawScope.() -> Unit): Bitmap {
+        val bitmap = Bitmap.createBitmap(layout.viewportWidthPx, layout.viewportHeightPx, Bitmap.Config.ARGB_8888)
+        CanvasDrawScope().draw(
+            Density(1f), LayoutDirection.Ltr, Canvas(bitmap.asImageBitmap()),
+            Size(bitmap.width.toFloat(), bitmap.height.toFloat()),
+            block = draw,
+        )
+        return bitmap
     }
 
     @Test
