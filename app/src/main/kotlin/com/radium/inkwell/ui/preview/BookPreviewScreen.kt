@@ -23,6 +23,7 @@ import com.radium.inkwell.ui.components.pageScroll
 import com.radium.inkwell.ui.components.AppToolbar
 import com.radium.inkwell.ui.components.BackButton
 import com.radium.inkwell.ui.components.SectionHeader
+import com.radium.inkwell.ui.components.TocOrderButton
 import com.radium.inkwell.ui.components.ToolbarTitle
 import com.radium.inkwell.ui.components.groupedCardItem
 import com.radium.inkwell.ui.components.rememberToolbarTitleReveal
@@ -32,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +67,11 @@ fun BookPreviewScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val chapters = state.chapters
+    var tocReversed by rememberSaveable { mutableStateOf(false) }
+    val shownChapters = remember(chapters, tocReversed) {
+        if (tocReversed) chapters.asReversed() else chapters
+    }
 
     // 走共享的 CollectMessages：新提示直接替换正在显示的那条。从前这里自己 collect + showSnackbar，
     // showSnackbar 挂到上一条消失才返回 —— 连点「加入」「开始阅读」时提示一条条排队，几秒后才轮到
@@ -160,13 +167,22 @@ fun BookPreviewScreen(
                     return@LazyColumn
                 }
                 // 目录：分组小标题 + 整个装进一张卡，同书籍详情
-                item { SectionHeader("目录 · 共 ${state.chapters.size} 章") }
-                itemsIndexed(state.chapters, key = { _, it -> it.index }) { i, chapter ->
+                item {
+                    SectionHeader(
+                        "目录 · 共 ${chapters.size} 章",
+                        trailing = if (chapters.size > 1) {
+                            { TocOrderButton(reversed = tocReversed, onToggle = { tocReversed = !tocReversed }) }
+                        } else {
+                            null
+                        },
+                    )
+                }
+                itemsIndexed(shownChapters, key = { _, it -> it.index }) { i, chapter ->
                     ChapterListItem(
                         title = chapter.title,
                         selected = false,
                         onClick = { viewModel.read(chapter.index) },
-                        modifier = Modifier.groupedCardItem(i, state.chapters.size),
+                        modifier = Modifier.groupedCardItem(i, shownChapters.size),
                         enabled = !state.busy,
                     )
                 }
