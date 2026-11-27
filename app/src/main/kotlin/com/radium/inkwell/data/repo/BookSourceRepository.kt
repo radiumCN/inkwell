@@ -94,22 +94,6 @@ class BookSourceRepository(
     }
 
     /**
-     * 导入书源 JSON（Legado 原生格式，数组或单对象）。只收小说源（[BookSourceTypes.TEXT]）；
-     * 音频/漫画/文件/视频源按类型过滤并计入 skipped。规则原文原样入库，运行期由引擎直接求值。
-     */
-    suspend fun importJson(text: String): Result<ImportReport> = withContext(Dispatchers.Default) {
-        try {
-            val (rules, skipped) = parseImport(text)
-            Result.success(upsertRules(rules, skipped))
-        } catch (e: CancellationException) {
-            // 导入要写库（挂起）：用户离开页面是取消，别包成「导入失败」吞掉
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
      * 解析整份 JSON、逐条 fromJson/toJson：书源合集动辄几 MB、几千条，在主线程上跑就是几秒冻屏
      * 乃至 ANR —— 调用方是 viewModelScope（Main.immediate），所以入口自己切到 Default。
      */
@@ -131,7 +115,7 @@ class BookSourceRepository(
     suspend fun confirmImport(preview: ImportPreview, group: String?): ImportReport =
         withContext(Dispatchers.Default) {
             val write: suspend () -> ImportReport = {
-                upsertRules(preview.rules, preview.skipped, preserveGroups = true, newGroup = group?.trim())
+                upsertRules(preview.rules, preview.skipped, newGroup = group?.trim())
             }
             db?.withWriteTransaction { write() } ?: write()
         }
@@ -174,28 +158,25 @@ class BookSourceRepository(
     }
 
     /**
-     * 批量入库：逐条构造 entity（失败只跳过该条），去重后单事务写入。
+     * 批量入库：逐条构造 entity（失败只跳过该条），将预览时已去重的规则或单个新建来源一起写入。
      * 单事务避免逐条写在真机上被中断只写进第一条的问题。
      */
     private suspend fun upsertRules(
         rules: List<BookSourceRule>,
         skipped: List<String> = emptyList(),
-        preserveGroups: Boolean = false,
         newGroup: String? = null,
     ): ImportReport {
-        // 同 id（= bookSourceUrl）保留最后一个，避免同事务重复主键
-        val deduped = rules.associateBy { it.id }.values
         // 只按本次涉及的 id 逐条读旧行，禁止 getAll()+json 撑爆 CursorWindow
-        val existingById = deduped.mapNotNull { rule ->
+        val existingById = rules.mapNotNull { rule ->
             loadEntity(rule.id)?.let { rule.id to it }
         }.toMap()
         val now = System.currentTimeMillis()
 
-        val toWrite = ArrayList<BookSourceEntity>(deduped.size)
+        val toWrite = ArrayList<BookSourceEntity>(rules.size)
         val failed = ArrayList<String>()
         var added = 0
         var updated = 0
-        deduped.forEach { rule ->
+        rules.forEach { rule ->
             try {
                 val existing = existingById[rule.id]
                 val live = existing?.takeIf { !it.deleted }
@@ -217,8 +198,7 @@ class BookSourceRepository(
                         ?.takeIf { !it.deleted && it.json == ruleJson && it.name == rule.name }
                         ?.updatedAt
                         ?: now,
-                    groupName = if (preserveGroups) live?.groupName ?: newGroup ?: rule.group
-                    else importedGroup(existing, rule),
+                    groupName = live?.groupName ?: newGroup ?: rule.group,
                     checkStatus = keepCheck?.checkStatus ?: CheckStatus.UNCHECKED,
                     checkMessage = keepCheck?.checkMessage.orEmpty(),
                     respondTime = keepCheck?.respondTime ?: -1,
@@ -229,7 +209,7 @@ class BookSourceRepository(
                     searchAt = keepCheck?.searchAt ?: 0,
                     searchRetryAt = keepCheck?.searchRetryAt ?: 0,
                 )
-                if (existing == null || (preserveGroups && live == null)) added++ else updated++
+                if (live == null) added++ else updated++
             } catch (e: Exception) {
                 failed += "${rule.name}: ${e.message?.take(60)}"
             }
@@ -392,6 +372,11 @@ class BookSourceRepository(
         inLanes(dao.getEnabledMeta()) { ruleAt(it.id, it.updatedAt) }.filterNotNull()
     }
 
+    suspend fun singleEnabledForSearchWarmup(): BookSourceRule? = withContext(Dispatchers.Default) {
+        dao.getEnabledMeta().singleOrNull()?.takeIf { it.searchRetryAt <= System.currentTimeMillis() }
+            ?.let { ruleAt(it.id, it.updatedAt) }
+    }
+
     /**
      * 启用的书源，**连校验结果一起带出来**。
      *
@@ -484,20 +469,6 @@ class BookSourceRepository(
         val idSet = ids.toSet()
         val items = idSet.mapNotNull { id -> loadEntity(id)?.json }
         items.joinToString(",\n", prefix = "[\n", postfix = "\n]")
-    }
-
-    /**
-     * 重新导入时分组听谁的。
-     *
-     * 用户在书源管理里改过分组（库里的分组 ≠ 旧规则自带的分组），就保留用户的 ——
-     * 从前一律用新规则的，重导一次合集，辛苦整理的分组全回到作者写的那个。
-     * 没改过就跟着新规则走：作者在新版里调整了分组，用户理应拿到。
-     */
-    private fun importedGroup(existing: BookSourceEntity?, rule: BookSourceRule): String {
-        if (existing == null || existing.deleted) return rule.group
-        val oldRuleGroup = runCatching { BookSourceRule.fromJson(existing.json).group }.getOrNull()
-            ?: return existing.groupName
-        return if (existing.groupName == oldRuleGroup) rule.group else existing.groupName
     }
 
     private suspend fun loadEntity(id: String): BookSourceEntity? =

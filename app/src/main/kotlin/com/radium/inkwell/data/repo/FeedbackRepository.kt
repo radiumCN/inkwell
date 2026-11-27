@@ -87,6 +87,14 @@ data class FeedbackDiscussion(
     val nextCursor: String?,
 )
 
+enum class FeedbackLogUploadResult {
+    SUCCESS,
+    FORBIDDEN,
+    TOO_LARGE,
+    RATE_LIMITED,
+    UNCONFIRMED,
+}
+
 /**
  * 意见反馈：POST 到中转服务器，服务端据此在公开仓库建一个 GitHub issue。
  *
@@ -158,6 +166,36 @@ class FeedbackRepository(
             null
         }
     }
+
+    suspend fun appendLogs(receipt: FeedbackReceipt, uploadId: String, logs: File): FeedbackLogUploadResult =
+        withContext(Dispatchers.IO) {
+            val token = receipt.replyToken?.takeIf(String::isNotBlank)
+                ?: return@withContext FeedbackLogUploadResult.FORBIDDEN
+            if (feedbackRepo(receipt) == null) return@withContext FeedbackLogUploadResult.FORBIDDEN
+            val url = baseUrl.toHttpUrlOrNull()?.newBuilder()
+                ?.addPathSegments("api/v1/feedback")?.addPathSegment(receipt.issue.toString())
+                ?.addPathSegment("logs")?.addPathSegment(uploadId)?.build()
+                ?: return@withContext FeedbackLogUploadResult.UNCONFIRMED
+            try {
+                val request = Request.Builder().url(url)
+                    .header("Authorization", "Bearer $token")
+                    .put(logs.asRequestBody(ZIP_MEDIA))
+                    .build()
+                attachmentHttp.newCall(request).execute().use { response ->
+                    when (response.code) {
+                        201, 204 -> FeedbackLogUploadResult.SUCCESS
+                        403 -> FeedbackLogUploadResult.FORBIDDEN
+                        413 -> FeedbackLogUploadResult.TOO_LARGE
+                        429 -> FeedbackLogUploadResult.RATE_LIMITED
+                        else -> FeedbackLogUploadResult.UNCONFIRMED
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                FeedbackLogUploadResult.UNCONFIRMED
+            }
+        }
 
     private fun feedbackRepo(receipt: FeedbackReceipt): String? {
         val issue = receipt.url.toHttpUrlOrNull() ?: return null

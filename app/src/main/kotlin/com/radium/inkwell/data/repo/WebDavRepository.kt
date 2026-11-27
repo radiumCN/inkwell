@@ -213,13 +213,16 @@ class WebDavRepository(
         // 试读未上架不进备份：从没成为用户书架上的书，同步出去只会在别的设备
         // 冒出一本看不见的书，或在用户点「不加入」之后变成凭空墓碑。
         // 墓碑仍要带走（inShelf 可能是 false —— 删过又试读过），合并靠它表达「删过」。
-        books = bookDao.getAll().filter { it.inShelf || it.deleted || it.removedFromShelf }.map { b ->
+        books = bookDao.getAll().filter {
+            it.type != BookType.LOCAL_SERIES && (it.inShelf || it.deleted || it.removedFromShelf)
+        }.map { b ->
             BackupBook(
                 id = b.id, type = b.type, title = b.title, author = b.author,
                 intro = b.intro,
                 // coverPath 这个列名对两类书是两种东西：网络书存的是远程 URL（跨设备可用），
                 // 本地书存的是本机绝对路径（换设备就是死路径）。只把前者带走。
                 coverUrl = b.coverPath?.takeIf { b.type == BookType.NET },
+                localFileHash = b.localFileHash?.takeIf { b.type != BookType.NET },
                 sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
                 totalChapters = b.totalChapters,
                 readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
@@ -337,6 +340,7 @@ class WebDavRepository(
                     BookEntity(
                         id = b.id, type = b.type, title = b.title, author = b.author,
                         intro = b.intro, localPath = null, coverPath = remoteCover(b),
+                        localFileHash = b.localFileHash?.takeIf { b.type != BookType.NET },
                         sourceId = b.sourceId, bookUrl = b.bookUrl, tocUrl = b.tocUrl,
                         totalChapters = b.totalChapters,
                         readChapterIndex = b.readChapterIndex, readCharOffset = b.readCharOffset,
@@ -359,7 +363,7 @@ class WebDavRepository(
     private suspend fun applySources(merged: BackupMerger.MergeResult): Int {
         var applied = 0
         merged.changedSources.forEach { s ->
-            // 与 importJson 一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
+            // 与来源导入一致：远端若带了漫画/听书/视频源，别写进只跑小说引擎的本地库
             if (!isTextNovelSourceJson(s.json)) return@forEach
             // 本地测速和校验只适用于当前这份规则。规则相同的启停/分组改动保留它们。
             val existing = sourceDao.getById(s.id)
@@ -453,6 +457,7 @@ internal fun applySyncedBook(existing: BookEntity, b: BackupBook): SyncedBook {
         // 只补空，不覆盖：本地书这一列是有效的本机文件路径，
         // 而远端对本地书永远给 null —— 拿 null 盖上去等于把封面弄丢。
         coverPath = existing.coverPath ?: remoteCover(b),
+        localFileHash = existing.localFileHash ?: b.localFileHash?.takeIf { existing.type != BookType.NET },
         totalChapters = when {
             sameSource -> maxOf(existing.totalChapters, b.totalChapters)
             // 换了源就按新源的章节数来，旧源的更大值对新目录没有意义

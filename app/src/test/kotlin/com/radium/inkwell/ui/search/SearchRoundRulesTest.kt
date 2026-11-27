@@ -80,6 +80,42 @@ class SearchRoundRulesTest {
         assertEquals(listOf(title, author), orderSearchHits(listOf(author, title), "同名", SearchSort.RELEVANCE))
     }
 
+    @Test fun `search accepts title and author matches with common formatting variations`() {
+        val keyword = normalizeSearchMatch(" 《Ｒｅ：刀剑神域》 ")
+        assertEquals(SearchMatch.EXACT_TITLE, result("Re: 刀剑・神域", "/1").matchSearch(keyword))
+        assertEquals(SearchMatch.PARTIAL_TITLE, result("Re: 刀剑神域（完本）", "/2").matchSearch(keyword))
+        val author = result("另一部作品", "/3", author = "作者：川原　砾")
+        assertEquals(SearchMatch.EXACT_AUTHOR, author.matchSearch(normalizeSearchMatch("川原砾")))
+        assertEquals(SearchMatch.PARTIAL_AUTHOR, author.matchSearch(normalizeSearchMatch("川原")))
+    }
+
+    @Test fun `unrelated source items are not matches but still count for page history`() {
+        val item = result("热门推荐", "/1", author = null)
+        assertEquals(SearchMatch.NONE, item.matchSearch(normalizeSearchMatch("目标")))
+        assertEquals(SearchMatch.NONE, item.matchSearch(normalizeSearchMatch("《 ・ 》")))
+        assertTrue(SearchPageHistory().canContinue("a", SearchPage(listOf(item), hasMore = true)))
+    }
+
+    @Test fun `rewritten search matches stay with that source and keep their relevance`() {
+        val query = "书名@子源"
+        val exact = result("书名", "/exact")
+        val partial = result("书名续篇", "/partial")
+        val unrelated = result("子源作品", "/unrelated")
+        val page = SearchPage(listOf(partial, unrelated, exact), true, rewrittenKeyword = "书名")
+        val matches = page.matchingResults(normalizeSearchMatch(query))
+        assertEquals(mapOf(partial to SearchMatch.PARTIAL_TITLE, exact to SearchMatch.EXACT_TITLE), matches)
+        assertTrue(page.copy(rewrittenKeyword = null).matchingResults(normalizeSearchMatch(query)).isEmpty())
+        val literal = result(query, "/literal")
+        assertEquals(SearchMatch.EXACT_TITLE, SearchPage(listOf(literal), false)
+            .matchingResults(normalizeSearchMatch(query))[literal])
+
+        val hits = linkedMapOf<Pair<String, String>, SearchHit>()
+        mergeSearchResults(hits, matches.keys, relevance = { matches.getValue(it).ordinal })
+        mergeSearchResults(hits, listOf(partial.copy(sourceId = "b")))
+        assertEquals(listOf(exact, partial), orderSearchHits(hits.values.toList(), query, SearchSort.RELEVANCE)
+            .map { it.result })
+    }
+
     @Test fun `search failures distinguish wrapped HTTP status from timeout and rule errors`() {
         assertEquals(SearchStatus.RATE_LIMITED, searchFailure(SourceException("wrapper", HttpStatusException(429, "url"))))
         assertEquals(SearchStatus.HTTP, searchFailure(HttpStatusException(403, "url")))

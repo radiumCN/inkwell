@@ -273,6 +273,7 @@ fun SpinnerSettingRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    optionIcon: (@Composable (PickerOption, Modifier) -> Unit)? = null,
 ) {
     val currentOnSelect by rememberUpdatedState(onSelect)
     // 同 Miuix：开没开跨重建保留（转屏后弹层还在），按下的灰等弹层退场播完才收
@@ -313,6 +314,7 @@ fun SpinnerSettingRow(
                             summary = opt.subtitle?.takeIf { it.isNotBlank() },
                             selected = opt.id == selectedId,
                             onClick = { currentOnSelect(opt) },
+                            icon = if (optionIcon == null) null else { modifier -> optionIcon(opt, modifier) },
                         )
                     },
                     onDismissRequest = { expanded = false },

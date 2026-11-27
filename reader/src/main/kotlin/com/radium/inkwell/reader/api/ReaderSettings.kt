@@ -5,10 +5,10 @@ data class ReaderSettings(
     val fontSizeSp: Float = 18f,
     /** 章节标题相对正文的倍数（legado 的标题字号）。1.0 = 与正文同大 */
     val titleScale: Float = 1.4f,
-    /** 章节标题上方的留白（dp）。让标题跟正文之间/跟页顶之间松紧可调 */
-    val titleTopSpacingDp: Float = 24f,
-    /** 顶部小标题（页眉章节名）离屏幕上边的留白（dp），独立于正文边距 */
-    val headerTopSpacingDp: Float = 24f,
+    /** 章节标题上方的留白（dp）。null 表示使用当前页眉模式的默认值。 */
+    val titleTopSpacingDp: Float? = null,
+    /** 顶部挖孔区之外的排版留白（dp）。null 表示使用当前页眉模式的默认值。 */
+    val headerTopSpacingDp: Float? = null,
     val fontId: String = FONT_SYSTEM,
     val lineSpacingMult: Float = 1.6f,
     val paragraphSpacingEm: Float = 0.6f,
@@ -23,19 +23,19 @@ data class ReaderSettings(
     /** null = 跟随系统 */
     val brightnessOverride: Float? = null,
     val keepScreenOn: Boolean = true,
-    /**
-     * 页脚是否画电池图标。默认开，和从前「进度 · 时间 · 电量」三件套一致；
-     * 关掉只少一个图标，页码和时间还在。
-     */
+    /** 页脚是否显示电量。 */
     val showBattery: Boolean = true,
+    /** 页脚右侧的电量样式，默认仅显示图标。 */
+    val batteryDisplayStyle: BatteryDisplayStyle = BatteryDisplayStyle.ICON,
     /**
-     * 正文上方画不画章节名（页眉）。关掉后页眉那条带让给正文（buildLayoutSpec 里带高给 0），约多排一行；
-     * 「头部留白」照旧，正文顶端仍然避开挖孔。默认开。
+     * 是否显示章节名页眉。默认开。
      */
     val showHeader: Boolean = true,
+    /** 正文阅读时是否常驻顶部系统状态栏。 */
+    val showStatusBar: Boolean = false,
     /**
      * 正文下方画不画「页码 · 进度 · 时间 · 电量」（页脚）。关掉后页脚那条带让给正文，「下边距」照旧；
-     * [showBattery] 这时不起作用（设置里那一行也收起来）。默认开。
+     * [batteryDisplayStyle] 在页脚关闭时保留，重新开启页脚后继续使用。默认开。
      */
     val showFooter: Boolean = true,
     val volumeKeyFlip: Boolean = true,
@@ -79,7 +79,19 @@ data class ReaderSettings(
     /** 当前日夜模式保存的自定义纸色，即使正在使用预设也保留。 */
     val customPaper: ReaderTheme = ReaderTheme.DEFAULT_CUSTOM,
     val bodyFontWeight: Int = FONT_WEIGHT_NORMAL,
+    /** 隐藏系统状态栏时，允许章节页眉使用屏幕顶部的可用区域。 */
+    val raiseHeader: Boolean = false,
+    val lightweightEffects: Boolean = false,
 ) {
+    val renderedFlipAnimation: FlipAnimation
+        get() = if (lightweightEffects && flipAnimation == FlipAnimation.CURL) FlipAnimation.COVER else flipAnimation
+
+    val usesRaisedHeader: Boolean get() = showHeader && !showStatusBar && raiseHeader
+    val effectiveHeaderTopSpacingDp: Float
+        get() = headerTopSpacingDp ?: if (usesRaisedHeader) 8f else 12f
+    val effectiveTitleTopSpacingDp: Float
+        get() = titleTopSpacingDp ?: if (usesRaisedHeader) 0f else 12f
+
     companion object {
         /** 字号上下限（sp）。面板的滑轨、双指缩放都夹在这个范围里 */
         const val FONT_SIZE_MIN = 12f
@@ -112,6 +124,13 @@ data class ReaderSettings(
             FONT_MONO to "等宽",
         )
     }
+}
+
+enum class BatteryDisplayStyle(val label: String) {
+    ICON("仅图标"),
+    PERCENT_INSIDE("百分比在图标内"),
+    PERCENT_OUTSIDE("百分比在图标外"),
+    PERCENT_ONLY("仅百分比"),
 }
 
 enum class FlipAnimation(val label: String) {

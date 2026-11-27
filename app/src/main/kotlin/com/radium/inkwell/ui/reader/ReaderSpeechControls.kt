@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,9 +49,11 @@ import com.radium.inkwell.ui.components.SpinnerSettingRow
 import com.radium.inkwell.ui.components.cardMargin
 import com.radium.inkwell.ui.components.groupPosition
 import com.radium.inkwell.ui.components.pageScroll
+import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Pause
@@ -60,10 +64,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private enum class SpeechPanel { CONTROLS, SETTINGS, VOICES }
 
 private const val TTS_SETTINGS_ACTION = "com.android.settings.TTS_SETTINGS"
-private const val MANAGE_VOICES = "管理系统音色"
-private const val MISSING_VOICE_HINT = "请在系统文字转语音设置中选择支持中文的引擎，并安装中文离线音色。"
+private const val MANAGE_VOICES = "系统语音设置"
+private const val MISSING_VOICE_HINT = "请切换语音引擎，或在系统语音设置中添加中文音色。"
+private const val NETWORK_VOICE_HINT = "联网音色可能将朗读文字发送给语音引擎的服务。"
 
-private val speechRates = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
 private val sleepTimers = listOf(null, 15, 30, 45, 60, 0)
 
 @Composable
@@ -79,7 +83,7 @@ internal fun ReaderSpeechSheet(
     val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val service = speech.service
         if (service != null) {
-            service.retryVoice(keepPaused = state.status == SpeechStatus.PAUSED)
+            service.retryVoice()
             settingsMessage = null
         } else {
             settingsMessage = "请重新打开朗读以检查已安装的音色。"
@@ -96,7 +100,7 @@ internal fun ReaderSpeechSheet(
         }
     }
     val manageVoices: () -> Unit = {
-        val engineInstaller = speech.service?.defaultEnginePackage?.let { engine ->
+        val engineInstaller = (state.enginePackage ?: state.systemEngine)?.let { engine ->
             Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).setPackage(engine)
         }
         settingsMessage = when {
@@ -150,12 +154,39 @@ internal fun ReaderSpeechSheet(
                     when (current) {
                         SpeechPanel.CONTROLS -> when (state.status) {
                             SpeechStatus.NO_VOICE -> {
-                                EmptyState(
+                                val hasVoices = state.hasVoiceOptions
+                                val hasEngines = state.engines.isNotEmpty()
+                                val connectionError = state.voiceError
+                                if (connectionError != null && !hasVoices) {
+                                    ErrorState(
+                                        title = "语音引擎暂不可用",
+                                        message = settingsMessage ?: connectionError,
+                                        onRetry = onRetry,
+                                        secondaryLabel = if (hasEngines) "选择引擎" else MANAGE_VOICES,
+                                        onSecondary = if (hasEngines) ({ page = SpeechPanel.SETTINGS }) else manageVoices,
+                                    )
+                                } else EmptyState(
                                     icon = MiuixIcons.VolumeUp,
-                                    title = "缺少中文离线音色",
-                                    hint = settingsMessage ?: MISSING_VOICE_HINT,
-                                    actionLabel = MANAGE_VOICES,
-                                    onAction = manageVoices,
+                                    title = when {
+                                        hasVoices -> "请选择朗读音色"
+                                        hasEngines -> "当前引擎没有可用音色"
+                                        else -> "没有可用的语音引擎"
+                                    },
+                                    hint = settingsMessage ?: when {
+                                        hasVoices -> "可以选择当前引擎提供的音色，也可以切换引擎。"
+                                        hasEngines -> MISSING_VOICE_HINT
+                                        else -> "请在系统语音设置中检查已安装的引擎。"
+                                    },
+                                    actionLabel = when {
+                                        hasVoices -> "选择音色"
+                                        hasEngines -> "选择语音引擎"
+                                        else -> MANAGE_VOICES
+                                    },
+                                    onAction = when {
+                                        hasVoices -> ({ page = SpeechPanel.VOICES })
+                                        hasEngines -> ({ page = SpeechPanel.SETTINGS })
+                                        else -> manageVoices
+                                    },
                                 )
                             }
                             SpeechStatus.ERROR -> ErrorState(
@@ -166,17 +197,33 @@ internal fun ReaderSpeechSheet(
                             else -> SpeechTransport(state, speech)
                         }
                         SpeechPanel.SETTINGS -> ReaderGroup {
+                            val systemLabel = state.engines.firstOrNull { it.packageName == state.systemEngine }?.label
+                            val engineOptions = listOf(PickerOption("", "跟随系统", systemLabel)) +
+                                state.engines.map { PickerOption(it.packageName, it.label) }
+                            SpinnerSettingRow(
+                                title = "语音引擎",
+                                options = engineOptions,
+                                subtitle = "首选引擎不可用时，系统可能回退",
+                                selectedId = state.enginePackage.orEmpty(),
+                                onSelect = { speech.service?.selectEngine(it.id.ifEmpty { null }) },
+                                enabled = state.engines.isNotEmpty(),
+                                position = SettingGroupPosition.First,
+                            )
+                            val rates = speech.service?.availableRates ?: speechRates
                             SpinnerSettingRow(
                                 title = "播放倍速",
-                                options = speechRates.map { PickerOption(it.toString(), "${it}×") },
+                                options = rates.map { PickerOption(it.toString(), it.speechRateLabel()) },
+                                subtitle = if (rates.size > speechRates.size) "3× 及以上用于调试，实际语速由引擎决定" else null,
                                 selectedId = state.rate.toString(),
                                 onSelect = { speech.service?.setRate(it.id.toFloat()) },
-                                position = SettingGroupPosition.First,
+                                position = SettingGroupPosition.Middle,
                             )
                             SettingRow(
                                 title = "朗读音色",
-                                value = state.voices.indexOf(state.selectedVoice).takeIf { it >= 0 }
-                                    ?.let { voiceTitle(it, state.voices.size) } ?: "未安装",
+                                value = state.voice?.let { selected ->
+                                    val index = state.voices.indexOfFirst { it.name == selected.name }
+                                    if (index < 0) "引擎默认音色" else voiceTitle(state.voices, index)
+                                } ?: if (state.status == SpeechStatus.LOADING) "正在检查" else "未选择",
                                 onClick = { page = SpeechPanel.VOICES },
                                 position = SettingGroupPosition.Middle,
                             )
@@ -198,29 +245,54 @@ internal fun ReaderSpeechSheet(
                             )
                         }
                         SpeechPanel.VOICES -> {
+                            val pending = state.pendingVoice
+                            var showPending by remember(pending) { mutableStateOf(false) }
+                            LaunchedEffect(pending) {
+                                if (pending != null) {
+                                    delay(VOICE_SWITCH_INDICATOR_DELAY_MS)
+                                    showPending = true
+                                }
+                            }
+                            if (state.hasDefaultVoice || state.voices.any { it.requiresNetwork }) {
+                                Text(
+                                    NETWORK_VOICE_HINT,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
                             ReaderGroup {
-                                val size = state.voices.size + 1
-                                state.voices.forEachIndexed { index, name ->
-                                    SettingRow(
-                                        title = voiceTitle(index, state.voices.size),
-                                        subtitle = name,
-                                        value = if (name == state.selectedVoice) "当前" else null,
-                                        onClick = if (state.status == SpeechStatus.LOADING || name == state.selectedVoice) null
-                                        else ({ speech.service?.selectVoice(name) }),
-                                        position = groupPosition(index, size),
-                                    )
+                                val defaultCount = if (state.hasDefaultVoice) 1 else 0
+                                val size = state.voices.size + defaultCount + 1
+                                if (state.hasDefaultVoice) {
+                                    SpeechVoiceRow(
+                                        choice = SpeechVoiceChoice(),
+                                        state = state,
+                                        showPending = showPending,
+                                        title = "引擎默认音色",
+                                        subtitle = "联网状态由引擎决定",
+                                        position = SettingGroupPosition.First,
+                                    ) { speech.service?.selectVoice(null, state.engineConnection) }
+                                }
+                                state.voices.forEachIndexed { index, voice ->
+                                    SpeechVoiceRow(
+                                        choice = SpeechVoiceChoice(voice.name),
+                                        state = state,
+                                        showPending = showPending,
+                                        title = voiceTitle(state.voices, index),
+                                        subtitle = voice.name,
+                                        position = groupPosition(index + defaultCount, size),
+                                    ) { speech.service?.selectVoice(voice.name, state.engineConnection) }
                                 }
                                 SettingRow(
                                     title = MANAGE_VOICES,
-                                    subtitle = "选择语音引擎或安装离线音色",
+                                    subtitle = "管理已安装的引擎和音色",
                                     onClick = manageVoices,
                                     position = groupPosition(size - 1, size),
                                 )
                             }
-                            val message = state.voiceError ?: settingsMessage ?: when {
-                                state.status == SpeechStatus.LOADING -> "正在检查音色…"
-                                state.voices.isEmpty() -> MISSING_VOICE_HINT
-                                state.voices.size == 1 -> "当前语音引擎只提供一种可用的中文离线音色。"
+                            val message = settingsMessage ?: state.voiceError ?: when {
+                                state.checkingVoiceOptions -> "正在检查音色…"
+                                !state.hasVoiceOptions -> MISSING_VOICE_HINT
                                 else -> null
                             }
                             if (message != null) {
@@ -247,8 +319,40 @@ internal fun ReaderSpeechSheet(
     }
 }
 
-private fun voiceTitle(index: Int, count: Int): String =
-    if (count == 1) "中文离线音色" else "中文离线音色 ${index + 1}"
+private const val VOICE_SWITCH_INDICATOR_DELAY_MS = 180L
+
+@Composable
+private fun SpeechVoiceRow(
+    choice: SpeechVoiceChoice,
+    state: SpeechState,
+    showPending: Boolean,
+    title: String,
+    subtitle: String,
+    position: SettingGroupPosition,
+    onClick: () -> Unit,
+) {
+    val selected = state.voice == choice
+    SettingRow(
+        title = title,
+        subtitle = subtitle,
+        onClick = onClick.takeIf { state.canRequestVoiceChange(choice) },
+        position = position,
+        trailing = {
+            // 勾选、等待和未选共用同一个行尾尺寸。换音色时长音色名也不会重新换行。
+            Box(Modifier.size(Dimens.iconSm), contentAlignment = Alignment.Center) {
+                when {
+                    showPending && state.pendingVoice == choice -> AppLoadingIndicator(size = Dimens.iconSm)
+                    selected -> Icon(MiuixIcons.Basic.Check, contentDescription = "当前音色", tint = MiuixTheme.colorScheme.primary)
+                }
+            }
+        },
+    )
+}
+
+private fun voiceTitle(voices: List<SpeechVoice>, index: Int): String {
+    val kind = if (voices[index].requiresNetwork) "联网音色" else "离线音色"
+    return if (voices.size == 1) kind else "$kind ${index + 1}"
+}
 
 @Composable
 private fun SpeechTransport(state: SpeechState, speech: ReaderSpeech) {
@@ -262,7 +366,7 @@ private fun SpeechTransport(state: SpeechState, speech: ReaderSpeech) {
         }
         Text(
             if (chapter == null) state.description()
-            else "${state.description()} · 第 ${state.paragraphIndex + 1} / ${chapter.paragraphs.size} 段",
+            else "${state.description()} · 第 ${state.paragraphIndex + 1} / ${chapter.paragraphs.size} 段 · ${state.rate.speechRateLabel()}",
             style = MiuixTheme.textStyles.footnote1,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = Dimens.gapXS, bottom = Dimens.gapS),
@@ -337,7 +441,7 @@ private fun SpeechState.description(): String = when (status) {
     SpeechStatus.LOADING -> "正在准备朗读…"
     SpeechStatus.PLAYING -> "正在朗读"
     SpeechStatus.PAUSED -> "朗读已暂停"
-    SpeechStatus.NO_VOICE -> "需要离线音色"
+    SpeechStatus.NO_VOICE -> "需要选择音色"
     SpeechStatus.ERROR -> "朗读加载失败"
     SpeechStatus.COMPLETE -> "朗读已结束"
 }

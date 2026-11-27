@@ -21,6 +21,7 @@ class ReadingStatsRepository(
     private val db: InkwellDb,
     private val dao: ReadingStatDao,
     private val prefs: WebDavPrefs,
+    private val onChanged: () -> Unit = {},
 ) {
     /** 把 [millis] 记到 [at] 那一天的这本书上。读改写放一个事务里：两次记录挨得很近时别丢一次 */
     suspend fun record(
@@ -38,6 +39,7 @@ class ReadingStatsRepository(
                 dao.upsert(ReadingStatEntity(device, day, bookId, (current?.millis ?: 0) + millis, at))
             }
         }
+        onChanged()
     }
 
     fun observeAll(): Flow<List<ReadingStatEntity>> = dao.observeAll()
@@ -63,6 +65,7 @@ class ReadingStatsRepository(
                 }
             }
         }
+        onChanged()
     }
 }
 

@@ -11,6 +11,8 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
+import okhttp3.OkHttpClient
 import okio.Buffer
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -100,6 +102,17 @@ class BackupSyncTest {
         val result = BackupSync(client()).run(path, { payload("a") }, {})
         assertEquals("etag:\"mine\"", result.remoteVersion)
         assertEquals(2, server.requestCount)
+    }
+
+    @Test fun `lost put response can be confirmed by reading the committed backup`() = runBlocking {
+        val newBackup = payload("a")
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(response(newBackup, "\"confirmed\""))
+        val http = OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+        val client = WebDavClient(server.url("/dav").toString(), "user", "pass", http)
+        assertEquals("etag:\"confirmed\"", BackupSync(client).run(path, { newBackup }, {}).remoteVersion)
+        assertEquals(listOf("GET", "PUT", "GET"), List(3) { server.takeRequest().method })
     }
 
     @Test fun `PUT without ETag does not claim a remote version`() = runBlocking {

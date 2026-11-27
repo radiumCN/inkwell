@@ -82,7 +82,9 @@ private class EpubBookHandle(
                 else -> resolvePath(dir, src.substringBefore('#').substringBefore('?'))
             }
         })
-        return ChapterContent(converter.convert(doc.body()))
+        val anchors = mutableMapOf<String, Int>()
+        val elements = converter.convert(doc.body(), anchors)
+        return ChapterContent(elements, anchors)
     }
 
     override fun loadResource(resourceId: String): ImageBlob? {
@@ -232,7 +234,7 @@ private class EpubBookHandle(
                     if (a != null) {
                         val href = a.attr("href")
                         val path = resolvePath(navDir, href.substringBefore('#'))
-                        val anchor = href.substringAfter('#', "").ifBlank { null }
+                        val anchor = epubFragment(href)
                         spineIndexByPath[path.lowercase()]?.let { idx ->
                             out += TocEntry(a.text().trim(), idx, anchor, level)
                         }
@@ -273,7 +275,7 @@ private class EpubBookHandle(
                 val src = navPoint.select("> content").firstOrNull()?.attr("src") ?: ""
                 if (label.isNotEmpty() && src.isNotEmpty()) {
                     val path = resolvePath(ncxDir, src.substringBefore('#'))
-                    val anchor = src.substringAfter('#', "").ifBlank { null }
+                    val anchor = epubFragment(src)
                     spineIndexByPath[path.lowercase()]?.let { idx ->
                         out += TocEntry(label, idx, anchor, level)
                     }
@@ -287,6 +289,11 @@ private class EpubBookHandle(
 }
 
 /** 以 baseDir 为基准解析相对路径，处理 ../ 与 URL 编码 */
+private fun epubFragment(href: String): String? =
+    href.substringAfter('#', "").takeIf(String::isNotBlank)?.let { value ->
+        runCatching { URLDecoder.decode(value.replace("+", "%2B"), "UTF-8") }.getOrDefault(value)
+    }
+
 internal fun resolvePath(baseDir: String, href: String): String {
     // href 是 URI 引用：`+` 是字面的加号，空格写作 %20。URLDecoder 按表单编码解，会把 `+` 解成空格 ——
     // 文件名带 `+` 的章节（`chapter+1.xhtml`）就找不到了。先把 `+` 护住再解

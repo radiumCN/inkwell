@@ -22,9 +22,3 @@ internal fun formatProgressPercent(progress: Float): String =
 
 /** 最近一次「在读」的时间：打开或翻动过。与书架排序（`MAX(readAt, openedAt)`）同一个口径 */
 internal fun BookEntity.lastActiveAt(): Long = maxOf(readAt, openedAt)
-
-/** 「继续阅读」卡片要的东西。章节名单独查（书行里只有章号） */
-data class ContinueReading(
-    val book: BookEntity,
-    val chapterTitle: String?,
-)

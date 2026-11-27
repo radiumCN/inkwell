@@ -170,7 +170,7 @@ internal data class RemoteBookFile(val bookId: String, val extension: String, va
     }
 }
 
-private suspend fun File.sha256(): String = withContext(Dispatchers.IO) {
+internal suspend fun File.sha256(): String = withContext(Dispatchers.IO) {
     val digest = MessageDigest.getInstance("SHA-256")
     inputStream().use { input ->
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)

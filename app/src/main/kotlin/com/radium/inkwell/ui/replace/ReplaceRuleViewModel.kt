@@ -19,6 +19,7 @@ import com.radium.inkwell.core.source.PurifyRuleExport
 import com.radium.inkwell.core.source.PurifyRuleImport
 import com.radium.inkwell.core.source.PurifyTimeoutException
 import com.radium.inkwell.core.source.Purifier
+import com.radium.inkwell.util.readImportText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -400,18 +401,8 @@ class ReplaceRuleViewModel(
 
     fun importFromFile(uri: Uri) = startImport("读取失败") {
         withContext(Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                // 边读边数，超了就停：误选一个几百 MB 的文件，别整个读进内存
-                val out = java.io.ByteArrayOutputStream()
-                val buf = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    out.write(buf, 0, n)
-                    check(out.size() <= MAX_IMPORT_BYTES) { "文件太大（超过 ${MAX_IMPORT_BYTES shr 20}MB），不像是净化规则" }
-                }
-                out.toByteArray().toString(Charsets.UTF_8)
-            } ?: error("无法读取文件")
+            context.contentResolver.openInputStream(uri)?.use { it.readImportText(MAX_IMPORT_BYTES) }
+                ?: error("无法读取文件")
         }
     }
 

@@ -180,6 +180,9 @@ object Dimens {
     val sliderLabelWidth = 120.dp
     /** 阅读页右边缘调亮度时浮出的那根竖条（见 QuickAdjustOverlay）：手指滑过半屏多，竖条有个能读的长度就够 */
     val brightnessHudHeight = 160.dp
+    val readerBatteryIconWidth = 24.dp
+    val readerBatteryIconHeight = 12.dp
+    val readerBatteryPreviewMinWidth = 56.dp
     /**
      * 阅读页选字的两个手柄（SelectionHandles）：从字底伸下来的那截竖线，和末端圆点的直径。
      * 能拖的范围不看圆点多大，以圆点为心、半个 [touchTarget] 为半径

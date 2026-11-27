@@ -94,11 +94,14 @@ class ComposeTextMeasureFacade(
     private val styleCache = HashMap<ResolvedTextStyle, TextStyle>(4)
 
     override fun measureParagraph(text: String, style: ResolvedTextStyle, widthPx: Int): MeasuredParagraph {
-        val result = measurer.measure(
-            text = AnnotatedString(text),
-            style = textStyleOf(style),
-            constraints = Constraints(maxWidth = widthPx.coerceAtLeast(1)),
-        )
+        val width = widthPx.coerceAtLeast(1)
+        val composeStyle = textStyleOf(style)
+        val annotated = AnnotatedString(text)
+        val result = if (style.justify && supportsHanJustification(text)) {
+            measureJustifiedHanParagraph(measurer, annotated, composeStyle, width, style.letterSpacingEm, density)
+        } else {
+            measurer.measure(annotated, composeStyle, constraints = Constraints(maxWidth = width))
+        }
         return ComposeMeasuredParagraph(result)
     }
 

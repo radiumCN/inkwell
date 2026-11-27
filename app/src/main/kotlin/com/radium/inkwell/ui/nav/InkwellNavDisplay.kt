@@ -108,9 +108,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun InkwellNavDisplay(
     externalBook: Intent? = null,
     onExternalBookHandled: (Intent) -> Unit = {},
+    openReadingStats: Boolean = false,
+    onReadingStatsOpened: () -> Unit = {},
 ) {
     val backStack = rememberNavBackStack(BookshelfRoute)
     val nav = remember(backStack) { InkwellNavigator(backStack) }
+    LaunchedEffect(openReadingStats) {
+        if (openReadingStats) {
+            if (backStack.lastOrNull() != ReadingStatsRoute) nav.go(ReadingStatsRoute)
+            onReadingStatsOpened()
+        }
+    }
     LaunchedEffect(backStack) {
         snapshotFlow { backStack.lastOrNull() }.collect { route ->
             UsageLog.screenVisible(route.diagnosticName(), backStack.size)
@@ -500,7 +508,12 @@ fun InkwellNavDisplay(
                 val receiptFlow = remember(prefs, route) { prefs.feedbackReceipt(route.issue, route.url) }
                 val savedReceipt by receiptFlow.collectAsStateWithLifecycle(initialValue = null)
                 val receipt = savedReceipt ?: FeedbackReceipt(route.issue, route.url, route.title)
-                FeedbackDiscussionScreen(receipt, koinInject<FeedbackRepository>(), onBack = { nav.back() })
+                FeedbackDiscussionScreen(
+                    receipt = receipt,
+                    repo = koinInject<FeedbackRepository>(),
+                    recorder = koinInject(),
+                    onBack = { nav.back() },
+                )
             }
             entry<DisclaimerRoute>(
                 metadata = ListDetailSceneStrategy.extraPane(sceneKey = NavPaneGroup.SETTINGS),

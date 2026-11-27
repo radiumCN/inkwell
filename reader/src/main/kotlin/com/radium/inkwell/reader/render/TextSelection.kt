@@ -1,7 +1,9 @@
 package com.radium.inkwell.reader.render
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import com.radium.inkwell.reader.measure.MeasuredParagraph
 import com.radium.inkwell.reader.paginate.LayoutSpec
@@ -40,6 +42,24 @@ data class TextSelection(
 enum class SelectionEnd { START, END }
 
 data class SelectionHandlePosition(val anchor: Offset, val lineCenterY: Float)
+
+/** 选区和手柄共用实际排版的字框，包含对齐后行末的字符宽度。 */
+internal inline fun TextLayoutResult.forEachSelectionBox(start: Int, end: Int, action: (Rect) -> Unit) {
+    val bounds = multiParagraph.fillBoundingBoxes(TextRange(start, end), FloatArray((end - start) * 4), 0)
+    // 批量字框的纵坐标可能从选区所在的子段落重新起算；中文两端对齐会给每行建一个子段落。
+    for (line in getLineForOffset(start)..getLineForOffset(end - 1)) {
+        val top = getLineTop(line)
+        val bottom = getLineBottom(line)
+        val from = maxOf(start, getLineStart(line))
+        val to = minOf(end, getLineEnd(line))
+        for (offset in from until to) {
+            val i = (offset - start) * 4
+            val left = bounds[i]
+            val right = bounds[i + 2]
+            if (left < right) action(Rect(left, top, right, bottom))
+        }
+    }
+}
 
 /**
  * 触点 → 选中的词。自绘正文没有系统级的文字选择，命中测试只能自己做：
@@ -132,11 +152,20 @@ fun RenderablePage.selectionHandlePosition(
     if (adjacent !in para.text.indices) return null
     val line = result.getLineForOffset(adjacent)
     if (line !in slice.lineRange) return null
-    val rtl = result.getBidiRunDirection(adjacent) == ResolvedTextDirection.Rtl
     val boundary = if (start) selection.start else selection.end
-    val clusterStart = if (start) adjacent else characterBreaks(para.text).preceding(boundary)
-    val box = result.getBoundingBox(clusterStart)
-    val x = if (start != rtl) box.left else box.right
+    val breaks = characterBreaks(para.text)
+    val clusterStart = if (start) boundary else breaks.preceding(boundary)
+    val clusterEnd = if (start) breaks.following(boundary) else boundary
+    val rtl = result.getBidiRunDirection(clusterStart) == ResolvedTextDirection.Rtl
+    val useLeft = start != rtl
+    var x = if (useLeft) Float.POSITIVE_INFINITY else Float.NEGATIVE_INFINITY
+    result.forEachSelectionBox(clusterStart, clusterEnd) { box ->
+        x = if (useLeft) minOf(x, box.left) else maxOf(x, box.right)
+    }
+    if (!x.isFinite()) {
+        val box = result.getBoundingBox(clusterStart)
+        x = if (useLeft) box.left else box.right
+    }
     val top = layout.marginTopPx + layout.headerHeightPx + slice.yTopInPage - para.lineTop(slice.startLine)
     val bottom = para.lineBottom(line)
     return SelectionHandlePosition(

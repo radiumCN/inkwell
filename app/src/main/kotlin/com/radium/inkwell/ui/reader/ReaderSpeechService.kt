@@ -10,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.media.AudioAttributes
@@ -23,7 +24,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.speech.tts.Voice
 import androidx.core.graphics.drawable.toBitmap
 import com.radium.inkwell.MainActivity
 import com.radium.inkwell.R
@@ -47,24 +47,30 @@ internal class ReaderSpeechService : Service() {
     private lateinit var notifications: NotificationManager
     private lateinit var focus: AudioFocusRequest
     private val preferences by lazy { getSharedPreferences(CHANNEL, MODE_PRIVATE) }
+    val availableRates by lazy {
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) speechRates + experimentalSpeechRates
+        else speechRates
+    }
     private var owner: ReaderSpeech? = null
     private var notificationIcon = AppIcon.DEFAULT.shape.notificationIcon
     private var notificationArt: Bitmap? = null
     private var publishedTitle: String? = null
-    private var tts: TextToSpeech? = null
-    private var voices = emptyList<Voice>()
-    private var selectedVoice: Voice? = null
+    private var tts: ReaderSpeechEngine? = null
+    private var offlinePreferenceKey: String? = null
+    private var engineOperation: Job? = null
+    private var engineTimeout: Job? = null
+    private var speechSubmission: Job? = null
     private var loadJob: Job? = null
     private var timerJob: Job? = null
     /** 暂停太久就收场（见 [pause]） */
     private var pausedJob: Job? = null
-    private var failedTarget: Pair<Int, Int>? = null
-    private var resumeAfterLoad = true
+    private var playWhenReady = true
+    private var engineSequence = 0L
     private var utteranceSequence = 0L
     private var utterance: String? = null
     private var chunkStart = 0
+    private var spokenOffset = 0
     private var nextChunk = 0
-    private var paragraphStarted = false
     private var foreground = false
     private var hasFocus = false
 
@@ -123,13 +129,14 @@ internal class ReaderSpeechService : Service() {
                 notificationArt = AppIconManager.drawable(this, icon).toBitmap(ART_SIZE_PX, ART_SIZE_PX, Bitmap.Config.ARGB_8888)
                 publishedTitle = null
                 current.service = this
-                current.update(current.state.value.copy(rate = preferences.getFloat("rate", 1f)))
+                val savedRate = preferences.getFloat("rate", 1f)
+                current.update(current.state.value.copy(rate = savedRate.takeIf { it in availableRates } ?: 1f))
                 media.isActive = true
                 if (enterForeground()) initializeEngine()
             }
             PREVIOUS -> step(-1)
             NEXT -> step(1)
-            TOGGLE -> if (owner?.state?.value?.status in setOf(SpeechStatus.PLAYING, SpeechStatus.LOADING)) pause() else play()
+            TOGGLE -> if (owner?.state?.value?.let(::isPlayingOrPreparing) == true) pause() else play()
             STOP -> finishPlayback()
         }
         // 进程被杀后点了、划掉残留的通知：新起的实例没有朗读在跟，上面几样都无事可做，别留一个空服务挂着
@@ -139,97 +146,210 @@ internal class ReaderSpeechService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    val defaultEnginePackage: String? get() = tts?.defaultEngine
-
-    fun retryVoice(keepPaused: Boolean = false) {
-        val current = owner ?: return
-        if (!enterForeground()) return
-        val state = current.state.value
-        val offset = state.chapterOffset
-        if (state.chapter != null && offset != null) {
-            current.setTarget(state.chapter.index, offset)
-        }
-        loadJob?.cancel()
-        stopUtterance()
-        tts?.shutdown()
-        tts = null
-        initializeEngine(autoplay = !keepPaused)
+    fun selectEngine(packageName: String?) {
+        val state = owner?.state?.value ?: return
+        if (packageName == state.enginePackage) return
+        if (packageName != null && state.engines.none { it.packageName == packageName }) return
+        preferences.edit().putString("engine", packageName).apply()
+        retryVoice()
     }
 
-    private fun initializeEngine(autoplay: Boolean = true) {
+    fun retryVoice() {
         val current = owner ?: return
-        selectedVoice = null
-        publish(current.state.value.copy(status = SpeechStatus.LOADING, error = null, voiceError = null))
-        // 部分引擎创建失败时立即回调。在主线程下一轮读取实例，避免读到尚未赋值的 tts。
-        lateinit var engine: TextToSpeech
-        engine = TextToSpeech(applicationContext) { result ->
-            handler.post {
-                if (owner !== current || tts !== engine) return@post
-                voices = if (result == TextToSpeech.SUCCESS) {
-                    val available = engine.voices.orEmpty()
-                        .filter { it.locale.language == "zh" && !it.isNetworkConnectionRequired }
-                        .filterNot { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED in it.features.orEmpty() }
-                        .sortedWith(
-                            compareByDescending<Voice> { it.locale.country == "CN" }
-                                .thenBy { it.name }.thenBy { it.locale.toLanguageTag() }.thenByDescending { it.quality },
-                        )
-                    available.distinctBy { it.name }
-                } else {
-                    emptyList()
-                }
-                val preferredVoice = preferences.getString("voice", null)
-                selectedVoice = voices.firstOrNull { it.name == preferredVoice && engine.setVoice(it) == TextToSpeech.SUCCESS }
-                    ?: voices.firstOrNull { engine.setVoice(it) == TextToSpeech.SUCCESS }
-                if (selectedVoice == null) {
-                    releaseFocus()
-                    publish(current.state.value.copy(status = SpeechStatus.NO_VOICE, voices = emptyList(), selectedVoice = null))
-                    leaveForeground()
-                    return@post
-                }
-                engine.setAudioAttributes(attributes)
-                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(id: String) = Unit
-                    override fun onDone(id: String) { handler.post { if (utterance == id) speakNextChunk() } }
-                    @Deprecated("Android may still dispatch this callback from a TTS engine")
-                    override fun onError(id: String) { handler.post { if (utterance == id) fail("朗读失败，请重试") } }
-                })
-                val state = current.state.value
-                publish(state.copy(voices = voices.map { it.name }, selectedVoice = selectedVoice?.name))
-                seek(current.targetChapter, current.targetOffset, autoplay && state.status != SpeechStatus.PAUSED)
+        val state = checkpoint(current)
+        loadJob?.cancel()
+        stopUtterance(sendStop = false)
+        retireEngine()
+        releaseFocus()
+        if (!enterForeground()) return
+        initializeEngine(state)
+    }
+
+    private fun initializeEngine(previous: SpeechState? = null) {
+        val current = owner ?: return
+        val preferred = preferences.getString("engine", null)
+        val engine = ReaderSpeechEngine(applicationContext)
+        tts = engine
+        publish((previous ?: current.state.value).copy(
+            status = SpeechStatus.LOADING, enginePackage = preferred, systemEngine = null, voice = null,
+            engineConnection = ++engineSequence,
+            voices = emptyList(), hasDefaultVoice = false, pendingVoice = null, error = null, voiceError = null,
+        ))
+        runEngineOperation(engine, "语音引擎准备超时，请切换引擎或重试。") {
+            val connection = engine.connect(
+                preferredPackage = preferred,
+                offlinePreference = { key ->
+                    preferences.getString(key, null)
+                        ?: preferences.getString("voice", null).takeIf { preferred == null }
+                },
+                attributes = attributes,
+                listener = speechListener(engine),
+                onCatalog = { catalog ->
+                    if (tts === engine && owner === current) {
+                        if (preferred != null && catalog.preferredPackage == null) {
+                            preferences.edit().remove("engine").apply()
+                        }
+                        publish(current.state.value.copy(engines = catalog.engines, enginePackage = catalog.preferredPackage))
+                    }
+                },
+            )
+            if (!finishEngineOperation(engine)) return@runEngineOperation
+            val state = current.state.value.copy(systemEngine = connection.systemEngine)
+            if (!connection.connected) {
+                retireEngine()
+                val message = if (state.engines.isEmpty()) null else "无法连接语音引擎，请重试或切换引擎。"
+                unavailableVoice(state, message)
+                return@runEngineOperation
+            }
+            offlinePreferenceKey = connection.offlinePreferenceKey
+            val ready = state.copy(
+                voices = connection.voices,
+                hasDefaultVoice = connection.hasDefaultVoice,
+                voice = connection.offlineVoice,
+            )
+            if (ready.voice == null) unavailableVoice(ready)
+            else resumeAtTarget(current, ready)
+        }
+    }
+
+    private fun runEngineOperation(engine: ReaderSpeechEngine, timeoutMessage: String, action: suspend () -> Unit) {
+        // The timer stays on the service thread while the engine may be waiting in Binder.
+        engineTimeout = scope.launch {
+            delay(ENGINE_INIT_TIMEOUT_MS)
+            if (tts === engine) engineUnavailable(timeoutMessage)
+        }
+        engineOperation = scope.launch {
+            try {
+                action()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (tts === engine) engineUnavailable("无法使用语音引擎，请重试或切换引擎。")
             }
         }
-        tts = engine
     }
 
-    fun selectVoice(name: String) {
-        val state = owner?.state?.value ?: return
-        val engine = tts ?: return
-        if (state.status == SpeechStatus.LOADING || state.selectedVoice == name) return
-        val voice = voices.firstOrNull { it.name == name } ?: return
-        if (engine.setVoice(voice) != TextToSpeech.SUCCESS) {
-            publish(state.copy(voiceError = "语音引擎无法切换到此音色。"))
-            return
+    private fun finishEngineOperation(engine: ReaderSpeechEngine): Boolean {
+        if (tts !== engine) return false
+        engineTimeout?.cancel()
+        engineTimeout = null
+        engineOperation = null
+        return true
+    }
+
+    private fun retireEngine() {
+        engineTimeout?.cancel()
+        engineTimeout = null
+        engineOperation?.cancel()
+        engineOperation = null
+        val engine = tts
+        tts = null
+        offlinePreferenceKey = null
+        engine?.close()
+    }
+
+    private fun engineUnavailable(message: String) {
+        val current = owner ?: return
+        val state = checkpoint(current)
+        loadJob?.cancel()
+        stopUtterance(sendStop = false)
+        retireEngine()
+        unavailableVoice(state.copy(voice = null, voices = emptyList(), hasDefaultVoice = false), message)
+        if (state.status == SpeechStatus.PLAYING) recordPosition()
+    }
+
+    private fun unavailableVoice(state: SpeechState, message: String? = null) {
+        releaseFocus()
+        publish(state.copy(status = SpeechStatus.NO_VOICE, pendingVoice = null, voiceError = message))
+        leaveForeground()
+    }
+
+    private fun resumeAtTarget(current: ReaderSpeech, ready: SpeechState) {
+        publish(ready)
+        seek(current.targetChapter, current.targetOffset, playWhenReady)
+    }
+
+    private fun speechListener(engine: ReaderSpeechEngine): UtteranceProgressListener = object : UtteranceProgressListener() {
+        override fun onStart(id: String) = Unit
+
+        override fun onRangeStart(id: String, start: Int, end: Int, frame: Int) {
+            handler.post {
+                if (tts === engine && utterance == id && start in 0 until nextChunk - chunkStart) {
+                    spokenOffset = maxOf(spokenOffset, chunkStart + start)
+                }
+            }
         }
-        selectedVoice = voice
-        preferences.edit().putString("voice", name).apply()
-        publish(state.copy(selectedVoice = name, voiceError = null))
-        if (state.status == SpeechStatus.PLAYING) restartChunk()
+
+        override fun onDone(id: String) {
+            handler.post {
+                if (tts !== engine || utterance != id) return@post
+                utterance = null
+                speakNextChunk()
+            }
+        }
+
+        @Deprecated("Android may still dispatch this callback from a TTS engine")
+        override fun onError(id: String) = onError(id, TextToSpeech.ERROR)
+
+        override fun onError(id: String, errorCode: Int) {
+            handler.post {
+                if (tts !== engine || utterance != id) return@post
+                if (errorCode == TextToSpeech.ERROR_SERVICE) {
+                    engineUnavailable("语音引擎连接已断开，请重试或切换引擎。")
+                    return@post
+                }
+                fail(when (errorCode) {
+                    TextToSpeech.ERROR_NETWORK, TextToSpeech.ERROR_NETWORK_TIMEOUT -> "联网音色暂不可用，请检查网络或切换音色"
+                    TextToSpeech.ERROR_NOT_INSTALLED_YET -> "音色数据待下载，请在系统设置中检查或切换音色"
+                    else -> "朗读失败，请重试或切换语音引擎"
+                }, utteranceEnded = true)
+            }
+        }
+    }
+
+    fun selectVoice(name: String?, connection: Long) {
+        val current = owner ?: return
+        val engine = tts ?: return
+        val state = current.state.value
+        val choice = SpeechVoiceChoice(name)
+        if (engineTimeout != null || !state.canRequestVoiceChange(choice) || !state.offersVoice(choice, connection)) return
+        val option = state.voices.firstOrNull { it.name == name }
+
+        val checkpoint = checkpoint(current)
+        loadJob?.cancel()
+        stopUtterance()
+        if (!enterForeground()) return
+        publish(checkpoint.copy(status = SpeechStatus.LOADING, pendingVoice = choice, voiceError = null, error = null))
+        runEngineOperation(engine, "切换音色超时，请重试或切换引擎。") {
+            val selected = engine.selectVoice(choice)
+            if (!finishEngineOperation(engine)) return@runEngineOperation
+            val latest = current.state.value
+            if (!selected) {
+                engineUnavailable("无法切换到所选音色，请重试或切换引擎。")
+                return@runEngineOperation
+            }
+            if (option != null && !option.requiresNetwork) {
+                offlinePreferenceKey?.let { key ->
+                    preferences.edit().putString(key, option.name).apply()
+                }
+            }
+            resumeAtTarget(current, latest.copy(voice = choice, pendingVoice = null))
+        }
     }
 
     fun setRate(rate: Float) {
         val state = owner?.state?.value ?: return
+        if (rate == state.rate || rate !in availableRates) return
         preferences.edit().putFloat("rate", rate).apply()
         publish(state.copy(rate = rate))
-        // 倍速只在一段的第一片设给引擎（见 speakNextChunk）：不重播的话，要等这一段（一片最长几千字）读完才变
-        if (state.status == SpeechStatus.PLAYING) restartChunk()
-    }
-
-    /** 用新音色 / 倍速重播当前播报片段，不用等到整段结束；章节进度仍用原锚点 */
-    private fun restartChunk() {
-        val restart = chunkStart
-        stopUtterance()
-        nextChunk = restart
-        speakNextChunk()
+        val paragraph = state.paragraph
+        if (state.status == SpeechStatus.PLAYING && utterance != null && paragraph != null) {
+            // 没有字词回调时 spokenOffset 仍是片段开头。新播报用 QUEUE_FLUSH 换掉当前这一段。
+            val restart = paragraph.startWithin(paragraph.offset + spokenOffset)
+            stopUtterance(sendStop = false)
+            nextChunk = restart
+            speakNextChunk()
+        }
     }
 
     fun setTimer(minutes: Int?) {
@@ -246,47 +366,50 @@ internal class ReaderSpeechService : Service() {
     }
 
     fun play() {
-        val state = owner?.state?.value ?: return
+        val current = owner ?: return
+        val state = current.state.value
         when (state.status) {
-            SpeechStatus.PLAYING, SpeechStatus.LOADING, SpeechStatus.IDLE, SpeechStatus.COMPLETE -> return
-            SpeechStatus.NO_VOICE -> { retryVoice(); return }
+            SpeechStatus.PLAYING, SpeechStatus.IDLE, SpeechStatus.COMPLETE -> return
             else -> Unit
         }
+        val alreadyRequested = playWhenReady
+        playWhenReady = true
         pausedJob?.cancel()
-        if (!enterForeground()) return
-        val current = owner ?: return
-        val target = failedTarget
         when {
-            target != null -> seek(target.first, target.second, true)
-            state.paragraph != null -> startParagraph(state.paragraphIndex, state.paragraphStart)
-            tts == null || selectedVoice == null -> retryVoice()
-            else -> seek(current.targetChapter, current.targetOffset, true)
+            state.status == SpeechStatus.LOADING -> if (!alreadyRequested) publish(state)
+            state.voice != null && tts != null -> if (enterForeground()) seek(current.targetChapter, current.targetOffset, autoplay = true)
+            tts != null && state.hasVoiceOptions -> publish(state)
+            else -> retryVoice()
         }
     }
 
     fun pause() {
-        val state = owner?.state?.value ?: return
-        if (state.status != SpeechStatus.PLAYING && state.status != SpeechStatus.LOADING) return
-        loadJob?.cancel()
-        stopUtterance()
+        val current = owner ?: return
+        if (!playWhenReady) return
+        playWhenReady = false
+        val state = checkpoint(current)
         releaseFocus()
-        publish(state.copy(status = SpeechStatus.PAUSED))
+        if (state.status == SpeechStatus.PLAYING || state.status == SpeechStatus.LOADING && engineTimeout == null) {
+            loadJob?.cancel()
+            stopUtterance()
+            publish(state.copy(status = SpeechStatus.PAUSED))
+            if (state.status == SpeechStatus.PLAYING) recordPosition()
+        } else {
+            publish(state)
+        }
         // 暂停时留在前台，同媒体 App：出了前台就是个普通后台服务，App 退到后台一分钟左右就被系统收掉 ——
         // onDestroy 清掉朗读状态，通知、锁屏控件一起没了，回来想继续都没处点。继续时也不用再从后台进前台（Android 12 起会被拒）。
         // 也不一直挂着：暂停超过 PAUSED_TIMEOUT_MS 就当是不听了，记下位置、收掉通知
-        pausedJob?.cancel()
-        pausedJob = scope.launch {
-            delay(PAUSED_TIMEOUT_MS)
-            finishPlayback()
-        }
+        schedulePausedStop()
     }
 
     fun step(direction: Int) {
         val state = owner?.state?.value ?: return
         val chapter = state.chapter ?: return
-        if (state.status == SpeechStatus.LOADING || state.status == SpeechStatus.COMPLETE) return
+        if (state.voice == null || state.status == SpeechStatus.LOADING || state.status == SpeechStatus.COMPLETE) return
         val target = state.paragraphIndex + direction
         val playing = state.status == SpeechStatus.PLAYING
+        playWhenReady = playing
         when {
             target in chapter.paragraphs.indices -> {
                 if (playing) startParagraph(target)
@@ -294,6 +417,7 @@ internal class ReaderSpeechService : Service() {
                     selectParagraph(target)
                     recordPosition()
                     publish(owner?.state?.value?.copy(status = SpeechStatus.PAUSED) ?: return)
+                    schedulePausedStop()
                 }
             }
             target >= chapter.paragraphs.size -> nextChapter(chapter, playing, reachedEnd = false)
@@ -301,26 +425,28 @@ internal class ReaderSpeechService : Service() {
         }
     }
 
-    fun seek(
-        chapter: Int,
-        offset: Int,
-        autoplay: Boolean = when (owner?.state?.value?.status) {
-            SpeechStatus.LOADING -> resumeAfterLoad
-            SpeechStatus.PLAYING -> true
-            else -> false
-        },
-    ) {
+    fun seek(chapter: Int, offset: Int) {
         val current = owner ?: return
-        if (selectedVoice == null) {
-            current.setTarget(chapter, offset)
+        if (current.state.value.status == SpeechStatus.ERROR) {
+            if (chapter in 0 until current.chapterCount()) current.setTarget(chapter, offset)
             return
         }
+        seek(chapter, offset, playWhenReady)
+    }
+
+    private fun seek(
+        chapter: Int,
+        offset: Int,
+        autoplay: Boolean,
+    ) {
+        val current = owner ?: return
         if (chapter !in 0 until current.chapterCount()) return
+        playWhenReady = autoplay
+        current.setTarget(chapter, offset)
+        val state = current.state.value
+        if (state.voice == null || state.pendingVoice != null) return
         loadJob?.cancel()
         stopUtterance()
-        failedTarget = chapter to offset
-        resumeAfterLoad = autoplay
-        current.setTarget(chapter, offset)
         val previous = current.state.value
         publish(previous.copy(status = SpeechStatus.LOADING, error = null))
         loadJob = scope.launch {
@@ -330,27 +456,32 @@ internal class ReaderSpeechService : Service() {
                 val loaded = if (previous.chapter?.index == chapter) previous.chapter else current.load(chapter)
                 val index = loaded.paragraphIndexAt(offset)
                 if (index < 0) {
-                    failedTarget = null
                     if (offset == Int.MAX_VALUE) {
                         if (loaded.index > 0) {
                             seek(loaded.index - 1, Int.MAX_VALUE, autoplay)
                         } else {
-                            publish(previous.copy(status = SpeechStatus.PAUSED))
+                            val previousOffset = previous.chapterOffset
+                            if (previous.chapter != null && previousOffset != null) {
+                                current.setTarget(previous.chapter.index, previousOffset)
+                            }
+                            playWhenReady = false
                             releaseFocus()
-                            leaveForeground()
+                            publish(previous.copy(status = SpeechStatus.PAUSED))
+                            schedulePausedStop()
                         }
                     } else {
                         nextChapter(loaded, autoplay, reachedEnd = false)
                     }
                     return@launch
                 }
-                failedTarget = null
-                val start = loaded.paragraphs[index].startWithin(offset)
+                val paragraph = loaded.paragraphs[index]
+                val start = paragraph.startWithin(offset)
+                current.setTarget(chapter, paragraph.offset + start)
                 publish(current.state.value.copy(chapter = loaded, paragraphIndex = index, paragraphStart = start))
-                if (autoplay) startParagraph(index, start) else {
+                if (playWhenReady) startParagraph(index, start) else {
                     recordPosition()
                     publish(current.state.value.copy(status = SpeechStatus.PAUSED))
-                    leaveForeground()
+                    schedulePausedStop()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -361,8 +492,11 @@ internal class ReaderSpeechService : Service() {
     }
 
     private fun selectParagraph(index: Int, start: Int = 0) {
-        val state = owner?.state?.value ?: return
-        failedTarget = null
+        val current = owner ?: return
+        val state = current.state.value
+        val chapter = state.chapter ?: return
+        val paragraph = chapter.paragraphs.getOrNull(index) ?: return
+        current.setTarget(chapter.index, paragraph.offset + start)
         stopUtterance()
         nextChunk = start
         publish(state.copy(paragraphIndex = index, paragraphStart = start, error = null))
@@ -394,26 +528,25 @@ internal class ReaderSpeechService : Service() {
             else nextChapter(chapter, autoplay = true, reachedEnd = true)
             return
         }
-        val firstChunk = !paragraphStarted
-        if (firstChunk) {
-            val voice = selectedVoice ?: return
-            if (engine.voice != voice && engine.setVoice(voice) != TextToSpeech.SUCCESS) {
-                fail("所选音色暂不可用，请在播放设置中选择其他音色")
-                return
-            }
-            engine.setSpeechRate(state.rate)
-            paragraphStarted = true
-        }
         val start = nextChunk
         chunkStart = start
+        spokenOffset = start
         val end = speechChunkEnd(paragraph.text, start, TextToSpeech.getMaxSpeechInputLength())
         val id = (++utteranceSequence).toString()
         utterance = id
         nextChunk = end
-        if (engine.speak(paragraph.text.substring(start, end), TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.SUCCESS) {
-            if (firstChunk) recordPosition()
-        } else {
-            fail("朗读失败，请重试")
+        val text = paragraph.text.substring(start, end)
+        speechSubmission = scope.launch {
+            val accepted = try {
+                engine.speak(text, state.rate, id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
+            }
+            if (tts !== engine || utterance != id) return@launch
+            if (!accepted) engineUnavailable("语音引擎未接收朗读请求，请重试或切换引擎。")
+            else if (start == state.paragraphStart) recordPosition()
         }
     }
 
@@ -436,18 +569,30 @@ internal class ReaderSpeechService : Service() {
             publish(current.state.value.copy(timer = null))
             // 章末定时后继续时从下一章起播。
             pause()
-            failedTarget = chapter.index + 1 to 0
+            current.setTarget(chapter.index + 1, 0)
         } else {
             seek(chapter.index + 1, 0, autoplay)
         }
     }
 
-    private fun fail(message: String) {
-        val state = owner?.state?.value ?: return
-        stopUtterance()
+    private fun fail(message: String, utteranceEnded: Boolean = false) {
+        val current = owner ?: return
+        val state = checkpoint(current)
+        stopUtterance(sendStop = !utteranceEnded)
         releaseFocus()
         publish(state.copy(status = SpeechStatus.ERROR, error = message))
+        if (state.status == SpeechStatus.PLAYING) recordPosition()
         leaveForeground()
+    }
+
+    private fun checkpoint(current: ReaderSpeech): SpeechState = current.checkpoint(spokenOffset.takeIf { utterance != null })
+
+    private fun schedulePausedStop() {
+        if (pausedJob?.isActive == true) return
+        pausedJob = scope.launch {
+            delay(PAUSED_TIMEOUT_MS)
+            finishPlayback()
+        }
     }
 
     fun finishPlayback(notifyReader: Boolean = true) {
@@ -463,12 +608,25 @@ internal class ReaderSpeechService : Service() {
         stopSelf()
     }
 
-    private fun stopUtterance() {
+    private fun stopUtterance(sendStop: Boolean = true) {
+        val hadUtterance = utterance != null
+        speechSubmission?.cancel()
+        speechSubmission = null
         utterance = null
         chunkStart = 0
+        spokenOffset = 0
         nextChunk = 0
-        paragraphStarted = false
-        tts?.stop()
+        val engine = tts ?: return
+        if (sendStop && hadUtterance) scope.launch {
+            val stopped = try {
+                engine.stop()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
+            }
+            if (!stopped && tts === engine) engineUnavailable("语音引擎连接已断开，请重试或切换引擎。")
+        }
     }
 
     private fun releaseFocus() {
@@ -480,14 +638,10 @@ internal class ReaderSpeechService : Service() {
         loadJob?.cancel()
         timerJob?.cancel()
         pausedJob?.cancel()
-        failedTarget = null
-        resumeAfterLoad = true
-        stopUtterance()
+        playWhenReady = true
+        stopUtterance(sendStop = false)
         releaseFocus()
-        tts?.shutdown()
-        tts = null
-        selectedVoice = null
-        voices = emptyList()
+        retireEngine()
     }
 
     // 不要 POST_NOTIFICATIONS：这条是带 MediaSession 的 MediaStyle 通知（见 notification()），Android 13 起媒体会话通知
@@ -498,7 +652,7 @@ internal class ReaderSpeechService : Service() {
         current.update(state)
         val status = when (state.status) {
             SpeechStatus.PLAYING -> PlaybackState.STATE_PLAYING
-            SpeechStatus.LOADING -> PlaybackState.STATE_BUFFERING
+            SpeechStatus.LOADING -> if (playWhenReady) PlaybackState.STATE_BUFFERING else PlaybackState.STATE_PAUSED
             SpeechStatus.COMPLETE, SpeechStatus.IDLE -> PlaybackState.STATE_STOPPED
             else -> PlaybackState.STATE_PAUSED
         }
@@ -551,7 +705,7 @@ internal class ReaderSpeechService : Service() {
         else state.chapter?.title?.takeIf { it.isNotBlank() } ?: current.bookTitle()
 
     private fun notification(current: ReaderSpeech, state: SpeechState): Notification {
-        val playing = state.status == SpeechStatus.PLAYING || state.status == SpeechStatus.LOADING
+        val playing = isPlayingOrPreparing(state)
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(notificationIcon)
             .setLargeIcon(notificationArt)
@@ -569,6 +723,9 @@ internal class ReaderSpeechService : Service() {
             .setStyle(Notification.MediaStyle().setMediaSession(media.sessionToken).setShowActionsInCompactView(0, 1, 2))
             .build()
     }
+
+    private fun isPlayingOrPreparing(state: SpeechState): Boolean =
+        state.status == SpeechStatus.PLAYING || state.status == SpeechStatus.LOADING && playWhenReady
 
     private fun notificationAction(icon: Int, label: String, action: String): Notification.Action =
         Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(this, icon), label, serviceAction(action)).build()
@@ -606,6 +763,7 @@ internal class ReaderSpeechService : Service() {
 
     companion object {
         private const val ART_SIZE_PX = 128
+        private const val ENGINE_INIT_TIMEOUT_MS = 15_000L
         /** 暂停多久算不听了：够接个电话、吃顿饭 */
         private const val PAUSED_TIMEOUT_MS = 30 * 60 * 1000L
         private const val CHANNEL = "reader_read_aloud"

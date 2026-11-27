@@ -1,21 +1,23 @@
 package com.radium.inkwell.ui.components
 
-import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -23,12 +25,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.unit.IntSize
 import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -65,22 +67,21 @@ fun AppColorSlider(
     val onChange by rememberUpdatedState(onValueChange)
     val onFinished by rememberUpdatedState(onValueChangeFinished)
     val range by rememberUpdatedState(valueRange)
-    var width by remember { mutableIntStateOf(0) }
-    var height by remember { mutableIntStateOf(0) }
-    // 拖动中手指的横坐标：draggable 只给增量，自己累加
-    var dragX by remember { mutableFloatStateOf(0f) }
+    var gestureFraction by remember { mutableFloatStateOf(Float.NaN) }
+    var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(value, valueRange) {
+        if (!dragging) gestureFraction = Float.NaN
+    }
 
-    fun emitAt(x: Float) {
-        val radius = height / 2f
-        val span = width - 2 * radius
+    fun emitAt(x: Float, size: IntSize) {
+        val radius = size.height / 2f
+        val span = size.width - 2 * radius
         val fraction = if (span <= 0f) 0f else ((x - radius) / span).coerceIn(0f, 1f)
+        // 拇指直接读手势位置，当帧绘制，不等纸色预览经阅读状态回到控件。
+        gestureFraction = fraction
         onChange(range.start + fraction * (range.endInclusive - range.start))
     }
 
-    val dragState = rememberDraggableState { delta ->
-        dragX += delta
-        emitAt(dragX)
-    }
     val span = valueRange.endInclusive - valueRange.start
     val fraction = if (span <= 0f) 0f else ((value - valueRange.start) / span).coerceIn(0f, 1f)
 
@@ -88,10 +89,6 @@ fun AppColorSlider(
         modifier
             .fillMaxWidth()
             .height(SliderDefaults.MinHeight)
-            .onSizeChanged {
-                width = it.width
-                height = it.height
-            }
             .semantics {
                 contentDescription = label
                 progressBarRangeInfo = ProgressBarRangeInfo(value.coerceIn(valueRange), valueRange)
@@ -103,43 +100,55 @@ fun AppColorSlider(
                     true
                 }
             }
-            // 点一下跳过去。拖起来时 draggable 先（Main 阶段里层先看到）把事件消费掉，这里的点按就作废
+            // 点按直接跳过去。横拖先消费事件，竖拖仍由面板接手。
             .pointerInput(Unit) {
                 detectTapGestures { pos ->
-                    emitAt(pos.x)
+                    emitAt(pos.x, size)
                     onFinished?.invoke()
                 }
             }
-            .draggable(
-                state = dragState,
-                orientation = Orientation.Horizontal,
-                onDragStarted = { pos ->
-                    dragX = pos.x
-                    emitAt(pos.x)
-                },
-                onDragStopped = { onFinished?.invoke() },
-            )
-            .drawBehind {
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
+                        ?: return@awaitEachGesture
+                    dragging = true
+                    try {
+                        emitAt(drag.position.x, size)
+                        horizontalDrag(drag.id) { change ->
+                            change.consume()
+                            emitAt(change.position.x, size)
+                        }
+                    } finally {
+                        dragging = false
+                        onFinished?.invoke()
+                    }
+                }
+            }
+            .drawWithCache {
                 val radius = size.height / 2f
                 val corner = CornerRadius(radius)
                 val brush = if (trackColors.size == 1) SolidColor(trackColors[0])
                 else Brush.horizontalGradient(trackColors, startX = radius, endX = size.width - radius)
-                drawRoundRect(brush, cornerRadius = corner)
-                // 一道细边：轨道和卡片同色的那一头（浅纸上的「明度」右端）不至于化进卡里
                 val hairline = Dimens.strokeThin.toPx()
-                drawRoundRect(
-                    outline,
-                    topLeft = Offset(hairline / 2, hairline / 2),
-                    size = size.copy(width = size.width - hairline, height = size.height - hairline),
-                    cornerRadius = CornerRadius(radius - hairline / 2),
-                    style = Stroke(hairline),
-                )
-
-                val center = Offset(radius + fraction * (size.width - 2 * radius), radius)
                 val thumb = radius - Dimens.gapXS.toPx()
-                drawCircle(THUMB_SHADOW, radius = thumb + hairline, center = center + Offset(0f, hairline / 2))
-                drawCircle(THUMB_RING, radius = thumb, center = center)
-                drawCircle(thumbColor, radius = thumb - Dimens.strokeThick.toPx(), center = center)
+                val thumbFill = thumb - Dimens.strokeThick.toPx()
+                onDrawBehind {
+                    drawRoundRect(brush, cornerRadius = corner)
+                    // 轨道和卡片同色的那一头也能靠细边分辨。
+                    drawRoundRect(
+                        outline,
+                        topLeft = Offset(hairline / 2, hairline / 2),
+                        size = size.copy(width = size.width - hairline, height = size.height - hairline),
+                        cornerRadius = CornerRadius(radius - hairline / 2),
+                        style = Stroke(hairline),
+                    )
+                    val position = if (gestureFraction.isNaN()) fraction else gestureFraction
+                    val center = Offset(radius + position * (size.width - 2 * radius), radius)
+                    drawCircle(THUMB_SHADOW, radius = thumb + hairline, center = center + Offset(0f, hairline / 2))
+                    drawCircle(THUMB_RING, radius = thumb, center = center)
+                    drawCircle(thumbColor, radius = thumbFill, center = center)
+                }
             }
     )
 }

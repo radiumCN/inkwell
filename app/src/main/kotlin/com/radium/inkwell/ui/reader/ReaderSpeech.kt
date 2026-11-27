@@ -5,8 +5,15 @@ import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.asParagraph
 import com.radium.inkwell.core.model.charLength
 import com.radium.inkwell.core.model.textOrNull
+import java.security.MessageDigest
+import java.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+internal val speechRates = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+internal val experimentalSpeechRates = listOf(3f, 4f, 5f)
+
+internal fun Float.speechRateLabel(): String = "${toString().removeSuffix(".0")}×"
 
 internal data class SpeechParagraph(val offset: Int, val elementIndex: Int, val text: String) {
     fun startWithin(chapterOffset: Int): Int {
@@ -44,13 +51,59 @@ internal fun speechChapter(index: Int, title: String, content: ChapterContent): 
 
 internal enum class SpeechStatus { IDLE, LOADING, PLAYING, PAUSED, NO_VOICE, ERROR, COMPLETE }
 
+internal data class SpeechEngine(val packageName: String, val label: String)
+
+internal data class SpeechVoice(val name: String, val requiresNetwork: Boolean, val languageTag: String = "")
+
+/** null 的 name 表示沿用引擎配置的中文音色。 */
+internal data class SpeechVoiceChoice(val name: String? = null)
+
+internal fun isChineseSpeechLanguage(language: String?): Boolean = when (language) {
+    "zh", "zho", "chi", "cmn", "yue" -> true
+    else -> false
+}
+
+/** A preferred package may have fallen back. Match offline preferences against the returned catalog. */
+internal fun offlineSpeechPreferenceKey(voices: List<SpeechVoice>, defaultName: String?): String {
+    val catalog = buildString {
+        append(defaultName.orEmpty().length).append(':').append(defaultName.orEmpty())
+        for (voice in voices.sortedBy { it.name }) {
+            append(voice.name.length).append(':').append(voice.name)
+            append(voice.languageTag.length).append(':').append(voice.languageTag)
+            append(if (voice.requiresNetwork) '1' else '0')
+        }
+    }
+    val digest = MessageDigest.getInstance("SHA-256").digest(catalog.encodeToByteArray())
+    return "offline-voice:" + Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+}
+
+internal fun chooseOfflineSpeechVoice(
+    voices: List<SpeechVoice>,
+    preferred: String?,
+    current: String?,
+    setVoice: (String) -> Boolean,
+): SpeechVoiceChoice? {
+    val saved = voices.firstOrNull { !it.requiresNetwork && it.name == preferred }
+    if (saved != null && setVoice(saved.name)) return SpeechVoiceChoice(saved.name)
+    val offline = voices.filterNot { it.requiresNetwork || it.name == preferred }
+    offline.firstOrNull { it.name == current && setVoice(it.name) }?.let { return SpeechVoiceChoice(it.name) }
+    offline.firstOrNull { it.name != current && setVoice(it.name) }?.let { return SpeechVoiceChoice(it.name) }
+    return null
+}
+
 internal data class SpeechState(
     val status: SpeechStatus = SpeechStatus.IDLE,
     val chapter: SpeechChapter? = null,
     val paragraphIndex: Int = 0,
     val paragraphStart: Int = 0,
-    val voices: List<String> = emptyList(),
-    val selectedVoice: String? = null,
+    val engines: List<SpeechEngine> = emptyList(),
+    val enginePackage: String? = null,
+    val systemEngine: String? = null,
+    val engineConnection: Long = 0,
+    val voices: List<SpeechVoice> = emptyList(),
+    val hasDefaultVoice: Boolean = false,
+    val voice: SpeechVoiceChoice? = null,
+    val pendingVoice: SpeechVoiceChoice? = null,
     val voiceError: String? = null,
     val rate: Float = 1f,
     // null = 关闭，0 = 本章结束，正数 = 分钟。
@@ -60,6 +113,13 @@ internal data class SpeechState(
     val paragraph: SpeechParagraph? get() = chapter?.paragraphs?.getOrNull(paragraphIndex)
     val chapterOffset: Int? get() = paragraph?.let { it.offset + paragraphStart }
     val active: Boolean get() = status != SpeechStatus.IDLE
+    val hasVoiceOptions: Boolean get() = hasDefaultVoice || voices.isNotEmpty()
+    val checkingVoiceOptions: Boolean get() = status == SpeechStatus.LOADING && !hasVoiceOptions
+
+    fun canRequestVoiceChange(choice: SpeechVoiceChoice): Boolean = pendingVoice == null && voice != choice
+
+    fun offersVoice(choice: SpeechVoiceChoice, connection: Long): Boolean =
+        engineConnection == connection && (choice.name?.let { name -> voices.any { it.name == name } } ?: hasDefaultVoice)
 }
 
 internal class ReaderSpeech(
@@ -94,6 +154,16 @@ internal class ReaderSpeech(
     fun setTarget(chapter: Int, offset: Int) {
         targetChapter = chapter
         targetOffset = offset
+    }
+
+    fun checkpoint(spokenOffset: Int?): SpeechState {
+        val current = state.value
+        val chapter = current.chapter ?: return current
+        val paragraph = current.paragraph ?: return current
+        if (current.status != SpeechStatus.PLAYING || spokenOffset == null) return current
+        val start = paragraph.startWithin(paragraph.offset + spokenOffset)
+        setTarget(chapter.index, paragraph.offset + start)
+        return current.copy(paragraphStart = start)
     }
 
     fun seek(chapter: Int, offset: Int) {

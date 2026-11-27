@@ -2,9 +2,12 @@ package com.radium.inkwell.data.prefs
 
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.api.ReaderTheme
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LayoutSchemeTest {
@@ -59,6 +62,53 @@ class LayoutSchemeTest {
         assertEquals(0f, decoded.letterSpacingEm)
         assertTrue(decoded.justify)
         assertEquals(ReaderSettings.FONT_WEIGHT_NORMAL, decoded.bodyFontWeight)
+    }
+
+    @Test
+    fun `排版方案保存负的头部留白并为旧版保留零值`() {
+        val settings = tight.copy(headerTopSpacingDp = -16f, titleTopSpacingDp = 12f, marginVerticalDp = 0f)
+        val scheme = LayoutScheme.capture("贴边", settings)
+        val decoded = LayoutSchemeCodec.decode(LayoutSchemeCodec.encode(listOf(scheme))).single()
+        assertEquals(0f, decoded.headerTopSpacingDp)
+        assertEquals(settings, decoded.applyTo(ReaderSettings()))
+        assertTrue(decoded.matches(settings))
+        assertFalse(decoded.matches(settings.copy(headerTopSpacingDp = 0f)))
+    }
+
+    @Test
+    fun `单书排版恢复默认间距后随页眉位置重新计算`() {
+        val defaults = ReaderSettings()
+        val raised = defaults.copy(raiseHeader = true)
+        val custom = BookLayout.capture(true, raised.copy(headerTopSpacingDp = -8f, titleTopSpacingDp = 0f))
+        val reset = BookLayout.capture(
+            true,
+            custom.applyTo(raised).copy(
+                headerTopSpacingDp = defaults.headerTopSpacingDp,
+                titleTopSpacingDp = defaults.titleTopSpacingDp,
+            ),
+        )
+        val reopened = Json.decodeFromString<BookLayout>(Json.encodeToString(reset))
+        val regular = reopened.applyTo(defaults)
+        val raisedAgain = reopened.applyTo(raised)
+
+        assertNull(regular.headerTopSpacingDp)
+        assertNull(regular.titleTopSpacingDp)
+        assertEquals(12f, regular.effectiveHeaderTopSpacingDp)
+        assertEquals(12f, regular.effectiveTitleTopSpacingDp)
+        assertEquals(8f, raisedAgain.effectiveHeaderTopSpacingDp)
+        assertEquals(0f, raisedAgain.effectiveTitleTopSpacingDp)
+        assertEquals(-8f, custom.applyTo(defaults).headerTopSpacingDp)
+        assertEquals(0f, custom.applyTo(defaults).titleTopSpacingDp)
+    }
+
+    @Test
+    fun `旧的单书配置仍保留显式间距`() {
+        val layout = Json.decodeFromString<BookLayout>(
+            """{"enabled":true,"scheme":{"name":"","headerTopSpacingDp":0,"headerTopOffsetDp":-6,"titleTopSpacingDp":12}}""",
+        )
+        val applied = layout.applyTo(ReaderSettings(raiseHeader = true))
+        assertEquals(-6f, applied.headerTopSpacingDp)
+        assertEquals(12f, applied.titleTopSpacingDp)
     }
 
     @Test

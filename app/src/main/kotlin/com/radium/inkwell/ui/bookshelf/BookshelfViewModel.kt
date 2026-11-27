@@ -18,8 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -103,7 +101,7 @@ class BookshelfViewModel(
             val myJob = coroutineContext.job
             try {
                 val showingHidden = _showHidden.value
-                val (books, silent) = allBooks.value
+                val (books, silent) = shelf.value.orEmpty()
                     .filter { it.type == BookType.NET && !it.sourceId.isNullOrBlank() }
                     .sortedByDescending { maxOf(it.readAt, it.openedAt) }
                     .partition { showingHidden || !it.hidden }
@@ -228,49 +226,18 @@ class BookshelfViewModel(
             (appPrefs.rssEntryEnabledState.value ?: true) && rssRepo.hasEnabledSourceState.value == true,
         )
 
-    /** 书架展示：网格或列表。初值同上，别让列表用户先看一帧网格 */
-    val layout: StateFlow<BookshelfLayout> = appPrefs.bookshelfLayoutState
-        .map { it ?: BookshelfLayout.GRID }
-        .stateIn(
-            viewModelScope, SharingStarted.WhileSubscribed(5_000),
-            appPrefs.bookshelfLayoutState.value ?: BookshelfLayout.GRID,
-        )
-
-    /** 网格每行几本（见 [ShelfColumns]）。初值同上，别让每行 4 本的人先看一帧 3 本 */
-    val columns: StateFlow<Int> = appPrefs.bookshelfColumnsState
-        .map { it ?: ShelfColumns.DEFAULT }
-        .stateIn(
-            viewModelScope, SharingStarted.WhileSubscribed(5_000),
-            appPrefs.bookshelfColumnsState.value ?: ShelfColumns.DEFAULT,
-        )
+    /** 和首批书一起就绪后再排内容，避免先出现一次默认网格。 */
+    val layout = appPrefs.bookshelfLayoutState
+    val columns = appPrefs.bookshelfColumnsState
 
     /** 书架上捏合换了一档 */
     fun setColumns(columns: Int) {
         viewModelScope.launch { appPrefs.setBookshelfColumns(columns) }
     }
 
-    /**
-     * Room 送来的书架；null = 第一帧还没到。
-     *
-     * [allBooks] 与 [shelfReady] 都从这一份派生，二者同一拍更新。从前 shelfReady 另订一份
-     * `books.map { true }`、allBooks 初值是 emptyList —— 进页那一瞬间「空列表」和「真没有书」分不开，
-     * 书架先闪一下空态和「导入本地书」，书才冒出来。
-     */
+    /** Room 送来的书架，null 表示首批数据正在读取。 */
     private val shelf: StateFlow<List<BookEntity>?> = bookRepo.books
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    val allBooks: StateFlow<List<BookEntity>> = shelf
-        .map { it.orEmpty() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /**
-     * Room 第一帧已到（含空架）。启动指标用它报 timeToFullDisplay，
-     * 而不是首帧空白 —— 书架书是异步来的，TTID 测的不是用户看见的那一帧。
-     * 页面也靠它决定能不能下「书架是空的」这个结论。
-     */
-    val shelfReady: StateFlow<Boolean> = shelf
-        .map { it != null }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val messages = MessageBus()
 
@@ -296,10 +263,7 @@ class BookshelfViewModel(
 
     /** null = 全部；"" 也是一个真实分组（未分组的书） */
     private val _group = MutableStateFlow<String?>(null)
-    val group: StateFlow<String?> = _group.asStateFlow()
     fun setGroup(g: String?) { _group.value = g }
-
-    // 分组名列表 [groups] 声明在隐藏区那一节：它要按「隐藏区开没开」过滤，构造期就得取到 _showHidden
 
     // ---- 隐藏 ----
 
@@ -313,33 +277,6 @@ class BookshelfViewModel(
      */
     private val _showHidden = MutableStateFlow(false)
     val showHidden: StateFlow<Boolean> = _showHidden.asStateFlow()
-
-    /**
-     * 筛选条与「设置分组」里列出的分组名。隐藏区收着时**不算隐藏的书**：一个组里只有隐藏的书，
-     * 它的名字就不该作为一个 chip 摆在书架上 —— 点进去是空的，名字本身还泄了底。
-     * 隐藏区开着时那些书就在眼前，它们的组照常列出。
-     */
-    val groups: StateFlow<List<String>> = combine(allBooks, _showHidden) { list, showHidden ->
-        list.asSequence()
-            .filter { showHidden || !it.hidden }
-            .map { it.groupName.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .sorted()
-            .toList()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    init {
-        // 正筛着的分组没了（删光了这组的书、或把它们都移去别组、或收起隐藏区后它只剩隐藏的书）
-        // → 回到「全部」。否则 _group 指着一个筛选条上已经不存在的名字：书列表空着、chip 一个也不亮，
-        // 用户只看到「书架突然空了」。
-        viewModelScope.launch {
-            groups.collect { gs ->
-                val g = _group.value
-                if (g != null && g != UNGROUPED && g !in gs) _group.value = null
-            }
-        }
-    }
 
     /**
      * 「退出 App 就复位」得真的发生。书架是根页面，它的 ViewModel 跟着 Activity 活：
@@ -372,7 +309,7 @@ class BookshelfViewModel(
     fun openHiddenPanel(): Boolean {
         _showHidden.value = true
         val g = _group.value
-        return allBooks.value.any { it.hidden && inGroup(it, g) }
+        return shelf.value.orEmpty().any { it.hidden && it.inBookshelfGroup(g) }
     }
 
     /** 「展开需验证」只在隐藏区胶囊上露面，所以设置这件事归书架管，而不是设置页 */
@@ -385,10 +322,6 @@ class BookshelfViewModel(
         _showHidden.value = false
         _dedupIncludeHidden.value = true
     }
-
-    val hiddenCount: StateFlow<Int> = allBooks
-        .map { list -> list.count { it.hidden } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     // ---- 重复的书 ----
 
@@ -410,8 +343,8 @@ class BookshelfViewModel(
      * 整个书架两两比，挪到 Default 上算，别占主线程。
      */
     val duplicateGroups: StateFlow<List<DuplicateGroup>> =
-        combine(allBooks, _showHidden, _dedupIncludeHidden) { list, showHidden, include ->
-            shelfDuplicates(list, includeHidden = showHidden && include)
+        combine(shelf, _showHidden, _dedupIncludeHidden) { list, showHidden, include ->
+            shelfDuplicates(list.orEmpty(), includeHidden = showHidden && include)
         }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -463,10 +396,10 @@ class BookshelfViewModel(
         }
     }
 
-    private fun shelfIds(): Set<String> = allBooks.value.mapTo(HashSet()) { it.id }
+    private fun shelfIds(): Set<String> = shelf.value.orEmpty().mapTo(HashSet()) { it.id }
 
     /**
-     * 开书那一刻的书架顺序；非 null 时 [books] 照它摆。
+     * 开书那一刻的书架顺序，冻结期间 [content] 照它摆。
      *
      * 书架按「最近读 / 打开」排序，而开书当场就会 markOpened —— 这本书立刻跳到第一位。阅读页的
      * 退出动画却是缩回「点开它时的位置」（InkwellNavigator.openOrigin）：缩回去的地方已经换成了别的书；
@@ -476,63 +409,61 @@ class BookshelfViewModel(
      */
     private val frozenOrder = MutableStateFlow<List<String>?>(null)
 
-    fun freezeShelfOrder() {
-        frozenOrder.value = books.value.map { it.id }
+    fun freezeShelfOrder(visibleBooks: List<BookEntity>) {
+        frozenOrder.value = visibleBooks.map { it.id }
     }
 
     fun releaseShelfOrder() {
         frozenOrder.value = null
     }
 
-    val books: StateFlow<List<BookEntity>> =
-        combine(allBooks, _group, _showHidden, frozenOrder) { list, g, showHidden, frozen ->
-            val visible = list
-                .filter { showHidden || !it.hidden }
-                .filter { inGroup(it, g) }
-            if (frozen == null) {
-                visible
-            } else {
-                val rank = HashMap<String, Int>(frozen.size * 2).apply { frozen.forEachIndexed { i, id -> put(id, i) } }
-                visible.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /**
-     * 书架顶上的「继续阅读」：最近在读的那一本。只在「全部」里出现 —— 筛到某个分组时人是在找书，
-     * 不是要接着读。
-     *
-     * 取自 [books] 而不是 allBooks：开书时顺序被冻住（见 [frozenOrder]），卡片也就跟着冻住 ——
-     * 否则从网格里点开另一本，退出动画还没播完，顶上的卡片就先换了封面。隐藏区收着时隐藏书本来就
-     * 不在 [books] 里，卡片也就不会把藏起来的书摆到最显眼的位置。
-     */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val continueReading: StateFlow<ContinueReading?> =
-        combine(books, _group) { list, g ->
-            if (g != null) null else list.firstOrNull { it.lastActiveAt() > 0L }
+    internal val content: StateFlow<BookshelfContent?> =
+        combine(shelf, _group, _showHidden, frozenOrder) { list, group, showHidden, frozen ->
+            list?.let { bookshelfContent(it, group, showHidden, frozen) }
         }
-            .distinctUntilChanged()
-            .mapLatest { book ->
-                book?.let { ContinueReading(it, chapterDao.get(it.id, it.readChapterIndex)?.title) }
-            }
+            .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private fun inGroup(book: BookEntity, g: String?): Boolean = when (g) {
-        null -> true
-        UNGROUPED -> book.groupName.isBlank()
-        else -> book.groupName.trim() == g
-    }
+    internal suspend fun chapterTitle(bookId: String, index: Int): String? = chapterDao.get(bookId, index)?.title
 
     // ---- 多选 ----
 
     private val _selected = MutableStateFlow<Set<String>>(emptySet())
     val selected: StateFlow<Set<String>> = _selected.asStateFlow()
 
+    private val _creatingSeries = MutableStateFlow(false)
+    val creatingSeries = _creatingSeries.asStateFlow()
+
+    fun createSeries(title: String, ids: List<String>, onCreated: () -> Unit) {
+        if (_creatingSeries.value) return
+        _creatingSeries.value = true
+        viewModelScope.launch {
+            try {
+                bookRepo.saveLocalSeries(title, ids)
+                clearSelection()
+                onCreated()
+                messages.emit("已创建合订本")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                messages.emit(e.message ?: "无法创建合订本")
+            } finally {
+                _creatingSeries.value = false
+            }
+        }
+    }
+
     init {
         // 多选只对**看得见的**书生效。选了几本再切分组、或收起隐藏区，看不见的书还留在选中集合里，
         // 「删除 N 本」就会把它们一起删掉 —— 用户根本不知道自己选过。可见列表一变就把选中收窄。
         viewModelScope.launch {
-            books.collect { visible ->
-                val ids = visible.mapTo(HashSet()) { it.id }
+            content.filterNotNull().collect { snapshot ->
+                val currentGroup = _group.value
+                if (currentGroup != null && currentGroup != UNGROUPED && currentGroup !in snapshot.groups) {
+                    _group.compareAndSet(currentGroup, null)
+                }
+                if (_selected.value.isEmpty()) return@collect
+                val ids = snapshot.books.mapTo(HashSet()) { it.id }
                 _selected.update { sel -> if (ids.containsAll(sel)) sel else sel.filterTo(LinkedHashSet()) { it in ids } }
             }
         }
@@ -550,7 +481,7 @@ class BookshelfViewModel(
     fun selectAll() {
         // 只全选**当前可见**的（分组筛选 + 隐藏区过滤之后）——
         // 否则「未分组」下点全选再删除，会把别的分组里的书一并删掉
-        _selected.value = books.value.map { it.id }.toSet()
+        _selected.value = content.value?.books.orEmpty().map { it.id }.toSet()
     }
 
     fun clearSelection() {

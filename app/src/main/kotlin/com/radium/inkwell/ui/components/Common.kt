@@ -34,7 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.platform.LocalDensity
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
 import coil3.decode.DataSource
 import coil3.request.ImageRequest
@@ -212,6 +215,8 @@ fun ReadingProgressMeter(
  * 内存缓存命中的（滑回来的那些）不淡，直接出。不用 Coil 自带的 crossfade：它自己计时，
  * 不理系统的动画开关，而且一成功就该撤掉的默认封面会在淡入期间先消失，露出底下的灰方。
  *
+ * [shelfThumbnail] 在已知图片地址时用中性底等待，缺图或失败才显示书名封面，避免冷启动时整屏色块换色。
+ * [fixedSize] 适用于尺寸固定的缩略图，网格等自适应布局留空。
  * @param contentDescription 读屏念的名字。书名就印在旁边（列表行标题、书架卡片下的书名、详情页抬头）
  *   时传 null —— 封面整块不进读屏，否则同一个书名连念两遍（默认封面上那行字还会再念一遍截断的）。
  *   默认仍是书名，给「只有一张封面、旁边没字」的地方用（进书 splash）。
@@ -226,40 +231,46 @@ fun BookCover(
     placeholderChars: Int = 4,
     contentDescription: String? = title,
     retryReferer: String? = null,
+    shelfThumbnail: Boolean = false,
+    fixedSize: DpSize? = null,
+    onCoverResult: ((AsyncImagePainter.State) -> Unit)? = null,
 ) {
     Box(
         (if (contentDescription == null) modifier.clearAndSetSemantics {} else modifier)
             .clip(AppShapes.small)
             .background(MiuixTheme.colorScheme.surfaceContainerHigh),
     ) {
-        var loaded by remember(coverModel) { mutableStateOf(false) }
-        // 这次成功是不是内存缓存命中：命中就不淡入
-        var instant by remember(coverModel) { mutableStateOf(false) }
+        var display by remember(coverModel, shelfThumbnail) {
+            mutableStateOf(coverDisplay(shelfThumbnail, coverModel != null, source = null))
+        }
         val fade = remember(coverModel) { Animatable(0f) }
         val fadeSpec = AppTheme.motionScheme.defaultEffectsSpec<Float>()
-        LaunchedEffect(fade, loaded, instant) {
-            when {
-                !loaded -> fade.snapTo(0f)
-                instant -> fade.snapTo(1f)
-                else -> fade.animateTo(1f, fadeSpec)
+        LaunchedEffect(fade, display) {
+            when (display) {
+                CoverDisplay.FADE -> fade.animateTo(1f, fadeSpec)
+                CoverDisplay.DIRECT -> fade.snapTo(1f)
+                else -> fade.snapTo(0f)
             }
         }
-        // 图完全不透明了才撤默认封面；derivedStateOf 让淡入的每一帧只走图层、不重组
-        val covered by remember(coverModel) {
-            derivedStateOf { loaded && (instant || fade.value >= 1f) }
+        val fading by remember(fade) { derivedStateOf { fade.value < 1f } }
+        if (display == CoverDisplay.TITLE || (display == CoverDisplay.FADE && !shelfThumbnail && fading)) {
+            DefaultCover(title, placeholderChars)
         }
-        if (!covered) DefaultCover(title, placeholderChars)
         if (coverModel != null) {
             val context = LocalPlatformContext.current
             // 先不带 Referer；取不到、又给了 retryReferer 的，带上它再来一次
             var withReferer by remember(coverModel) { mutableStateOf(false) }
-            val request = remember(coverModel, context, withReferer) {
+            val density = LocalDensity.current
+            val request = remember(coverModel, context, withReferer, fixedSize, density) {
                 ImageRequest.Builder(context)
                     .data(coverModel)
                     .referer(if (withReferer) retryReferer else null)
-                    // 不设 size：AsyncImage 按布局约束定解码尺寸 —— 列表封面 48×64dp，不会把 1000px 原图解进内存。
-                    // 从前为了拿约束在外面套了 BoxWithConstraints，每个列表项都多一次子组合，书架一滑就是一屏。
-                    // 各调用点的尺寸都是有界的（定宽高，或网格格子里 fillMaxSize）；无界时 Coil 会按原图解，新调用点别给无界约束。
+                    // 已知尺寸的首屏缩略图直接开始解码；网格继续按实际布局约束取尺寸。
+                    .apply {
+                        if (fixedSize != null) with(density) {
+                            size(fixedSize.width.roundToPx(), fixedSize.height.roundToPx())
+                        }
+                    }
                     .precision(Precision.INEXACT)
                     .build()
             }
@@ -269,19 +280,31 @@ fun BookCover(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = if (instant) 1f else fade.value },
+                    .graphicsLayer { alpha = if (display == CoverDisplay.DIRECT) 1f else fade.value },
                 onSuccess = { s ->
-                    instant = s.result.dataSource == DataSource.MEMORY_CACHE ||
-                        s.result.dataSource == DataSource.MEMORY
-                    loaded = true
+                    display = coverDisplay(shelfThumbnail, hasModel = true, source = s.result.dataSource)
+                    onCoverResult?.invoke(s)
                 },
                 onError = {
-                    loaded = false
                     if (!withReferer && retryReferer != null) withReferer = true
+                    else {
+                        display = CoverDisplay.TITLE
+                        onCoverResult?.invoke(it)
+                    }
                 },
             )
         }
     }
+}
+
+internal enum class CoverDisplay { NEUTRAL, TITLE, DIRECT, FADE }
+
+internal fun coverDisplay(shelfThumbnail: Boolean, hasModel: Boolean, source: DataSource?): CoverDisplay = when {
+    !hasModel -> CoverDisplay.TITLE
+    source == null -> if (shelfThumbnail) CoverDisplay.NEUTRAL else CoverDisplay.TITLE
+    source == DataSource.MEMORY_CACHE || source == DataSource.MEMORY -> CoverDisplay.DIRECT
+    shelfThumbnail && source == DataSource.DISK -> CoverDisplay.DIRECT
+    else -> CoverDisplay.FADE
 }
 
 /**

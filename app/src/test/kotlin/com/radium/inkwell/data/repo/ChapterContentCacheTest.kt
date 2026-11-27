@@ -2,15 +2,26 @@ package com.radium.inkwell.data.repo
 
 import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ChapterContentCacheTest {
+
+    @Test
+    fun resumedPlanRetainsOnlyExistingTargetsInOriginalOrder() {
+        val saved = OfflinePlan("source", "book", listOf("b", "removed", "a"))
+        assertEquals(listOf("b", "a"), saved.currentTargets(setOf("a", "b", "new")).urls)
+        assertTrue(saved.currentTargets(setOf("new")).urls.isEmpty())
+    }
 
     private val root: File = Files.createTempDirectory("cache-test").toFile()
     private val cache = ChapterContentCache(root)
@@ -24,6 +35,68 @@ class ChapterContentCacheTest {
             ContentElement.Paragraph("正文第二段。"),
         )
     )
+
+    @Test
+    fun `offline plans survive a new cache instance and follow cache invalidation`() {
+        val epoch = cache.epoch("b1")
+        assertTrue(cache.writeOfflinePlan("b1", "original range", epoch))
+        assertTrue(cache.writeOfflinePlan("b1", "missing chapters", epoch, textOnly = true))
+        val reopened = ChapterContentCache(root)
+        assertEquals("original range", reopened.readOfflinePlan("b1"))
+        assertEquals("missing chapters", reopened.readOfflinePlan("b1", textOnly = true))
+        assertFalse(reopened.hasAny("b1"))
+        cache.clearOfflinePlan("b1", epoch, textOnly = true)
+        assertNull(reopened.readOfflinePlan("b1", textOnly = true))
+        assertEquals("original range", reopened.readOfflinePlan("b1"))
+        assertTrue(cache.writeOfflinePlan("b1", "new range", epoch, textOnly = true))
+        cache.clear("b1")
+        assertFalse(cache.writeOfflinePlan("b1", "stale range", epoch))
+        assertNull(reopened.readOfflinePlan("b1"))
+        assertNull(reopened.readOfflinePlan("b1", textOnly = true))
+    }
+
+    @Test
+    fun `offline images continue after a failure and retry only the missing image`() = runTest {
+        val broken = "https://ex.com/missing.jpg"
+        val valid = "https://ex.com/valid.jpg"
+        val chapter = ChapterContent(listOf(ContentElement.Image(broken), ContentElement.Image(valid)))
+        val calls = mutableListOf<String>()
+        val epoch = cache.epoch("b1")
+
+        assertFalse(cache.cacheOfflineImages("b1", chapter, epoch) {
+            calls += it
+            if (it == broken) throw IOException("404")
+            byteArrayOf(1)
+        })
+        assertEquals(listOf(broken, valid), calls)
+        assertFalse(cache.hasImage("b1", broken))
+        assertTrue(cache.hasImage("b1", valid))
+
+        calls.clear()
+        assertTrue(cache.cacheOfflineImages("b1", chapter, epoch) {
+            calls += it
+            byteArrayOf(2)
+        })
+        assertEquals(listOf(broken), calls)
+    }
+
+    @Test
+    fun `offline images stop after cancellation or cache invalidation`() = runTest {
+        val chapter = ChapterContent(listOf(ContentElement.Image("a.jpg"), ContentElement.Image("b.jpg")))
+        val epoch = cache.epoch("b1")
+        assertFailsWith<CancellationException> {
+            cache.cacheOfflineImages("b1", chapter, epoch) { throw CancellationException() }
+        }
+
+        val calls = mutableListOf<String>()
+        assertFalse(cache.cacheOfflineImages("b1", chapter, epoch) {
+            calls += it
+            cache.clear("b1")
+            byteArrayOf(1)
+        })
+        assertEquals(listOf("a.jpg"), calls)
+        assertFalse(cache.hasImage("b1", "a.jpg"))
+    }
 
     /**
      * 缓存里躺的是**解析结果**，不是原始 HTML —— 解析器修好了，磁盘上那份旧结果并不会

@@ -6,18 +6,26 @@ import android.app.Activity
 import android.content.ClipData
 import android.view.WindowManager
 import com.radium.inkwell.MainActivity
+import com.radium.inkwell.ui.theme.AppTheme
 import com.radium.inkwell.util.UsageLog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.areStatusBarsVisible
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -55,7 +63,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.style.TextAlign
 import com.radium.inkwell.ui.components.ErrorState
+import com.radium.inkwell.ui.components.AppTextButton
+import com.radium.inkwell.ui.components.FloatingGlassBar
 import com.radium.inkwell.ui.components.LocalBarBackdrop
+import com.radium.inkwell.ui.theme.AppThemes
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import androidx.compose.runtime.snapshotFlow
@@ -78,7 +89,10 @@ import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.radium.inkwell.ui.components.Dimens
@@ -101,6 +115,7 @@ import com.radium.inkwell.reader.measure.ComposeTextMeasureFacade
 import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.reader.paginate.PageSpec
+import com.radium.inkwell.reader.paginate.RaisedReaderHeader
 import com.radium.inkwell.util.KeyEventBus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -127,6 +142,7 @@ private const val PAGE_GLASS_LINGER_MS = 600L
 private data class ScrollSelectionTarget(val page: PageSpec, val offsetY: Float)
 
 /** 弹层宿主与正文共用窗口，供阅读设置局部取样。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReaderScreen(
     bookId: String,
@@ -140,6 +156,19 @@ fun ReaderScreen(
     val speechState by speech.state.collectAsStateWithLifecycle()
     val readerContext = LocalContext.current
     var showSpeechSheet by rememberSaveable { mutableStateOf(false) }
+    var showTextSearch by rememberSaveable { mutableStateOf(false) }
+    var menuSheetOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(menuSheetOpen, showTextSearch) {
+        viewModel.setReaderSheetOpen(menuSheetOpen || showTextSearch)
+    }
+    val showOverlayBars = overlay.menuVisible || showSpeechSheet || showTextSearch
+    val showRaisedHeader = !WindowInsets.areStatusBarsVisible
+    val motion = AppTheme.motionScheme
+    val menuProgress = animateFloatAsState(
+        targetValue = if (overlay.menuVisible) 1f else 0f,
+        animationSpec = if (overlay.menuVisible) motion.defaultEffectsSpec() else motion.fastEffectsSpec(),
+        label = "readerMenuChapterTitle",
+    )
     var miniPlayerHeight by remember { mutableStateOf(0.dp) }
     val speechInset = if (speechState.active && miniPlayerHeight > 0.dp) miniPlayerHeight + Dimens.gapS else 0.dp
     LaunchedEffect(speechState.active) {
@@ -157,6 +186,11 @@ fun ReaderScreen(
         speechChapter == pageUi.chapterIndex && speechState.status != SpeechStatus.LOADING
     }
         ?.let { TextSelection(it.elementIndex, 0, it.text.length, it.text) }
+    val textMatch by viewModel.textMatch.collectAsStateWithLifecycle()
+    val searchDestination by viewModel.textSearchDestination.collectAsStateWithLifecycle()
+    val onSearchResultPage = searchDestination?.isOnPage(pageUi.page?.spec) == true
+    val readingHighlight = textMatch?.takeIf { it.position.chapterIndex == pageUi.chapterIndex }?.selection
+        ?: speechSelection
     val density = LocalDensity.current
     val fontFamilyResolver = LocalFontFamilyResolver.current
     val keyBus = koinInject<KeyEventBus>()
@@ -188,14 +222,15 @@ fun ReaderScreen(
      *
      * 但挖孔在哪，**窗口本来就知道** —— 我们是从书架页导航进来的，insets 老早派发过；
      * 晚一帧的只是 Compose 在这棵新子树里的那次分发。所以首帧直接问 window 要
-     * （[rootDisplayCutout]，同步），之后以 Compose 的响应式值为准 —— 旋转、折叠、
+     * （同步），之后以 Compose 的响应式值为准 —— 旋转、折叠、
      * 分屏时它会自己更新，不必去猜什么时候该让缓存失效。
      *
      * 两者一致时（绝大多数情况）视口从头到尾没变过，压根不会有第二次排版。
      */
     val view = LocalView.current
     val windowSize = LocalWindowInfo.current.containerSize
-    val seed = remember(view, windowSize) { rootDisplayCutout(view) }
+    val rootInsets = remember(view, windowSize) { ViewCompat.getRootWindowInsets(view) }
+    val seed = rootInsets?.getInsets(WindowInsetsCompat.Type.displayCutout())
 
     val live = WindowInsets.displayCutout
     val layoutDirection = LocalLayoutDirection.current
@@ -205,7 +240,22 @@ fun ReaderScreen(
     val t = live.getTop(density)
     val r = live.getRight(density, layoutDirection)
     val b = live.getBottom(density)
-    val cutout = if (l == 0 && t == 0 && r == 0 && b == 0) seed else IntInsets(l, t, r, b)
+    val cutout = if (l == 0 && t == 0 && r == 0 && b == 0 && seed != null) {
+        IntInsets(seed.left, seed.top, seed.right, seed.bottom)
+    } else {
+        IntInsets(l, t, r, b)
+    }
+    // 菜单临时显示系统栏时，正文仍按用户设置排版。这里读可见时的高度，避免来回重排。
+    val statusBarTop = WindowInsets.statusBarsIgnoringVisibility.getTop(density).takeIf { it > 0 }
+        ?: rootInsets?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+    val statusArea = remember(view, windowSize, cutout, statusBarTop) {
+        val displayCutout = ViewCompat.getRootWindowInsets(view)?.displayCutout
+        ReaderStatusArea(
+            statusBarTop,
+            displayCutout?.boundingRects.orEmpty().map { IntRect(it.left, it.top, it.right, it.bottom) },
+            displayCutout?.waterfallInsets?.top ?: 0,
+        )
+    }
 
     // 视口 = **整个窗口**（边到边）。挖孔不再从视口里扣掉，而是折进正文边距（见下）——
     // 这样正文页与卷页都铺满全屏，顶部不再留一条状态栏/挖孔高度的空带（卷页时会露出来）。
@@ -213,9 +263,12 @@ fun ReaderScreen(
 
     // 页眉页脚小字的行高：分页给那两条带的预留按它兜底（见 pageInfoTextStyle）
     val infoLineHeight = pageInfoTextStyle().lineHeight
-    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight, speechInset) {
+    val spec = remember(viewport, session.settings, density, cutout, infoLineHeight, speechInset, statusArea, layoutDirection) {
         if (viewport.width <= 0 || viewport.height <= 0) null
-        else buildLayoutSpec(viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() })
+        else buildLayoutSpec(
+            viewport, session.settings, density, cutout, infoLineHeight, with(density) { speechInset.toPx() },
+            statusArea, layoutDirection,
+        )
     }
     // 快速调字号时让旧页面按旧尺寸显示，等重排完成再一起换正文和排版参数。
     val layout = pageUi.layout ?: spec
@@ -353,7 +406,7 @@ fun ReaderScreen(
     // 否则菜单开着按返回会直接跳出阅读，用户以为只是想关掉菜单。
     // 试读未上架时再拦一层，弹出加入书架的确认。
     BackHandler(
-        enabled = !overlay.readerSheetOpen && (
+        enabled = !overlay.readerSheetOpen && !showTextSearch && (
             overlay.menuVisible || selection != null || overlay.sourceCandidates != null ||
                 (!session.inShelf && !addShelfPrompt)
             ),
@@ -369,24 +422,26 @@ fun ReaderScreen(
     val activity = LocalActivity.current
     BrightnessEffect((activity as? MainActivity)?.readerBrightness, session.settings.brightnessOverride)
     KeepScreenOnEffect(activity, session.settings.keepScreenOn)
-    // 阅读时隐藏系统状态栏/导航栏，呼出菜单时恢复；露出来时图标明暗跟纸走、退出阅读页还给 App 主题
-    ImmersiveEffect(
+    ReaderSystemBarsEffect(
         activity,
-        immersive = !overlay.menuVisible && !showSpeechSheet,
+        showNavigationBar = showOverlayBars,
+        showStatusBar = session.settings.showStatusBar || (showOverlayBars && !session.settings.usesRaisedHeader),
         lightPaper = !session.settings.theme.isDark,
         lightApp = MiuixTheme.colorScheme.surface.luminance() > 0.5f,
     )
 
     val paper = remember(session.settings.theme.background) { Color(session.settings.theme.background) }
-    val pageBackdrop = rememberLayerBackdrop {
+    val backdrop = rememberLayerBackdrop {
         drawRect(paper)
         drawContent()
     }
+    val pageBackdrop = backdrop.takeUnless { session.settings.lightweightEffects }
     // 录图层要把整页再画一遍：滚动模式下每一帧都是一整页字。所以只在有毛玻璃露着时录（菜单、选字工具条），
     // 收起后再录一小段给退场动画（见 PAGE_GLASS_LINGER_MS）。lingering 在亮起时就置上 ——
     // 否则收起那一帧 needsGlass 已经是 false、lingering 还没被协程置上，录制会断一帧，栏闪一下透明。
     // 自动换源的提示胶囊也是这块玻璃：它只亮 8 秒（AUTO_CHANGED_HINT_MS），这几秒录着不值一提
-    val needsGlass = speechState.active || overlay.menuVisible || selection != null || overlay.autoChangedTo != null
+    val needsGlass = speechState.active || overlay.menuVisible || selection != null ||
+        overlay.autoChangedTo != null || onSearchResultPage
     var glassLingering by remember { mutableStateOf(false) }
     LaunchedEffect(needsGlass) {
         if (needsGlass) {
@@ -402,8 +457,7 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(paper)
             // 不在这里扣挖孔 —— 页要铺满全屏（卷页才不会在顶上露出空带）。避开摄像头改由
-            // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏用它自己的
-            // statusBarsPadding 让开状态栏，不受这里影响。
+            // 正文边距承担（buildLayoutSpec 把 cutout 折进 margin）。阅读菜单顶栏单独让开顶部安全区。
     ) {
         /*
          * 进书 splash：正文还没就位时，在纸面上居中显示这本书的封面。
@@ -479,7 +533,7 @@ fun ReaderScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .then(if (recordPage) Modifier.layerBackdrop(pageBackdrop) else Modifier)
+                .then(if (recordPage && pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier)
                 // 挂在翻页容器、长按选字的父节点上：它在 Initial 阶段先看到事件，认出是自己的手势才接走
                 .quickAdjustGestures(
                     enabled = quickAdjustEnabled,
@@ -587,7 +641,7 @@ fun ReaderScreen(
                     ) {
                         ScrollPageReader(
                             onTrace = viewModel::traceInteraction,
-                            highlight = speechSelection,
+                            highlight = readingHighlight,
                             selectedPage = scrollPageSpec,
                             textSelection = selection,
                             onTextSelection = if (!session.textSelectionEnabled) null else { page, offsetY, selected ->
@@ -618,7 +672,7 @@ fun ReaderScreen(
                                 viewingImage = box.resourceId
                             },
                         )
-                        PageInfoBar(pageUi, session, layout)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader, menuProgress)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -691,7 +745,7 @@ fun ReaderScreen(
                             next = pageUi.nextPage,
                             layout = layout,
                             theme = session.settings.theme,
-                            animation = session.settings.flipAnimation,
+                            animation = session.settings.renderedFlipAnimation,
                             animationsEnabled = animationsEnabled(),
                             hapticOnFlip = session.settings.flipHaptic,
                             // 选中期间不翻页：手指还压在选区上，一动就翻页会让人抓狂
@@ -711,10 +765,10 @@ fun ReaderScreen(
                             tapZones = session.settings.tapZones,
                             selection = selection,
                             // 朗读到的那一段只画不拦：传进 selection 会被当成在选字，菜单上滑动翻页没反应
-                            highlight = speechSelection,
+                            highlight = readingHighlight,
                             onImageTap = onImageTap,
                         )
-                        PageInfoBar(pageUi, session, layout)
+                        PageInfoBar(pageUi, session, layout, showRaisedHeader, menuProgress)
                         SelectionHandles(selectionHandles, Color(session.settings.theme.textColor), Modifier.matchParentSize())
                     }
                 }
@@ -799,6 +853,45 @@ fun ReaderScreen(
         ReaderThemeScope(session.settings.theme) {
 
         QuickAdjustOverlay(quickAdjust)
+
+        val showSearchReturn = onSearchResultPage && !pageUi.loading && !overlay.menuVisible &&
+            !showTextSearch && !overlay.readerSheetOpen && overlay.sourceCandidates == null &&
+            !overlay.changingSource && !overlay.autoChanging && overlay.autoChangedTo == null &&
+            selection == null && !speechState.active &&
+            viewingImage == null && !addShelfPrompt
+        val lastSearchPosition = remember { mutableStateOf("") }
+        searchDestination?.let {
+            lastSearchPosition.value = "第 ${it.matchNumber} / ${it.totalMatches} 处"
+        }
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = hintBottom)) {
+            CompositionLocalProvider(LocalBarBackdrop provides pageBackdrop) {
+                FloatingGlassBar(visible = showSearchReturn, onHeightChange = {}) { floor ->
+                    val scheme = MiuixTheme.colorScheme
+                    Text(
+                        lastSearchPosition.value,
+                        color = AppThemes.readableOn(scheme.onSurface, floor),
+                        style = MiuixTheme.textStyles.footnote1,
+                        modifier = Modifier.padding(start = Dimens.gapM, end = Dimens.gapS),
+                    )
+                    AppTextButton(
+                        "返回结果",
+                        onClick = { showTextSearch = true },
+                        contentColor = AppThemes.readableOn(scheme.primary, floor),
+                    )
+                }
+            }
+        }
+        ReaderTextSearchSheet(
+            visible = showTextSearch,
+            isNetBook = session.isNetBook,
+            viewModel = viewModel,
+            onDismiss = { showTextSearch = false },
+            onOpenMatch = {
+                showTextSearch = false
+                viewModel.dismissMenu()
+                viewModel.openTextMatch(it)
+            },
+        )
 
         if (showSpeechSheet && speechState.active) {
             ReaderSpeechSheet(
@@ -914,7 +1007,7 @@ fun ReaderScreen(
         Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .then(if (overlay.menuVisible) Modifier.statusBarsPadding() else Modifier)
+                .then(if (overlay.menuVisible) Modifier.windowInsetsPadding(readerMenuTopInsets()) else Modifier)
                 .padding(top = if (overlay.menuVisible) Dimens.toolbarHeight + Dimens.gapS else Dimens.touchTarget)
                 .semantics { liveRegion = LiveRegionMode.Polite },
         ) {
@@ -936,18 +1029,26 @@ fun ReaderScreen(
         // 常驻组合，可见性交给 AnimatedVisibility，保留退场动画。
         ReaderMenu(
             visible = overlay.menuVisible,
+            chapterHandoff = menuProgress.takeIf { layout?.raisedHeader != null },
             session = session,
             overlay = overlay,
             pageUi = pageUi,
             toc = viewModel.toc,
+            tocRule = viewModel.tocRule,
+            onApplyTocRule = viewModel::applyTocRule,
             onExit = requestExit,
             onGotoChapter = viewModel::jumpFromReaderMenu,
+            onGotoTocEntry = viewModel::jumpFromToc,
+            onShowTextSearch = {
+                viewModel.stopAutoFlip()
+                showTextSearch = true
+            },
             onSeekPercent = { viewModel.seekToPercent(it) },
             onUpdateSettings = { viewModel.updateSettings(it) },
             onPreviewSettings = { viewModel.previewSettings(it) },
             onCommitSettings = { viewModel.commitSettings() },
             onSelectPaper = viewModel::selectPaper,
-            onCommitCustomPaper = viewModel::commitCustomPaper,
+            onCustomPaperChange = viewModel::updateCustomPaper,
             onSetTextSelection = { viewModel.setTextSelectionEnabled(it) },
             typography = rememberTypographyActions(viewModel),
             onSearchSources = { viewModel.searchOtherSources() },
@@ -969,7 +1070,7 @@ fun ReaderScreen(
                     flipController.requestFlip(dir)
                 }
             },
-            onReaderSheetOpen = { viewModel.setReaderSheetOpen(it) },
+            onReaderSheetOpen = { menuSheetOpen = it },
             pageBackdrop = pageBackdrop,
         )
 
@@ -1008,60 +1109,54 @@ fun ReaderScreen(
 /** 挖孔的四边留白，单位 px。只是个不带 Android 类型的小载体，方便比较相等。 */
 internal data class IntInsets(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
-/**
- * 同步读窗口当前的挖孔 inset。
- *
- * Compose 的 `WindowInsets.displayCutout` 是**响应式**的，代价是新子树的首帧读不到值。
- * 而 window 上挂着的 rootWindowInsets 是**已经在那儿**的 —— Activity 早就布局过了。
- * 首帧要一个正确的值，只能问它。
- *
- * view 还没 attach 时拿不到（返回 null），退回全 0：那就是从前的行为（首帧按全屏排、
- * 第二帧纠正），不会更糟。
- */
-private fun rootDisplayCutout(view: android.view.View): IntInsets {
-    val insets = ViewCompat.getRootWindowInsets(view)
-        ?.getInsets(WindowInsetsCompat.Type.displayCutout())
-        ?: return IntInsets(0, 0, 0, 0)
-    return IntInsets(insets.left, insets.top, insets.right, insets.bottom)
-}
+internal data class ReaderStatusArea(
+    val heightPx: Int,
+    val cutoutBounds: List<IntRect> = emptyList(),
+    val waterfallTopPx: Int = 0,
+)
 
 internal fun buildLayoutSpec(
     viewport: IntSize,
     settings: ReaderSettings,
-    density: androidx.compose.ui.unit.Density,
+    density: Density,
     cutout: IntInsets,
     infoLineHeight: TextUnit,
     speechInsetPx: Float,
+    statusArea: ReaderStatusArea = ReaderStatusArea(0),
+    layoutDirection: LayoutDirection = LayoutDirection.Ltr,
 ): LayoutSpec = with(density) {
     val fontSizePx = settings.fontSizeSp.sp.toPx()
-    // 页眉页脚小字一行的高度（随系统字号缩放）。不是 sp（主题里被改成 em/未指定）就只按下面的 dp 兜底
-    val infoLinePx = if (infoLineHeight.isSp) infoLineHeight.toPx() else 0f
+    val infoLinePx = if (infoLineHeight.isSp) infoLineHeight.toPx() else 18.dp.toPx()
+    val leftMargin = settings.marginHorizontalDp.dp.toPx() + cutout.left
+    val rightMargin = settings.marginHorizontalDp.dp.toPx() + cutout.right
+    val raisedHeader = if (settings.usesRaisedHeader) {
+        raisedReaderHeader(
+            viewport.width, leftMargin, rightMargin, cutout.top, statusArea, layoutDirection,
+            infoLinePx,
+        )
+    } else null
+    val preferredTop = (settings.effectiveHeaderTopSpacingDp.dp.toPx() + cutout.top).coerceAtLeast(0f)
+    val marginTop = when {
+        raisedHeader != null -> maxOf(preferredTop, cutout.top.toFloat(), raisedHeader.topPx + infoLinePx + Dimens.gapS.toPx())
+        settings.showStatusBar || settings.showHeader -> maxOf(preferredTop, cutout.top.toFloat(), statusArea.heightPx.toFloat())
+        else -> preferredTop
+    }
     // 挖孔折进边距：视口铺满全屏，靠加大这一侧的留白把页眉/正文推开摄像头，而不是把整页缩进去。
     LayoutSpec(
         viewportWidthPx = viewport.width,
         viewportHeightPx = viewport.height,
-        marginLeftPx = settings.marginHorizontalDp.dp.toPx() + cutout.left,
-        marginRightPx = settings.marginHorizontalDp.dp.toPx() + cutout.right,
-        // 上边距 = 头部留白：它就是正文顶端的位置（页眉小标题落在这条带里）。缩小它，
-        // 正文顶跟着上移、多出显示空间。下边距用 marginVerticalDp。
-        marginTopPx = settings.headerTopSpacingDp.dp.toPx() + cutout.top,
-        marginBottomPx = settings.marginVerticalDp.dp.toPx() + cutout.bottom + speechInsetPx,
-        // 正文首行落在 marginTop + headerHeight，而页眉章节名画在 marginTop —— 两者的间距就是
-        // headerHeight 减去页眉字高。18dp 里塞进 11sp 的章节名后只剩 ~4dp，比段间距还窄，
-        // 页眉像贴在正文上。抬到 26dp，让页眉与正文拉开一个不小于段间距的舒服距离。
-        //
-        // 页眉页脚的字走排版令牌（footnote1，见 pageInfoTextStyle），会跟着系统字号放大：放大到行高
-        // 超出这两条带时，带子跟着撑开，字才不会压进正文。默认字号下行高 18sp，两条带仍是 26/18dp，排版不变。
-        //
-        // 页眉 / 页脚关掉了，那条带就给 0：正文顶到头部留白 / 下边距为止，多排出一行左右（同阅读）。
-        // 边距不跟着收 —— 头部留白里折着挖孔，收了正文就钻到摄像头底下
-        headerHeightPx = if (settings.showHeader) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
+        marginLeftPx = leftMargin,
+        marginRightPx = rightMargin,
+        marginTopPx = marginTop,
+        marginBottomPx = settings.marginVerticalDp.coerceAtLeast(0f).dp.toPx() + cutout.bottom + speechInsetPx,
+        // 页眉上移后已经由 marginTop 让开，正文无需再留一条页眉带。
+        headerHeightPx = if (settings.showHeader && raisedHeader == null) maxOf(26.dp.toPx(), infoLinePx + Dimens.gapS.toPx()) else 0f,
         footerHeightPx = if (settings.showFooter) maxOf(18.dp.toPx(), infoLinePx) else 0f,
         fontSizePx = fontSizePx,
         lineHeightPx = fontSizePx * settings.lineSpacingMult,
         paragraphSpacingPx = fontSizePx * settings.paragraphSpacingEm,
         titleFontScale = settings.titleScale,
-        titleTopSpacingPx = settings.titleTopSpacingDp.dp.toPx(),
+        titleTopSpacingPx = settings.effectiveTitleTopSpacingDp.dp.toPx(),
         firstLineIndentEm = settings.firstLineIndentEm,
         fontId = settings.fontId,
         justify = settings.justify,
@@ -1069,7 +1164,41 @@ internal fun buildLayoutSpec(
         bodyFontWeight = settings.bodyFontWeight,
         showImages = settings.showImages,
         density = density.density,
+        raisedHeader = raisedHeader,
     )
+}
+
+private fun Density.raisedReaderHeader(
+    viewportWidthPx: Int,
+    leftMarginPx: Float,
+    rightMarginPx: Float,
+    cutoutTopPx: Int,
+    statusArea: ReaderStatusArea,
+    layoutDirection: LayoutDirection,
+    lineHeightPx: Float,
+): RaisedReaderHeader? {
+    if (statusArea.heightPx <= 0) return null
+    val availableHeight = maxOf(statusArea.heightPx, cutoutTopPx) - statusArea.waterfallTopPx
+    if (availableHeight < lineHeightPx) return null
+    // 已知顶部有挖孔却拿不到它的横向位置时，退回安全区下方。
+    if (cutoutTopPx > statusArea.waterfallTopPx && statusArea.cutoutBounds.none { it.top < cutoutTopPx && it.bottom > 0 }) {
+        return null
+    }
+    val top = statusArea.waterfallTopPx + (availableHeight - lineHeightPx) / 2f
+    val right = viewportWidthPx - rightMarginPx
+    val clearancePx = Dimens.gapS.toPx()
+    val obstacles = statusArea.cutoutBounds.filter {
+        it.top < top + lineHeightPx && it.bottom > top &&
+            it.left - clearancePx < right && it.right + clearancePx > leftMarginPx
+    }
+    val leftEdge = if (layoutDirection == LayoutDirection.Rtl) {
+        obstacles.maxOfOrNull { it.right + clearancePx } ?: leftMarginPx
+    } else leftMarginPx
+    val rightEdge = if (layoutDirection == LayoutDirection.Ltr) {
+        obstacles.minOfOrNull { it.left - clearancePx } ?: right
+    } else right
+    if (rightEdge - leftEdge < maxOf((Dimens.touchTarget * 2).toPx(), lineHeightPx * 4)) return null
+    return RaisedReaderHeader(top, leftEdge, viewportWidthPx - rightEdge)
 }
 
 @Composable
@@ -1083,39 +1212,45 @@ private fun BrightnessEffect(windowBrightness: ReaderWindowBrightness?, brightne
     SideEffect { windowBrightness.update(reader, brightness) }
 }
 
-/**
- * 沉浸：读的时候藏起系统栏，呼出菜单时放出来。
- *
- * 放出来的系统栏压在阅读菜单的顶栏 / 底栏上，图标明暗得跟**纸**走（[lightPaper]），不能沿用 MainActivity 按 App 主题设的那一套：
- * App 是深色、纸是象牙时，状态栏的时间和信号是白字压在浅色顶栏上，几乎看不见（反过来也一样）。
- * 退出阅读页时还给 App 主题（[lightApp]）—— MainActivity 那边是 SideEffect，根组合不重组就不会再设一遍。
- */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ImmersiveEffect(activity: Activity?, immersive: Boolean, lightPaper: Boolean, lightApp: Boolean) {
-    DisposableEffect(activity, immersive, lightPaper, lightApp) {
-        val window = activity?.window
-        if (window != null) {
-            val controller = WindowInsetsControllerCompat(window, window.decorView)
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.isAppearanceLightStatusBars = lightPaper
-            controller.isAppearanceLightNavigationBars = lightPaper
-            if (immersive) {
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            } else {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
+internal fun readerMenuTopInsets(): WindowInsets =
+    WindowInsets.statusBarsIgnoringVisibility.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top)
+
+@Composable
+private fun ReaderSystemBarsEffect(
+    activity: Activity?,
+    showNavigationBar: Boolean,
+    showStatusBar: Boolean,
+    lightPaper: Boolean,
+    lightApp: Boolean,
+) {
+    val window = activity?.window ?: return
+    val controller = remember(window) { WindowInsetsControllerCompat(window, window.decorView) }
+    val latestLightApp by rememberUpdatedState(lightApp)
+    val systemBars = WindowInsetsCompat.Type.systemBars()
+    val statusBar = WindowInsetsCompat.Type.statusBars()
+    val navigationBar = WindowInsetsCompat.Type.navigationBars()
+    // 开合面板只切换可见性。退出阅读时才归还系统栏和 App 主题的图标颜色。
+    DisposableEffect(controller) {
+        val previousBehavior = controller.systemBarsBehavior
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         onDispose {
-            // 退出阅读页恢复系统栏，图标明暗还给 App 主题（换纸 / 开合菜单时这里也会先跑一遍，紧接着被新的一轮设回来）
-            activity?.window?.let {
-                WindowInsetsControllerCompat(it, it.decorView).apply {
-                    show(WindowInsetsCompat.Type.systemBars())
-                    isAppearanceLightStatusBars = lightApp
-                    isAppearanceLightNavigationBars = lightApp
-                }
-            }
+            controller.systemBarsBehavior = previousBehavior
+            controller.isAppearanceLightStatusBars = latestLightApp
+            controller.isAppearanceLightNavigationBars = latestLightApp
+            controller.show(systemBars)
         }
+    }
+    SideEffect {
+        if (controller.isAppearanceLightStatusBars != lightPaper) controller.isAppearanceLightStatusBars = lightPaper
+        if (controller.isAppearanceLightNavigationBars != lightPaper) controller.isAppearanceLightNavigationBars = lightPaper
+    }
+    LaunchedEffect(controller, showStatusBar) {
+        if (showStatusBar) controller.show(statusBar) else controller.hide(statusBar)
+    }
+    LaunchedEffect(controller, showNavigationBar) {
+        if (showNavigationBar) controller.show(navigationBar) else controller.hide(navigationBar)
     }
 }
 

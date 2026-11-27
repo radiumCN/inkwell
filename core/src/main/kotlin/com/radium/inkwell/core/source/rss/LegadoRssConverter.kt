@@ -44,19 +44,23 @@ object LegadoRssConverter {
             is JsonObject -> listOf(root)
             else -> emptyList()
         }
-        val converted = mutableListOf<Converted>()
+        val converted = linkedMapOf<String, Converted>()
         val skipped = mutableListOf<Skipped>()
         items.forEach { el ->
             val obj = el as? JsonObject ?: return@forEach
             val name = obj.str("sourceName").orEmpty()
             val url = obj.str("sourceUrl").orEmpty()
             try {
-                converted += Converted(convertOne(obj), sourceJson = obj.toString())
+                val rule = convertOne(obj)
+                val previous = converted.put(rule.id, Converted(rule, sourceJson = obj.toString()))
+                if (previous != null) {
+                    skipped += Skipped(previous.rule.name, rule.id, "重复订阅源地址")
+                }
             } catch (e: Exception) {
                 skipped += Skipped(name, url, e.message ?: "转换失败")
             }
         }
-        return Result(converted, skipped)
+        return Result(converted.values.toList(), skipped)
     }
 
     private fun convertOne(src: JsonObject): RssSourceRule {

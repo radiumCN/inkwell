@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.data.db.entity.BookSourceListItem
 import com.radium.inkwell.data.db.entity.CheckStatus
+import com.radium.inkwell.util.MAX_SOURCE_IMPORT_BYTES
+import com.radium.inkwell.util.readImportText
 import kotlinx.coroutines.flow.mapLatest
 import com.radium.inkwell.data.repo.BookSourceRepository
 import com.radium.inkwell.ui.components.MessageBus
@@ -417,7 +419,7 @@ class SourceManageViewModel(
             val text = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(uri)?.use {
-                        it.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
+                        it.readImportText(MAX_SOURCE_IMPORT_BYTES)
                     } ?: error("无法读取文件")
                 }
             }
@@ -442,8 +444,8 @@ class SourceManageViewModel(
                             // 先预读（request 只往缓冲里填、不消费）确认没超，再交给 body.string() ——
                             // BOM 与 Content-Type 里的字符集它都会处理，自己按 UTF-8 解的话带 BOM 的合集就解析不了
                             val body = resp.body
-                            check(!body.source().request(MAX_IMPORT_BYTES + 1L)) {
-                                "文件太大（超过 ${MAX_IMPORT_BYTES shr 20}MB）"
+                            check(!body.source().request(MAX_SOURCE_IMPORT_BYTES + 1L)) {
+                                "文件太大（超过 ${MAX_SOURCE_IMPORT_BYTES shr 20}MB）"
                             }
                             body.string()
                         }
@@ -504,8 +506,6 @@ class SourceManageViewModel(
     }
 
     private companion object {
-        /** 从网址导入书源的大小上限 */
-        const val MAX_IMPORT_BYTES = 32 shl 20
         /** 搜索框停手多久才重新过滤：几千个源每个字都全量过滤一遍，打字会跟不上 */
         const val QUERY_DEBOUNCE_MS = 150L
     }

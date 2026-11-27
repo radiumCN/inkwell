@@ -81,7 +81,7 @@ class UpdateNotifier(
                 val fresh = known.checkedFor == updateCheckTarget(source, channel) &&
                     now - known.checkedAt in 0 until LAUNCH_THROTTLE_MS
                 if (fresh) return@launch
-                record(updateManager.check(source, channel, currentVersion), source, channel)
+                record(updateManager.check(source, channel, currentVersion, trigger = "launch"), source, channel)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

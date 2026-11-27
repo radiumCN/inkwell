@@ -5,9 +5,7 @@ import android.graphics.Bitmap
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -30,7 +28,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.radium.inkwell.data.source.WebViewNetworkGuard
+import com.radium.inkwell.data.source.GuardedWebViewClient
+import com.radium.inkwell.data.source.WEB_RENDERER_ERROR
 import com.radium.inkwell.ui.components.AppIconButton
 import com.radium.inkwell.ui.components.AppScaffold
 import com.radium.inkwell.ui.components.AppSnackbarHost
@@ -75,6 +74,7 @@ fun RssWebScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
     // 0..100；100 = 这一页加载完了，进度线收起
     var progress by remember { mutableIntStateOf(0) }
+    var rendererGone by remember(state.url) { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
     var pageError by remember { mutableStateOf<String?>(null) }
     // 当前在看的那一页（点进去之后不再是订阅源地址）：「用浏览器打开」打开的是它
@@ -99,7 +99,7 @@ fun RssWebScreen(
                 actions = {
                     val url = currentUrl ?: state.url
                     if (url != null) {
-                        AppIconButton(onClick = ::reload) {
+                        AppIconButton(onClick = ::reload, enabled = webView != null) {
                             Icon(MiuixIcons.Refresh, contentDescription = "刷新")
                         }
                         AppIconButton(onClick = { links.open(url) }) {
@@ -125,13 +125,27 @@ fun RssWebScreen(
             when {
                 error != null -> ErrorState(message = error, onRetry = viewModel::load)
                 url == null -> LoadingState()
+                rendererGone -> ErrorState(
+                    message = WEB_RENDERER_ERROR,
+                    onRetry = { rendererGone = false },
+                    secondaryLabel = "用浏览器打开",
+                    onSecondary = { links.open(currentUrl ?: url) },
+                )
                 else -> {
                     SourceWebView(
                         url = url,
                         headers = state.headers,
                         enableJs = state.enableJs,
                         onCreated = { webView = it },
-                        onReleased = { webView = null },
+                        onReleased = { if (webView === it) webView = null },
+                        onRendererGone = { failed ->
+                            if (webView === failed) {
+                                webView = null
+                                canGoBack = false
+                                progress = 0
+                                rendererGone = true
+                            }
+                        },
                         onProgress = { progress = it },
                         onPageStarted = {
                             currentUrl = it
@@ -168,6 +182,7 @@ fun RssWebScreen(
     DisposableEffect(lifecycle, webView) {
         val view = webView
         val observer = LifecycleEventObserver { _, event ->
+            if (view !== webView) return@LifecycleEventObserver
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> view?.onPause()
                 Lifecycle.Event.ON_RESUME -> view?.onResume()
@@ -181,7 +196,7 @@ fun RssWebScreen(
 
 /**
  * 网页本身。和来源向导的 WizardWebView 是两回事（那个要截表单、点选元素），只有两条一致：
- * 页面不许碰本机文件和内网（[WebViewNetworkGuard]，同一道拦截）。
+ * 页面不许碰本机文件和内网（[GuardedWebViewClient]，同一道拦截）。
  *
  * - 请求头照订阅源里写的：User-Agent 设给 WebView（之后每个请求都带），其余随第一次请求带上（WebView 只给 loadUrl 这一下带头）。
  *   没写 UA 就用 WebView 自己的（手机版 Chrome）—— 给人看的网页，站点按它出手机版。
@@ -194,7 +209,8 @@ private fun SourceWebView(
     headers: Map<String, String>,
     enableJs: Boolean,
     onCreated: (WebView) -> Unit,
-    onReleased: () -> Unit,
+    onReleased: (WebView) -> Unit,
+    onRendererGone: (WebView) -> Unit,
     onProgress: (Int) -> Unit,
     onPageStarted: (String) -> Unit,
     onHistoryChanged: (canGoBack: Boolean) -> Unit,
@@ -207,6 +223,7 @@ private fun SourceWebView(
     val history by rememberUpdatedState(onHistoryChanged)
     val mainError by rememberUpdatedState(onMainFrameError)
     val external by rememberUpdatedState(onExternalLink)
+    val rendererGone by rememberUpdatedState(onRendererGone)
     val released by rememberUpdatedState(onReleased)
     AndroidView(
         modifier = modifier,
@@ -229,14 +246,9 @@ private fun SourceWebView(
                         progress(newProgress)
                     }
                 }
-                webViewClient = object : WebViewClient() {
-                    private val guard = WebViewNetworkGuard()
-
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                        guard.intercept(request)
-
+                webViewClient = object : GuardedWebViewClient({ rendererGone(it) }) {
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                        if (guard.blocksNavigation(request)) return true
+                        if (super.shouldOverrideUrlLoading(view, request)) return true
                         return when (request.url.scheme?.lowercase()) {
                             "http", "https" -> false
                             // 不出网、留在页面里的那几种照常
@@ -268,8 +280,7 @@ private fun SourceWebView(
             }
         },
         onRelease = {
-            released()
-            it.stopLoading()
+            released(it)
             it.destroy()
         },
     )

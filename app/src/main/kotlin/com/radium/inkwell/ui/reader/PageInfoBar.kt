@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,8 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,17 +31,26 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.radium.inkwell.reader.api.BatteryDisplayStyle
 import com.radium.inkwell.reader.paginate.LayoutSpec
 import com.radium.inkwell.ui.components.Dimens
+import com.radium.inkwell.ui.theme.AppThemes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,12 +60,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 页眉章节名 + 页脚信息层。
- * 左下：章内页码；右下：全书进度百分比 · 时间 ·（可选）电池图标。
- * 页眉、页脚各有开关（ReaderSettings.showHeader / showFooter）：关掉的那一边不画，
- * 分页时那条带也让给了正文（buildLayoutSpec），这里画了就压在正文上。
+ * 左下：章内页码。右下：全书进度百分比、时间和电量。
+ * 页眉的位置跟随已经应用到正文的分页结果，系统栏临时出现时收起上移的页眉。
  */
 @Composable
-fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec) {
+fun PageInfoBar(
+    pageUi: ReaderPageUi,
+    session: ReaderSessionUi,
+    spec: LayoutSpec,
+    showRaisedHeader: Boolean,
+    menuProgress: State<Float>,
+) {
     val density = LocalDensity.current
     val context = LocalContext.current
     val footerColor = remember(session.settings.theme.footerColor) {
@@ -63,14 +78,15 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
     }
     val footerStyle = pageInfoTextStyle()
     val footerNumStyle = remember(footerStyle) { footerStyle.copy(fontFeatureSettings = "tnum") }
-    val showHeader = session.settings.showHeader
+    val raisedHeader = spec.raisedHeader
+    val showHeader = if (raisedHeader == null) spec.headerHeightPx > 0f else showRaisedHeader
     val showFooter = session.settings.showFooter
+    val batteryStyle = session.settings.batteryDisplayStyle
     // 页脚关了，电量也就不看了：连 BATTERY_CHANGED 都不注册
     val showBattery = showFooter && session.settings.showBattery
 
     var time by remember { mutableStateOf(currentTime()) }
-    // 关掉电量时连 sticky BATTERY_CHANGED 都不读，少一次系统广播。
-    var battery by remember { mutableIntStateOf(if (showBattery) readBattery(context) else 100) }
+    var battery by remember(context, showBattery) { mutableStateOf<Int?>(null) }
 
     // 整点/每分钟系统会发 TIME_TICK，不必自己 30s 轮询。页脚关了就不听（时间只画在页脚上）
     DisposableEffect(context, showFooter) {
@@ -102,7 +118,7 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
             IntentFilter(Intent.ACTION_BATTERY_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        battery = batteryPercent(sticky) ?: battery
+        battery = batteryPercent(sticky)
         onDispose { context.unregisterReceiver(receiver) }
     }
 
@@ -111,21 +127,23 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
     }
 
     val marginH = with(density) { spec.marginLeftPx.toDp() }
-    // 页眉/页脚对齐正文预留的那两条带 —— marginTop/Bottom 已经把挖孔折进去了，所以既清开
-    // 摄像头、又不会像从前那样（固定 8dp）把页眉顶到屏幕最边、跟正文之间空出一大截。
-    // 页眉小标题落在正文上边距那条带的顶端 —— marginTopPx 现在就是「挖孔 + 头部留白」，
-    // 所以缩小头部留白，页眉和正文一起上移，正文多出空间
-    val headerTop = with(density) { spec.marginTopPx.toDp() }
     val footerBottom = with(density) { spec.marginBottomPx.toDp() }
 
     Box(Modifier.fillMaxSize()) {
-        // 页眉：章节名，落在正文上方的页眉带里
         if (showHeader) {
+            val left = with(density) { (raisedHeader?.leftInsetPx ?: spec.marginLeftPx).toDp() }
+            val right = with(density) { (raisedHeader?.rightInsetPx ?: spec.marginRightPx).toDp() }
+            val top = with(density) { (raisedHeader?.topPx ?: spec.marginTopPx).toDp() }
+            val chapterFade = if (raisedHeader == null) Modifier else Modifier.graphicsLayer {
+                // 页眉先淡出，章名再在菜单栏里淡入。
+                alpha = (1f - 2f * menuProgress.value).coerceIn(0f, 1f)
+            }
             Text(
                 pageUi.chapterTitle,
                 Modifier
                     .align(Alignment.TopStart)
-                    .padding(start = marginH, end = marginH, top = headerTop),
+                    .absolutePadding(left = left, right = right, top = top)
+                    .then(chapterFade),
                 color = footerColor,
                 style = footerStyle,
                 maxLines = 1,
@@ -144,23 +162,32 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
             ) {
                 Text(
                     "${pageUi.pageInChapter + 1} / ${pageUi.pageCount}",
+                    Modifier.weight(1f).padding(end = Dimens.gapXS),
                     color = footerColor,
                     style = footerNumStyle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.weight(1f))
                 Text(
                     "${"%.1f".format(bookPercent)}%",
                     color = footerColor,
                     style = footerNumStyle,
+                    maxLines = 1,
                 )
                 Text(
                     "  ·  $time",
                     color = footerColor,
                     style = footerNumStyle,
+                    maxLines = 1,
                 )
-                if (showBattery) {
+                battery?.takeIf { showBattery }?.let { level ->
                     Spacer(Modifier.width(Dimens.gapS))
-                    BatteryIndicator(level = battery, color = footerColor)
+                    BatteryIndicator(
+                        level = level,
+                        style = batteryStyle,
+                        color = footerColor,
+                        background = Color(session.settings.theme.background),
+                    )
                 }
             }
         }
@@ -182,83 +209,127 @@ fun PageInfoBar(pageUi: ReaderPageUi, session: ReaderSessionUi, spec: LayoutSpec
 @ReadOnlyComposable
 internal fun pageInfoTextStyle(): TextStyle = MiuixTheme.textStyles.footnote1.copy(lineHeight = 18.sp)
 
-/**
- * 小电池图标：描边外框 + 正极触点 + 按电量填充。
- *
- * 几何都从外框推出来：填充块离外框内沿四边留一样宽的缝、圆角与外框同心，触点贴在外框右边。
- * 从前填充块的宽另算了一遍，左边空 1.3dp、右边只剩 0.3dp，满电时像顶到了右边框上；
- * 触点和外框之间还夹着半个 dp 的缝，抗锯齿后是一道发虚的细线，看着像画坏了（被指出过）。
- * 线宽、缝宽、触点尺寸取整像素（画布本身由 Row 放在整像素上）：边都落在像素格上，不会一边实一边虚。
- */
 @Composable
-private fun BatteryIndicator(level: Int, color: Color) {
-    Canvas(Modifier.size(width = 20.dp, height = 10.dp)) {
-        fun snapPx(dp: Dp) = dp.toPx().roundToInt().coerceAtLeast(1).toFloat()
-        val stroke = snapPx(1.dp)
-        val gap = snapPx(1.dp)
-        val tipWidth = snapPx(1.5.dp)
-        val bodyWidth = size.width - tipWidth
-        // 外沿 3dp：往里减掉线宽与缝，填充块还剩 1dp 圆角；再小，填充块就成了直角，套在圆角框里发硬
-        val bodyRadius = 3.dp.toPx()
-        // 外框：描边以路径为中线，往里缩半个线宽，外沿才正好落在画布边上
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(stroke / 2, stroke / 2),
-            size = Size(bodyWidth - stroke, size.height - stroke),
-            cornerRadius = CornerRadius(bodyRadius - stroke / 2),
-            style = Stroke(stroke),
-        )
-        // 正极：紧贴外框外沿，只圆右边两个角（左边圆了会在接缝处缺两个小口），上下留白取整、居中
-        val tipInset = ((size.height - 4.dp.toPx()) / 2).roundToInt().toFloat()
-        val tipRadius = CornerRadius(minOf(tipWidth, (size.height - tipInset * 2) / 2))
-        drawPath(
-            Path().apply {
-                addRoundRect(
-                    RoundRect(
-                        left = bodyWidth,
-                        top = tipInset,
-                        right = size.width,
-                        bottom = size.height - tipInset,
-                        topRightCornerRadius = tipRadius,
-                        bottomRightCornerRadius = tipRadius,
-                    ),
-                )
-            },
-            color = color,
-        )
-        // 电量填充：四边离外框内沿都是 gap
-        val fillInset = stroke + gap
-        val fillMax = bodyWidth - fillInset * 2
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(fillInset, fillInset),
-            size = Size(
-                (fillMax * level.coerceIn(0, 100) / 100f).coerceAtLeast(1f),
-                size.height - fillInset * 2,
-            ),
-            cornerRadius = CornerRadius((bodyRadius - fillInset).coerceAtLeast(0f)),
-        )
+internal fun BatteryIndicator(level: Int, style: BatteryDisplayStyle, color: Color, background: Color) {
+    val percent = "$level%"
+    val textStyle = pageInfoTextStyle().copy(fontFeatureSettings = "tnum")
+    Row(
+        Modifier.clearAndSetSemantics { contentDescription = "电量 $percent" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (style != BatteryDisplayStyle.PERCENT_ONLY) {
+            BatteryIcon(level, style == BatteryDisplayStyle.PERCENT_INSIDE, color, background, textStyle)
+        }
+        if (style == BatteryDisplayStyle.PERCENT_ONLY || style == BatteryDisplayStyle.PERCENT_OUTSIDE) {
+            Text(
+                percent,
+                modifier = if (style == BatteryDisplayStyle.PERCENT_OUTSIDE) Modifier.padding(start = Dimens.gapXS) else Modifier,
+                color = color,
+                style = textStyle,
+                maxLines = 1,
+            )
+        }
     }
+}
+
+@Composable
+private fun BatteryIcon(level: Int, showNumber: Boolean, color: Color, background: Color, textStyle: TextStyle) {
+    val numberStyle = remember(textStyle) {
+        textStyle.copy(fontSize = 10.sp, lineHeight = TextUnit.Unspecified, fontWeight = FontWeight.SemiBold)
+    }
+    val measurer = rememberTextMeasurer()
+    // 三种样式都按满电数字预留空间，电量变化时图标宽度不跳，放大系统字号时也一起撑开。
+    val fullNumber = remember(measurer, numberStyle) {
+        measurer.measure("100", style = numberStyle, maxLines = 1, softWrap = false)
+    }
+    val number = if (showNumber) {
+        remember(measurer, level, numberStyle, fullNumber) {
+            if (level == 100) fullNumber
+            else measurer.measure(level.toString(), style = numberStyle, maxLines = 1, softWrap = false)
+        }
+    } else {
+        null
+    }
+    val density = LocalDensity.current
+    val width = maxOf(
+        Dimens.readerBatteryIconWidth,
+        with(density) { fullNumber.size.width.toDp() } + Dimens.gapXS + Dimens.strokeThick,
+    )
+    val height = maxOf(Dimens.readerBatteryIconHeight, with(density) { fullNumber.size.height.toDp() })
+    val numberColor = if (showNumber) {
+        remember(background, color) { AppThemes.readableOn(background.copy(alpha = 1f), color) }
+    } else {
+        Color.Unspecified
+    }
+
+    Canvas(Modifier.size(width = width, height = height)) {
+        val bodyWidth = size.width - batteryTipWidth()
+        val bodyRadius = 3.dp.toPx()
+        if (number != null && bodyWidth >= number.size.width && size.height >= number.size.height) {
+            drawRoundRect(color, size = Size(bodyWidth, size.height), cornerRadius = CornerRadius(bodyRadius))
+            drawText(
+                textLayoutResult = number,
+                color = numberColor,
+                topLeft = Offset((bodyWidth - number.size.width) / 2f, (size.height - number.size.height) / 2f),
+            )
+        } else {
+            val stroke = Dimens.strokeThin.roundToPx().coerceAtLeast(1).toFloat()
+            val fillInset = 2 * stroke
+            if (bodyWidth <= fillInset * 2 || size.height <= fillInset * 2) return@Canvas
+            // 描边沿路径居中，内缩半个线宽让外沿正好贴住画布边。
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(stroke / 2, stroke / 2),
+                size = Size(bodyWidth - stroke, size.height - stroke),
+                cornerRadius = CornerRadius(bodyRadius - stroke / 2),
+                style = Stroke(stroke),
+            )
+            // 填充与外框同心，满电时四边留同样宽的缝。
+            if (level > 0) {
+                val fillMax = bodyWidth - fillInset * 2
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(fillInset, fillInset),
+                    size = Size((fillMax * level / 100f).coerceAtLeast(1f), size.height - fillInset * 2),
+                    cornerRadius = CornerRadius((bodyRadius - fillInset).coerceAtLeast(0f)),
+                )
+            }
+        }
+        drawBatteryTip(color, bodyWidth)
+    }
+}
+
+private fun DrawScope.batteryTipWidth(): Float = 1.5.dp.roundToPx().coerceAtLeast(1).toFloat()
+
+/** 正极紧贴外框，只圆右边两个角，避免接缝处留空。 */
+private fun DrawScope.drawBatteryTip(color: Color, bodyWidth: Float) {
+    val tipInset = ((size.height - Dimens.gapXS.toPx()) / 2).roundToInt().coerceAtLeast(0).toFloat()
+    val tipRadius = CornerRadius(minOf(size.width - bodyWidth, (size.height - tipInset * 2) / 2))
+    drawPath(
+        Path().apply {
+            addRoundRect(
+                RoundRect(
+                    left = bodyWidth,
+                    top = tipInset,
+                    right = size.width,
+                    bottom = size.height - tipInset,
+                    topRightCornerRadius = tipRadius,
+                    bottomRightCornerRadius = tipRadius,
+                ),
+            )
+        },
+        color = color,
+    )
 }
 
 private fun currentTime(): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
-private fun readBattery(context: Context): Int {
-    val intent = ContextCompat.registerReceiver(
-        context,
-        null,
-        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
-        ContextCompat.RECEIVER_NOT_EXPORTED,
-    )
-    return batteryPercent(intent) ?: 100
-}
-
 private fun batteryPercent(intent: Intent?): Int? {
     intent ?: return null
     val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
     val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-    return if (level >= 0 && scale > 0) level * 100 / scale else null
+    return if (level >= 0 && scale > 0) (level.coerceAtMost(scale) * 100L / scale).toInt() else null
 }
 
 /**

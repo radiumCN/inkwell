@@ -98,7 +98,7 @@ object EpubFixture {
                     """<?xml version="1.0" encoding="utf-8"?>
                     <html xmlns="http://www.w3.org/1999/xhtml"><head><title>第${i}章</title></head>
                     <body>
-                      <h2>第${i}章 起承转合</h2>
+                      <h2 id="c${i}">第${i}章 起承转合</h2>
                       <p>　　这是第${i}章的第一段，讲述了一些故事。</p>
                       $pictures
                       ${if (i == 1) firstChapterExtra else ""}

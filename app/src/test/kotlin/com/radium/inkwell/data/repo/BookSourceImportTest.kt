@@ -95,6 +95,9 @@ class BookSourceImportTest {
         override suspend fun lastChangeAt() = store.values.maxOfOrNull { it.updatedAt } ?: 0L
     }
 
+    private suspend fun BookSourceRepository.importSources(text: String) =
+        confirmImport(previewImport(text), group = null)
+
     private val legadoArray = """
     [
       ${legadoSource("站A", "https://a.com")},
@@ -134,10 +137,12 @@ class BookSourceImportTest {
     fun `batch import writes all sources in a single transaction`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        val report = repo.importJson(legadoArray).getOrThrow()
+        val report = repo.importSources(legadoArray)
 
         // 4 个源，站B/站C 撞同一域名 id → 去重后 3 个
         assertEquals(3, dao.store.size)
+        assertEquals("站C重复", dao.store.getValue("https://b.com").name)
+        assertEquals(listOf("重复来源地址"), report.skipped)
         assertEquals(3, report.added)
         assertEquals(0, report.failed.size)
         // 关键：批量写只调一次 upsertAll，而非逐条 upsert
@@ -149,11 +154,11 @@ class BookSourceImportTest {
     fun `re-import reports updates and keeps user enabled state`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
         // 用户禁用站A（id = bookSourceUrl）
         dao.store["https://a.com"] = dao.store["https://a.com"]!!.copy(enabled = false)
 
-        val report = repo.importJson(legadoArray).getOrThrow()
+        val report = repo.importSources(legadoArray)
         assertEquals(0, report.added)
         assertEquals(3, report.updated)
         assertTrue(report.summary.contains("更新"))
@@ -177,7 +182,7 @@ class BookSourceImportTest {
         val repo = BookSourceRepository(dao, FakeHitDao())
         val first = groupedSource("玄幻")
         val second = groupedSource("言情").replace("https://g.com", "https://new.com")
-        repo.importJson(first).getOrThrow()
+        repo.importSources(first)
 
         val preview = repo.previewImport("[${groupedSource("合集新分组")},$second,$second,null]")
         assertEquals(1, preview.added)
@@ -200,7 +205,7 @@ class BookSourceImportTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
         val source = groupedSource("作者分组")
-        repo.importJson(source).getOrThrow()
+        repo.importSources(source)
         dao.softDeleteById("https://g.com", 100)
 
         val preview = repo.previewImport(source)
@@ -220,13 +225,13 @@ class BookSourceImportTest {
     fun `原样重导不刷新 updatedAt，规则变了才刷新`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         dao.store["https://g.com"] = dao.store["https://g.com"]!!.copy(updatedAt = 1_000)
 
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         assertEquals(1_000, dao.store["https://g.com"]!!.updatedAt)
 
-        repo.importJson(groupedSource("玄幻", search = "/search?q={{key}}")).getOrThrow()
+        repo.importSources(groupedSource("玄幻", search = "/search?q={{key}}"))
         assertTrue(dao.store["https://g.com"]!!.updatedAt > 1_000)
     }
 
@@ -235,15 +240,15 @@ class BookSourceImportTest {
     fun `原样重导保留搜索测速，规则变了清零`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         dao.saveSearchStats("https://g.com", 1_200, 1, 100, 200, dao.store.getValue("https://g.com").updatedAt)
 
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         assertEquals(1_200, dao.store["https://g.com"]!!.searchMs)
         assertEquals(1, dao.store["https://g.com"]!!.searchFails)
         assertEquals(200L, dao.store["https://g.com"]!!.searchRetryAt)
 
-        repo.importJson(groupedSource("玄幻", search = "/search?q={{key}}")).getOrThrow()
+        repo.importSources(groupedSource("玄幻", search = "/search?q={{key}}"))
         assertEquals(-1, dao.store["https://g.com"]!!.searchMs)
         assertEquals(0, dao.store["https://g.com"]!!.searchFails)
         assertEquals(0L, dao.store["https://g.com"]!!.searchAt)
@@ -253,29 +258,29 @@ class BookSourceImportTest {
     fun `墓碑被重新导入算加回来，要盖新时间戳`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         repo.delete("https://g.com")
         dao.store["https://g.com"] = dao.store["https://g.com"]!!.copy(updatedAt = 1_000)
 
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
         val row = dao.store["https://g.com"]!!
         assertEquals(false, row.deleted)
         assertTrue(row.updatedAt > 1_000)
     }
 
     @Test
-    fun `用户改过的分组在重导时保留，没改过的跟着新规则走`() = runTest {
+    fun `确认重导时保留现有分组，包括沿用首次导入的分组`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(groupedSource("玄幻")).getOrThrow()
+        repo.importSources(groupedSource("玄幻"))
 
-        // 没改过：作者在新版里把分组改成「都市」，用户拿到新分组
-        repo.importJson(groupedSource("都市")).getOrThrow()
-        assertEquals("都市", dao.store["https://g.com"]!!.groupName)
+        // 与确认页一致，合集改分组也不会挪动已存在的来源。
+        repo.importSources(groupedSource("都市"))
+        assertEquals("玄幻", dao.store["https://g.com"]!!.groupName)
 
         // 用户自己整理成「常用」：再导哪一版都不该被冲掉
         repo.setGroup(listOf("https://g.com"), "常用")
-        repo.importJson(groupedSource("言情")).getOrThrow()
+        repo.importSources(groupedSource("言情"))
         assertEquals("常用", dao.store["https://g.com"]!!.groupName)
     }
 
@@ -300,9 +305,9 @@ class BookSourceImportTest {
             {"bookSourceUrl":"https://video.com","bookSourceName":"影视站","bookSourceType":"4",
              "searchUrl":"/s","ruleSearch":{"bookList":"class.i","name":"tag.h3@text","bookUrl":"tag.a@href"}}
         """.trimIndent()
-        val report = repo.importJson(
+        val report = repo.importSources(
             "[" + LEGADO_SRC + "," + audio + "," + manga + "," + file + "," + video + "]"
-        ).getOrThrow()
+        )
         assertEquals(1, report.added)
         assertEquals(4, report.skipped.size)
         assertTrue(report.skipped.any { it.contains("音频源不支持") })
@@ -347,7 +352,7 @@ class BookSourceImportTest {
     fun `批量删除打墓碑而不是真删行`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson("[" + LEGADO_SRC + "," + LEGADO_SRC2 + "]").getOrThrow()
+        repo.importSources("[" + LEGADO_SRC + "," + LEGADO_SRC2 + "]")
         assertEquals(2, dao.store.size)
 
         val ids = dao.store.keys.toList()
@@ -402,7 +407,7 @@ class BookSourceImportTest {
     fun `启用源的规则按 updatedAt 缓存，变了的那条才重新解码`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
 
         val first = repo.getEnabledRules().associateBy { it.bookSourceUrl }
         val reads = dao.getByIdCalls
@@ -430,7 +435,7 @@ class BookSourceImportTest {
     fun `换源取的校验结果每次现查，不被规则缓存挡住`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
         repo.getEnabledForSwitch()
 
         repo.saveCheck("https://a.com", ok = true, message = "", respondMs = 321)
@@ -454,7 +459,7 @@ class BookSourceImportTest {
     fun `新建书源撞上同站书源时加后缀，不覆盖`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
 
         val first = repo.addCreated(created("https://a.com"))
         assertEquals("https://a.com#自建", first.id)
@@ -472,7 +477,7 @@ class BookSourceImportTest {
     fun `新建书源可以复用已删除书源的地址`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
         repo.delete("https://a.com")
 
         val saved = repo.addCreated(created("https://a.com"))
@@ -485,7 +490,7 @@ class BookSourceImportTest {
     fun `按主机找已有书源`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
         repo.addCreated(created("https://a.com"))
 
         val found = repo.findByHost("https://a.com/book/1/").map { it.id }
@@ -499,7 +504,7 @@ class BookSourceImportTest {
     fun `复用已删除书源地址的新书源是启用的`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(legadoArray).getOrThrow()
+        repo.importSources(legadoArray)
         repo.setEnabledAll(listOf("https://a.com"), false)
         repo.moveToTop(listOf("https://a.com"))
         repo.delete("https://a.com")
@@ -515,10 +520,10 @@ class BookSourceImportTest {
     fun `没有发现页的书源不算仅发现页`() = runTest {
         val dao = FakeDao()
         val repo = BookSourceRepository(dao, FakeHitDao())
-        repo.importJson(
+        repo.importSources(
             """{"bookSourceUrl":"https://e.com","bookSourceName":"发现源","exploreUrl":"玄幻::/xh/{{page}}",
                "ruleExplore":{"bookList":"class.item","name":"tag.h3@text","bookUrl":"tag.a@href"}}""",
-        ).getOrThrow()
+        )
         repo.addCreated(created("https://x.com"))
         val items = dao.store.values.map { it.id to it.updatedAt }
         val searchless = repo.searchlessIds(items)

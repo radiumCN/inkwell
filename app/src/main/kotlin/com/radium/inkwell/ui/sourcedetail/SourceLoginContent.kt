@@ -8,7 +8,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -32,7 +31,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewCompat
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.SourceLoginForm
-import com.radium.inkwell.data.source.WebViewNetworkGuard
+import com.radium.inkwell.data.source.GuardedWebViewClient
+import com.radium.inkwell.data.source.WEB_RENDERER_ERROR
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.data.source.sourceLoginHttpUrl
 import com.radium.inkwell.ui.components.AppScaffold
@@ -120,6 +120,7 @@ internal fun SourceLoginBrowser(
     var desktopMode by remember(page) { mutableStateOf(page.desktopMode) }
     var menuOpen by remember(page) { mutableStateOf(false) }
     var webView by remember(page, desktopMode) { mutableStateOf<WebView?>(null) }
+    var rendererGone by remember(page, desktopMode) { mutableStateOf(false) }
     var currentUrl by remember(page, desktopMode) { mutableStateOf(page.url) }
     var ready by remember(page, desktopMode) { mutableStateOf(false) }
     var pageError by remember(page, desktopMode) { mutableStateOf<String?>(null) }
@@ -197,7 +198,7 @@ internal fun SourceLoginBrowser(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             // 从登录入口重开，站点才能按新 UA 选路由。Profile 继续使用这个来源自己的会话。
-            key(page, desktopMode) {
+            if (!rendererGone) key(page, desktopMode) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
@@ -211,14 +212,17 @@ internal fun SourceLoginBrowser(
                             // 默认和抓取同一个 UA，供绑定 UA 的会话使用。
                             settings.userAgentString = if (desktopMode) SourceHttpClient.LEGADO_UA else page.userAgent
                             settings.displayZoomControls = false
-                            webViewClient = object : WebViewClient() {
-                                private val guard = WebViewNetworkGuard()
-
-                                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                                    guard.intercept(request)
-
+                            webViewClient = object : GuardedWebViewClient({ failed ->
+                                if (webView === failed) {
+                                    webView = null
+                                    ready = false
+                                    httpStatus = null
+                                    pageError = null
+                                    rendererGone = true
+                                }
+                            }) {
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                                    guard.blocksNavigation(request) ||
+                                    super.shouldOverrideUrlLoading(view, request) ||
                                         (request.isForMainFrame && request.url.toString().sourceLoginHttpUrl() == null)
 
                                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -264,17 +268,16 @@ internal fun SourceLoginBrowser(
                         view.visibility = if (pageError == null) View.VISIBLE else View.INVISIBLE
                     },
                     onRelease = { view ->
-                        webView = null
-                        view.stopLoading()
+                        if (webView === view) webView = null
                         view.destroy()
                     },
                 )
             }
-            pageError?.let { error ->
+            (if (rendererGone) WEB_RENDERER_ERROR else pageError)?.let { error ->
                 ErrorState(
                     message = error,
                     modifier = Modifier.background(MiuixTheme.colorScheme.surface).blockTouchesBelow(),
-                    onRetry = ::reload,
+                    onRetry = if (rendererGone) ({ rendererGone = false }) else ::reload,
                 )
             }
         }

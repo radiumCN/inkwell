@@ -126,27 +126,18 @@ internal suspend fun walkFolderTree(
     return walk(rootId, emptyList()) || depthLimited
 }
 
-/** 文件夹导入里不碰 Android 的那部分（认格式、排序、和书架比书名），单测见 FolderBooksTest */
+/** 文件夹导入里不碰 Android 的那部分（认格式、排序和分组），单测见 FolderBooksTest */
 object FolderBooks {
 
     /** 完整相对路径避免不同父目录下的同名子文件夹混组；根目录中的书归入根目录名。 */
     fun groupName(rootName: String, relativeFolder: String): String =
         listOf(rootName.trim(), relativeFolder.trim()).filter { it.isNotEmpty() }.joinToString(" / ")
 
-    /** 认得的扩展名 → 面板上的格式名。和 BookRepository 按扩展名定书的类型是同一张表 */
-    private val FORMATS = mapOf(
-        "txt" to "TXT",
-        "epub" to "EPUB",
-        "mobi" to "MOBI",
-        "azw3" to "AZW3",
-        "azw" to "AZW",
-    )
-
     /** 书文件的格式名；不是书（图片、压缩包、没有扩展名的）返回 null */
     fun formatOf(fileName: String): String? {
         if (fileName.startsWith('.')) return null
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        return FORMATS[ext]
+        return ext.takeIf { localBookTypeForExtension(it) != null }?.uppercase()
     }
 
     /** 文件名按人读的顺序比（不分大小写）；数字不做自然排序，同系统文件管理器的默认 */
@@ -159,15 +150,4 @@ object FolderBooks {
                 .thenBy(NAME_ORDER) { it.folder }
                 .thenBy(NAME_ORDER) { it.name },
         )
-
-    /**
-     * 比书名用的骨架：去扩展名、书名号、空白和标点，不分大小写。
-     * 文件名「《雾港》.txt」和书架上的「雾港」是同一本；本地 txt 的书名就是文件名去掉扩展名（见 BookRepository）。
-     */
-    fun titleKey(nameOrTitle: String): String {
-        val base = FORMATS.keys.firstOrNull { nameOrTitle.endsWith(".$it", ignoreCase = true) }
-            ?.let { nameOrTitle.dropLast(it.length + 1) }
-            ?: nameOrTitle
-        return base.filter { it.isLetterOrDigit() }.lowercase()
-    }
 }

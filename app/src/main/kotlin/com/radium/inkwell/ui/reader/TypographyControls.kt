@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -27,7 +28,6 @@ import com.radium.inkwell.data.repo.ReaderFontStore
 import com.radium.inkwell.data.repo.UserFont
 import com.radium.inkwell.reader.api.ReaderSettings
 import com.radium.inkwell.reader.measure.FontRegistry
-import com.radium.inkwell.ui.components.AddChip
 import com.radium.inkwell.ui.components.AppAlertDialog
 import com.radium.inkwell.ui.components.AppLoadingIndicator
 import com.radium.inkwell.ui.components.AppTextButton
@@ -59,16 +59,19 @@ class TypographyActions(
     val onApplyScheme: (LayoutScheme) -> Unit,
     val onSaveScheme: (String) -> Unit,
     val onDeleteScheme: (String) -> Unit,
+    val bookLayoutEnabled: Boolean,
+    val onSetBookLayoutEnabled: (Boolean) -> Unit,
 )
 
 @Composable
 fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
     val fonts by viewModel.userFonts.collectAsStateWithLifecycle()
     val schemes by viewModel.layoutSchemes.collectAsStateWithLifecycle()
+    val bookLayoutEnabled by viewModel.bookLayoutEnabled.collectAsStateWithLifecycle()
     val importStage by viewModel.fontImportStage.collectAsStateWithLifecycle()
     val importError by viewModel.fontImportError.collectAsStateWithLifecycle()
     val fontRegistry = koinInject<ReaderFontStore>().registry
-    return remember(fonts, schemes, importStage, importError, viewModel, fontRegistry) {
+    return remember(fonts, schemes, bookLayoutEnabled, importStage, importError, viewModel, fontRegistry) {
         TypographyActions(
             fonts = fonts,
             fontRegistry = fontRegistry,
@@ -82,6 +85,8 @@ fun rememberTypographyActions(viewModel: ReaderViewModel): TypographyActions {
             onApplyScheme = viewModel::applyLayoutScheme,
             onSaveScheme = viewModel::saveLayoutScheme,
             onDeleteScheme = viewModel::deleteLayoutScheme,
+            bookLayoutEnabled = bookLayoutEnabled,
+            onSetBookLayoutEnabled = viewModel::setBookLayoutEnabled,
         )
     }
 }
@@ -105,7 +110,7 @@ internal fun LayoutSchemeSection(
     val current = schemes.indexOfFirst { it.matches(settings) }
 
     ReaderGroup(
-        title = "排版方案",
+        title = "管理方案",
         trailing = {
             if (current >= 0) {
                 AppTextButton("删除", onClick = { deleting = schemes[current] }, contentColor = MiuixTheme.colorScheme.error)
@@ -179,8 +184,7 @@ internal fun LayoutSchemeSection(
  *
  * - **字体名用那款字本身写**（[TypographyActions.fontRegistry]，和正文同一个解析器）：换之前就看得到长相，
  *   不用一款款点过去再看正文。
- * - **末尾空心圆框的「＋」是导入**（[AddChip]）：从前是一颗写着「导入字体」的普通 chip，和「默认」「衬线」长得一模一样，
- *   看着像一款叫「导入字体」的字。
+ * - 导入字体放在列表上方的标题行，横滑字体列表时仍可使用。
  * - **导入的字体长按删除**（删除收进长按，同书源、净化规则）：从前选中导入字体时条末尾多一颗「删除字体」，
  *   一会儿有一会儿没有，条的长度跟着跳。
  * - 不弹列表、不进二级：弹出来的列表会挡住正文，正好挡掉要看的效果。
@@ -206,6 +210,20 @@ internal fun FontSection(
     // 解析一次就够：导入字体的解析要碰一下文件（见 FileFontRegistry），别每次重组都去
     val families = remember(ids, actions.fontRegistry) { ids.map { actions.fontRegistry.resolve(it) } }
 
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Dimens.touchTarget).padding(horizontal = Dimens.listHorizontal),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("字体", style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        if (actions.fontImportStage == null) {
+            AppTextButton(
+                "导入字体",
+                onClick = { picker.launch(arrayOf("*/*")) },
+                contentPadding = PaddingValues(horizontal = Dimens.gapXS),
+            )
+        }
+    }
     ChipRow(
         options = labels,
         selectedIndex = selected,
@@ -216,11 +234,6 @@ internal fun FontSection(
         longClickActions = ReaderSettings.FONT_PRESETS.map { null } +
             actions.fonts.map { font -> { deleting = font } },
         longClickLabel = "删除字体",
-        trailing = {
-            if (actions.fontImportStage == null) {
-                AddChip(onClick = { picker.launch(arrayOf("*/*")) }, contentDescription = "导入字体")
-            }
-        },
     )
 
     actions.fontImportStage?.let { stage ->

@@ -5,12 +5,12 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -18,7 +18,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import com.radium.inkwell.core.source.SourceHttpClient
 import com.radium.inkwell.core.source.detect.FormField
-import com.radium.inkwell.data.source.WebViewNetworkGuard
+import com.radium.inkwell.data.source.GuardedWebViewClient
+import com.radium.inkwell.data.source.WEB_RENDERER_ERROR
+import com.radium.inkwell.ui.components.ErrorState
 import org.json.JSONObject
 
 /** 网页里提交的一次表单（[WebMode.Capture] 下报上来） */
@@ -42,7 +44,7 @@ enum class WebMode {
  * 这个是给人看、给人点的。但有两条与它一致：
  * - **UA 一致**：用抓取客户端的 [SourceHttpClient.DEFAULT_UA]。站点按 UA 给不同的页面，用户在这里看到的
  *   和引擎抓到的必须是同一套，否则用户点中的链接在静态页里根本找不到。
- * - **内网拦截**：页面里的脚本同样不许碰内网，与它共用 [WebViewNetworkGuard]。
+ * - **内网拦截**：页面里的脚本同样不许碰内网，与它共用 [GuardedWebViewClient]。
  *
  * 脚本桥对页面上的**所有** frame 开放（广告 iframe 也调得到）。所以桥只上报数据、不做任何事；
  * 报上来的东西由 ViewModel 校验（表单必须是这个站的、点选结果要在静态页上重认一遍）。
@@ -61,6 +63,12 @@ fun WizardWebView(
     val pageUrl by rememberUpdatedState(onPageUrl)
     val submit by rememberUpdatedState(onFormSubmit)
     val pick by rememberUpdatedState(onPick)
+    var activeView by remember { mutableStateOf<WebView?>(null) }
+    var rendererGone by remember(url, mode) { mutableStateOf(false) }
+    if (rendererGone) {
+        ErrorState(message = WEB_RENDERER_ERROR, modifier = modifier, onRetry = { rendererGone = false })
+        return
+    }
     val script = when (mode) {
         WebMode.Capture -> CAPTURE_JS
         WebMode.PickLink -> pickJs("link", highlight)
@@ -76,32 +84,30 @@ fun WizardWebView(
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
                 settings.userAgentString = SourceHttpClient.DEFAULT_UA
+                activeView = this
                 val main = Handler(Looper.getMainLooper())
                 addJavascriptInterface(
                     object {
                         // 桥在 WebView 自己的线程上被调，回主线程再交出去
                         @JavascriptInterface
                         fun onSubmit(json: String) {
-                            parseForm(json)?.let { form -> main.post { submit(form) } }
+                            parseForm(json)?.let { form -> main.post { if (activeView === this@apply) submit(form) } }
                         }
 
                         @JavascriptInterface
                         fun onPick(json: String) {
                             val o = runCatching { JSONObject(json) }.getOrNull() ?: return
-                            main.post { pick(o.optString("href"), o.optString("text")) }
+                            main.post { if (activeView === this@apply) pick(o.optString("href"), o.optString("text")) }
                         }
                     },
                     BRIDGE,
                 )
-                webViewClient = object : WebViewClient() {
-                    private val guard = WebViewNetworkGuard()
-
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                        guard.intercept(request)
-
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                        guard.blocksNavigation(request)
-
+                webViewClient = object : GuardedWebViewClient({ failed ->
+                    if (activeView === failed) {
+                        activeView = null
+                        rendererGone = true
+                    }
+                }) {
                     override fun onPageStarted(view: WebView, startedUrl: String, favicon: Bitmap?) {
                         pageUrl(startedUrl)
                     }
@@ -123,7 +129,10 @@ fun WizardWebView(
                 loadUrl(url)
             }
         },
-        onRelease = { it.destroy() },
+        onRelease = { view ->
+            if (activeView === view) activeView = null
+            view.destroy()
+        },
     )
 }
 

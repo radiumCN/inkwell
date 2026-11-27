@@ -8,6 +8,11 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Cookie
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -22,6 +27,64 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SourceLoginTest {
+    @Test
+    fun `direct search book reopens with the current session after redirects`() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val sessions = Sessions()
+            val source = fixture(base).copy(
+                loginUrl = "function login() {}",
+                searchUrl = """<js>
+                    var token = source.getLoginHeaderMap().get('Authorization');
+                    '/lookup,' + JSON.stringify({method:'POST',headers:{'X-Session':token},
+                        body:'key='+encodeURIComponent(key)+'&page='+page+'&ticket='+token})
+                </js>""",
+                ruleSearch = SearchRuleSet(bookList = ".result", name = "h1@text", bookUrl = "a@href"),
+                ruleBookInfo = BookInfoRuleSet(name = "h1@text"),
+                ruleToc = TocRuleSet(chapterList = "li", chapterName = "a@text", chapterUrl = "a@href"),
+            )
+            val id = checkNotNull(source.loginSessionId)
+            val key = "三国演义"
+            val html = "<h1>$key</h1><ul><li><a href='ch1'>第一章</a></li></ul>"
+            for (redirect in listOf(0, 307, 308, 302, 303)) {
+                fun enqueuePage() {
+                    if (redirect != 0) server.enqueue(MockResponse().setResponseCode(redirect).addHeader("Location", "/book/sanguo"))
+                    server.enqueue(MockResponse().setBody(html))
+                }
+                fun checkRequest(token: String) {
+                    val first = server.takeRequest()
+                    assertEquals("POST", first.method)
+                    assertEquals(token, first.getHeader("X-Session"))
+                    val body = first.body.readUtf8()
+                    assertTrue("page=2" in body && "ticket=$token" in body)
+                    if (redirect != 0) {
+                        val last = server.takeRequest()
+                        val keepsBody = redirect == 307 || redirect == 308
+                        assertEquals(if (keepsBody) "POST" else "GET", last.method)
+                        assertEquals(if (keepsBody) body else "", last.body.readUtf8())
+                    }
+                }
+                fun login(token: String) = sessions.write(id, SourceSessionKey.HEADERS, """{"Authorization":"$token"}""")
+                login("first-fixture")
+                enqueuePage()
+                val book = engine(http(sessions), sessions).search(source, key, page = 2).items.single()
+                checkRequest("first-fixture")
+                assertFalse("first-fixture" in book.bookUrl)
+                login("second-fixture")
+                enqueuePage()
+                val detail = engine(http(sessions), sessions).getDetail(source, book.bookUrl)
+                assertEquals(key, detail.title)
+                assertFalse("second-fixture" in detail.tocUrl)
+                checkRequest("second-fixture")
+                login("third-fixture")
+                enqueuePage()
+                val toc = engine(http(sessions), sessions).getToc(source, detail.tocUrl, book.bookUrl)
+                assertEquals("第一章", toc.single().title)
+                checkRequest("third-fixture")
+            }
+        }
+    }
+
     private class Sessions : SourceSessionStore {
         private val data = ConcurrentHashMap<Pair<String, SourceSessionKey>, String>()
 
@@ -39,6 +102,37 @@ class SourceLoginTest {
 
     private fun engine(http: SourceHttpClient, sessions: SourceSessionStore = Sessions()) =
         BookSourceEngine(http, scriptRuntime = RhinoScriptRuntime(), sessionStore = sessions)
+
+    @Test
+    fun `cold search page warms only the learned origin without search text or login headers`() = runBlocking {
+        val calls = mutableListOf<Request>()
+        val sessions = Sessions()
+        val transport = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            calls.add(request)
+            Response.Builder().request(request).protocol(Protocol.HTTP_2).code(200).message("OK")
+                .body("""{"items":[{"title":"示例","url":"/book"}]}""".toResponseBody()).build()
+        }.build()
+        val source = fixture("https://books.example").copy(loginUrl = "/login",
+            searchUrl = "https://api.example:8443/search?q={{key}}")
+        val http = SourceHttpClient(transport, sessionStore = sessions)
+        val first = engine(http, sessions)
+        first.warmSearchConnection(source)
+        assertTrue(calls.isEmpty())
+        assertEquals(1, first.search(source, "示例", rememberOrigin = true).items.size)
+        val id = checkNotNull(source.loginSessionId)
+        assertEquals("https://api.example:8443/", sessions.read(id, SourceSessionKey.SEARCH_ORIGIN))
+
+        val reopened = engine(http, sessions)
+        reopened.warmSearchConnection(source.copy(concurrentRate = "1/1000"))
+        sessions.write(id, SourceSessionKey.HEADERS, """{"Authorization":"fixture"}""")
+        reopened.warmSearchConnection(source)
+        reopened.warmSearchConnection(source)
+        assertEquals(listOf("GET", "HEAD"), calls.map { it.method })
+        assertEquals("https://api.example:8443/", calls.last().url.toString())
+        assertNull(calls.last().header("Authorization"))
+        assertNull(calls.last().header("Cookie"))
+    }
 
     @Test
     fun `仅配置登录校验脚本的来源有独立会话且不显示登录入口`() {

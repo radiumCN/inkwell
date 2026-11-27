@@ -31,7 +31,12 @@ data class LayoutScheme(
     val marginHorizontalDp: Float = 24f,
     val marginVerticalDp: Float = 28f,
     val bodyFontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
+    /** 负值单独保存，旧版读取方案时仍能拿到合法的非负留白。 */
+    val headerTopOffsetDp: Float = 0f,
 ) {
+    private val effectiveHeaderTopSpacingDp: Float
+        get() = if (headerTopSpacingDp == 0f) headerTopOffsetDp.coerceAtMost(0f) else headerTopSpacingDp
+
     fun applyTo(s: ReaderSettings): ReaderSettings = s.copy(
         fontSizeSp = fontSizeSp,
         fontId = fontId,
@@ -44,7 +49,7 @@ data class LayoutScheme(
         justify = justify,
         titleScale = titleScale,
         titleTopSpacingDp = titleTopSpacingDp,
-        headerTopSpacingDp = headerTopSpacingDp,
+        headerTopSpacingDp = effectiveHeaderTopSpacingDp,
         marginHorizontalDp = marginHorizontalDp,
         marginVerticalDp = marginVerticalDp,
     )
@@ -63,8 +68,8 @@ data class LayoutScheme(
             near(firstLineIndentEm, s.firstLineIndentEm) &&
             justify == s.justify &&
             near(titleScale, s.titleScale) &&
-            near(titleTopSpacingDp, s.titleTopSpacingDp) &&
-            near(headerTopSpacingDp, s.headerTopSpacingDp) &&
+            near(titleTopSpacingDp, s.effectiveTitleTopSpacingDp) &&
+            near(effectiveHeaderTopSpacingDp, s.effectiveHeaderTopSpacingDp) &&
             near(marginHorizontalDp, s.marginHorizontalDp) &&
             near(marginVerticalDp, s.marginVerticalDp)
 
@@ -83,8 +88,9 @@ data class LayoutScheme(
             firstLineIndentEm = s.firstLineIndentEm,
             justify = s.justify,
             titleScale = s.titleScale,
-            titleTopSpacingDp = s.titleTopSpacingDp,
-            headerTopSpacingDp = s.headerTopSpacingDp,
+            titleTopSpacingDp = s.effectiveTitleTopSpacingDp,
+            headerTopSpacingDp = s.effectiveHeaderTopSpacingDp.coerceAtLeast(0f),
+            headerTopOffsetDp = s.effectiveHeaderTopSpacingDp.coerceAtMost(0f),
             marginHorizontalDp = s.marginHorizontalDp,
             marginVerticalDp = s.marginVerticalDp,
         )

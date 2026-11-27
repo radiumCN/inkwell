@@ -9,6 +9,9 @@ import kotlinx.coroutines.withContext
 /** 本地书的阅读数据源：包装 BookHandle，IO 线程加载 */
 class LocalReaderBookSource(private val handle: BookHandle) : ReaderBookSource, AutoCloseable {
 
+    val toc get() = handle.toc
+    internal val hasNestedToc = handle.toc.any { it.level > 0 }
+
     override val chapterCount: Int get() = handle.chapters.size
 
     override fun chapterTitle(index: Int): String? =

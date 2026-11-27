@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Before
 import kotlin.test.Test
@@ -60,7 +61,123 @@ class BookSourceEngineTest {
         assertEquals(2, result.items.size)
     }
 
+    @Test
+    fun `search reports a key rewritten by the URL script and keeps fetch timing separate`() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setBody(SEARCH_PAGE).setBodyDelay(120, TimeUnit.MILLISECONDS)
+        }
+        val source = searchSource(
+            """<js>
+                var parts = splitKey(key);
+                key = parts[0];
+                '/search?title=' + encodeURIComponent(key) + '&source=' + parts[1] + '&page={{page}}'
+            </js>""",
+        ).copy(jsLib = "function splitKey(input) { return String(input).split('@'); }")
+        val engine = engine()
+        val timing = SearchPageTiming()
+        val result = engine.search(source, "魔道修真@a", page = 2, timing = timing)
+        val request = server.takeRequest().requestUrl!!
+
+        assertEquals("魔道修真", request.queryParameter("title"))
+        assertEquals("a", request.queryParameter("source"))
+        assertEquals("2", request.queryParameter("page"))
+        assertEquals("魔道修真", result.rewrittenKeyword)
+        assertEquals(2, result.items.size)
+        assertTrue(result.hasMore)
+        assertTrue(timing.requestSetupMs != null)
+        assertTrue((timing.fetchMs ?: -1) >= 100)
+        assertTrue(timing.parseMs != null)
+        assertNull(engine.search(searchSource("/s?q={{key}}"), "原样@保留").rewrittenKeyword)
+    }
+
+    @Test
+    fun `search timing leaves parsing absent when the fetch fails`() = runBlocking {
+        val timing = SearchPageTiming()
+        assertFailsWith<SourceHttpClient.HttpStatusException> {
+            engine().search(searchSource("/missing"), "test", timing = timing)
+        }
+        assertTrue(timing.requestSetupMs != null)
+        assertTrue(timing.fetchMs != null)
+        assertNull(timing.parseMs)
+    }
+
     // ---- 全链路 ----
+
+    @Test
+    fun `五六中文搜索精确命中跳到详情页时从同一响应取书名`() = runBlocking {
+        val src = source().copy(
+            searchUrl = "/exact?q={{key}}&page={{page}}",
+            ruleSearch = SearchRuleSet(
+                bookList = "class.grid@id.nr", name = "tag.td.0@tag.a@text", bookUrl = "tag.td.0@tag.a@href",
+            ),
+            ruleBookInfo = BookInfoRuleSet(name = "id.info@h1@text", author = "id.info@tag.p.0@text", coverUrl = "img@src"),
+        )
+        val page = engine().search(src, "三国演义")
+        val book = page.items.single()
+        assertEquals("三国演义", book.title)
+        assertEquals("罗贯中", book.author)
+        assertEquals("$base/book/sanguo", book.bookUrl)
+        assertEquals("$base/book/cover.jpg", book.coverUrl)
+        assertFalse(page.hasMore)
+        assertEquals(2, server.requestCount) // 搜索和 HTTP 跳转，无额外详情请求
+        assertEquals(book.title, engine().search(src, "罗贯中").items.single().title)
+        assertTrue(engine().search(src, "站点会将不存在的书跳转到推荐书").items.isEmpty())
+    }
+
+    @Test
+    fun `同一地址直接返回详情的 POST 搜索结果可以重新打开`() = runBlocking {
+        val src = source().copy(
+            searchUrl = """/direct,{"method":"POST","body":"q={{key}}","headers":{"X-Book":"yes"}}""",
+            ruleBookInfo = BookInfoRuleSet(init = "id.info", name = "h1@text"),
+        )
+        val eng = engine()
+        val book = eng.search(src, "三国演义").items.single()
+        assertEquals("三国演义", eng.getDetail(src, book.bookUrl, book.variables).title)
+        repeat(2) {
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals("yes", request.getHeader("X-Book"))
+            assertEquals("q=%E4%B8%89%E5%9B%BD%E6%BC%94%E4%B9%89", request.body.readUtf8())
+        }
+    }
+
+    @Test
+    fun `public POST redirect can use its final URL only if it landed with GET`() = runBlocking {
+        for (code in listOf(302, 307, 308)) {
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest) = when (request.path) {
+                    "/lookup" -> MockResponse().setResponseCode(code).setHeader("Location", "/book/sanguo")
+                    else -> if (request.method == (if (code == 302) "GET" else "POST")) {
+                        MockResponse().setBody("<h1>三国演义</h1>")
+                    } else MockResponse().setResponseCode(405)
+                }
+            }
+            val src = source().copy(
+                searchUrl = """/lookup,{"method":"POST","body":"q={{key}}"}""",
+                ruleBookInfo = BookInfoRuleSet(name = "h1@text"),
+            )
+            val book = engine().search(src, "三国演义").items.single()
+            if (code == 302) assertEquals("$base/book/sanguo", book.bookUrl)
+            assertEquals(book.title, engine().getDetail(src, book.bookUrl).title)
+        }
+    }
+
+    @Test
+    fun `真正的空搜索和已有列表节点的无效条目都不产生详情命中`() = runBlocking {
+        val src = source().copy(
+            searchUrl = "/book/empty",
+            ruleBookInfo = BookInfoRuleSet(name = "id.info@h1@text"),
+        )
+        assertTrue(engine().search(src, "三国演义").items.isEmpty())
+        val genericHeading = src.copy(searchUrl = "/no-results", ruleBookInfo = BookInfoRuleSet(name = "h1@text"))
+        assertTrue(engine().search(genericHeading, "三国演义").items.isEmpty())
+        val brokenList = src.copy(
+            searchUrl = "/book/sanguo",
+            ruleSearch = SearchRuleSet(bookList = "id.info@h1", name = "text", bookUrl = "a@href"),
+        )
+        assertTrue(engine().search(brokenList, "三国演义").items.isEmpty())
+    }
 
     @Test
     fun `full chain search detail toc content`() = runBlocking {
@@ -418,6 +535,10 @@ class BookSourceEngineTest {
         override fun dispatch(request: RecordedRequest): MockResponse {
             val path = request.path ?: return MockResponse().setResponseCode(404)
             return when {
+                path.startsWith("/exact?") -> MockResponse().setResponseCode(302).setHeader("Location", "/book/sanguo")
+                path == "/book/sanguo" -> html("""<div id="info"><h1>三国演义</h1><p>罗贯中</p><img src="cover.jpg"></div>""")
+                path == "/no-results" -> html("<h1>没有找到相关的书</h1>")
+                path == "/direct" && request.method == "POST" -> html("""<div id="info"><h1>三国演义</h1></div>""")
                 path.startsWith("/search") -> html(SEARCH_PAGE)
                 path == "/book/1" -> html(DETAIL_PAGE)
                 path == "/book/empty" -> html("<html><body><p>无书名页</p></body></html>")

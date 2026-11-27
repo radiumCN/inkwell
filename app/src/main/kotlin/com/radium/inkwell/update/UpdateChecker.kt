@@ -8,6 +8,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /** 更新渠道：稳定版只看正式 Release，测试版包含 prerelease */
 enum class UpdateChannel(val label: String) {
@@ -44,11 +50,23 @@ class UpdateChecker(
         versionName: String,
     ): CheckResult = withContext(Dispatchers.IO) {
         try {
-            val candidate = when (channel) {
-                // /releases/latest 天然排除 draft 与 prerelease
-                UpdateChannel.STABLE -> fetch("releases/latest")?.let { listOf(it) }
-                UpdateChannel.BETA -> fetchList("releases?per_page=15")
-            } ?: return@withContext CheckResult.UpToDate // 404 = 尚无任何 Release
+            val path = when (channel) {
+                UpdateChannel.STABLE -> "releases/latest"
+                UpdateChannel.BETA -> "releases?per_page=15"
+            }
+            val request = Request.Builder()
+                .url("https://api.github.com/repos/$repo/$path")
+                .header("Accept", "application/vnd.github+json")
+                .build()
+            val candidate = http.newCall(request).execute().use { response ->
+                if (response.code == 404) return@withContext CheckResult.UpToDate
+                if (!response.isSuccessful) return@withContext githubFailure(response)
+                val body = response.body.string()
+                when (channel) {
+                    UpdateChannel.STABLE -> listOf(json.decodeFromString<GithubRelease>(body))
+                    UpdateChannel.BETA -> json.decodeFromString<List<GithubRelease>>(body)
+                }
+            }
             val latest = candidate
                 .filter { !it.draft }
                 .maxWithOrNull { a, b ->
@@ -82,25 +100,43 @@ class UpdateChecker(
         }
     }
 
-    private fun fetch(path: String): GithubRelease? = request(path)?.let {
-        json.decodeFromString<GithubRelease>(it)
-    }
-
-    private fun fetchList(path: String): List<GithubRelease>? = request(path)?.let {
-        json.decodeFromString<List<GithubRelease>>(it)
-    }
-
-    /** 404 → null；其他失败抛异常由上层转 Failed */
-    private fun request(path: String): String? {
-        val request = Request.Builder()
-            .url("https://api.github.com/repos/$repo/$path")
-            .header("Accept", "application/vnd.github+json")
-            .build()
-        http.newCall(request).execute().use { resp ->
-            if (resp.code == 404) return null
-            check(resp.isSuccessful) { "HTTP ${resp.code}" }
-            return resp.body.string()
+    private fun githubFailure(response: Response): CheckResult.Failed {
+        val code = response.code
+        if (code != 403 && code != 429) return CheckResult.Failed("HTTP $code", code)
+        val marker = when {
+            response.header("CF-Mitigated").equals("challenge", ignoreCase = true) -> "edge_challenge"
+            response.header("X-GitHub-Request-Id") != null -> "github_request_id"
+            else -> "unknown"
         }
+        val now = Instant.now()
+        val retryAfter = response.header("Retry-After")?.trim()?.let { value ->
+            runCatching {
+                val seconds = value.toLongOrNull()
+                if (seconds != null && seconds >= 0) now.plusSeconds(seconds).toEpochMilli()
+                else ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
+            }.getOrNull()
+        }
+        val exhausted = response.header("X-RateLimit-Remaining") == "0"
+        val signal = when {
+            exhausted -> "remaining_zero"
+            retryAfter != null -> "retry_after"
+            code == 429 -> "http_429"
+            else -> {
+                // GitHub 的次级限流有时只有 JSON message。只读少量，只记录分类。
+                val message = runCatching {
+                    val body = json.parseToJsonElement(response.peekBody(4096).string()) as? JsonObject
+                    (body?.get("message") as? JsonPrimitive)?.content
+                }.getOrNull()
+                if (message?.contains("rate limit", ignoreCase = true) == true) "api_message"
+                else return CheckResult.Failed("GitHub 更新源拒绝了本次请求（HTTP $code）", code, responseMarker = marker)
+            }
+        }
+        val reset = if (exhausted) response.header("X-RateLimit-Reset")?.toLongOrNull()?.let {
+            runCatching { Instant.ofEpochSecond(it).toEpochMilli() }.getOrNull()
+        } else null
+        val retryAt = listOfNotNull(retryAfter, reset).maxOrNull()?.coerceAtLeast(now.toEpochMilli())
+            ?: now.plusSeconds(60).toEpochMilli()
+        return CheckResult.Failed("GitHub 更新请求暂时受限", code, retryAt, signal, marker)
     }
 
     companion object {

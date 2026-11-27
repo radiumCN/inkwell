@@ -4,9 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.webkit.CustomHeader
 import androidx.webkit.Profile
 import androidx.webkit.WebViewCompat
@@ -17,7 +15,9 @@ import com.radium.inkwell.core.source.PageRenderer
 import com.radium.inkwell.core.source.sourceOrigin
 import com.radium.inkwell.core.source.isPrivateNetworkHost
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -106,7 +106,9 @@ class WebViewPageRenderer internal constructor(
                             registered += header
                         }
                     }
-                    loadPage(wv, url, headers)
+                    // 加载完成后还要轮询 DOM；进程退出时一并取消这两段等待。
+                    val renderJob = coroutineContext.job
+                    loadPage(wv, url, headers) { renderJob.cancel(RendererGone()) }
                     val html = awaitSettledHtml(wv)
                     FetchedPage(
                         finalUrl = wv.url ?: url,
@@ -117,21 +119,22 @@ class WebViewPageRenderer internal constructor(
                 }
             } catch (e: TimeoutCancellationException) {
                 null // 超时 → 调用方沿用静态抓取的结果
+            } catch (_: RendererGone) {
+                null
             } catch (e: RenderFailed) {
                 null
             } catch (_: IllegalArgumentException) {
                 null
             } finally {
-                view?.let {
-                    it.stopLoading()
-                    it.destroy() // 每次用完即销毁：长期持有的离屏 WebView 容易泄漏 Activity/内存
-                }
+                view?.destroy()
                 configuredProfile?.let { current ->
                     registered.forEach { current.clearCustomHeader(it.name, it.value) }
                 }
             }
         }
     }
+
+    private class RendererGone : CancellationException(WEB_RENDERER_ERROR)
 
     private class RenderFailed(message: String) : Exception(message)
 
@@ -153,40 +156,31 @@ class WebViewPageRenderer internal constructor(
     }
 
     /** 加载页面，等 onPageFinished；主文档加载失败直接放弃 */
-    private suspend fun loadPage(wv: WebView, url: String, headers: Map<String, String>) =
-        suspendCancellableCoroutine { cont ->
-            val guard = WebViewNetworkGuard()
-            wv.webViewClient = object : WebViewClient() {
-                /**
-                 * 页面里的脚本、XHR、子框架同样不许碰内网（见 [WebViewNetworkGuard]）：否则渲染一个公网页，
-                 * 它的脚本就能去读 `http://192.168.1.1/`，再由规则里的 `java.ajax` 把结果发回书源作者的服务器。
-                 */
-                override fun shouldInterceptRequest(
-                    view: WebView,
-                    request: WebResourceRequest,
-                ): WebResourceResponse? = guard.intercept(request)
+    private suspend fun loadPage(
+        wv: WebView,
+        url: String,
+        headers: Map<String, String>,
+        onRendererGone: (WebView) -> Unit,
+    ) = suspendCancellableCoroutine { cont ->
+        wv.webViewClient = object : GuardedWebViewClient(onRendererGone) {
+            override fun onPageFinished(view: WebView, finishedUrl: String) {
+                if (cont.isActive) cont.resume(Unit)
+            }
 
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                    guard.blocksNavigation(request)
-
-                override fun onPageFinished(view: WebView, finishedUrl: String) {
-                    if (cont.isActive) cont.resume(Unit)
-                }
-
-                override fun onReceivedError(
-                    view: WebView,
-                    request: WebResourceRequest,
-                    error: WebResourceError,
-                ) {
-                    // 只有主文档失败才算失败：子资源（图片/统计脚本）报错很常见，忽略
-                    if (request.isForMainFrame && cont.isActive) {
-                        cont.cancel(RenderFailed("加载失败: ${error.description}"))
-                    }
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceError,
+            ) {
+                // 只有主文档失败才算失败：子资源（图片/统计脚本）报错很常见，忽略
+                if (request.isForMainFrame && cont.isActive) {
+                    cont.cancel(RenderFailed("加载失败: ${error.description}"))
                 }
             }
-            // Referer 等源级头随首次请求带上；WebView 不会把它们带到后续 XHR，够用
-            wv.loadUrl(url, headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) })
         }
+        // Referer 等源级头随首次请求带上；WebView 不会把它们带到后续 XHR，够用
+        wv.loadUrl(url, headers.filterKeys { !it.equals("User-Agent", ignoreCase = true) })
+    }
 
     /**
      * onPageFinished 只代表主文档就绪，正文往往还在 XHR 途中。

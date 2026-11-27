@@ -6,6 +6,9 @@ import com.radium.inkwell.core.model.asParagraph
 import com.radium.inkwell.core.util.toHex
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
@@ -119,7 +122,39 @@ class ChapterContentCache(private val root: File) {
     fun has(bookId: String, chapterUrl: String): Boolean = file(bookId, chapterUrl).isFile
 
     /** 这本书有没有任何正文缓存。全书架清理先问这一句，没有就不必去读它几千行的目录 */
-    fun hasAny(bookId: String): Boolean = bookDir(bookId).list()?.isNotEmpty() == true
+    fun hasAny(bookId: String): Boolean =
+        bookDir(bookId).list()?.any { name ->
+            name != OFFLINE_PLAN_FILE && name != TEXT_PLAN_FILE && !name.endsWith(".part")
+        } == true
+
+    internal fun readOfflinePlan(bookId: String, textOnly: Boolean = false): String? = synchronized(epochLock) {
+        offlinePlanFile(bookId, textOnly).takeIf { it.isFile }?.readText()
+    }
+
+    internal fun writeOfflinePlan(bookId: String, plan: String, epoch: Long, textOnly: Boolean = false): Boolean =
+        synchronized(epochLock) {
+            if (epoch(bookId) != epoch) return false
+            val target = offlinePlanFile(bookId, textOnly)
+            val dir = checkNotNull(target.parentFile)
+            dir.mkdirs()
+            val temporary = File.createTempFile("offline-", ".part", dir)
+            try {
+                temporary.writeText(plan)
+                Files.move(temporary.toPath(), target.toPath(), REPLACE_EXISTING, ATOMIC_MOVE)
+            } finally {
+                temporary.delete()
+            }
+            true
+        }
+
+    internal fun clearOfflinePlan(bookId: String, epoch: Long, textOnly: Boolean = false) {
+        synchronized(epochLock) {
+            if (epoch(bookId) == epoch) Files.deleteIfExists(offlinePlanFile(bookId, textOnly).toPath())
+        }
+    }
+
+    private fun offlinePlanFile(bookId: String, textOnly: Boolean) =
+        File(bookDir(bookId), if (textOnly) TEXT_PLAN_FILE else OFFLINE_PLAN_FILE)
 
     /**
      * 整本目录逐章问 [has] 的批量版：目录只列一次，之后每章算个 MD5 查集合。语义与 [has] 相同（文件在不在）。
@@ -197,6 +232,8 @@ class ChapterContentCache(private val root: File) {
 
     private fun imageFile(bookId: String, imageUrl: String): File =
         File(File(bookDir(bookId), IMAGE_DIR), key(imageUrl))
+
+    internal fun hasImage(bookId: String, imageUrl: String): Boolean = imageFile(bookId, imageUrl).length() > 0
 
     /** 读过的插图。命中同样续命（自动清理按「多久没碰过」算，见 [pruneBehindProgress]） */
     fun readImage(bookId: String, imageUrl: String): ByteArray? {
@@ -393,6 +430,8 @@ class ChapterContentCache(private val root: File) {
     }
 
     private companion object {
+        const val OFFLINE_PLAN_FILE = "offline-plan.json"
+        const val TEXT_PLAN_FILE = "text-search-plan.json"
         const val MAX_RECENT_UPGRADES = 256
         /** 同一本书两次清理之间至少隔多久，见 [claimPrune] */
         const val PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000L

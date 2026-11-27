@@ -1,6 +1,9 @@
 package com.radium.inkwell.core.source
 
+import com.radium.inkwell.core.model.ChapterContent
 import com.radium.inkwell.core.model.ContentElement
+import java.util.regex.Matcher
+import java.util.regex.Pattern
 
 /**
  * 净化规则的执行。
@@ -30,6 +33,23 @@ class Purifier private constructor(
 
     fun apply(text: String): String = guarded { apply(text, it) }
 
+    fun apply(content: ChapterContent): ChapterContent {
+        if (compiled.isEmpty()) return content
+        if (content.anchors.isEmpty()) return content.copy(elements = apply(content.elements))
+        return guarded { run ->
+            val elements = content.elements
+            val indices = IntArray(elements.size + 1)
+            val cleaned = if (compiled.any { it.multiline }) applyCrossParagraph(elements, run, indices) else buildList {
+                elements.forEachIndexed { index, element ->
+                    indices[index] = size
+                    cleanElement(element, run)?.let(::add)
+                }
+                indices[elements.size] = size
+            }
+            ChapterContent(cleaned, content.anchors.mapValues { (_, index) -> indices[index] })
+        }
+    }
+
     /**
      * 整章一次交给 [RegexWatchdog]：真机上 [GuardedText] 拦不住 ICU 的回溯，只能靠看门狗
      * 让调用方别陪着卡死（阅读器是在互斥锁里净化的，卡住就是此后每一章都转圈）。
@@ -58,13 +78,13 @@ class Purifier private constructor(
         // 逐段各自 apply 永远匹配不到（这正是「规则页试算对、书里不生效」的一类成因）。
         // 有这类规则时退回「整章文本 join → apply → 按换行重新拆段」路径。
         if (compiled.any { it.multiline }) return applyCrossParagraph(elements, run)
-        return elements.mapNotNull { el ->
-            when (el) {
-                is ContentElement.Paragraph -> clean(el.text, run)?.let { ContentElement.Paragraph(it) }
-                is ContentElement.Heading -> clean(el.text, run)?.let { ContentElement.Heading(el.level, it) }
-                else -> el
-            }
-        }
+        return elements.mapNotNull { cleanElement(it, run) }
+    }
+
+    private fun cleanElement(element: ContentElement, run: Run): ContentElement? = when (element) {
+        is ContentElement.Paragraph -> clean(element.text, run)?.let { ContentElement.Paragraph(it) }
+        is ContentElement.Heading -> clean(element.text, run)?.let { ContentElement.Heading(element.level, it) }
+        else -> element
     }
 
     /**
@@ -74,35 +94,59 @@ class Purifier private constructor(
     private fun applyCrossParagraph(
         elements: List<ContentElement>,
         run: Run,
+        indices: IntArray? = null,
     ): List<ContentElement> {
         val out = mutableListOf<ContentElement>()
         val buffer = mutableListOf<String>()
-        fun flush() {
+        fun flush(endIndex: Int) {
             if (buffer.isEmpty()) return
-            apply(buffer.joinToString("\n"), run).split("\n")
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .forEach { out += ContentElement.Paragraph(it) }
+            val firstIndex = endIndex - buffer.size
+            val offsets = indices?.let {
+                val starts = IntArray(buffer.size)
+                for (i in 1 until buffer.size) starts[i] = starts[i - 1] + buffer[i - 1].length + 1
+                starts
+            }
+            val cleaned = apply(buffer.joinToString("\n"), run, offsets)
+            var lineStart = 0
+            var boundary = 0
+            for (line in cleaned.splitToSequence('\n')) {
+                val lineEnd = lineStart + line.length
+                if (indices != null && offsets != null) {
+                    while (boundary < offsets.size && offsets[boundary] < lineEnd) {
+                        indices[firstIndex + boundary++] = out.size
+                    }
+                }
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty()) out += ContentElement.Paragraph(trimmed)
+                lineStart = lineEnd + 1
+            }
+            // 删除到块尾的段落，定位到下一块（或章末）。
+            if (indices != null) while (boundary < buffer.size) indices[firstIndex + boundary++] = out.size
             buffer.clear()
         }
-        for (el in elements) {
+        for ((index, el) in elements.withIndex()) {
             if (el is ContentElement.Paragraph) buffer += el.text
-            else { flush(); out += el }
+            else {
+                flush(index)
+                indices?.set(index, out.size)
+                out += el
+            }
         }
-        flush()
+        flush(elements.size)
+        indices?.set(elements.size, out.size)
         return out
     }
 
-    private fun apply(text: String, run: Run): String = compiled.fold(text) { acc, p ->
+    private fun apply(text: String, run: Run, offsets: IntArray? = null): String = compiled.fold(text) { acc, p ->
         run.pattern = p.pattern
         // apply 期兜底：替换串里的 `$`（Illegal group reference）、灾难性回溯的 StackOverflowError
         // 都会在这里炸。runCatching 捕获 Throwable，宽松模式保原文、严格模式抛 SourceException。
-        runCatching { p.apply(acc, run.budget) }.getOrElse { e ->
+        runCatching { p.apply(acc, run.budget, offsets) }.getOrElse { e ->
             // 超时是**整章级别的降级信号**，不能被"跳过这条坏规则"的宽松逻辑吞掉：吞了的话
             // 后面每条规则都会立刻再超时一次，最后静默返回原文 —— 用户只会看到"我的净化规则
             // 怎么不生效了"，永远查不到原因。与本项目「catch 前先 rethrow 取消」同一个道理。
             if (e is RegexBudgetExceeded) throw PurifyTimeoutException()
-            if (literalFallback) p.applyLiteral(acc)
+            if (literalFallback) p.applyLiteral(acc, offsets)
             else if (lenient) acc
             else throw SourceException("净化规则执行失败: ${p.pattern}", e)
         }
@@ -121,12 +165,19 @@ class Purifier private constructor(
         val multiline: Boolean = rule.isRegex &&
             (rule.pattern.contains("\\n") || rule.pattern.contains('\n') || rule.pattern.contains("(?s)"))
         // 字面替换不回溯，不必包 —— 只有正则才需要那层取字符的关卡
-        fun apply(text: String, budget: Budget): String =
-            regex?.replace(GuardedText(text, budget), replacement)
-                ?: text.replace(literal, replacement)
+        fun apply(text: String, budget: Budget, offsets: IntArray?): String {
+            if (regex == null) return applyLiteral(text, offsets)
+            val input = GuardedText(text, budget)
+            return if (offsets == null) regex.replace(input, replacement)
+            else replaceTrackingOffsets(regex.toPattern().matcher(input), replacement, text, offsets)
+        }
 
         /** 按字面替换（替换串也按字面，`$` 不是组引用） */
-        fun applyLiteral(text: String): String = text.replace(literal, replacement)
+        fun applyLiteral(text: String, offsets: IntArray?): String {
+            if (offsets == null) return text.replace(literal, replacement)
+            val matcher = Pattern.compile(literal, Pattern.LITERAL).matcher(text)
+            return replaceTrackingOffsets(matcher, Matcher.quoteReplacement(replacement), text, offsets)
+        }
     }
 
     companion object {
@@ -216,6 +267,36 @@ class Purifier private constructor(
 
 /** 净化超时：某条规则陷入灾难性回溯，已放弃净化（正文按未净化返回） */
 class PurifyTimeoutException : RuntimeException("净化规则执行超时")
+
+/** 和替换共用同一次匹配，按实际展开的组引用长度移动后续段首。 */
+private fun replaceTrackingOffsets(matcher: Matcher, replacement: String, text: String, offsets: IntArray): String {
+    if (!matcher.find()) return text
+    val result = StringBuffer()
+    val mapped = IntArray(offsets.size)
+    var boundary = 0
+    var delta = 0
+    do {
+        val start = matcher.start()
+        val end = matcher.end()
+        while (boundary < offsets.size && offsets[boundary] < start) {
+            mapped[boundary] = offsets[boundary] + delta
+            boundary++
+        }
+        while (boundary < offsets.size && (offsets[boundary] < end || offsets[boundary] == start)) {
+            mapped[boundary++] = start + delta
+        }
+        matcher.appendReplacement(result, replacement)
+        delta = result.length - end
+    } while (matcher.find())
+    matcher.appendTail(result)
+    while (boundary < offsets.size) {
+        mapped[boundary] = offsets[boundary] + delta
+        boundary++
+    }
+    // 非法组引用会中途失败，整条规则成功后才提交段首位置。
+    mapped.copyInto(offsets)
+    return result.toString()
+}
 
 /**
  * 预算耗尽。名字是中性的：这套关卡不只净化在用 —— 书源规则里的正则（`##替换##`、`:regex`）

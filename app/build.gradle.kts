@@ -9,7 +9,7 @@ plugins {
 android {
     namespace = "com.radium.inkwell"
     compileSdk = 37
-    // Miuix 0.9.5-beta03 的 AAR 元数据要求 37.2。CI 三条工作流安装同一平台。
+    // Miuix 的 AAR 元数据要求 37.2。CI 三条工作流安装同一平台。
     compileSdkMinor = 2
 
     defaultConfig {

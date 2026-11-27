@@ -252,17 +252,20 @@ private fun DrawScope.drawSelection(
     top: Float,
     color: Color,
 ) {
-    val len = layoutResult.layoutInput.text.length
-    val start = (if (slice.elementIndex == selection.elementIndex) selection.start else 0).coerceIn(0, len)
-    val end = (if (slice.elementIndex == selection.endElementIndex) selection.end else len).coerceIn(start, len)
+    val visibleStart = layoutResult.getLineStart(slice.startLine)
+    val visibleEnd = layoutResult.getLineEnd(slice.endLine)
+    val start = if (slice.elementIndex == selection.elementIndex) maxOf(selection.start, visibleStart) else visibleStart
+    val end = if (slice.elementIndex == selection.endElementIndex) minOf(selection.end, visibleEnd) else visibleEnd
     if (end <= start) return
+    val highlight = Path()
+    layoutResult.forEachSelectionBox(start, end) { highlight.addRect(it) }
     val sliceTopInParagraph = layoutResult.getLineTop(slice.startLine)
     translate(left = left, top = top + slice.yTopInPage - sliceTopInParagraph) {
         clipRect(
             top = sliceTopInParagraph,
             bottom = layoutResult.getLineBottom(slice.endLine),
         ) {
-            drawPath(layoutResult.getPathForRange(start, end), color)
+            drawPath(highlight, color)
         }
     }
 }

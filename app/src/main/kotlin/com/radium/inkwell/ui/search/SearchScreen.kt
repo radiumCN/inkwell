@@ -33,7 +33,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,15 +94,6 @@ fun SearchScreen(
         initialFirstVisibleItemIndex = viewModel.listIndex,
         initialFirstVisibleItemScrollOffset = viewModel.listOffset,
     )
-    val nearEnd by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 3
-        }
-    }
-    // 结果是边搜边出、且会按相关度重排的。LazyColumn 带 key 时会把首个可见项按 key 钉住 ——
-    // 更相关的书随后插到它前面，列表就等于被顶下去了，用户得手动往回滑才看得见最相关的那本。
-    // 所以：新搜索滚回顶部；搜索过程中只要用户自己没滑动过，就一直粘在顶部。
     LaunchedEffect(listState) {
         snapshotFlow {
             Triple(
@@ -121,17 +111,12 @@ fun SearchScreen(
             listState.scrollToItem(0)
         }
     }
-    LaunchedEffect(state.results.firstOrNull()) {
-        if (state.searching && !viewModel.userScrolled) {
+    // LazyColumn 会保留首个可见项。首轮补齐时，尚未滚动的用户应看到最新的第一条。
+    LaunchedEffect(state.results.firstOrNull()?.key) {
+        if (state.results.isNotEmpty() && state.page == 1 && !viewModel.userScrolled) {
             listState.scrollToItem(0)
             viewModel.noteScroll(0, 0)
         }
-    }
-
-    // 只认 nearEnd 的 false→true 跳变不够：一页只多出两三行、或第一页一屏就放得下时 nearEnd 一直是 true，
-    // 下一页永远不会来，得往回滑再滑下来才能触发。每次加载落地（条数、hasMore、加载状态变化）都再判一次。
-    LaunchedEffect(nearEnd, state.hasMore, state.searching, state.loadingMore, state.results.size) {
-        if (nearEnd) viewModel.loadMore()
     }
 
     // 与书架/设置同一套画布：灰底白卡（Miuix 的页面底 surface 上放卡片色的结果行）
@@ -144,10 +129,6 @@ fun SearchScreen(
     LaunchedEffect(Unit) {
         if (state.searchId == 0 && viewModel.query.isEmpty()) searchFocus.requestFocus()
     }
-    // 在 items 外面读一次：animationsEnabled() 内部会挂一个 ContentObserver，写进 items 里就是每行挂一个
-    val motionOn = animationsEnabled()
-    val motion = AppTheme.motionScheme
-
     // 历史在两种时候出来：进页还没搜过；搜过之后把输入框清空了 —— 清空就是「换个词」的意思，
     // 这时候还摆着上一个词的结果（或「没找到」）没有用，从前得退出页面再进来才看得到历史。
     // 正在搜 / 暂停着的时候不让位：结果还在长，或者等着用户点「继续搜索」。
@@ -156,7 +137,7 @@ fun SearchScreen(
     // 否则会落回上一个词的旧结果，顶着一个空搜索框
     val cleared = idle && state.searchId > 0 && viewModel.query.isBlank()
     val showHistory = idle && state.history.isNotEmpty() && (state.searchId == 0 || cleared)
-    val showEmpty = !showHistory && ((state.results.isEmpty() && idle) || cleared)
+    val showEmpty = !showHistory && ((state.results.isEmpty() && idle && !state.hasMore && !state.loadingMore) || cleared)
     val showResults = !showHistory && !showEmpty
 
     AppScaffold(
@@ -257,7 +238,7 @@ fun SearchScreen(
                     EmptyState(
                         icon = MiuixIcons.Search,
                         title = "没有找到相关的书",
-                        hint = "换个关键词试试，或到来源管理里检查来源是否已启用、是否还能用",
+                        hint = "试试更短的书名或作者名",
                         modifier = Modifier.padding(padding),
                     )
                 } else if (state.historyLoaded) {
@@ -286,8 +267,6 @@ fun SearchScreen(
                     // key 必须与合并键是同一个（SearchHit.key）：拿代表条目的 sourceId|bookUrl 当 key 的话，
                     // 一个书源把同一地址列成两本书就撞 key 崩溃，见 searchKey
                     itemsIndexed(state.results, key = { _, hit -> hit.key }) { index, hit ->
-                        // 边搜边重排（源数变了、相关度变了）时让行滑到新位置，而不是一帧之内互换 ——
-                        // 手指底下的那行瞬间换成别的书，点开的就不是想点的那本
                         val result = hit.result
                         // 合并进这一行的任何一个源已经在架，这一行就是「已加入」（见 ShelfIndex）
                         val inShelf = hit.results.any { it in state.shelf }
@@ -317,22 +296,23 @@ fun SearchScreen(
                                 viewModel.pauseSearch()
                                 onOpenPreview(viewModel.rankedResults(hit.results))
                             },
-                            // 关了系统动画就传 null（这个 API 的「不动画」写法），同书架
                             modifier = Modifier
                                 .onPlaced { viewModel.noteFirstResultPlaced(resultSearchId) }
-                                .animateItem(
-                                    fadeInSpec = if (motionOn) motion.defaultEffectsSpec() else null,
-                                    placementSpec = if (motionOn) motion.defaultSpatialSpec() else null,
-                                    fadeOutSpec = if (motionOn) motion.fastEffectsSpec() else null,
-                                )
                                 .groupedCardItem(index, resultCount),
                             colors = ContentListDefaults.plainColors(),
                         )
                     }
-                    if (state.loadingMore) {
-                        item {
+                    if (state.loadingMore || (state.hasMore && !state.searchPaused && !state.searching)) {
+                        item(key = "search-pagination") {
                             Box(Modifier.fillMaxWidth().padding(Dimens.gapL), contentAlignment = Alignment.Center) {
-                                AppLoadingIndicator(size = Dimens.iconMd)
+                                if (state.loadingMore) {
+                                    AppLoadingIndicator(size = Dimens.iconMd)
+                                } else {
+                                    AppTextButton(
+                                        text = if (state.results.isEmpty()) "继续查找" else "加载更多结果",
+                                        onClick = viewModel::loadMore,
+                                    )
+                                }
                             }
                         }
                     }

@@ -107,6 +107,8 @@ class EpubParserTest {
         val f = temp()
         EpubFixture.minimalEpub(f, ncxAnchors = true)
         EpubParser().open(f).use { book ->
+            assertEquals("c2", book.toc[1].anchor)
+            assertEquals(0, book.loadChapter(1).anchors["c2"])
             assertEquals(
                 listOf("第1章 起承转合", "第2章 起承转合", "第3章 起承转合"),
                 book.chapters.map { it.title },

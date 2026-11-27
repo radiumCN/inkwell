@@ -65,7 +65,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      # Miuix 0.9.5-beta03 的 AAR 元数据要求 Android 37.2。
+      # Miuix 的 AAR 元数据要求 Android 37.2。
       - name: Install Android SDK platform 37.2
         run: |
           SM="$(find "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" -path '*/cmdline-tools/*/bin/sdkmanager' | head -n 1)"

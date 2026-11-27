@@ -29,11 +29,15 @@ data class LayoutSpec(
     /** 1dp 合多少 px。图按「原图一像素 = 1dp」排（见 [fitImage]），和订阅文章同一条规则 */
     val density: Float = 1f,
     val bodyFontWeight: Int = ReaderSettings.FONT_WEIGHT_NORMAL,
+    /** 页眉借用顶部系统栏空间时的位置。随分页结果一起提交，避免新旧布局错开。 */
+    val raisedHeader: RaisedReaderHeader? = null,
 ) {
     val contentWidthPx: Int get() = (viewportWidthPx - marginLeftPx - marginRightPx).toInt()
     val contentHeightPx: Float get() =
         viewportHeightPx - marginTopPx - marginBottomPx - headerHeightPx - footerHeightPx
 }
+
+data class RaisedReaderHeader(val topPx: Float, val leftInsetPx: Float, val rightInsetPx: Float)
 
 /** 轻量分页结果：纯数据，可缓存 */
 data class PageSpec(
@@ -89,7 +93,25 @@ data class PaginatedChapter(
     val title: String,
     val pages: List<PageSpec>,
     val totalChars: Int,
+    val anchorOffsets: Map<String, Int> = emptyMap(),
+    val anchorElements: Map<String, Int> = emptyMap(),
 ) {
+    fun pageIndexForAnchor(anchor: String): Int? {
+        val elementIndex = anchorElements[anchor]?.plus(1) ?: return null
+        val offset = anchorOffsets[anchor] ?: return null
+        val start = pageIndexFor(offset)
+        // 插图不占字符偏移，按字符查出的页面可能已经越过插图。
+        val matching = pages.indexOfFirst { page ->
+            page.items.any { item ->
+                when (item) {
+                    is PageItem.TextSlice -> item.elementIndex == elementIndex
+                    is PageItem.ImageBox -> item.elementIndex == elementIndex
+                }
+            }
+        }
+        return matching.takeIf { it >= 0 } ?: start
+    }
+
     /** 按章内字符偏移二分定位页 */
     fun pageIndexFor(charOffset: Int): Int {
         if (pages.isEmpty()) return 0

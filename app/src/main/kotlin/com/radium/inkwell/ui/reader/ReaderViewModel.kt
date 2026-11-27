@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.radium.inkwell.core.source.BookSourceEngine
 import com.radium.inkwell.core.source.SearchResult
 import com.radium.inkwell.core.source.SourceVariables
+import com.radium.inkwell.core.util.VolumeChapterTitle
 import com.radium.inkwell.data.db.dao.BookSourceHitDao
 import com.radium.inkwell.data.db.dao.ChapterDao
 import com.radium.inkwell.data.db.entity.BookEntity
@@ -16,6 +17,7 @@ import com.radium.inkwell.data.db.entity.BookSourceHitEntity
 import com.radium.inkwell.data.db.entity.BookType
 import com.radium.inkwell.data.db.entity.ChapterEntity
 import com.radium.inkwell.data.prefs.AppPrefs
+import com.radium.inkwell.data.prefs.BookTocRule
 import com.radium.inkwell.data.prefs.ReaderPrefs
 import com.radium.inkwell.data.prefs.LayoutScheme
 import com.radium.inkwell.data.repo.ReaderFontStore
@@ -30,6 +32,7 @@ import com.radium.inkwell.data.repo.TEXT_ONLY_UPGRADE_INTERVAL_MS
 import com.radium.inkwell.data.repo.LocalReaderBookSource
 import com.radium.inkwell.data.repo.NetBookRepository
 import com.radium.inkwell.data.repo.NetReaderBookSource
+import com.radium.inkwell.data.repo.OfflineDownloader
 import com.radium.inkwell.data.repo.SourceReadHealth
 import com.radium.inkwell.data.repo.AutoSourceSwitcher
 import com.radium.inkwell.data.repo.TitleMatch
@@ -73,6 +76,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -95,7 +99,32 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 /** [cached] 正文已在文件缓存里（网络书才有意义：本地书正文一直都在，UI 侧不展示这个状态） */
-data class TocItem(val index: Int, val title: String, val cached: Boolean = false)
+data class TocItem(
+    val index: Int,
+    val title: String,
+    val cached: Boolean = false,
+    val anchor: String? = null,
+    val depth: Int = 0,
+    val key: Int = index,
+)
+
+data class TocReadingPosition(
+    val elementIndex: Int,
+    val anchorElements: Map<String, Int>,
+    val jumpedAnchor: String?,
+)
+
+internal fun currentTocKey(toc: List<TocItem>, chapterIndex: Int, position: TocReadingPosition?): Int? {
+    val entries = toc.asSequence().filter { it.index == chapterIndex }
+    if (position != null) {
+        position.jumpedAnchor?.let { anchor -> entries.firstOrNull { it.anchor == anchor }?.let { return it.key } }
+        val nearest = entries.mapNotNull { item ->
+            item.anchor?.let(position.anchorElements::get)?.takeIf { it <= position.elementIndex }?.let { it to item }
+        }.maxByOrNull { it.first }
+        if (nearest != null) return nearest.second.key
+    }
+    return entries.firstOrNull()?.key
+}
 
 data class ReaderUiState(
     val bookTitle: String = "",
@@ -170,6 +199,7 @@ data class ReaderUiState(
     val refreshingChapter: Boolean = false,
     val chapterRefreshFailed: Boolean = false,
     val pageLayout: LayoutSpec? = null,
+    val tocPosition: TocReadingPosition? = null,
 )
 
 /**
@@ -190,6 +220,7 @@ data class ReaderPageUi(
     val error: String? = null,
     val atBookEnd: Boolean = false,
     val layout: LayoutSpec? = null,
+    val tocPosition: TocReadingPosition? = null,
 )
 
 data class ReaderSessionUi(
@@ -228,7 +259,7 @@ data class ReaderOverlayUi(
 
 private fun ReaderUiState.toPage() = ReaderPageUi(
     chapterTitle, chapterIndex, pageInChapter, pageCount,
-    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout,
+    page, prevPage, nextPage, hasPrev, hasNext, loading, error, atBookEnd, pageLayout, tocPosition,
 )
 
 private fun ReaderUiState.toSession() = ReaderSessionUi(
@@ -289,6 +320,7 @@ class ReaderViewModel(
     private val fontStore: ReaderFontStore,
     private val readingStats: ReadingStatsRepository,
     private val readHealth: SourceReadHealth,
+    private val offlineDownloader: OfflineDownloader,
 ) : ViewModel() {
 
     // 用已预热的真实设置播种首帧，避免进书先闪一帧浅色默认主题再切深色
@@ -313,6 +345,9 @@ class ReaderViewModel(
         .map { it.toc }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.toc)
+
+    private val _tocRule = MutableStateFlow(BookTocRule.ORIGINAL)
+    internal val tocRule = _tocRule.asStateFlow()
 
     /**
      * 一次性提示（建了净化规则、换源失败、本章未净化……），由阅读页按纸张主题浮在页顶。
@@ -410,12 +445,33 @@ class ReaderViewModel(
         UsageLog.event("reader.$event", "book" to diagnosticBook, *fields)
     }
 
+    private val _textSearch = MutableStateFlow(ReaderTextSearchState())
+    val textSearch = _textSearch.asStateFlow()
+    private val _textMatch = MutableStateFlow<ReaderTextMatch?>(null)
+    val textMatch = _textMatch.asStateFlow()
+    private val _textSearchDestination = MutableStateFlow<ReaderTextSearchDestination?>(null)
+    internal val textSearchDestination = _textSearchDestination.asStateFlow()
+    internal val textSearchDownload = offlineDownloader.downloads.map { it[bookId] }.distinctUntilChanged()
+    private var textSearchJob: Job? = null
+    private var wholeBookSearchQuery: String? = null
+    private var missingTextUrls = emptyList<String>()
+    private var textSearchEpoch = 0L
+    private var textSearchRevision = 0
+    private var watchedTextDownload: Job? = null
+
     init {
         viewModelScope.launch {
+            _tocRule.value = try {
+                readerPrefs.bookTocRule(bookId)
+            } catch (_: java.io.IOException) {
+                BookTocRule.ORIGINAL
+            }
             loadSession()
-            readerPrefs.settings.collect { s ->
+            combine(readerPrefs.settings, readerPrefs.bookLayout(bookId)) { shared, layout ->
+                settingsForBook(readerPrefs.applyBookLayout(shared, layout))
+            }.collect { s ->
                 val previous = _state.value.settings.theme.id
-                _state.value = _state.value.copy(settings = settingsForBook(s))
+                _state.value = _state.value.copy(settings = s)
                 if (previous != s.theme.id) {
                     trace("settings.paper_applied", "from_theme" to previous, "theme" to s.theme.id)
                 }
@@ -458,6 +514,7 @@ class ReaderViewModel(
                 .map { chapterDao.getTocRows(bookId) }
                 .distinctUntilChanged()
                 .collect { rows ->
+                    if (source is LocalReaderBookSource) return@collect
                     _state.value = _state.value.copy(toc = rows.map { TocItem(it.index, it.title, it.isCached) })
                     // 目录结构变了（后台追更）才把整行读出来，交给会话去对齐。条件同 syncSessionToc 开头那几条，
                     // 先在这里挡掉，免得换源途中每一声都白读一遍整本目录
@@ -490,6 +547,7 @@ class ReaderViewModel(
         if (sameReadingToc(old, rows)) return
         val remap = TocRemap(old, rows)
         val s = _state.value
+        invalidateTextSearch()
         src.updateChapters(rows)
         // 只在末尾追加了新章（连载追更的常态）：手里记着的序号一个都没动，补上章数、刷新「下一章/书末」即可
         val held = buildSet {
@@ -547,12 +605,14 @@ class ReaderViewModel(
             ),
             measured = measured,
             complete = complete,
+            elementOffsets = elementOffsets,
         )
 
     private suspend fun loadSession() {
         trace("session.load.start")
         try {
             sessionReady = false
+            invalidateTextSearch()
             stopLegacyImageUpgrade()
             upgradedChapterUrl = null
             decodeJob?.cancel()
@@ -570,7 +630,7 @@ class ReaderViewModel(
             // （网络往返），而那正是 splash 必然出场的场景 —— 拖到目录回来才随全量 state 写入，
             // 出场的就是一块无名素色块，起不到「交代在开哪本书」的作用。
             _state.value = _state.value.copy(
-                settings = settingsForBook(readerPrefs.settings.value),
+                settings = initialSettingsForBook(),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
@@ -629,13 +689,15 @@ class ReaderViewModel(
                 progressHeld = b.type == BookType.NET
             }
             _state.value = _state.value.copy(
-                settings = settingsForBook(readerPrefs.settings.value),
+                settings = initialSettingsForBook(),
                 bookTitle = b.title,
                 bookAuthor = b.author,
                 coverPath = b.coverPath,
                 chapterCount = src.chapterCount,
                 chapterIndex = position.chapterIndex,
-                toc = chapters.map { TocItem(it.index, it.title, it.isCached) },
+                toc = (src as? LocalReaderBookSource)?.toc?.takeIf { it.isNotEmpty() }
+                    ?.mapIndexed { key, entry -> TocItem(entry.chapterIndex, entry.title, anchor = entry.anchor, depth = entry.level, key = key) }
+                    ?: chapters.map { TocItem(it.index, it.title, it.isCached) },
                 isNetBook = b.type == BookType.NET,
                 currentSourceName = currentSourceName,
                 inShelf = b.inShelf && !b.deleted,
@@ -718,7 +780,7 @@ class ReaderViewModel(
      * [invalidate] 为 true 时**同步**清掉分页缓存（视口/净化规则/书源变了）：这一轮若还没拿到锁就被下一次
      * 跳转取代，锁里那句 clear 根本轮不到执行，新的那次就会捡到按旧排版/旧规则分好的页。
      */
-    private fun navigate(invalidate: Boolean = false, target: () -> ReadPosition) {
+    private fun navigate(invalidate: Boolean = false, tocAnchor: String? = null, target: suspend () -> ReadPosition) {
         navJob?.cancel()
         navTarget = null
         if (invalidate) paginated.clear()
@@ -728,7 +790,7 @@ class ReaderViewModel(
                 if (invalidate) paginated.clear()
                 val destination = target()
                 if (destination.chapterIndex != position.chapterIndex) stopLegacyImageUpgrade()
-                showPosition(destination)
+                showPosition(destination, tocAnchor)
             }
         }
     }
@@ -867,6 +929,28 @@ class ReaderViewModel(
         gotoChapter(index)
     }
 
+    internal fun jumpFromToc(item: TocItem) {
+        val anchor = item.anchor ?: return jumpFromReaderMenu(item.index)
+        progressHeld = false
+        releaseSpeechPosition()
+        navigate(tocAnchor = anchor) { ReadPosition(item.index, 0) }
+    }
+
+    internal suspend fun applyTocRule(rule: BookTocRule) {
+        readerPrefs.setBookTocRule(bookId, rule)
+        val wasShortened = shortenChapterTitle(source)
+        _tocRule.value = rule
+        if (wasShortened != shortenChapterTitle(source)) {
+            // 章首页的大标题需要重排，正文仍按原始标题占用的字符位置定位。
+            decodeJob?.cancel()
+            pendingDecodes.clear()
+            navigate(invalidate = true) { pendingTarget ?: speechPosition ?: position }
+        }
+    }
+
+    private fun shortenChapterTitle(src: ReaderBookSource?): Boolean =
+        _tocRule.value != BookTocRule.ORIGINAL && (src as? LocalReaderBookSource)?.hasNestedToc != true
+
     private suspend fun loadSpeechChapter(index: Int): SpeechChapter {
         val src = checkNotNull(source)
         val generation = tocGeneration
@@ -931,8 +1015,12 @@ class ReaderViewModel(
     private fun settingsForBook(settings: ReaderSettings): ReaderSettings =
         if (book != null && book?.type != BookType.NET) settings.copy(showImages = settings.localShowImages) else settings
 
+    private suspend fun initialSettingsForBook(): ReaderSettings = settingsForBook(
+        readerPrefs.applyBookLayout(readerPrefs.settings.value, readerPrefs.bookLayout(bookId).first()),
+    )
+
     private suspend fun persistSettings(settings: ReaderSettings) {
-        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET)
+        readerPrefs.update(settings, localBook = book != null && book?.type != BookType.NET, bookId = bookId)
     }
 
     fun updateSettings(settings: ReaderSettings) {
@@ -945,15 +1033,16 @@ class ReaderViewModel(
         viewModelScope.launch { readerPrefs.selectPaper(themeId) }
     }
 
-    fun commitCustomPaper() {
-        val theme = _state.value.settings.theme
-        if (theme.id == ReaderTheme.CUSTOM_ID) {
-            viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
+    fun updateCustomPaper(theme: ReaderTheme, commit: Boolean) {
+        if (_state.value.settings.theme.id != ReaderTheme.CUSTOM_ID) return
+        _state.update { state ->
+            state.copy(settings = state.settings.copy(theme = theme))
         }
+        if (commit) viewModelScope.launch { readerPrefs.saveCustomPaper(theme) }
     }
 
     /**
-     * 拖滑块（亮度、自定义纸色）时的实时预览：只改内存里的 settings，不落盘。
+     * 拖滑块（亮度、字号）时的实时预览：只改内存里的 settings，不落盘。
      * 松手由 [commitSettings] 写一次。
      *
      * 从前 onValueChange 直接走 [updateSettings]：每一帧整份 DataStore 重写一遍（一秒几十次），
@@ -971,10 +1060,23 @@ class ReaderViewModel(
 
     val userFonts: StateFlow<List<UserFont>> = fontStore.fonts
     val layoutSchemes: StateFlow<List<LayoutScheme>> = readerPrefs.layoutSchemes
+    val bookLayoutEnabled = readerPrefs.bookLayout(bookId).map { it?.enabled == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setBookLayoutEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                readerPrefs.setBookLayoutEnabled(bookId, enabled)
+            } catch (_: java.io.IOException) {
+                messageBus.emit("排版范围保存失败")
+            }
+        }
+    }
+
     fun adjustTypography(change: ReaderSettings.() -> ReaderSettings) {
         viewModelScope.launch {
             try {
-                readerPrefs.adjustTypography(change)
+                readerPrefs.adjustTypography(bookId, change)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: java.io.IOException) {
@@ -997,7 +1099,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             try {
                 val font = fontStore.import(uri) { _fontImportStage.value = it }.getOrThrow()
-                readerPrefs.adjustTypography { copy(fontId = font.id) }
+                readerPrefs.adjustTypography(bookId) { copy(fontId = font.id) }
                 messageBus.emit("已导入字体「${font.label}」")
             } catch (e: CancellationException) {
                 throw e
@@ -1031,7 +1133,7 @@ class ReaderViewModel(
         }
     }
 
-    fun applyLayoutScheme(scheme: LayoutScheme) = updateSettings(scheme.applyTo(_state.value.settings))
+    fun applyLayoutScheme(scheme: LayoutScheme) = adjustTypography { scheme.applyTo(this) }
 
     fun saveLayoutScheme(name: String) {
         val trimmed = name.trim().take(LayoutScheme.MAX_NAME_LENGTH)
@@ -1247,6 +1349,7 @@ class ReaderViewModel(
                         }
                         throw e
                     }
+                    invalidateTextSearch()
                     if (position.chapterIndex == chapterIndex && pendingTarget == null) {
                         val latestOffset = position.charOffset
                         showPage(chapterIndex, result.chapter.pageIndexFor(latestOffset), keepOffset = latestOffset)
@@ -1280,7 +1383,189 @@ class ReaderViewModel(
             var first = true
             replaceRules.observeForBook(bookId).collect {
                 if (first) { first = false; return@collect } // 首帧是初始值，别白重排一次
+                invalidateTextSearch()
                 navigate(invalidate = true) { pendingTarget ?: position }
+            }
+        }
+    }
+
+    // ---------- 查找正文 ----------
+
+    fun clearTextSearch() {
+        textSearchJob?.cancel()
+        textSearchRevision++
+        wholeBookSearchQuery = null
+        missingTextUrls = emptyList()
+        _textSearch.value = ReaderTextSearchState()
+        _textMatch.value = null
+        _textSearchDestination.value = null
+    }
+
+    private fun invalidateTextSearch() {
+        if (_textSearch.value.total == 0) return
+        clearTextSearch()
+        _textSearch.value = ReaderTextSearchState(invalidated = true)
+    }
+
+    fun findText(input: String, wholeBook: Boolean) {
+        clearTextSearch()
+        val query = input.trim()
+        if (query.isEmpty() || query.length > MAX_READER_TEXT_QUERY) return
+        searchText(query, wholeBook)
+    }
+
+    private fun searchText(query: String, wholeBook: Boolean) {
+        if (!sessionReady || sourceChanging) return
+        val src = source ?: return
+        val epoch = contentCache.epoch(bookId)
+        textSearchEpoch = epoch
+        wholeBookSearchQuery = query.takeIf { wholeBook }
+        missingTextUrls = emptyList()
+        textSearchJob?.cancel()
+        val indices = if (wholeBook) 0 until src.chapterCount else _state.value.chapterIndex.let { it..it }
+        val net = src as? NetReaderBookSource
+        textSearchJob = viewModelScope.launch {
+            val matches = ArrayList<ReaderTextMatch>()
+            val missing = ArrayList<String>()
+            var scanned = 0
+            var failed = 0
+            var limited = false
+            fun snapshot(active: Boolean) = ReaderTextSearchState(
+                total = indices.count(), scanned = scanned, missing = missing.size, failed = failed,
+                matches = matches.toList(), active = active, limited = limited,
+            )
+            _textSearch.value = snapshot(active = true)
+            for (index in indices) {
+                ensureActive()
+                val title = src.chapterTitle(index).orEmpty()
+                val url = net?.chapters?.getOrNull(index)?.url
+                val found = try {
+                    val raw = if (net != null) {
+                        url?.let { withContext(Dispatchers.IO) { contentCache.read(bookId, it) } }
+                    } else {
+                        src.loadChapter(index)
+                    }
+                    if (raw == null) {
+                        if (url == null) failed++ else missing.add(url)
+                        emptyList()
+                    } else {
+                        withContext(Dispatchers.Default) {
+                            val content = prepareChapter(loadPurified(raw, index, reportTimeout = false), title)
+                            readerTextMatches(content, index, title, query, MAX_READER_TEXT_MATCHES + 1 - matches.size)
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    failed++
+                    emptyList()
+                }
+                ensureActive()
+                if (net != null && epoch != contentCache.epoch(bookId)) {
+                    invalidateTextSearch()
+                    return@launch
+                }
+                scanned++
+                matches.addAll(found)
+                if (matches.size > MAX_READER_TEXT_MATCHES) {
+                    matches.removeAt(matches.lastIndex)
+                    limited = true
+                    break
+                }
+                if (found.isNotEmpty() || scanned % 8 == 0) _textSearch.value = snapshot(active = true)
+            }
+            missingTextUrls = missing.distinct()
+            _textSearch.value = snapshot(active = false)
+            _textSearchDestination.update { destination ->
+                destination?.let {
+                    val index = matches.indexOf(it.match)
+                    if (index < 0) null else it.copy(matchNumber = index + 1, totalMatches = matches.size)
+                }
+            }
+        }
+    }
+
+    internal suspend fun restoreTextSearchDownload() {
+        offlineDownloader.restore(bookId, textOnly = true)
+        val src = source as? NetReaderBookSource ?: return
+        val task = offlineDownloader.activeJob(bookId) ?: return
+        refreshSearchAfterDownload(task, src, contentCache.epoch(bookId))
+    }
+
+    internal fun stopTextSearchDownload() {
+        if (offlineDownloader.downloads.value[bookId]?.textOnly == true) offlineDownloader.cancel(bookId)
+    }
+
+    internal fun cacheTextSearchChapters(resume: Boolean) {
+        val src = source as? NetReaderBookSource ?: return
+        val result = _textSearch.value
+        if (sourceChanging || result.active || result.limited || missingTextUrls.isEmpty() ||
+            wholeBookSearchQuery == null
+        ) return
+        val epoch = textSearchEpoch
+        if (epoch != contentCache.epoch(bookId)) {
+            invalidateTextSearch()
+            return
+        }
+        val task = if (resume) offlineDownloader.resumeText(bookId, epoch)
+            else offlineDownloader.startText(bookId, missingTextUrls, epoch)
+        if (task == null) return
+        refreshSearchAfterDownload(task, src, epoch)
+    }
+
+    private fun refreshSearchAfterDownload(task: Job, src: NetReaderBookSource, epoch: Long) {
+        if (watchedTextDownload === task) return
+        watchedTextDownload = task
+        viewModelScope.launch {
+            task.join()
+            if (watchedTextDownload !== task) return@launch
+            watchedTextDownload = null
+            val query = wholeBookSearchQuery
+            if (query != null && source === src && !sourceChanging && contentCache.epoch(bookId) == epoch &&
+                offlineDownloader.downloads.value[bookId]?.let { it.done > 0 || it.imageFailures > 0 } == true
+            ) {
+                searchText(query, wholeBook = true)
+            }
+        }
+    }
+
+    fun openTextMatch(match: ReaderTextMatch) {
+        val matches = _textSearch.value.matches
+        val index = matches.indexOf(match)
+        if (sourceChanging || index < 0) return
+        val revision = textSearchRevision
+        val epoch = textSearchEpoch
+        stopSpeech(returnToText = false)
+        stopAutoFlip()
+        progressHeld = false
+        _textMatch.value = null
+        _textSearchDestination.value = null
+        navigate {
+            if (revision != textSearchRevision || sourceChanging) return@navigate position
+            val result = ensurePaginated(match.position.chapterIndex, userFacing = true, notifyAfterChar = Int.MAX_VALUE)
+            if (revision != textSearchRevision || sourceChanging) return@navigate position
+            val selection = match.selection
+            val currentText = result?.measured?.get(selection.elementIndex)?.text
+            val start = result?.elementOffsets?.getOrNull(selection.elementIndex)
+            if (result != null && start != null &&
+                (source !is NetReaderBookSource || epoch == contentCache.epoch(bookId)) &&
+                currentText?.regionMatches(selection.start, selection.text, 0, selection.text.length) == true
+            ) {
+                val destination = match.position.copy(charOffset = start + selection.start)
+                val highlight = match.copy(position = destination)
+                _textMatch.value = highlight
+                _textSearchDestination.value = ReaderTextSearchDestination(
+                    match, destination.charOffset, index + 1, matches.size,
+                )
+                viewModelScope.launch {
+                    delay(5_000)
+                    if (_textMatch.value === highlight) _textMatch.value = null
+                }
+                destination
+            } else {
+                invalidateTextSearch()
+                messageBus.emit("正文已变化，请重新查找")
+                position
             }
         }
     }
@@ -1888,16 +2173,17 @@ class ReaderViewModel(
     // ---------- 内部 ----------
 
     /** 定位到指定位置：必要时加载+分页该章，并预取相邻章 */
-    private suspend fun showPosition(target: ReadPosition) {
+    private suspend fun showPosition(target: ReadPosition, tocAnchor: String? = null) {
         // 这条永远是"用户在等的那一章"（进书、翻章、跳目录、重试都走这里），预取不走这里
         pendingTarget = target
         val src = source
         val startSpec = spec
         val startGen = tocGeneration
+        val shortened = shortenChapterTitle(src)
         val result = ensurePaginated(
             target.chapterIndex,
             userFacing = true,
-            notifyAfterChar = target.charOffset,
+            notifyAfterChar = if (tocAnchor == null) target.charOffset else Int.MAX_VALUE,
         ) ?: run {
             // ensurePaginated 的前置守卫是静默返回 null 的。其中"排版环境还没就绪"
             // （source/facade/spec 为 null）属于正常启动时序 —— loadSession/onLayoutReady
@@ -1909,7 +2195,7 @@ class ReaderViewModel(
             // 排着队，拿到锁就会按 [pendingTarget] 重来 —— 这里报错只会闪一下假的「读不出来」。
             // 加载期间目录换过（后台追更）也一样：旧序号的结果被丢掉，syncSessionToc 已按新序号重新发起。
             if (src != null && source === src && facade != null && spec != null &&
-                spec == startSpec && tocGeneration == startGen && _state.value.error == null
+                spec == startSpec && tocGeneration == startGen && shortened == shortenChapterTitle(src) && _state.value.error == null
             ) {
                 Log.w(TAG, "第 ${target.chapterIndex} 章取不到分页结果，且排版环境已就绪")
                 _state.value = _state.value.copy(
@@ -1919,12 +2205,18 @@ class ReaderViewModel(
             }
             return
         }
-        val pageIdx = if (target.charOffset == Int.MAX_VALUE) {
-            result.chapter.pages.lastIndex
-        } else {
-            result.chapter.pageIndexFor(target.charOffset)
+        val anchorOffset = tocAnchor?.let(result.chapter.anchorOffsets::get)
+        val offset = anchorOffset ?: target.charOffset
+        val pageIdx = when {
+            tocAnchor != null -> result.chapter.pageIndexForAnchor(tocAnchor) ?: 0
+            offset == Int.MAX_VALUE -> result.chapter.pages.lastIndex
+            else -> result.chapter.pageIndexFor(offset)
         }
-        showPage(target.chapterIndex, pageIdx, keepOffset = target.charOffset)
+        if (tocAnchor != null) {
+            if (anchorOffset == null) messageBus.emit("无法定位此目录条目，已跳到本章开头")
+            if (speech.state.value.active) speech.seek(target.chapterIndex, offset)
+        }
+        showPage(target.chapterIndex, pageIdx, keepOffset = offset, tocAnchor = tocAnchor?.takeIf { anchorOffset != null })
         preloadNeighbors(target.chapterIndex)
     }
 
@@ -1935,7 +2227,7 @@ class ReaderViewModel(
      * 这一页立刻干净 —— 而这一页早就缓存好了，抓取时的净化再也不会跑到它头上。
      * 本地书没有「抓取时」，通用规则也只能在这里跑。
      */
-    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int): ChapterContent {
+    private suspend fun loadPurified(raw: ChapterContent, chapterIndex: Int, reportTimeout: Boolean = true): ChapterContent {
         // 本地书不经过引擎，通用规则从前一条都不跑（从阅读导进来一批去广告的规则，本地书毫无反应），在这里和书内规则一起跑。
         // 网上的书不加：通用规则在抓取时已经跑过、结果进了缓存，这里再跑一遍，「a → ab」这种规则会替换两次
         val b = book
@@ -1945,7 +2237,7 @@ class ReaderViewModel(
             replaceRules.purifyForBook(bookId)
         }
         if (rules.isEmpty()) {
-            purifySkipped.remove(chapterIndex)
+            if (reportTimeout) purifySkipped.remove(chapterIndex)
             return raw
         }
         // 编译规则、逐段替换都切到 Default。调用方在主线程（Main.immediate）上：正则规则交给
@@ -1959,12 +2251,21 @@ class ReaderViewModel(
         return withContext(Dispatchers.Default) {
             try {
                 val purifier = Purifier.lenient(rules)
-                raw.copy(elements = purifier.apply(raw.elements)).also { purifySkipped.remove(chapterIndex) }
+                purifier.apply(raw).also { if (reportTimeout) purifySkipped.remove(chapterIndex) }
             } catch (_: PurifyTimeoutException) {
-                purifySkipped.add(chapterIndex)
+                if (reportTimeout) purifySkipped.add(chapterIndex)
                 raw
             }
         }
+    }
+
+    private fun prepareChapter(content: ChapterContent, title: String): ChapterContent {
+        val elements = RepeatedTitle.strip(content.elements, title, book?.title.orEmpty())
+        val removed = content.elements.size - elements.size
+        return if (removed == 0) content else ChapterContent(
+            elements,
+            content.anchors.mapValues { (_, index) -> (index - removed).coerceAtLeast(0) },
+        )
     }
 
     /** 这一章是按未净化显示的（净化超时）：显示出来时提示一次 */
@@ -2017,7 +2318,7 @@ class ReaderViewModel(
      * 还顺手存回了库；第二遍视口变高、重新分页，再拿这个已经退化的偏移去定位，就退了一页。
      * 用户看到的正是「返回再进来，退回上一页」。
      */
-    private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null) {
+    private fun showPage(chapterIndex: Int, pageIndex: Int, keepOffset: Int? = null, tocAnchor: String? = null) {
         val layout = spec ?: return
         val result = paginated[chapterIndex] ?: return
         if (pageIndex !in result.chapter.pages.indices) return
@@ -2056,6 +2357,18 @@ class ReaderViewModel(
             pageCount = result.chapter.pages.size,
             page = page,
             pageLayout = layout,
+            tocPosition = if (result.chapter.anchorElements.isEmpty()) null else {
+                val visibleElements = page.spec.items.asSequence().map {
+                    when (it) {
+                        is PageItem.TextSlice -> it.elementIndex
+                        is PageItem.ImageBox -> it.elementIndex
+                    }
+                }
+                val element = visibleElements.takeWhile { result.elementOffsets[it] <= offset }
+                    .maxByOrNull { result.elementOffsets[it] }
+                // 分页在正文前插入虚拟章标题，EPUB 锚点用的是原正文下标。
+                TocReadingPosition((element ?: 0) - 1, result.chapter.anchorElements, tocAnchor)
+            },
             prevPage = prev,
             nextPage = next,
             hasPrev = pageIndex > 0 || chapterIndex > 0,
@@ -2122,6 +2435,7 @@ class ReaderViewModel(
         val facade = facade ?: return null
         val spec = spec ?: return null
         val gen = tocGeneration
+        val shortenTitle = shortenChapterTitle(src)
         // 发起这次加载的协程（跳章时就是 navJob）。部分结果的 showPage 是另投递到主线程的，
         // 不随它取消 —— 这一跳已经被下一次取代的话，别再把人拽回被放弃的那一章
         val caller = currentCoroutineContext()[Job]
@@ -2139,6 +2453,7 @@ class ReaderViewModel(
         trace("chapter.load.start", "chapter" to chapterIndex, "user_facing" to userFacing, "load_id" to loadId)
         return try {
             val title = src.chapterTitle(chapterIndex) ?: ""
+            val displayTitle = if (shortenTitle) VolumeChapterTitle.parse(title)?.chapter ?: title else title
             // 正文开头和章节名重复的那一两行不排：排版自己会在章首排一个大标题（见 RepeatedTitle）。
             // 放在净化之后：开头的广告行先被删掉，下面那行标题才会露到第一行来。
             // 进度按章内字符偏移记，去掉一行标题旧进度往后挪十来个字，仍落在同一页，不另做迁移
@@ -2157,9 +2472,7 @@ class ReaderViewModel(
             ) {
                 throw ImageOnlyChapterException()
             }
-            val content = purified.copy(
-                elements = RepeatedTitle.strip(purified.elements, title, book?.title.orEmpty()),
-            )
+            val content = prepareChapter(purified, title)
             // 本地包可以同步取得尺寸；网络插图先留框，交给可见页的解码队列。
             if (spec.showImages && src !is NetReaderBookSource) {
                 measureChapterStage({ imageMeasureMs = it }) { readerImages.measure(src, content) }
@@ -2168,7 +2481,8 @@ class ReaderViewModel(
                 ImageInfo.Reserved(content.elements.all { it is ContentElement.Image })
             } else null
             // 这次排版作废了没有：视口 / 字号换了、换了源、目录换过。和下面写回前的三道检查是同一组条件
-            fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration
+            fun stale() = spec != this@ReaderViewModel.spec || src !== source || gen != tocGeneration ||
+                shortenTitle != shortenChapterTitle(src)
             val waitStarted = TimeSource.Monotonic.markNow()
             val result = try {
                 measureMutex.withLock {
@@ -2187,6 +2501,7 @@ class ReaderViewModel(
                             val job = coroutineContext[Job]
                             Paginator(facade).paginate(
                                 chapterIndex, title, content, spec,
+                                displayTitle = displayTitle,
                                 notifyAfterChar = notifyAfterChar,
                                 images = { reservedImage ?: readerImages.info(it.resourceId) },
                                 // 半截结果不会进缓存：取消会在 withContext 收尾时抛出，stale 由下面的检查丢掉
@@ -2231,7 +2546,7 @@ class ReaderViewModel(
             // 写回去，下一章翻过去看到的还是旧源的内容 —— 而换源多半就是嫌它的正文不对。
             if (src !== source) return null
             // 同理：拉正文期间目录换过、序号整体错了位，chapterIndex 已经指向另一章
-            if (gen != tocGeneration) return null
+            if (gen != tocGeneration || shortenTitle != shortenChapterTitle(src)) return null
             paginated[chapterIndex] = result
             // 目录跳章时 position 还停在旧章：若只按旧章号裁窗口，刚分好页的目标章会被
             // 当场剔除，随后 showPage 取不到分页结果直接 return，页面永远停在转圈。

@@ -32,11 +32,15 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBarDefaults
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -240,3 +244,30 @@ class ToolbarTitleReveal internal constructor(private val listState: LazyListSta
 @Composable
 fun rememberToolbarTitleReveal(listState: LazyListState): ToolbarTitleReveal =
     remember(listState) { ToolbarTitleReveal(listState) }
+
+/** 多选态顶栏。各页保留自己的计数单位和列表筛选栏。 */
+@Composable
+internal fun SelectionToolbar(
+    title: String,
+    containerColor: Color,
+    onExit: () -> Unit,
+    onSelectAll: () -> Unit,
+    bottomContent: @Composable () -> Unit,
+) {
+    AppToolbar(
+        navigationIcon = {
+            AppIconButton(onClick = onExit) {
+                Icon(MiuixIcons.Close, contentDescription = "退出多选")
+            }
+        },
+        containerColor = containerColor,
+        actions = {
+            AppIconButton(onClick = onSelectAll) {
+                Icon(MiuixIcons.SelectAll, contentDescription = "全选")
+            }
+        },
+        bottomContent = bottomContent,
+    ) {
+        ToolbarTitle(title)
+    }
+}
